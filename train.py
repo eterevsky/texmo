@@ -43,14 +43,14 @@ def _step(params, state, c):
         state: array with the internal state, initially zero. shape = (256,)
         x: a single character represented as a one-of. shape = (256,)
     """
-    state1 = state[256:]
-    state2 = state[:256]
-    state1 = jnp.dot(params['winp1'], c) + jnp.dot(params['wstate1'], state1) + params['b1']
-    state1 = jnp.tanh(state1)
-    state2 = jnp.dot(params['winp2'], state1) + jnp.dot(params['wstate2'], state2) + params['b2']
-    state2 = jnp.tanh(state2)
-    out = jnp.dot(params['wout'], state2) + params['bout']
-    state = jnp.concatenate((state1, state2))
+    # state1 = state[256:]
+    # state2 = state[:256]
+    state = jnp.dot(params['winp1'], c) + jnp.dot(params['wstate1'], state) + params['b1']
+    state = jnp.tanh(state)
+    # state2 = jnp.dot(params['winp2'], state1) + jnp.dot(params['wstate2'], state2) + params['b2']
+    # state2 = jnp.tanh(state2)
+    # state = jnp.concatenate((state1, state2))
+    out = jnp.dot(params['wout'], state) + params['bout']
     return state, out
 
 
@@ -61,7 +61,7 @@ def _loss(params, x):
         params: dictionary with model parameters
         x: a string represented as one-of. shape = (L, 256)
     """
-    _, y = jax.lax.scan(lambda s, c: _step(params, s, c), jnp.zeros((512,)), x)
+    _, y = jax.lax.scan(lambda s, c: _step(params, s, c), jnp.zeros((256,)), x)
     return optax.softmax_cross_entropy(y[:-1,:], x[1:,:]) / (x.shape[0] - 1)
 
 
@@ -82,6 +82,7 @@ def _step_batch(params, sbatch, cbatch):
 
 def _loss_batch(params, xbatch):
     sbatch = jnp.zeros((xbatch.shape[0], 256))
+    xbatch = jnp.swapaxes(xbatch, 0, 1)  # (element, batch, one-hot)
     _, ybatch = jax.lax.scan(lambda s, c: _step_batch(params, s, c), sbatch, xbatch)
     entropy = optax.softmax_cross_entropy(ybatch[:,:-1,:], xbatch[:,1:,:])
     return jnp.average(entropy)
@@ -101,32 +102,53 @@ class Model(object):
             # 'b2': jax.random.normal(self.key, shape=(256,)),
             'bout': jax.random.normal(self.key, shape=(256,))
         }
-        # print('Creating batch loss')
-        # loss_batch = jax.vmap(_loss, in_axes=(None, 1), out_axes=0)
-        # print('Creating loss_avg')
-        # loss_avg = lambda params, xs: jnp.average(loss_batch(params, xs))
+        print('Creating batch loss')
+        loss_batch = jax.vmap(_loss, in_axes=(None, 1), out_axes=0)
+        print('Creating loss_avg')
+        loss_avg = lambda params, xs: jnp.average(loss_batch(params, xs))
         print('loss_avg')
-        self._loss_grad = jax.jit(jax.value_and_grad(_loss_batch))
+        # self._loss_grad = jax.jit(jax.value_and_grad(_loss_batch))
+        self._loss_grad = jax.jit(jax.value_and_grad(loss_avg))
         print('_loss_grad')
         self.optimizer = optax.adam(0.1)
         self.opt_state = self.optimizer.init(self.params)
 
-    def sample(self, prefix, l, temperature=0.05):
+    def sample_batch(self, prefix, l, temperature=0.05):
         print(prefix)
         prefix = jnp.array(list(prefix))
         c_selected = prefix[-1]
-        prefix_batch = jnp.expand_dims(jax.nn.one_hot(prefix, 256), 0)
-        c = prefix_batch[:,-1,:]
+        prefix_batch = jnp.expand_dims(jax.nn.one_hot(prefix, 256), 1)
+        c = prefix_batch[-1,:,:]
 
-        state = jnp.zeros((1, 256))
-        print('sample', state.shape, prefix_batch[:,:-1,:].shape)
-        state, _ = jax.lax.scan(lambda s, c: _step_batch(self.params, s, c), state, prefix_batch[:,:-1,:])
+        state = jnp.zeros((1, 512))
+        print('sample', state.shape, prefix_batch[:-1,:,:].shape)
+        state, _ = jax.lax.scan(lambda s, c: _step_batch(self.params, s, c), state, prefix_batch[:-1,:,:])
 
         out = []
         while len(out) < l and c_selected != 0:
             state, c = _step_batch(self.params, state, c)
             c_softmax = jax.nn.softmax(c.squeeze() / temperature)
             c_selected = jax.random.choice(self.key, 256, p=c_softmax)
+            out.append(c_selected)
+        return bytes(out)
+
+    def sample(self, prefix, l, temperature=0.05):
+        print(prefix)
+        prefix = jnp.array(list(prefix))
+        c_selected = prefix[-1]
+        prefix = jax.nn.one_hot(prefix, 256)
+        c = prefix[-1,:]
+
+        state = jnp.zeros((256,))
+        print('sample', state.shape, prefix[:-1,:].shape)
+        state, _ = jax.lax.scan(lambda s, c: _step(self.params, s, c), state, prefix[:-1,:])
+
+        out = []
+        while len(out) < l and c_selected != 0:
+            state, c = _step(self.params, state, c)
+            c_softmax = jax.nn.softmax(c / temperature)
+            c_selected = jax.random.choice(self.key, 256, p=c_softmax)
+            c = jax.nn.one_hot(c_selected, 256)
             out.append(c_selected)
         return bytes(out)
 
@@ -147,7 +169,7 @@ def main(dir, steps):
     start = time.time()
 
     for i in range(steps):
-        batch = train_set.sample(32, 32)
+        batch = train_set.sample(16, 64)
         # print(batch)
         model.train(batch)
 

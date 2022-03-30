@@ -1,11 +1,15 @@
 import argparse
 import jax
 import jax.numpy as jnp
+import math
 import numpy as np
 import optax
 import os
 import random
 import time
+
+
+NCHAR = 256  # Considering characters with codes 0..NCHAR
 
 
 class TrainSet(object):
@@ -57,10 +61,48 @@ class Model(object):
                 previous step)
             x: a single character represented as a one-of. shape = (256,)
         """
+        pass
 
     def loss(self, params, x):
         _, y = jax.lax.scan(lambda s, c: self.step(params, s, c), self.init_state(), x)
-        return optax.softmax_cross_entropy(y[:-1,:], x[1:,:]) / (x.shape[0] - 1)
+        print(y[:-1,:].shape)
+        print(x[1:,:].shape)
+        return optax.softmax_cross_entropy(y[:-1,:], x[1:,:])
+
+
+class Equal(Model):
+    def init_params(self, key):
+        return {}
+
+    def init_state(self):
+        return jnp.zeros((self._hidden,))
+
+    def step(self, params, state, c):
+        return state, jnp.ones_like(c)
+
+
+class Freq(Model):
+    def init_params(self, key):
+        return {
+            'b': jax.random.normal(key, shape=(NCHAR,)),
+        }
+
+    def step(self, params, state, c):
+        out = params['b']
+        return state, out
+
+
+class Markov(Model):
+    def init_params(self, key):
+        key0, key1 = jax.random.split(key)
+        return {
+            'w': jax.random.normal(key0, shape=(NCHAR, NCHAR)),
+            'b': jax.random.normal(key1, shape=(NCHAR,)),
+        }
+
+    def step(self, params, state, c):
+        out = jnp.dot(params['w'], c) + params['b']
+        return state, out
 
 
 class RecurrentL1(Model):
@@ -69,12 +111,13 @@ class RecurrentL1(Model):
         self._activation = activation
 
     def init_params(self, key):
+        key0, key1, key2, key3, key4 = jax.random.split(key, 5)
         return {
-            'winp1': jax.random.normal(key, shape=(self._hidden, 256)),
-            'b1': jax.random.normal(key, shape=(self._hidden,)),
-            'wstate1': jax.random.normal(key, shape=(self._hidden, self._hidden)),
-            'wout': jax.random.normal(key, shape=(256, self._hidden)),
-            'bout': jax.random.normal(key, shape=(256,))
+            'winp1': jax.random.normal(key0, shape=(self._hidden, NCHAR)),
+            'b1': jax.random.normal(key1, shape=(self._hidden,)),
+            'wstate1': jax.random.normal(key2, shape=(self._hidden, self._hidden)),
+            'wout': jax.random.normal(key3, shape=(NCHAR, self._hidden)),
+            'bout': jax.random.normal(key4, shape=(NCHAR,))
         }
 
     def init_state(self):
@@ -90,6 +133,7 @@ class RecurrentL1(Model):
         """
         state = jnp.dot(params['winp1'], c) + jnp.dot(params['wstate1'], state) + params['b1']
         state = self._activation(state)
+        # state = jax.nn.normalize(state)
         out = jnp.dot(params['wout'], state) + params['bout']
         return state, out
 
@@ -116,24 +160,59 @@ class RecurrentL1(Model):
         return jnp.average(entropy)
 
 
+class Recurrent2(Model):
+    def __init__(self, hidden, activation):
+        self._hidden = hidden
+        self._activation = activation
+
+    def init_params(self, key):
+        key0, key1, key2, key3, key4, key5 = jax.random.split(key, 6)
+        return {
+            'winp1': jax.random.normal(key0, shape=(self._hidden, NCHAR)),
+            'b1': jax.random.normal(key1, shape=(self._hidden,)),
+            'wstate1': jax.random.normal(key2, shape=(self._hidden, self._hidden)),
+            'wstateout': jax.random.normal(key3, shape=(NCHAR, self._hidden)),
+            'winout': jax.random.normal(key4, shape=(NCHAR, NCHAR)),
+            'bout': jax.random.normal(key5, shape=(NCHAR,))
+        }
+
+    def init_state(self):
+        return jnp.zeros((self._hidden,))
+
+    def step(self, params, state, c):
+        """One forward step in the recurrent network.
+
+        Args:
+            params: dictionary with model parameters
+            state: array with the internal state, initially zero. shape = (256,)
+            c: a single character represented as a one-of. shape = (256,)
+        """
+        new_state = jnp.dot(params['winp1'], c) + jnp.dot(params['wstate1'], state) + params['b1']
+        new_state = self._activation(state)
+        # state = jax.nn.normalize(state)
+        out = jnp.dot(params['wstateout'], state) + jnp.dot(params['winout'], c) + params['bout']
+        return new_state, out
+
 
 class Manager(object):
     def __init__(self, model):
         print('Creating Model')
-        self.key = jax.random.PRNGKey(42)
+        self._key = jax.random.PRNGKey(42)
         self.model = model
-        self.params = self.model.init_params(self.key)
+        self.params = self.model.init_params(self.key())
 
         print('Creating batch loss')
-        loss_batch = jax.vmap(model.loss, in_axes=(None, 1), out_axes=0)
+        self._loss_batch = jax.vmap(model.loss, in_axes=(None, 1), out_axes=0)
         print('Creating loss_avg')
-        loss_avg = lambda params, xs: jnp.average(loss_batch(params, xs))
-        print('loss_avg')
+        self._loss_avg = lambda params, xs: jnp.average(self._loss_batch(params, xs))
         # self._loss_grad = jax.jit(jax.value_and_grad(_loss_batch))
-        self._loss_grad = jax.jit(jax.value_and_grad(loss_avg))
-        print('_loss_grad')
-        self.optimizer = optax.adam(0.1)
+        self._loss_grad = jax.jit(jax.value_and_grad(self._loss_avg))
+        self.optimizer = optax.adam(0.001)
         self.opt_state = self.optimizer.init(self.params)
+
+    def key(self):
+        self._key, key = jax.random.split(self._key)
+        return key
 
     # def sample_batch(self, prefix, l, temperature=0.05):
     #     print(prefix)
@@ -155,54 +234,91 @@ class Manager(object):
     #         out.append(c_selected)
     #     return bytes(out)
 
+    def sample_loss(self, s):
+        """Loss of the model for a given string."""
+
+        sarray = jnp.array(list(s))
+        soh = jax.nn.one_hot(sarray, NCHAR)
+
+        state = self.model.init_state()
+        _, r = self.model.step(self.params, state, soh[0])
+        print('prediction: ', r)
+
+        loss = self.model.loss(self.params, soh) / math.log(2)
+        print(chr(s[0]))
+        for c, p in zip(s[1:], loss):
+            if c == ord('\n'): c = ord('\\')
+            print(chr(c), p)
+
+        print('Sample loss:', jnp.average(loss))
+
+    def batch_loss(self, xs):
+        xs = jax.nn.one_hot(xs, NCHAR)
+        return self._loss_avg(self.params, xs) / math.log(2)
+
     def sample(self, prefix, l, temperature=0.05):
-        print(prefix)
         prefix = jnp.array(list(prefix))
         c_selected = prefix[-1]
         prefix = jax.nn.one_hot(prefix, 256)
         c = prefix[-1,:]
 
         state = self.model.init_state()
-        print('sample', state.shape, prefix[:-1,:].shape)
         state, _ = jax.lax.scan(lambda s, c: self.model.step(self.params, s, c), state, prefix)
 
         out = []
         while len(out) < l and c_selected != 0:
             state, c = self.model.step(self.params, state, c)
             c_softmax = jax.nn.softmax(c / temperature)
-            c_selected = jax.random.choice(self.key, 256, p=c_softmax)
-            c = jax.nn.one_hot(c_selected, 256)
+            c_selected = jax.random.choice(self.key(), 256, p=c_softmax)
+            c = jax.nn.one_hot(c_selected, NCHAR)
             out.append(c_selected)
         return bytes(out)
 
     def train(self, xs):
-        xs = jax.nn.one_hot(xs, 256)
+        xs = jax.nn.one_hot(xs, NCHAR)
+        # print('shape:', xs.shape)
         loss, grads = self._loss_grad(self.params, xs)
-        print(loss)
-        updates, self.opt_state = self.optimizer.update(grads, self.opt_state)
+        # print('params:')
+        # print(self.params)
+        # print('loss:')
+        # print(loss)
+        # print('grads:')
+        # print(grads)
+        updates, self.opt_state = self.optimizer.update(grads, self.opt_state, self.params)
         self.params = optax.apply_updates(self.params, updates)
+
+        return loss / math.log(2)
 
 
 def main(dir, steps):
     print(f'Training data: {dir}')
     train_set = TrainSet(dir)
 
-    model = RecurrentL1(hidden=128, activation=jnp.tanh)
+    # model = Equal()
+    # model = Freq()
+    # model = Markov()
+    # model = RecurrentL1(hidden=128, activation=jax.nn.hard_sigmoid)
+    model = Recurrent2(hidden=128, activation=jax.nn.hard_sigmoid)
 
     manager = Manager(model)
 
     start = time.time()
 
     for i in range(steps):
-        batch = train_set.sample(16, 64)
-        # print(batch)
-        manager.train(batch)
+        batch = train_set.sample(64, 128)
+        loss = manager.train(batch)
+        print(loss)
 
     print(f'Training time: {time.time() - start}')
 
-    out = manager.sample(b'Roses are red\nViolets are blue,\n', 256)
-    print(out)
+    manager.sample_loss(b'Roses are red\nViolets are blue,\nSugar is sweet\nAnd so are you.')
 
+    batch = train_set.sample(32, 128)
+    print('Batch loss:', manager.batch_loss(batch))
+
+    prefix = b'Roses are red\nViolets are blu'
+    out = manager.sample(prefix, 256)
+    print(prefix + out)
 
 def parse_args():
     parser = argparse.ArgumentParser()

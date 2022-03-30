@@ -156,6 +156,36 @@ class Markov2(Model):
         return c, out
 
 
+class Markov2Flex(Model):
+    def __init__(self):
+        self._hidden = 128
+
+    def init_state(self):
+        return jnp.zeros((NCHAR,))
+
+    def init_params(self, key):
+        key = jax.random.split(key, 7)
+        return {
+            'win': jnp.eye(NCHAR),
+            'wprev': 0.1 * jax.random.normal(key[1], shape=(NCHAR, NCHAR)),
+            'b': 0.1 * jax.random.normal(key[2], shape=(NCHAR,)),
+
+            'w2': jax.random.normal(key[3], shape=(self._hidden, NCHAR)),
+            'b2': jax.random.normal(key[4], shape=(self._hidden,)),
+
+            'wout': jax.random.normal(key[5], shape=(NCHAR, self._hidden)),
+            'bout': jax.random.normal(key[6], shape=(NCHAR,)),
+        }
+
+    def step(self, params, state, c):
+        state = jnp.dot(params['win'], c) + jnp.dot(params['wprev'], state) + params['b']
+        state = jax.nn.relu(state)
+        hidden = jnp.dot(params['w2'], state) + params['b2']
+        hidden = jax.nn.sigmoid(hidden)
+        out = jnp.dot(params['wout'], hidden) + params['bout']
+        return c, state
+
+
 class RealMarkov(Model):
     def init_params(self, key):
         return {
@@ -284,6 +314,67 @@ class RecurrentL2(Model):
         return {'state1': state1, 'state2': state2}, out
 
 
+class RecurrentGRU(Model):
+    def __init__(self, hidden):
+        self._hidden = hidden
+
+    def init_params(self, key):
+        keys = jax.random.split(key, 16)
+        return {
+            'wz': jax.random.normal(keys[0], shape=(self._hidden, NCHAR)),
+            'pz': jax.random.normal(keys[11], shape=(self._hidden, NCHAR)),
+            'uz': jax.random.normal(keys[1], shape=(self._hidden, self._hidden)),
+            'bz': jax.random.normal(keys[2], shape=(self._hidden,)),
+
+            'wr': jax.random.normal(keys[3], shape=(self._hidden, NCHAR)),
+            'pr': jax.random.normal(keys[12], shape=(self._hidden, NCHAR)),
+            'ur': jax.random.normal(keys[4], shape=(self._hidden, self._hidden)),
+            'br': jax.random.normal(keys[5], shape=(self._hidden,)),
+
+            'wh': jax.random.normal(keys[6], shape=(self._hidden, NCHAR)),
+            'ph': jax.random.normal(keys[13], shape=(self._hidden, NCHAR)),
+            'uh': jax.random.normal(keys[7], shape=(self._hidden, self._hidden)),
+            'bh': jax.random.normal(keys[8], shape=(self._hidden,)),
+
+            'w2': jax.random.normal(keys[14], shape=(self._hidden, self._hidden)),
+            'b2': jax.random.normal(keys[15], shape=(self._hidden,)),
+
+            'wout': jax.random.normal(keys[9], shape=(NCHAR, self._hidden)),
+            'bout': jax.random.normal(keys[10], shape=(NCHAR,))
+        }
+
+    def init_state(self):
+        return {'h': jnp.zeros((self._hidden,)), 'prev': jnp.zeros((NCHAR,))}
+
+    def step(self, params, state, c):
+        """One forward step in the recurrent network.
+
+        Args:
+            params: dictionary with model parameters
+            state: array with the internal state, initially zero. shape = (256,)
+            c: a single character represented as a one-of. shape = (256,)
+        """
+        h = state['h']
+        prev = state['prev']
+
+        z = jnp.dot(params['wz'], c) + jnp.dot(params['uz'], h) + jnp.dot(params['pz'], prev) + params['bz']
+        z = jax.nn.sigmoid(z)
+
+        r = jnp.dot(params['wr'], c) + jnp.dot(params['ur'], h) + jnp.dot(params['pr'], prev) + params['br']
+        r = jax.nn.sigmoid(r)
+
+        hc = jnp.dot(params['wh'], c) + jnp.dot(params['uh'], r * h) + jnp.dot(params['ph'], prev) + params['bh']
+        hc = jax.nn.tanh(hc)
+
+        hn = (1 - z) * h + z * hc
+        t = jnp.dot(params['wout'], hn) + params['bout']
+        t = jax.nn.sigmoid(t)
+
+        out = jnp.dot(params['w2'], t) + params['b2']
+
+        return {'h': hn, 'prev': c}, out
+
+
 class Recurrent2(Model):
     def __init__(self, hidden, activation):
         self._hidden = hidden
@@ -318,6 +409,9 @@ class Recurrent2(Model):
         return new_state, out
 
 
+LOG2 = 1 / math.log(2)
+
+
 class Manager(object):
     def __init__(self, model, learning_rate):
         print('Creating Model')
@@ -328,12 +422,12 @@ class Manager(object):
         print('Creating batch loss')
         self._loss_batch = jax.vmap(model.loss, in_axes=(None, 0), out_axes=0)
         print('Creating loss_avg')
-        self._loss_avg = lambda params, xs: jnp.average(self._loss_batch(params, xs))
+        self._loss_avg = lambda params, xs: jnp.average(self._loss_batch(params, xs)) * LOG2
         self._loss_avg = jax.jit(self._loss_avg)
-        self._total_loss = lambda params, xs: jnp.average(self._loss_batch(params, xs)) + 0.1 * model.params_loss(params)
+        self._total_loss = lambda params, xs: jnp.average(self._loss_batch(params, xs)) * LOG2 + 0.02 * model.params_loss(params)
         # self._loss_grad = jax.jit(jax.value_and_grad(_loss_batch))
         self._loss_grad = jax.jit(jax.value_and_grad(self._total_loss))
-        self.optimizer = optax.adamw(learning_rate)
+        self.optimizer = optax.adam(learning_rate)
         # self.optimizer = optax.sgd(0.001)
         self.opt_state = self.optimizer.init(self.params)
 
@@ -371,7 +465,7 @@ class Manager(object):
         _, r = self.model.step(self.params, state, soh[0])
         print('prediction: ', r)
 
-        loss = self.model.loss(self.params, soh) / math.log(2)
+        loss = self.model.loss(self.params, soh)
         print(chr(s[0]))
         for c, p in zip(s[1:], loss):
             if c == ord('\n'): c = ord('\\')
@@ -381,7 +475,7 @@ class Manager(object):
 
     def batch_loss(self, xs):
         xs = jax.nn.one_hot(xs, NCHAR)
-        return self._loss_avg(self.params, xs) / math.log(2)
+        return self._loss_avg(self.params, xs)
 
     def sample(self, prefix, l, temperature=0.05):
         prefix = jnp.array(list(prefix))
@@ -419,18 +513,20 @@ def main(dir, steps, learning_rate):
 
     # model = Equal()
     # model = Freq()
-    model = Markov2()
+    # model = Markov2()
+    # model = Markov2Flex()
     # model = RecurrentL1(hidden=128, activation=jax.nn.hard_sigmoid)
     # model = Recurrent2(hidden=128, activation=jax.nn.hard_sigmoid)
     # model = RealMarkov()
-    # model = RecurrentL2(hidden1=128, hidden2=128, activation=jax.nn.relu6)
+    # model = RecurrentL2(hidden1=256, hidden2=256, activation=jax.nn.sigmoid)
+    model = RecurrentGRU(256)
 
     manager = Manager(model, learning_rate)
 
     start = time.time()
 
     for i in range(steps):
-        batch = train_set.sample(64, 64)
+        batch = train_set.sample(32, 32)
         # print(batch.shape)
         loss, real_loss = manager.train(batch, i % 10 == 0)
         if real_loss is not None:
@@ -440,7 +536,7 @@ def main(dir, steps, learning_rate):
 
     manager.sample_loss(b'Roses are red\nViolets are blue,\nSugar is sweet\nAnd so are you.')
 
-    batch = train_set.sample(64, 32)
+    batch = train_set.sample(128, 128)
     print('Batch loss:', manager.batch_loss(batch))
 
     prefix = b'Roses are red\nViolets are blu'

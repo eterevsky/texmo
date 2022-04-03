@@ -18,8 +18,8 @@ class DataSet(object):
                 total += len(text)
                 self.cum_weights.append(total)
 
-    def sample(self, length, size):
-        texts_batch = random.choices(self.texts, cum_weights=self.cum_weights, k=size)
+    def sample(self, length, batch_size):
+        texts_batch = random.choices(self.texts, cum_weights=self.cum_weights, k=batch_size)
         batch = []
         for text in texts_batch:
             start = random.randrange(len(text))
@@ -29,4 +29,5 @@ class DataSet(object):
         batch = np.array(batch, dtype=np.ubyte)
         return batch
 
-
+    def all(self):
+        return b'\n'.join(self.texts)

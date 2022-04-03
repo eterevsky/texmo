@@ -4,42 +4,12 @@ import jax.numpy as jnp
 import math
 import numpy as np
 import optax
-import os
-import random
 import time
+
+from dataset import DataSet
 
 
 NCHAR = 256  # Considering characters with codes 0..NCHAR
-
-
-class TrainSet(object):
-    def __init__(self, dir):
-        self.texts = []
-        self.cum_weights = []
-        total = 0
-        for dir, _, files in os.walk(dir):
-            for filename in files:
-                path = os.path.join(dir, filename)
-                print(f'Loading {path}')
-                with open(path, 'rb') as f:
-                    text = f.read()
-                self.texts.append(text)
-                total += len(text)
-                self.cum_weights.append(total)
-
-    def sample(self, length, batch_size):
-        texts_batch = random.choices(self.texts, cum_weights=self.cum_weights, k=batch_size)
-        batch = []
-        for text in texts_batch:
-            start = random.randrange(len(text))
-            sample = text[start:start + length]
-            sample += b'\0' * (length - len(sample))
-            batch.append(list(sample))
-        batch = np.array(batch, dtype=np.ubyte)
-        return batch
-
-    def all(self):
-        return b'\n'.join(self.texts)
 
 
 class Model(object):
@@ -85,8 +55,8 @@ class Model(object):
     def loss(self, params, x):
         _, y = jax.lax.scan(lambda s, c: self.step(params, s, c), self.init_state(), x)
         # print('loss', x.shape, y.shape)
-        return optax.softmax_cross_entropy(y[:-1,:], x[1:,:])
 
+        return optax.softmax_cross_entropy(y[:-1,:], x[1:,:])
     def params_loss(self, params):
         if not params: return 0
         s = 0
@@ -509,17 +479,17 @@ class Manager(object):
 
 def main(dir, steps, learning_rate):
     print(f'Training data: {dir}')
-    train_set = TrainSet(dir)
+    train_set = DataSet(dir)
 
     # model = Equal()
     # model = Freq()
-    # model = Markov2()
+    model = Markov2()
     # model = Markov2Flex()
     # model = RecurrentL1(hidden=128, activation=jax.nn.hard_sigmoid)
     # model = Recurrent2(hidden=128, activation=jax.nn.hard_sigmoid)
     # model = RealMarkov()
     # model = RecurrentL2(hidden1=256, hidden2=256, activation=jax.nn.sigmoid)
-    model = RecurrentGRU(256)
+    # model = RecurrentGRU(256)
 
     manager = Manager(model, learning_rate)
 

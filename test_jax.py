@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 from jax import grad, jit, vmap, device_put
 from timeit import timeit
-import matplotlib.pyplot as plt
 
 
 def selu(x, alpha=5/3, l=1.05):
@@ -25,3 +24,18 @@ print(timeit(lambda: selu(x).block_until_ready(), number=100))
 
 selu_jit = jit(selu)
 print(timeit(lambda: selu_jit(x).block_until_ready(), number=100))
+
+
+class Class(object):
+    def __init__(self, param):
+        self.param = param
+
+    def calc(self, y):
+        return self.param * y
+
+
+a = Class(2)
+print(a.calc(3))
+
+b = jax.jit(a.calc)
+print(b(3))

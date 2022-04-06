@@ -1,3 +1,8 @@
+import jax
+import jax.numpy as jnp
+import optax
+
+
 NCHAR = 256  # Considering characters with codes 0..NCHAR
 
 
@@ -54,3 +59,4 @@ class Model(object):
             s += jnp.average(v * v)
 
         return s
+

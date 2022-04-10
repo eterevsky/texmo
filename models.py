@@ -144,50 +144,90 @@ class RecurrentL1(Model):
 
 
 class RecurrentL2(Model):
-    def __init__(self, hidden1, hidden2, activation):
-        self._hidden1 = hidden1
-        self._hidden2 = hidden2
+    def __init__(self, hidden, activation):
+        self._hidden = hidden
         self._activation = activation
 
     def init_params(self, key):
-        keys = jax.random.split(key, 8)
+        key0, key1, key2, key3, key4, key5, key6 = jax.random.split(key, 7)
         return {
-            'winp1': jax.random.normal(keys[0], shape=(self._hidden1, NCHAR)),
-            'wstate1': jax.random.normal(keys[1], shape=(self._hidden1, self._hidden1)),
-            'b1': jax.random.normal(keys[2], shape=(self._hidden1,)),
+            'winp1': jax.random.normal(key0, shape=(self._hidden, NCHAR)),
+            'b1': jax.random.normal(key1, shape=(self._hidden,)),
+            'wstate1': jax.random.normal(key2, shape=(self._hidden, self._hidden)),
 
-            'w2': jax.random.normal(keys[3], shape=(self._hidden2, self._hidden1)),
-            'wstate2': jax.random.normal(keys[4], shape=(self._hidden2, self._hidden2)),
-            'b2': jax.random.normal(keys[5], shape=(self._hidden2,)),
+            'b2': jax.random.normal(key3, shape=(self._hidden,)),
+            'wstate2': jax.random.normal(key4, shape=(self._hidden, self._hidden)),
 
-            'wout': jax.random.normal(keys[6], shape=(NCHAR, self._hidden2)),
-            'bout': jax.random.normal(keys[7], shape=(NCHAR,))
+            'wout': jax.random.normal(key5, shape=(NCHAR, self._hidden)),
+            'bout': jax.random.normal(key6, shape=(NCHAR,))
         }
 
     def init_state(self):
-        return {
-            'state1': jnp.zeros((self._hidden1,)),
-            'state2': jnp.zeros((self._hidden2,)),
-        }
+        return jnp.zeros((self._hidden,))
 
     def step(self, params, state, c):
         """One forward step in the recurrent network.
 
         Args:
             params: dictionary with model parameters
-            state: array with the internal state, initially zero. shape = (256,)
-            c: a single character represented as a one-of. shape = (256,)
+            state: array with the internal state, initially zero. shape = (self._hidden,)
+            c: a single character represented as a one-of. shape = (NCHAR,)
         """
-        state1 = state['state1']
-        state1 = jnp.dot(params['winp1'], c) + jnp.dot(params['wstate1'], state1) + params['b1']
-        state1 = self._activation(state1)
+        hidden = jnp.dot(params['winp1'], c) + jnp.dot(params['wstate1'], state) + params['b1']
+        hidden = self._activation(hidden)
 
-        state2 = state['state2']
-        state2 = jnp.dot(params['w2'], state1) + jnp.dot(params['wstate2'], state2) + params['b2']
-        state2 = self._activation(state2)
+        state = jnp.dot(params['wstate2'], hidden) + params['b2']
+        state = self._activation(state)
 
-        out = jnp.dot(params['wout'], state2) + params['bout']
-        return {'state1': state1, 'state2': state2}, out
+        out = jnp.dot(params['wout'], state) + params['bout']
+        return state, out
+
+
+# class RecurrentL2(Model):
+#     def __init__(self, hidden1, hidden2, activation):
+#         self._hidden1 = hidden1
+#         self._hidden2 = hidden2
+#         self._activation = activation
+
+#     def init_params(self, key):
+#         keys = jax.random.split(key, 8)
+#         return {
+#             'winp1': jax.random.normal(keys[0], shape=(self._hidden1, NCHAR)),
+#             'wstate1': jax.random.normal(keys[1], shape=(self._hidden1, self._hidden1)),
+#             'b1': jax.random.normal(keys[2], shape=(self._hidden1,)),
+
+#             'w2': jax.random.normal(keys[3], shape=(self._hidden2, self._hidden1)),
+#             'wstate2': jax.random.normal(keys[4], shape=(self._hidden2, self._hidden2)),
+#             'b2': jax.random.normal(keys[5], shape=(self._hidden2,)),
+
+#             'wout': jax.random.normal(keys[6], shape=(NCHAR, self._hidden2)),
+#             'bout': jax.random.normal(keys[7], shape=(NCHAR,))
+#         }
+
+#     def init_state(self):
+#         return {
+#             'state1': jnp.zeros((self._hidden1,)),
+#             'state2': jnp.zeros((self._hidden2,)),
+#         }
+
+#     def step(self, params, state, c):
+#         """One forward step in the recurrent network.
+
+#         Args:
+#             params: dictionary with model parameters
+#             state: array with the internal state, initially zero. shape = (256,)
+#             c: a single character represented as a one-of. shape = (256,)
+#         """
+#         state1 = state['state1']
+#         state1 = jnp.dot(params['winp1'], c) + jnp.dot(params['wstate1'], state1) + params['b1']
+#         state1 = self._activation(state1)
+
+#         state2 = state['state2']
+#         state2 = jnp.dot(params['w2'], state1) + jnp.dot(params['wstate2'], state2) + params['b2']
+#         state2 = self._activation(state2)
+
+#         out = jnp.dot(params['wout'], state2) + params['bout']
+#         return {'state1': state1, 'state2': state2}, out
 
 
 class RecurrentGRU(Model):

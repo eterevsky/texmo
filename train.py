@@ -2,6 +2,7 @@ import argparse
 import jax
 import jax.numpy as jnp
 import math
+import matplotlib.pyplot as plt
 import numpy as np
 import optax
 import time
@@ -21,14 +22,41 @@ def additive_weight_decay(weight_decay: float = 0.0) -> optax.GradientTransforma
         return optax.AdditiveWeightDecayState()
 
     def update_fn(updates, state, params):
-        updates = jax.tree_multimap(lambda g, p: g + weight_decay * p * (len(g.shape) > 1), updates, params)
+        updates = jax.tree_multimap(lambda g, p: g + weight_decay * p * (len(g.shape) > 1),
+                                    updates, params)
         return updates, state
 
     return optax.GradientTransformation(init_fn, update_fn)
 
 
+def gpt3_schedule(warmup_steps,
+                  anneal_steps,
+                  peak_lr,
+                  end_lr):
+    def sch(step):
+        warmup_pct = jnp.clip(step, 0, warmup_steps) / warmup_steps
+        anneal_pct = jnp.clip(step - warmup_steps, 0, anneal_steps) / anneal_steps
+
+        return warmup_pct * peak_lr - (peak_lr - end_lr) * (1 - jnp.cos(jnp.pi * anneal_pct)) / 2
+
+    return sch
+
+
+def exp_schedule(initial_steps, total_steps, initial_lr, final_lr):
+    log_scale = math.log(final_lr / initial_lr)
+
+    def sch(step):
+        if step < initial_steps:
+            return initial_lr
+
+        t = (step - initial_steps) / (total_steps - initial_steps)
+        return initial_lr * math.exp(t * log_scale)
+
+    return sch
+
+
 class Manager(object):
-    def __init__(self, model, learning_rate, regularization):
+    def __init__(self, model, learning_rate, regularization, steps):
         print('Creating Model')
         self._key = jax.random.PRNGKey(42)
         self.model = model
@@ -47,6 +75,7 @@ class Manager(object):
             optax.scale_by_adam(),
             additive_weight_decay(regularization),
             optax.scale(-learning_rate),
+            optax.scale_by_schedule(exp_schedule(steps//100, steps, learning_rate, learning_rate/10))
         )
 
         # self.optimizer = optax.adam(learning_rate)
@@ -94,17 +123,13 @@ class Manager(object):
             out.append(c_selected)
         return bytes(out)
 
-    def train(self, xs, calc_real_loss=False):
+    def train(self, xs):
         xs = jax.nn.one_hot(xs, NCHAR)
         loss, grads = self._loss_grad(self.params, xs)
-        if calc_real_loss:
-            real_loss = self._loss_avg(self.params, xs)
-        else:
-            real_loss = None
         updates, self.opt_state = self.optimizer.update(grads, self.opt_state, self.params)
         self.params = optax.apply_updates(self.params, updates)
 
-        return loss, real_loss
+        return loss
 
 
 def main(dir, steps, learning_rate, regularization):
@@ -114,22 +139,29 @@ def main(dir, steps, learning_rate, regularization):
     # model = models.Equal()
     # model = models.Freq()
     # model = models.Markov2()
-    model = models.MarkovFlex()
-    # model = RecurrentL1(hidden=128, activation=jax.nn.hard_sigmoid)
+    # model = models.MarkovFlex()
+    # model = models.RecurrentL1(hidden=128, activation=jax.nn.sigmoid)
     # model = Recurrent2(hidden=128, activation=jax.nn.hard_sigmoid)
-    # model = RecurrentL2(hidden1=256, hidden2=256, activation=jax.nn.sigmoid)
-    # model = RecurrentGRU(256)
+    model = models.RecurrentL2(hidden=256, activation=jax.nn.sigmoid)
+    # model = models.RecurrentGRU(256)
 
-    manager = Manager(model, learning_rate, regularization)
+    manager = Manager(model, learning_rate, regularization, steps)
 
     start = time.time()
 
+    losses = []
+
     for i in range(steps):
-        batch = train_set.sample(32, 32)
-        # print(batch.shape)
-        loss, real_loss = manager.train(batch, i % 10 == 0)
-        if real_loss is not None:
-            print(i, loss, real_loss)
+        batch = train_set.sample(length=128, batch_size=32)
+        loss = manager.train(batch)
+        losses.append(loss)
+        if i % 10 == 0:
+            print(i, loss)
+
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.plot(list(range(1, steps + 1)), losses)
+    plt.show()
 
     print(f'Training time: {time.time() - start}')
 

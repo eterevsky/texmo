@@ -124,10 +124,6 @@ class Manager(object):
         _, r = self.model.step(self.params, state, soh[0])
 
         loss = self.model.loss(self.params, soh)
-        # print(chr(s[0]))
-        # for c, p in zip(s[1:], loss):
-        #     if c == ord('\n'): c = ord('\\')
-        #     print(chr(c), p)
 
         print('Sample loss:', jnp.average(loss))
 
@@ -173,9 +169,9 @@ def main(dir, steps, learning_rate, regularization):
     # model = models.Freq()
     # model = models.Markov2()
     # model = models.MarkovFlex()
-    model = models.RecurrentL1(hidden=128, activation=jax.nn.sigmoid)
+    # model = models.RecurrentL1(hidden=128, activation=jax.nn.sigmoid)
     # model = models.RecurrentL2(hidden=256, activation=jax.nn.sigmoid)
-    # model = models.RecurrentGRU(256)
+    model = models.RecurrentGRU(128)
 
     manager = Manager(model, learning_rate, regularization, steps)
 

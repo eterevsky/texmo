@@ -51,6 +51,14 @@ class Model(object):
 
         return optax.softmax_cross_entropy(y[:-1,:], x[1:,:])
 
+    def loss_batch(self, params, xbatch):
+        """Implements loss for a batch provided the model implements step_batch."""
+        sbatch = jnp.zeros((xbatch.shape[0], self._hidden))
+        xbatch = jnp.swapaxes(xbatch, 0, 1)  # (element, batch, one-hot)
+        _, ybatch = jax.lax.scan(lambda s, c: self._step_batch(params, s, c), sbatch, xbatch)
+        entropy = optax.softmax_cross_entropy(ybatch[:-1,:,:], xbatch[1:,:,:])
+        return jnp.average(entropy)
+
     def params_loss(self, params):
         if not params: return 0
         s = 0

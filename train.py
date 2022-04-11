@@ -15,6 +15,35 @@ import models
 LOG2 = 1 / math.log(2)
 
 
+def global_norm(updates):
+    pre_sqrt = sum([jnp.sum(jnp.square(x)) for x in jax.tree_leaves(updates)])
+    return jnp.sqrt(pre_sqrt)
+
+
+def clip_by_global_norm(max_norm) -> optax.GradientTransformation:
+    """Clip updates using their global norm.
+    References:
+      [Pascanu et al, 2012](https://arxiv.org/abs/1211.5063)
+    Args:
+      max_norm: the maximum global norm for an update.
+    Returns:
+      An (init_fn, update_fn) tuple.
+    """
+
+    def init_fn(_):
+        return optax.EmptyState()
+
+    def update_fn(updates, state, params=None):
+        del params
+        g_norm = global_norm(updates)
+        trigger = g_norm < max_norm
+        updates = jax.tree_map(
+            lambda t: jnp.where(trigger, t, (t / g_norm) * max_norm), updates)
+        return updates, state
+
+    return optax.GradientTransformation(init_fn, update_fn)
+
+
 def additive_weight_decay(weight_decay: float = 0.0) -> optax.GradientTransformation:
     """Add a delta emulating L2 regularization to all parameters except biases."""
 
@@ -71,11 +100,11 @@ class Manager(object):
         self._total_loss = lambda params, xs: jnp.average(self._loss_batch(params, xs)) * LOG2
         self._loss_grad = jax.jit(jax.value_and_grad(self._total_loss))
         self.optimizer = optax.chain(
-            optax.scale_by_param_block_rms(),
+            clip_by_global_norm(1),
             optax.scale_by_adam(),
             additive_weight_decay(regularization),
             optax.scale(-learning_rate),
-            optax.scale_by_schedule(exp_schedule(steps//100, steps, learning_rate, learning_rate/10))
+            optax.scale_by_schedule(exp_schedule(steps//10, steps, learning_rate, learning_rate/10))
         )
 
         # self.optimizer = optax.adam(learning_rate)
@@ -140,8 +169,7 @@ def main(dir, steps, learning_rate, regularization):
     # model = models.Freq()
     # model = models.Markov2()
     # model = models.MarkovFlex()
-    # model = models.RecurrentL1(hidden=128, activation=jax.nn.sigmoid)
-    # model = Recurrent2(hidden=128, activation=jax.nn.hard_sigmoid)
+    # model = models.RecurrentL1(hidden=256, activation=jax.nn.sigmoid)
     model = models.RecurrentL2(hidden=256, activation=jax.nn.sigmoid)
     # model = models.RecurrentGRU(256)
 

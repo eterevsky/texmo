@@ -174,10 +174,10 @@ class RecurrentL2(Model):
             c: a single character represented as a one-of. shape = (NCHAR,)
         """
         hidden = jnp.dot(params['winp1'], c) + jnp.dot(params['wstate1'], state) + params['b1']
-        hidden = self._activation(hidden)
+        hidden = jax.nn.sigmoid(hidden)
 
         state = jnp.dot(params['wstate2'], hidden) + params['b2']
-        state = self._activation(state)
+        state = jax.nn.sigmoid(state)
 
         out = jnp.dot(params['wout'], state) + params['bout']
         return state, out

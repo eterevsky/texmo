@@ -1,4 +1,5 @@
 import argparse
+import re
 import jax
 import jax.numpy as jnp
 import math
@@ -94,11 +95,11 @@ class Manager(object):
 
         print('Creating batch loss')
         self._loss_batch = jax.vmap(model.loss, in_axes=(None, 0), out_axes=0)
+        # self._loss_batch = model.loss_batch
         print('Creating loss_avg')
         self._loss_avg = lambda params, xs: jnp.average(self._loss_batch(params, xs)) * LOG2
-        self._loss_avg = jax.jit(self._loss_avg)
-        self._total_loss = lambda params, xs: jnp.average(self._loss_batch(params, xs)) * LOG2
-        self._loss_grad = jax.jit(jax.value_and_grad(self._total_loss))
+        # self._loss_avg = jax.jit(self._loss_avg)
+        self._loss_grad = jax.jit(jax.value_and_grad(self._loss_avg))
         self.optimizer = optax.chain(
             clip_by_global_norm(1),
             optax.scale_by_adam(),
@@ -107,7 +108,6 @@ class Manager(object):
             optax.scale_by_schedule(exp_schedule(steps//10, steps, learning_rate, learning_rate/10))
         )
 
-        # self.optimizer = optax.adam(learning_rate)
         self.opt_state = self.optimizer.init(self.params)
 
     def key(self):
@@ -124,16 +124,20 @@ class Manager(object):
         _, r = self.model.step(self.params, state, soh[0])
 
         loss = self.model.loss(self.params, soh)
-        print(chr(s[0]))
-        for c, p in zip(s[1:], loss):
-            if c == ord('\n'): c = ord('\\')
-            print(chr(c), p)
+        # print(chr(s[0]))
+        # for c, p in zip(s[1:], loss):
+        #     if c == ord('\n'): c = ord('\\')
+        #     print(chr(c), p)
 
         print('Sample loss:', jnp.average(loss))
 
     def batch_loss(self, xs):
         xs = jax.nn.one_hot(xs, NCHAR)
         return self._loss_avg(self.params, xs)
+
+    def batch_loss1(self, xs):
+        xs = jax.nn.one_hot(xs, NCHAR)
+        return self._loss_avg1(self.params, xs)
 
     def sample(self, prefix, l, temperature=0.05):
         prefix = jnp.array(list(prefix))
@@ -169,8 +173,8 @@ def main(dir, steps, learning_rate, regularization):
     # model = models.Freq()
     # model = models.Markov2()
     # model = models.MarkovFlex()
-    # model = models.RecurrentL1(hidden=256, activation=jax.nn.sigmoid)
-    model = models.RecurrentL2(hidden=256, activation=jax.nn.sigmoid)
+    model = models.RecurrentL1(hidden=128, activation=jax.nn.sigmoid)
+    # model = models.RecurrentL2(hidden=256, activation=jax.nn.sigmoid)
     # model = models.RecurrentGRU(256)
 
     manager = Manager(model, learning_rate, regularization, steps)
@@ -178,18 +182,18 @@ def main(dir, steps, learning_rate, regularization):
     start = time.time()
 
     losses = []
+    recent_losses = []
 
     for i in range(steps):
         batch = train_set.sample(length=128, batch_size=32)
         loss = manager.train(batch)
-        losses.append(loss)
-        if i % 10 == 0:
-            print(i, loss)
-
-    plt.xscale('log')
-    plt.yscale('log')
-    plt.plot(list(range(1, steps + 1)), losses)
-    plt.show()
+        if i % 10 == 0 and i > 0:
+            avg_loss = sum(recent_losses) / len(recent_losses)
+            losses.append(avg_loss)
+            recent_losses = []
+            print(i, avg_loss)
+        else:
+            recent_losses.append(loss)
 
     print(f'Training time: {time.time() - start}')
 
@@ -201,9 +205,20 @@ def main(dir, steps, learning_rate, regularization):
     prefix = b'Roses are red\nViolets are blu'
     out = manager.sample(prefix, 256)
     print(prefix + out)
-    s = (prefix + out).decode('utf-8')
+
+    try:
+        s = (prefix + out).decode('utf-8')
+    except UnicodeDecodeError:
+        s = '<Invalid UTF-8>'
     print()
     print(s)
+
+
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.plot(list(range(10, steps, 10)), losses)
+    plt.show()
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -211,7 +226,7 @@ def parse_args():
     parser.add_argument('-s', '--steps', type=int, help='number of training steps')
     parser.add_argument('-l', '--learning-rate', type=float, help='learning rate', default=0.1)
     parser.add_argument('-r', '--regularization', type=float, help='L2 regularization coefficient',
-                        default=0.001)
+                        default=0.1)
     return parser.parse_args()
 
 

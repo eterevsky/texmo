@@ -11,12 +11,12 @@ class DataSet(object):
         for dir, _, files in os.walk(dir):
             for filename in files:
                 path = os.path.join(dir, filename)
-                print(f'Loading {path}')
                 with open(path, 'rb') as f:
                     text = f.read()
                 self.texts.append(text)
                 total += len(text)
                 self.cum_weights.append(total)
+        print(f'Dataset loaded: {len(self.texts)}')
 
     def sample(self, length, batch_size):
         texts_batch = random.choices(self.texts, cum_weights=self.cum_weights, k=batch_size)

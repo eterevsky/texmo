@@ -48,7 +48,6 @@ class Model(object):
 
     def loss(self, params, x):
         _, y = jax.lax.scan(lambda s, c: self.step(params, s, c), self.init_state(), x)
-        # print('loss', x.shape, y.shape)
 
         return optax.softmax_cross_entropy(y[:-1,:], x[1:,:])
 

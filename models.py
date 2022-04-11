@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import optax
 
 from model import Model, NCHAR
 
@@ -89,7 +90,7 @@ class MarkovFlex(Model):
 
 
 class RecurrentL1(Model):
-    def __init__(self, hidden, activation):
+    def __init__(self, hidden, activation=jax.nn.sigmoid):
         self._hidden = hidden
         self._activation = activation
 
@@ -124,22 +125,33 @@ class RecurrentL1(Model):
         sbatch = jnp.expand_dims(sbatch, 2)
         cbatch = jnp.expand_dims(cbatch, 2)
         b1 = jnp.expand_dims(params['b1'], 1)
+        b1 = jnp.expand_dims(b1, 0)
         bout = jnp.expand_dims(params['bout'], 1)
-        # print('_step_batch', params['winp1'].shape, cbatch.shape, sbatch.shape, b1.shape)
-        sbatch = jnp.matmul(params['winp1'], cbatch) + jnp.matmul(params['wstate1'], sbatch) + b1
-        sbatch = jnp.tanh(sbatch)
+        bout = jnp.expand_dims(bout, 0)
+        winp1 = jnp.expand_dims(params['winp1'], 0)
+        wstate1 = jnp.expand_dims(params['wstate1'], 0)
+        wout = params['wout']
+        # print('_step_batch', winp1.shape, cbatch.shape, sbatch.shape)
+        s1 = jnp.matmul(winp1, cbatch)
+        s2 = jnp.matmul(wstate1, sbatch)
+        # print(s1.shape, s2.shape, b1.shape)
+        sbatch = s1 + s2 + b1
+        sbatch = self._activation(sbatch)
+        # print(wout.shape, sbatch.shape, bout.shape)
         out = jnp.matmul(params['wout'], sbatch) + bout
-        # print('_step_batch2', sbatch.shape, out.shape)
+        # print('out.shape', out.shape)
         sbatch = sbatch.squeeze(axis=2)
         out = out.squeeze(axis=2)
+        # print(sbatch.shape, out.shape)
         return sbatch, out
 
-
-    def _loss_batch(self, params, xbatch):
-        sbatch = jnp.zeros((xbatch.shape[0], 256))
+    def loss_batch(self, params, xbatch):
+        sbatch = jnp.zeros((xbatch.shape[0], self._hidden))
         xbatch = jnp.swapaxes(xbatch, 0, 1)  # (element, batch, one-hot)
+        # print('loss_batch', sbatch.shape, xbatch.shape)
         _, ybatch = jax.lax.scan(lambda s, c: self._step_batch(params, s, c), sbatch, xbatch)
-        entropy = optax.softmax_cross_entropy(ybatch[:,:-1,:], xbatch[:,1:,:])
+        # print(ybatch.shape, xbatch.shape)
+        entropy = optax.softmax_cross_entropy(ybatch[:-1,:,:], xbatch[1:,:,:])
         return jnp.average(entropy)
 
 

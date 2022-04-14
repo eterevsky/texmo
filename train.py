@@ -1,11 +1,12 @@
 import argparse
-import re
 import jax
 import jax.numpy as jnp
+import json
 import math
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
+import os
 import time
 
 from dataset import DataSet
@@ -76,8 +77,11 @@ def exp_schedule(initial_steps, total_steps, initial_lr, final_lr):
     log_scale = math.log(final_lr / initial_lr)
 
     def sch(step):
-        if step < initial_steps:
+        if step <= initial_steps:
             return initial_lr
+
+        if step >= total_steps:
+            return final_lr
 
         t = (step - initial_steps) / (total_steps - initial_steps)
         return initial_lr * math.exp(t * log_scale)
@@ -86,26 +90,45 @@ def exp_schedule(initial_steps, total_steps, initial_lr, final_lr):
 
 
 class Manager(object):
-    def __init__(self, model, learning_rate, regularization, steps):
+    @staticmethod
+    def from_spec(spec):
+        model = models.build(spec['model'])
+        params = {}
+        for key, value in spec['params'].items():
+            params[key] = jnp.array(value)
+        return Manager(model, spec['learning_rate'], spec['regularization'], spec.get('total_steps', 0), spec['step'], params)
+
+    def __init__(self, model, learning_rate, regularization, total_steps, step=0, params=None):
         print('Creating Model')
         self._key = jax.random.PRNGKey(42)
         self.model = model
-        self.params = self.model.init_params(self.key())
-        self._regularization = regularization
+        self.learning_rate = learning_rate
+        self.regularization = regularization
+        self.total_steps = total_steps
+        self.step = step
+        if params is not None:
+            self.params = params
+        else:
+            self.params = self.model.init_params(self.key())
+        self.loss = None
 
+    def init(self):
         print('Creating batch loss')
-        self._loss_batch = jax.vmap(model.loss, in_axes=(None, 0), out_axes=0)
-        # self._loss_batch = model.loss_batch
+        self._loss_batch = jax.vmap(self.model.loss, in_axes=(None, 0), out_axes=0)
         print('Creating loss_avg')
         self._loss_avg = lambda params, xs: jnp.average(self._loss_batch(params, xs)) * LOG2
-        # self._loss_avg = jax.jit(self._loss_avg)
+        print('Creating loss_grad')
         self._loss_grad = jax.jit(jax.value_and_grad(self._loss_avg))
+        print('Creating optimizer')
         self.optimizer = optax.chain(
             clip_by_global_norm(1),
             optax.scale_by_adam(),
-            additive_weight_decay(regularization),
-            optax.scale(-learning_rate),
-            optax.scale_by_schedule(exp_schedule(steps//10, steps, learning_rate, learning_rate/10))
+            additive_weight_decay(self.regularization),
+            optax.scale(-self.learning_rate),
+            optax.scale_by_schedule(
+                exp_schedule(
+                    self.total_steps//10, self.total_steps,
+                    self.learning_rate, self.learning_rate/10))
         )
 
         self.opt_state = self.optimizer.init(self.params)
@@ -131,9 +154,10 @@ class Manager(object):
         xs = jax.nn.one_hot(xs, NCHAR)
         return self._loss_avg(self.params, xs)
 
-    def batch_loss1(self, xs):
+    def evaluate(self, xs):
         xs = jax.nn.one_hot(xs, NCHAR)
-        return self._loss_avg1(self.params, xs)
+        self.loss = self._loss_avg(self.params, xs).item()
+        return self.loss
 
     def sample(self, prefix, l, temperature=0.05):
         prefix = jnp.array(list(prefix))
@@ -158,45 +182,91 @@ class Manager(object):
         updates, self.opt_state = self.optimizer.update(grads, self.opt_state, self.params)
         self.params = optax.apply_updates(self.params, updates)
 
+        self.step += 1
+
         return loss
 
+    def save(self, dir):
+        model = self.model.serialize()
+        model_name = model['name']
 
-def main(dir, steps, learning_rate, regularization):
-    print(f'Training data: {dir}')
-    train_set = DataSet(dir)
+        path = os.path.join(dir, f'{model_name}-{self.step}.json')
 
-    # model = models.Equal()
-    # model = models.Freq()
-    # model = models.Markov2()
-    # model = models.MarkovFlex()
-    # model = models.RecurrentL1(hidden=128, activation=jax.nn.sigmoid)
-    # model = models.RecurrentL2(hidden=256, activation=jax.nn.sigmoid)
-    model = models.RecurrentGRU(128)
+        params = {}
 
-    manager = Manager(model, learning_rate, regularization, steps)
+        for key, value in self.params.items():
+            params[key] = value.tolist()
+
+        data = {
+            'model': model,
+            'total_steps': self.total_steps,
+            'step': self.step,
+            'params': params,
+            'learning_rate': self.learning_rate,
+            'regularization': self.regularization,
+            'loss': self.loss
+        }
+
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=2)
+
+
+def main(data, steps, learning_rate, regularization, output_dir, model_path, temp_dir):
+    if data is not None:
+        print(f'Training data: {data}')
+        train_set = DataSet(data)
+    else:
+        train_set = None
+
+    if model_path is None:
+        # model = models.Equal()
+        # model = models.Freq()
+        # model = models.Markov1()
+        # model = models.MarkovFlex()
+        # model = models.RecurrentL1(hidden=128, activation=jax.nn.sigmoid)
+        # model = models.RecurrentL2(hidden=256, activation=jax.nn.sigmoid)
+        model = models.RecurrentGRU(256)
+
+        manager = Manager(model, learning_rate, regularization, steps)
+    else:
+        with open(model_path) as f:
+            spec = json.load(f)
+        manager = Manager.from_spec(spec)
+        if learning_rate is not None:
+            manager.learning_rate = learning_rate
+        if regularization is not None:
+            manager.regularization = regularization
+
+    manager.init()
 
     start = time.time()
 
+    step_array = []
     losses = []
     recent_losses = []
 
     for i in range(steps):
         batch = train_set.sample(length=128, batch_size=32)
         loss = manager.train(batch)
-        if i % 10 == 0 and i > 0:
+        if manager.step % 10 == 0 and recent_losses:
+            step_array.append(manager.step)
             avg_loss = sum(recent_losses) / len(recent_losses)
             losses.append(avg_loss)
             recent_losses = []
-            print(i, avg_loss)
+            print(manager.step, avg_loss)
         else:
             recent_losses.append(loss)
 
-    print(f'Training time: {time.time() - start}')
+        if manager.step % 100 == 0 and temp_dir is not None:
+            manager.save(temp_dir)
+
+    if steps > 0:
+        print(f'Training time: {time.time() - start}')
 
     manager.sample_loss(b'Roses are red\nViolets are blue,\nSugar is sweet\nAnd so are you.')
 
-    batch = train_set.sample(128, 128)
-    print('Batch loss:', manager.batch_loss(batch))
+    batch = train_set.sample(1024, 1024)
+    print('Batch loss:', manager.evaluate(batch))
 
     prefix = b'Roses are red\nViolets are blu'
     out = manager.sample(prefix, 256)
@@ -208,24 +278,31 @@ def main(dir, steps, learning_rate, regularization):
         s = '<Invalid UTF-8>'
     print()
     print(s)
+    print()
 
+    if output_dir is not None:
+        manager.save(output_dir)
 
-    plt.xscale('log')
-    plt.yscale('log')
-    plt.plot(list(range(10, steps, 10)), losses)
-    plt.show()
+    if steps > 0:
+        plt.xscale('log')
+        plt.yscale('log')
+        plt.plot(step_array, losses)
+        plt.show()
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-d', '--dir', type=str, help='directory with training data')
-    parser.add_argument('-s', '--steps', type=int, help='number of training steps')
+    parser.add_argument('-d', '--data', type=str, help='directory with training data')
+    parser.add_argument('-s', '--steps', type=int, default=0, help='number of training steps')
     parser.add_argument('-l', '--learning-rate', type=float, help='learning rate', default=0.1)
     parser.add_argument('-r', '--regularization', type=float, help='L2 regularization coefficient',
                         default=0.1)
+    parser.add_argument('-o', '--output-dir', type=str, default=None, help='directory for saved model')
+    parser.add_argument('-m', '--model-path', default=None, help='load trained model')
+    parser.add_argument('-t', '--temp-dir', default=None, help='directoy for intermediate models')
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     args = parse_args()
-    main(args.dir, args.steps, args.learning_rate, args.regularization)
+    main(**vars(args))

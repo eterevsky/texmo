@@ -7,6 +7,9 @@ NCHAR = 256  # Considering characters with codes 0..NCHAR
 
 
 class Model(object):
+    def __init__(self, **kwargs):
+        pass
+
     def init_params(self, key):
         """Initializes the params object.
 
@@ -26,7 +29,7 @@ class Model(object):
             params: dictionary with the model parameters
             state: array with the internal state (initialized by init_state or returned from the
                 previous step)
-            x: a single character represented as a one-of. shape = (256,)
+            c: a single character represented as a one-of. shape = (256,)
 
         Returns:
             (new state, an output 1D vector of size NCHAR that after softmax will produce character

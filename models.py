@@ -6,11 +6,17 @@ from model import Model, NCHAR
 
 
 class Equal(Model):
+    def serialize(self):
+        return {'name': 'equal'}
+
     def step(self, params, state, c):
         return state, jnp.ones_like(c)
 
 
 class Freq(Model):
+    def serialize(self):
+        return {'name': 'freq'}
+
     def init_params(self, key):
         return {'b': jax.random.normal(key, shape=(NCHAR,))}
 
@@ -19,7 +25,12 @@ class Freq(Model):
         return state, out
 
 
-class Markov(Model):
+class Markov1(Model):
+    """Logistic regression on the previous character."""
+
+    def serialize(self):
+        return {'name': 'markov1'}
+
     def init_params(self, key):
         key0, key1 = jax.random.split(key)
         return {
@@ -179,8 +190,11 @@ class RecurrentL2(Model):
 
 
 class RecurrentGRU(Model):
-    def __init__(self, hidden):
+    def __init__(self, hidden, **kwargs):
         self._hidden = hidden
+
+    def serialize(self):
+        return {'name': 'recurrent-gru', 'hidden': self._hidden}
 
     def init_params(self, key):
         keys = jax.random.split(key, 16)
@@ -243,3 +257,16 @@ class RecurrentGRU(Model):
         out = jnp.dot(params['wout'], t) + params['bout']
 
         return {'h': hn, 'prev': c}, out
+
+MODELS = {
+    'equal': Equal,
+    'freq': Freq,
+    'markov1': Markov1,
+    'markov2': Markov2,
+    'recurrent-gru': RecurrentGRU,
+}
+
+def build(spec):
+    cls = MODELS[spec['name']]
+    return cls(**spec)
+

@@ -223,7 +223,7 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
         # model = models.Freq()
         # model = models.Markov2True()
         # model = models.MarkovFlex()
-        model = models.RecurrentL1(hidden=128, activation=jax.nn.sigmoid)
+        model = models.RecurrentL1(hidden=512, activation=jax.nn.sigmoid)
         # model = models.RecurrentL2(hidden=256, activation=jax.nn.sigmoid)
         # model = models.RecurrentGRU(256)
 

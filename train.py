@@ -221,9 +221,9 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
     if model_path is None:
         # model = models.Equal()
         # model = models.Freq()
-        model = models.Markov2True()
+        # model = models.Markov2True()
         # model = models.MarkovFlex()
-        # model = models.RecurrentL1(hidden=128, activation=jax.nn.sigmoid)
+        model = models.RecurrentL1(hidden=128, activation=jax.nn.sigmoid)
         # model = models.RecurrentL2(hidden=256, activation=jax.nn.sigmoid)
         # model = models.RecurrentGRU(256)
 
@@ -248,14 +248,13 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
     for i in range(steps):
         batch = train_set.sample(length=sample_length, batch_size=batch_size)
         loss = manager.train(batch)
-        if manager.step % 10 == 0 and recent_losses:
+        recent_losses.append(loss)
+        if manager.step < 10 or manager.step % 10 == 0 and recent_losses:
             step_array.append(manager.step)
             avg_loss = sum(recent_losses) / len(recent_losses)
             losses.append(avg_loss)
             recent_losses = []
             print(manager.step, avg_loss)
-        else:
-            recent_losses.append(loss)
 
         if manager.step % 100 == 0 and temp_dir is not None:
             manager.save(temp_dir)

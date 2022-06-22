@@ -111,6 +111,9 @@ class MarkovFlex(Model):
         self._hidden = 128
         self._state_size = 256
 
+    def serialize(self):
+        return {'name': 'markov-flex', 'hidden': self._hidden, 'state_size': self._state_size}
+
     def init_state(self):
         return jnp.zeros((self._state_size,))
 
@@ -130,8 +133,10 @@ class MarkovFlex(Model):
         }
 
     def step(self, params, state, c):
-        new_state = jnp.dot(params['wstate_in'], c) + jnp.dot(params['wstate_prev'], state) + params['bstate']
-        new_state = jax.nn.tanh(state)
+        new_state = (jnp.dot(params['wstate_in'], c) +
+                     jnp.dot(params['wstate_prev'], state) +
+                     params['bstate'])
+        new_state = jax.nn.tanh(new_state)
         hidden = jnp.dot(params['w'], c) + jnp.dot(params['wprev'], state) + params['b']
         hidden = jax.nn.tanh(hidden)
         out = jnp.dot(params['wout'], hidden) + params['bout']
@@ -142,6 +147,9 @@ class RecurrentL1(Model):
     def __init__(self, hidden, activation=jax.nn.sigmoid):
         self._hidden = hidden
         self._activation = activation
+
+    def serialize(self):
+        return {'name': 'recurrent-l1', 'hidden': self._hidden}
 
     def init_params(self, key):
         key0, key1, key2, key3, key4 = jax.random.split(key, 5)
@@ -302,6 +310,7 @@ MODELS = {
     'markov1': Markov1,
     'markov2': Markov2,
     'markov2true': Markov2True,
+    'markov-flex': MarkovFlex,
     'recurrent-gru': RecurrentGRU,
 }
 

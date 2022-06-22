@@ -1,12 +1,13 @@
 ## Train model
 
 ```
-python3 train.py -d data
+python3 train.py -d data -s 100000 -o models -t temp
+```
 
 ## Evaluate trained model
 
 ```
-python3 train.py -d data -s 100000 -o models -t temp
+python3 train.py -d data -m models/some-model.json
 ```
 
 ## Results

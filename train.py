@@ -211,7 +211,7 @@ class Manager(object):
             json.dump(data, f, indent=2)
 
 
-def main(data, steps, learning_rate, regularization, output_dir, model_path, temp_dir):
+def main(data, steps, learning_rate, regularization, output_dir, model_path, temp_dir, sample_length, batch_size):
     if data is not None:
         print(f'Training data: {data}')
         train_set = DataSet(data)
@@ -221,11 +221,11 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
     if model_path is None:
         # model = models.Equal()
         # model = models.Freq()
-        # model = models.Markov1()
+        model = models.Markov2True()
         # model = models.MarkovFlex()
         # model = models.RecurrentL1(hidden=128, activation=jax.nn.sigmoid)
         # model = models.RecurrentL2(hidden=256, activation=jax.nn.sigmoid)
-        model = models.RecurrentGRU(256)
+        # model = models.RecurrentGRU(256)
 
         manager = Manager(model, learning_rate, regularization, steps)
     else:
@@ -246,7 +246,7 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
     recent_losses = []
 
     for i in range(steps):
-        batch = train_set.sample(length=128, batch_size=32)
+        batch = train_set.sample(length=sample_length, batch_size=batch_size)
         loss = manager.train(batch)
         if manager.step % 10 == 0 and recent_losses:
             step_array.append(manager.step)
@@ -300,6 +300,8 @@ def parse_args():
     parser.add_argument('-o', '--output-dir', type=str, default=None, help='directory for saved model')
     parser.add_argument('-m', '--model-path', default=None, help='load trained model')
     parser.add_argument('-t', '--temp-dir', default=None, help='directoy for intermediate models')
+    parser.add_argument('--sample-length', type=int, default=128, help='length of text fragments used for training')
+    parser.add_argument('-b', '--batch-size', type=int, default=32, help='batch size')
     return parser.parse_args()
 
 

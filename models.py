@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+from jax.experimental import sparse
 import optax
 
 from model import Model, NCHAR
@@ -43,9 +44,46 @@ class Markov1(Model):
         return state, out
 
 
+class Markov2True(Model):
+    """Logistic regression on the previous character."""
+
+    def serialize(self):
+        return {'name': 'markov2true'}
+
+    def init_state(self):
+        return jnp.ones((NCHAR,)) / NCHAR
+
+    def init_params(self, key):
+        key0, key1 = jax.random.split(key)
+        return {
+            'w': jax.random.normal(key0, shape=(NCHAR, NCHAR * NCHAR)),
+            'b': jax.random.normal(key1, shape=(NCHAR,)),
+        }
+
+    def step(self, params, state, c):
+        prev = jnp.expand_dims(state, 1)
+        cexp = jnp.expand_dims(c, 0)
+        cross = prev * cexp
+        cross = cross.flatten()
+        out = jnp.dot(params['w'], cross) + params['b']
+        return c, out
+
+
 class Markov2(Model):
-    def __init__(self):
-        self._hidden = 128
+    """Feed forward based on two previous characeters with a hidden layer.
+
+    prev + current
+         V
+       hidden
+         V
+        out
+    """
+
+    def __init__(self, hidden=128):
+        self._hidden = hidden
+
+    def serialize(self):
+        return {'name': 'markov2', 'hidden': self._hidden}
 
     def init_state(self):
         return jnp.zeros((NCHAR,))
@@ -263,6 +301,7 @@ MODELS = {
     'freq': Freq,
     'markov1': Markov1,
     'markov2': Markov2,
+    'markov2true': Markov2True,
     'recurrent-gru': RecurrentGRU,
 }
 

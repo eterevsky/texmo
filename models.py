@@ -166,7 +166,6 @@ class RecurrentL1(Model):
 
     def step(self, params, state, c):
         """One forward step in the recurrent network.
-
         Args:
             params: dictionary with model parameters
             state: array with the internal state, initially zero. shape = (256,)
@@ -193,6 +192,48 @@ class RecurrentL1(Model):
         sbatch = sbatch.squeeze(axis=2)
         out = out.squeeze(axis=2)
         return sbatch, out
+
+
+class RecurrentConv2(Model):
+    """One layer with last two characters as inputs + recurrent layer."""
+
+    def __init__(self, conv, hidden, activation=jax.nn.sigmoid):
+        self._conv = conv
+        self._hidden = hidden
+        self._activation = activation
+
+    def serialize(self):
+        return {'name': 'recurrent-conv2', 'hidden': self._hidden, 'conv': self._conv}
+
+    def init_params(self, key):
+        keys = jax.random.split(key, 8)
+        return {
+            'winp': 0.1 * jax.random.normal(keys[0], shape=(self._conv, NCHAR)),
+            'wprev': 0.1 * jax.random.normal(keys[1], shape=(self._conv, NCHAR)),
+            'bconv': 0.1 * jax.random.normal(keys[2], shape=(self._conv,)),
+            'wconv': 0.1 * jax.random.normal(keys[3], shape=(self._hidden, self._conv)),
+            'whidden': 0.1 * jax.random.normal(keys[4], shape=(self._hidden, self._hidden)),
+            'bhidden': 0.1 * jax.random.normal(keys[5], shape=(self._hidden,)),
+            'wout': 0.1 * jax.random.normal(keys[6], shape=(NCHAR, self._hidden)),
+            'bout': 0.1 * jax.random.normal(keys[7], shape=(NCHAR,))
+        }
+
+    def init_state(self):
+        return {'h': jnp.zeros((self._hidden,)), 'prev': jnp.zeros((NCHAR,))}
+
+    def step(self, params, state, c):
+        prev = state['prev']
+        hidden = state['h']
+
+        conv = jnp.dot(params['winp'], c) + jnp.dot(params['wprev'], prev) + params['bconv']
+        conv = jax.nn.tanh(conv)
+        # conv /= jnp.sum(conv)
+
+        new_hidden = jnp.dot(params['wconv'], conv) + jnp.dot(params['whidden'], hidden) + params['bhidden']
+        new_hidden = jax.nn.tanh(new_hidden)
+
+        out = jnp.dot(params['wout'], new_hidden) + params['bout']
+        return {'h': new_hidden, 'prev': c}, out
 
 
 class RecurrentL2(Model):
@@ -311,6 +352,8 @@ MODELS = {
     'markov2': Markov2,
     'markov2true': Markov2True,
     'markov-flex': MarkovFlex,
+    'recurrent-l1': RecurrentL1,
+    'recurrent-conv2': RecurrentConv2,
     'recurrent-gru': RecurrentGRU,
 }
 

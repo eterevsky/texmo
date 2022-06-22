@@ -113,6 +113,7 @@ class Manager(object):
         self.loss = None
 
     def init(self):
+        print('Total parameters:', self.model.total_params(self.params))
         print('Creating batch loss')
         self._loss_batch = jax.vmap(self.model.loss, in_axes=(None, 0), out_axes=0)
         print('Creating loss_avg')
@@ -223,9 +224,10 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
         # model = models.Freq()
         # model = models.Markov2True()
         # model = models.MarkovFlex()
-        model = models.RecurrentL1(hidden=512, activation=jax.nn.sigmoid)
+        # model = models.RecurrentL1(hidden=512, activation=jax.nn.sigmoid)
         # model = models.RecurrentL2(hidden=256, activation=jax.nn.sigmoid)
         # model = models.RecurrentGRU(256)
+        model = models.RecurrentConv2(conv=128, hidden=512)
 
         manager = Manager(model, learning_rate, regularization, steps)
     else:
@@ -250,9 +252,12 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
         loss = manager.train(batch)
         recent_losses.append(loss)
         if manager.step < 10 or manager.step % 10 == 0 and recent_losses:
-            step_array.append(manager.step)
             avg_loss = sum(recent_losses) / len(recent_losses)
-            losses.append(avg_loss)
+
+            if manager.step >= 20:
+                step_array.append(manager.step)
+                losses.append(avg_loss)
+
             recent_losses = []
             print(manager.step, avg_loss)
 

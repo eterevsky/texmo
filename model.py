@@ -70,3 +70,8 @@ class Model(object):
 
         return s
 
+    def total_params(self, params):
+        n = 0
+        for p in params.values():
+            n += p.flatten().shape[0]
+        return n

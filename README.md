@@ -26,7 +26,7 @@ python3 train.py -d data -m models/some-model.json
 | recurrent-conv2(128, 512) |        | 10000          | 2.6631 |
 | recurrent-conv2(128, 512) |        | 100000         | 2.0748 |
 | recurrent-gru(256)        | 722176 | 85500          | 1.8215 |
-| conv-gru(128, 256)        |        |                |        |
+| conv-gru(128, 256)        | 591232 | 100000         | 1.7893 |
 
 ## Notes
 

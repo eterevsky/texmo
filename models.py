@@ -381,6 +381,7 @@ MODELS = {
     'freq': Freq,
     'markov1': Markov1,
     'markov2': Markov2,
+    'markov3': Markov3,
     'markov2true': Markov2True,
     'markov-flex': MarkovFlex,
     'recurrent-l1': RecurrentL1,
@@ -390,5 +391,6 @@ MODELS = {
 
 def build(spec):
     cls = MODELS[spec['name']]
+    del spec['name']
     return cls(**spec)
 

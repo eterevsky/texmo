@@ -345,6 +345,87 @@ class RecurrentGRU(Model):
 
         return {'h': hn, 'prev': c}, out
 
+class ConvGru(Model):
+    def __init__(self, hidden, conv, **kwargs):
+        self._hidden = hidden
+        self._conv = conv
+
+    def serialize(self):
+        return {'name': 'gru-conv', 'hidden': self._hidden, 'conv': self._conv}
+
+    def init_params(self, key):
+        keys = jax.random.split(key, 16)
+        params = {
+            'winp': 0.1 * jax.random.normal(keys[0], shape=(self._conv, NCHAR)),
+            'wprev': 0.1 * jax.random.normal(keys[1], shape=(self._conv, NCHAR)),
+            'bconv': 0.1 * jax.random.normal(keys[2], shape=(self._conv,)),
+
+            'wz': jax.random.normal(keys[0], shape=(self._hidden, self._conv)),
+            'pz': jax.random.normal(keys[11], shape=(self._hidden, self._conv)),
+            'uz': jax.random.normal(keys[1], shape=(self._hidden, self._hidden)),
+            'bz': jax.random.normal(keys[2], shape=(self._hidden,)),
+
+            'wr': jax.random.normal(keys[3], shape=(self._hidden, self._conv)),
+            'pr': jax.random.normal(keys[12], shape=(self._hidden, self._conv)),
+            'ur': jax.random.normal(keys[4], shape=(self._hidden, self._hidden)),
+            'br': jax.random.normal(keys[5], shape=(self._hidden,)),
+
+            'wh': jax.random.normal(keys[6], shape=(self._hidden, self._conv)),
+            'ph': jax.random.normal(keys[13], shape=(self._hidden, self._conv)),
+            'uh': jax.random.normal(keys[7], shape=(self._hidden, self._hidden)),
+            'bh': jax.random.normal(keys[8], shape=(self._hidden,)),
+
+            'w2': jax.random.normal(keys[14], shape=(self._hidden, self._hidden)),
+            'b2': jax.random.normal(keys[15], shape=(self._hidden,)),
+
+            'wout': jax.random.normal(keys[9], shape=(NCHAR, self._hidden)),
+            'bout': jax.random.normal(keys[10], shape=(NCHAR,))
+        }
+
+        for k in params.keys():
+            params[k] = 0.1 * params[k]
+
+        return params
+
+    def init_state(self):
+        return {'h': jnp.zeros((self._hidden,)), 'prev': jnp.zeros((NCHAR,)), 'prev2': jnp.zeros((NCHAR,))}
+
+    def step(self, params, state, c):
+        """One forward step in the recurrent network.
+
+        Args:
+            params: dictionary with model parameters
+            state: array with the internal state, initially zero. shape = (256,)
+            c: a single character represented as a one-of. shape = (256,)
+        """
+        h = state['h']
+        prev = state['prev']
+        prev2 = state['prev2']
+
+        conv = jnp.dot(params['winp'], c) + jnp.dot(params['wprev'], prev) + params['bconv']
+        conv = jax.nn.tanh(conv)
+
+        conv_prev = jnp.dot(params['winp'], prev) + jnp.dot(params['wprev'], prev2) + params['bconv']
+        conv_prev = jax.nn.tanh(conv_prev)
+
+        z = jnp.dot(params['wz'], conv) + jnp.dot(params['uz'], h) + jnp.dot(params['pz'], conv_prev) + params['bz']
+        z = jax.nn.sigmoid(z)
+
+        r = jnp.dot(params['wr'], conv) + jnp.dot(params['ur'], h) + jnp.dot(params['pr'], conv_prev) + params['br']
+        r = jax.nn.sigmoid(r)
+
+        hc = jnp.dot(params['wh'], conv) + jnp.dot(params['uh'], r * h) + jnp.dot(params['ph'], conv_prev) + params['bh']
+        hc = jax.nn.tanh(hc)
+
+        hn = (1 - z) * h + z * hc
+
+        t = jnp.dot(params['w2'], hn) + params['b2']
+        t = jax.nn.sigmoid(t)
+
+        out = jnp.dot(params['wout'], t) + params['bout']
+
+        return {'h': hn, 'prev': c, 'prev2': prev}, out
+
 MODELS = {
     'equal': Equal,
     'freq': Freq,

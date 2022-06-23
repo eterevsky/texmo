@@ -106,6 +106,37 @@ class Markov2(Model):
         return c, out
 
 
+class Markov3(Model):
+    def __init__(self, hidden=128):
+        self._hidden = hidden
+
+    def serialize(self):
+        return {'name': 'markov3', 'hidden': self._hidden}
+
+    def init_state(self):
+        return jnp.zeros((2, NCHAR))
+
+    def init_params(self, key):
+        key = jax.random.split(key, 6)
+        return {
+            'w': jax.random.normal(key[0], shape=(self._hidden, 3 * NCHAR)),
+            'b': jax.random.normal(key[3], shape=(self._hidden,)),
+
+            'wout': jax.random.normal(key[4], shape=(NCHAR, self._hidden)),
+            'bout': jax.random.normal(key[5], shape=(NCHAR,)),
+        }
+
+    def step(self, params, state, c):
+        suffix = jnp.vstack((state, c.reshape((1, -1))))
+        flattened = suffix.flatten()
+
+        hidden = jnp.dot(params['w'], flattened) + params['b']
+        hidden = jax.nn.tanh(hidden)
+        out = jnp.dot(params['wout'], hidden) + params['bout']
+
+        return suffix[1:], out
+
+
 class MarkovFlex(Model):
     def __init__(self, hidden=128, state_size=256):
         self._hidden = 128

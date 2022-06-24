@@ -1,10 +1,8 @@
 import jax
 import jax.numpy as jnp
-from jax.experimental import sparse
-import optax
 
 from model import Model, NCHAR
-
+import layers
 
 class Equal(Model):
     def serialize(self):
@@ -29,44 +27,56 @@ class Freq(Model):
 class Markov1(Model):
     """Logistic regression on the previous character."""
 
+    def __init__(self):
+        super().__init__()
+        self.layer = layers.FeedForward(NCHAR, NCHAR)
+
     def serialize(self):
         return {'name': 'markov1'}
 
+    def init_state(self):
+        return None
+
     def init_params(self, key):
-        key0, key1 = jax.random.split(key)
-        return {
-            'w': jax.random.normal(key0, shape=(NCHAR, NCHAR)),
-            'b': jax.random.normal(key1, shape=(NCHAR,)),
-        }
+        return self.layer.init_params(key)
 
     def step(self, params, state, c):
-        out = jnp.dot(params['w'], c) + params['b']
+        out = self.layer.step(params, c)
         return state, out
 
 
-class Markov2True(Model):
-    """Logistic regression on the previous character."""
+class Markov(Model):
+    """Logistic regression on a number of previous characters."""
+
+    def __init__(self, suffix):
+        super().__init__()
+        assert suffix > 1
+        self._suffix = suffix
+        self.layer = layers.FeedForward(self._suffix * NCHAR, NCHAR)
 
     def serialize(self):
-        return {'name': 'markov2true'}
+        return {'name': 'markov', 'suffix': self._suffix}
 
     def init_state(self):
-        return jnp.ones((NCHAR,)) / NCHAR
+        return jnp.ones((self._suffix - 1, NCHAR)) / NCHAR
 
     def init_params(self, key):
-        key0, key1 = jax.random.split(key)
-        return {
-            'w': 0.1 * jax.random.normal(key0, shape=(NCHAR, NCHAR * NCHAR)),
-            'b': 0.1 * jax.random.normal(key1, shape=(NCHAR,)),
-        }
+        return self.layer.init_params(key)
 
     def step(self, params, state, c):
-        prev = jnp.expand_dims(state, 1)
-        cexp = jnp.expand_dims(c, 0)
-        cross = prev * cexp
-        cross = cross.flatten()
-        out = jnp.dot(params['w'], cross) + params['b']
-        return c, out
+        suffix = layers.stack_suffix(state, c)
+        out = self.layer.step(params, suffix)
+        return suffix[1:], out
+
+
+class Forward1(Model):
+    def __init__(self, suffix, hidden=128):
+        super().__init__()
+        self._suffix = suffix
+        self._hidden = hidden
+
+    def serialize(self):
+        return {'name': 'forward1', 'suffix': self._suffix, 'hidden': self._hidden}
 
 
 class Markov2(Model):
@@ -307,6 +317,44 @@ class RecurrentL2(Model):
         return state, out
 
 
+def init_gru2_params(key, state_size, input_size=NCHAR):
+    keys = jax.random.split(key, 12)
+
+    params = {
+        'wz': jax.random.normal(keys[0], shape=(state_size, input_size)),
+        'pz': jax.random.normal(keys[1], shape=(state_size, input_size)),
+        'uz': jax.random.normal(keys[2], shape=(state_size, state_size)),
+        'bz': jax.random.normal(keys[3], shape=(state_size,)),
+
+        'wr': jax.random.normal(keys[4], shape=(state_size, input_size)),
+        'pr': jax.random.normal(keys[5], shape=(state_size, input_size)),
+        'ur': jax.random.normal(keys[6], shape=(state_size, state_size)),
+        'br': jax.random.normal(keys[7], shape=(state_size,)),
+
+        'wh': jax.random.normal(keys[8], shape=(state_size, input_size)),
+        'ph': jax.random.normal(keys[9], shape=(state_size, input_size)),
+        'uh': jax.random.normal(keys[10], shape=(state_size, state_size)),
+        'bh': jax.random.normal(keys[11], shape=(state_size,)),
+    }
+
+    return params
+
+
+def gru2(params, h, prev, c):
+    z = jnp.dot(params['wz'], c) + jnp.dot(params['uz'], h) + jnp.dot(params['pz'], prev) + params['bz']
+    z = jax.nn.sigmoid(z)
+
+    r = jnp.dot(params['wr'], c) + jnp.dot(params['ur'], h) + jnp.dot(params['pr'], prev) + params['br']
+    r = jax.nn.sigmoid(r)
+
+    hc = jnp.dot(params['wh'], c) + jnp.dot(params['uh'], r * h) + jnp.dot(params['ph'], prev) + params['bh']
+    hc = jax.nn.tanh(hc)
+
+    hn = (1 - z) * h + z * hc
+
+    return hn
+
+
 class RecurrentGRU(Model):
     def __init__(self, hidden, **kwargs):
         self._hidden = hidden
@@ -315,29 +363,13 @@ class RecurrentGRU(Model):
         return {'name': 'recurrent-gru', 'hidden': self._hidden}
 
     def init_params(self, key):
-        keys = jax.random.split(key, 16)
-        params = {
-            'wz': jax.random.normal(keys[0], shape=(self._hidden, NCHAR)),
-            'pz': jax.random.normal(keys[11], shape=(self._hidden, NCHAR)),
-            'uz': jax.random.normal(keys[1], shape=(self._hidden, self._hidden)),
-            'bz': jax.random.normal(keys[2], shape=(self._hidden,)),
+        keys = jax.random.split(key, 5)
 
-            'wr': jax.random.normal(keys[3], shape=(self._hidden, NCHAR)),
-            'pr': jax.random.normal(keys[12], shape=(self._hidden, NCHAR)),
-            'ur': jax.random.normal(keys[4], shape=(self._hidden, self._hidden)),
-            'br': jax.random.normal(keys[5], shape=(self._hidden,)),
-
-            'wh': jax.random.normal(keys[6], shape=(self._hidden, NCHAR)),
-            'ph': jax.random.normal(keys[13], shape=(self._hidden, NCHAR)),
-            'uh': jax.random.normal(keys[7], shape=(self._hidden, self._hidden)),
-            'bh': jax.random.normal(keys[8], shape=(self._hidden,)),
-
-            'w2': jax.random.normal(keys[14], shape=(self._hidden, self._hidden)),
-            'b2': jax.random.normal(keys[15], shape=(self._hidden,)),
-
-            'wout': jax.random.normal(keys[9], shape=(NCHAR, self._hidden)),
-            'bout': jax.random.normal(keys[10], shape=(NCHAR,))
-        }
+        params = init_gru2_params(keys[0], self._hidden)
+        params['w2'] = jax.random.normal(keys[1], shape=(self._hidden, self._hidden))
+        params['b2'] = jax.random.normal(keys[2], shape=(self._hidden,))
+        params['wout'] = jax.random.normal(keys[9], shape=(NCHAR, self._hidden))
+        params['bout'] = jax.random.normal(keys[10], shape=(NCHAR,))
 
         for k in params.keys():
             params[k] = 0.1 * params[k]
@@ -358,16 +390,7 @@ class RecurrentGRU(Model):
         h = state['h']
         prev = state['prev']
 
-        z = jnp.dot(params['wz'], c) + jnp.dot(params['uz'], h) + jnp.dot(params['pz'], prev) + params['bz']
-        z = jax.nn.sigmoid(z)
-
-        r = jnp.dot(params['wr'], c) + jnp.dot(params['ur'], h) + jnp.dot(params['pr'], prev) + params['br']
-        r = jax.nn.sigmoid(r)
-
-        hc = jnp.dot(params['wh'], c) + jnp.dot(params['uh'], r * h) + jnp.dot(params['ph'], prev) + params['bh']
-        hc = jax.nn.tanh(hc)
-
-        hn = (1 - z) * h + z * hc
+        hn = gru2(params, h, prev, c)
 
         t = jnp.dot(params['w2'], hn) + params['b2']
         t = jax.nn.sigmoid(t)
@@ -546,9 +569,7 @@ MODELS = {
     'equal': Equal,
     'freq': Freq,
     'markov1': Markov1,
-    'markov2': Markov2,
-    'markov3': Markov3,
-    'markov2true': Markov2True,
+    'markov': Markov,
     'markov-flex': MarkovFlex,
     'recurrent-l1': RecurrentL1,
     'recurrent-gru': RecurrentGRU,

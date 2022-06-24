@@ -56,8 +56,8 @@ class Markov2True(Model):
     def init_params(self, key):
         key0, key1 = jax.random.split(key)
         return {
-            'w': jax.random.normal(key0, shape=(NCHAR, NCHAR * NCHAR)),
-            'b': jax.random.normal(key1, shape=(NCHAR,)),
+            'w': 0.1 * jax.random.normal(key0, shape=(NCHAR, NCHAR * NCHAR)),
+            'b': 0.1 * jax.random.normal(key1, shape=(NCHAR,)),
         }
 
     def step(self, params, state, c):
@@ -376,13 +376,14 @@ class RecurrentGRU(Model):
 
         return {'h': hn, 'prev': c}, out
 
+
 class ConvGru(Model):
     def __init__(self, hidden, conv, **kwargs):
         self._hidden = hidden
         self._conv = conv
 
     def serialize(self):
-        return {'name': 'gru-conv', 'hidden': self._hidden, 'conv': self._conv}
+        return {'name': 'conv-gru', 'hidden': self._hidden, 'conv': self._conv}
 
     def init_params(self, key):
         keys = jax.random.split(key, 16)
@@ -457,6 +458,90 @@ class ConvGru(Model):
 
         return {'h': hn, 'prev': c, 'prev2': prev}, out
 
+
+class Conv3Gru(Model):
+    def __init__(self, hidden, conv, **kwargs):
+        self._hidden = hidden
+        self._conv = conv
+
+    def serialize(self):
+        return {'name': 'conv3-gru', 'hidden': self._hidden, 'conv': self._conv}
+
+    def init_params(self, key):
+        keys = jax.random.split(key, 16)
+        params = {
+            'winp': 0.1 * jax.random.normal(keys[0], shape=(self._conv, 3*NCHAR)),
+            'bconv': 0.1 * jax.random.normal(keys[2], shape=(self._conv,)),
+
+            'wz': jax.random.normal(keys[0], shape=(self._hidden, self._conv)),
+            'pz': jax.random.normal(keys[11], shape=(self._hidden, self._conv)),
+            'uz': jax.random.normal(keys[1], shape=(self._hidden, self._hidden)),
+            'bz': jax.random.normal(keys[2], shape=(self._hidden,)),
+
+            'wr': jax.random.normal(keys[3], shape=(self._hidden, self._conv)),
+            'pr': jax.random.normal(keys[12], shape=(self._hidden, self._conv)),
+            'ur': jax.random.normal(keys[4], shape=(self._hidden, self._hidden)),
+            'br': jax.random.normal(keys[5], shape=(self._hidden,)),
+
+            'wh': jax.random.normal(keys[6], shape=(self._hidden, self._conv)),
+            'ph': jax.random.normal(keys[13], shape=(self._hidden, self._conv)),
+            'uh': jax.random.normal(keys[7], shape=(self._hidden, self._hidden)),
+            'bh': jax.random.normal(keys[8], shape=(self._hidden,)),
+
+            'w2': jax.random.normal(keys[14], shape=(self._hidden, self._hidden)),
+            'b2': jax.random.normal(keys[15], shape=(self._hidden,)),
+
+            'wout': jax.random.normal(keys[9], shape=(NCHAR, self._hidden)),
+            'bout': jax.random.normal(keys[10], shape=(NCHAR,))
+        }
+
+        for k in params.keys():
+            params[k] = 0.1 * params[k]
+
+        return params
+
+    def init_state(self):
+        return {'h': jnp.zeros((self._hidden,)), 'suffix': jnp.zeros((3, NCHAR))}
+
+    def step(self, params, state, c):
+        """One forward step in the recurrent network.
+
+        Args:
+            params: dictionary with model parameters
+            state: state dictionary
+            c: a single character represented as a one-of. shape = (256,)
+        """
+        h = state['h']
+        suffix = state['suffix']
+        suffix = jnp.vstack((suffix, c.reshape((1, -1))))
+
+        suffix1 = suffix[0:3]
+        suffix2 = suffix[1:4]
+
+        conv1 = jnp.dot(params['winp'], suffix1.flatten()) + params['bconv']
+        conv1 = jax.nn.tanh(conv1)
+        conv2 = jnp.dot(params['winp'], suffix2.flatten()) + params['bconv']
+        conv2 = jax.nn.tanh(conv2)
+
+        z = jnp.dot(params['wz'], conv1) + jnp.dot(params['uz'], h) + jnp.dot(params['pz'], conv2) + params['bz']
+        z = jax.nn.sigmoid(z)
+
+        r = jnp.dot(params['wr'], conv1) + jnp.dot(params['ur'], h) + jnp.dot(params['pr'], conv2) + params['br']
+        r = jax.nn.sigmoid(r)
+
+        hc = jnp.dot(params['wh'], conv1) + jnp.dot(params['uh'], r * h) + jnp.dot(params['ph'], conv2) + params['bh']
+        hc = jax.nn.tanh(hc)
+
+        hn = (1 - z) * h + z * hc
+
+        t = jnp.dot(params['w2'], hn) + params['b2']
+        t = jax.nn.sigmoid(t)
+
+        out = jnp.dot(params['wout'], t) + params['bout']
+
+        return {'h': hn, 'suffix': suffix2}, out
+
+
 MODELS = {
     'equal': Equal,
     'freq': Freq,
@@ -466,8 +551,9 @@ MODELS = {
     'markov2true': Markov2True,
     'markov-flex': MarkovFlex,
     'recurrent-l1': RecurrentL1,
-    'recurrent-conv2': RecurrentConv2,
     'recurrent-gru': RecurrentGRU,
+    'conv-gru': ConvGru,
+    'conv3-gru': ConvGru,
 }
 
 def build(spec):

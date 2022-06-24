@@ -228,8 +228,9 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
         # model = models.RecurrentL2(hidden=256, activation=jax.nn.sigmoid)
         # model = models.RecurrentGRU(256)
         # model = models.RecurrentConv2(conv=128, hidden=512)
-        # model = models.ConvGru(conv=128, hidden=256)
-        model = models.Markov3()
+        model = models.ConvGru(conv=128, hidden=512)
+        # model = models.Conv3Gru(conv=128, hidden=256)
+        # model = models.Markov3()
 
         manager = Manager(model, learning_rate, regularization, steps)
     else:

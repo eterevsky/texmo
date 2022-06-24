@@ -240,7 +240,8 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
         # model = models.RecurrentConv2(conv=128, hidden=512)
         # model = models.ConvGru(conv=128, hidden=512)
         # model = models.Conv3Gru(conv=128, hidden=256)
-        model = models.Forward1(5, 128)
+        # model = models.Forward1(5, 128)
+        model = models.Recurrent1(128)
 
         manager = Manager(model, learning_rate, regularization, steps)
     else:

@@ -98,160 +98,31 @@ class Forward1(Model):
         return suffix[1:], out
 
 
-class Markov2(Model):
-    """Feed forward based on two previous characeters with a hidden layer.
-
-    prev + current
-         V
-       hidden
-         V
-        out
-    """
-
-    def __init__(self, hidden=128):
-        self._hidden = hidden
-
-    def serialize(self):
-        return {'name': 'markov2', 'hidden': self._hidden}
-
-    def init_state(self):
-        return jnp.zeros((NCHAR,))
-
-    def init_params(self, key):
-        key = jax.random.split(key, 5)
-        return {
-            'w': jax.random.normal(key[0], shape=(self._hidden, NCHAR)),
-            'wprev': jax.random.normal(key[1], shape=(self._hidden, NCHAR)),
-            'b': jax.random.normal(key[2], shape=(self._hidden,)),
-
-            'wout': jax.random.normal(key[3], shape=(NCHAR, self._hidden)),
-            'bout': jax.random.normal(key[4], shape=(NCHAR,)),
-        }
-
-    def step(self, params, state, c):
-        hidden = jnp.dot(params['w'], c) + jnp.dot(params['wprev'], state) + params['b']
-        hidden = jax.nn.tanh(hidden)
-        out = jnp.dot(params['wout'], hidden) + params['bout']
-        return c, out
-
-
-class Markov3(Model):
-    def __init__(self, hidden=128):
-        self._hidden = hidden
-
-    def serialize(self):
-        return {'name': 'markov3', 'hidden': self._hidden}
-
-    def init_state(self):
-        return jnp.zeros((2, NCHAR))
-
-    def init_params(self, key):
-        key = jax.random.split(key, 6)
-        return {
-            'w': jax.random.normal(key[0], shape=(self._hidden, 3 * NCHAR)),
-            'b': jax.random.normal(key[3], shape=(self._hidden,)),
-
-            'wout': jax.random.normal(key[4], shape=(NCHAR, self._hidden)),
-            'bout': jax.random.normal(key[5], shape=(NCHAR,)),
-        }
-
-    def step(self, params, state, c):
-        suffix = jnp.vstack((state, c.reshape((1, -1))))
-        flattened = suffix.flatten()
-
-        hidden = jnp.dot(params['w'], flattened) + params['b']
-        hidden = jax.nn.tanh(hidden)
-        out = jnp.dot(params['wout'], hidden) + params['bout']
-
-        return suffix[1:], out
-
-
-class MarkovFlex(Model):
-    def __init__(self, hidden=128, state_size=256):
-        self._hidden = 128
-        self._state_size = 256
-
-    def serialize(self):
-        return {'name': 'markov-flex', 'hidden': self._hidden, 'state_size': self._state_size}
-
-    def init_state(self):
-        return jnp.zeros((self._state_size,))
-
-    def init_params(self, key):
-        key = jax.random.split(key, 8)
-        return {
-            'wstate_in': jax.random.normal(key[0], shape=(self._state_size, NCHAR)),
-            'wstate_prev': jax.random.normal(key[1], shape=(self._state_size, self._state_size)),
-            'bstate': jax.random.normal(key[2], shape=(self._state_size,)),
-
-            'w': jax.random.normal(key[3], shape=(self._hidden, NCHAR)),
-            'wprev': jax.random.normal(key[4], shape=(self._hidden, self._state_size)),
-            'b': jax.random.normal(key[5], shape=(self._hidden,)),
-
-            'wout': jax.random.normal(key[6], shape=(NCHAR, self._hidden)),
-            'bout': jax.random.normal(key[7], shape=(NCHAR,)),
-        }
-
-    def step(self, params, state, c):
-        new_state = (jnp.dot(params['wstate_in'], c) +
-                     jnp.dot(params['wstate_prev'], state) +
-                     params['bstate'])
-        new_state = jax.nn.tanh(new_state)
-        hidden = jnp.dot(params['w'], c) + jnp.dot(params['wprev'], state) + params['b']
-        hidden = jax.nn.tanh(hidden)
-        out = jnp.dot(params['wout'], hidden) + params['bout']
-        return new_state, out
-
-
-class RecurrentL1(Model):
+class Recurrent1(Model):
     def __init__(self, hidden, activation=jax.nn.sigmoid):
         self._hidden = hidden
         self._activation = activation
+        self.recurrent_layer = layers.Recurrent(NCHAR, self._hidden, NCHAR)
+        self.out_layer = layers.FeedForward(self._hidden, NCHAR)
 
     def serialize(self):
-        return {'name': 'recurrent-l1', 'hidden': self._hidden}
-
-    def init_params(self, key):
-        key0, key1, key2, key3, key4 = jax.random.split(key, 5)
-        return {
-            'winp1': jax.random.normal(key0, shape=(self._hidden, NCHAR)),
-            'b1': jax.random.normal(key1, shape=(self._hidden,)),
-            'wstate1': jax.random.normal(key2, shape=(self._hidden, self._hidden)),
-            'wout': jax.random.normal(key3, shape=(NCHAR, self._hidden)),
-            'bout': jax.random.normal(key4, shape=(NCHAR,))
-        }
+        return {'name': 'recurrent1', 'hidden': self._hidden}
 
     def init_state(self):
-        return jnp.zeros((self._hidden,))
+        return self.recurrent_layer.init_state()
+
+    def init_params(self, key):
+        key0, key1 = jax.random.split(key)
+        return {
+            'recurrent': self.recurrent_layer.init_params(key0),
+            'out': self.out_layer.init_params(key1)
+        }
 
     def step(self, params, state, c):
-        """One forward step in the recurrent network.
-        Args:
-            params: dictionary with model parameters
-            state: array with the internal state, initially zero. shape = (256,)
-            c: a single character represented as a one-of. shape = (256,)
-        """
-        state = jnp.dot(params['winp1'], c) + jnp.dot(params['wstate1'], state) + params['b1']
+        state = self.recurrent_layer.step(params['recurrent'], c, state)
         state = self._activation(state)
-        # state = jax.nn.normalize(state)
-        out = jnp.dot(params['wout'], state) + params['bout']
+        out = self.out_layer.step(params['out'], state)
         return state, out
-
-    def step_batch(self, params, sbatch, cbatch):
-        sbatch = jnp.expand_dims(sbatch, 2)
-        cbatch = jnp.expand_dims(cbatch, 2)
-        b1 = jnp.expand_dims(params['b1'], 1)
-        b1 = jnp.expand_dims(b1, 0)
-        bout = jnp.expand_dims(params['bout'], 1)
-        bout = jnp.expand_dims(bout, 0)
-        winp1 = jnp.expand_dims(params['winp1'], 0)
-        wstate1 = jnp.expand_dims(params['wstate1'], 0)
-        sbatch = jnp.matmul(winp1, cbatch) + jnp.matmul(wstate1, sbatch) + b1
-        sbatch = self._activation(sbatch)
-        out = jnp.matmul(params['wout'], sbatch) + bout
-        sbatch = sbatch.squeeze(axis=2)
-        out = out.squeeze(axis=2)
-        return sbatch, out
 
 
 class RecurrentConv2(Model):
@@ -589,8 +460,7 @@ MODELS = {
     'freq': Freq,
     'markov1': Markov1,
     'markov': Markov,
-    'markov-flex': MarkovFlex,
-    'recurrent-l1': RecurrentL1,
+    'recurrent1': Recurrent1,
     'recurrent-gru': RecurrentGRU,
     'conv-gru': ConvGru,
     'conv3-gru': ConvGru,

@@ -73,5 +73,18 @@ class Model(object):
     def total_params(self, params):
         n = 0
         for p in params.values():
-            n += p.flatten().shape[0]
+            if type(p) is dict:
+                n += self.total_params(p)
+            else:
+                n += p.flatten().shape[0]
         return n
+
+
+def init_suffix(suffix_len):
+    return jnp.ones((suffix_len - 1, NCHAR)) / NCHAR
+
+
+def stack_suffix(prev_suffix, c):
+    return jnp.vstack((prev_suffix, c.reshape((1, -1))))
+
+

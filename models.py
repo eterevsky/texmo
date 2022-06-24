@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 
+import model
 from model import Model, NCHAR
 import layers
 
@@ -58,13 +59,13 @@ class Markov(Model):
         return {'name': 'markov', 'suffix': self._suffix}
 
     def init_state(self):
-        return jnp.ones((self._suffix - 1, NCHAR)) / NCHAR
+        return model.init_suffix(self._suffix)
 
     def init_params(self, key):
         return self.layer.init_params(key)
 
     def step(self, params, state, c):
-        suffix = layers.stack_suffix(state, c)
+        suffix = model.stack_suffix(state, c)
         out = self.layer.step(params, suffix)
         return suffix[1:], out
 
@@ -74,9 +75,27 @@ class Forward1(Model):
         super().__init__()
         self._suffix = suffix
         self._hidden = hidden
+        self.in_layer = layers.FeedForward(self._suffix * NCHAR, self._hidden)
+        self.out_layer = layers.FeedForward(self._hidden, NCHAR)
 
     def serialize(self):
         return {'name': 'forward1', 'suffix': self._suffix, 'hidden': self._hidden}
+
+    def init_state(self):
+        return model.init_suffix(self._suffix)
+
+    def init_params(self, key):
+        key0, key1 = jax.random.split(key)
+        return {
+            'input': self.in_layer.init_params(key0),
+            'output': self.out_layer.init_params(key1),
+        }
+
+    def step(self, params, state, c):
+        suffix = model.stack_suffix(state, c)
+        hidden = self.in_layer.step(params['input'], suffix)
+        out = self.out_layer.step(params['output'], hidden)
+        return suffix[1:], out
 
 
 class Markov2(Model):

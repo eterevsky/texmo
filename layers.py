@@ -2,11 +2,6 @@ import jax
 import jax.numpy as jnp
 from jax.random import split, normal
 
-
-def stack_suffix(prev_suffix, c):
-    return jnp.vstack((prev_suffix, c.reshape((1, -1))))
-
-
 class Layer(object):
     def __init__(self):
         pass
@@ -29,7 +24,7 @@ class FeedForward(Layer):
         self._input = input_size
         self._output = output_size
 
-    def init_params(self, key, scale=1.0):
+    def init_params(self, key, scale=0.1):
         key0, key1 = split(key)
         params = {
             'w': normal(key0, shape=(self._output, self._input)),

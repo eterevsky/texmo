@@ -187,16 +187,22 @@ class Manager(object):
 
         return loss
 
+    def serialize_params(self, params):
+        serialized = {}
+        for key, value in params.items():
+            if type(value) is dict:
+                serialized[key] = self.serialize_params(value)
+            else:
+                serialized[key] = value.tolist()
+        return serialized
+
     def save(self, dir):
         model = self.model.serialize()
         model_name = self.name()
 
         path = os.path.join(dir, f'{model_name}.json')
 
-        params = {}
-
-        for key, value in self.params.items():
-            params[key] = value.tolist()
+        params = self.serialize_params(self.params)
 
         data = {
             'model': model,
@@ -212,7 +218,8 @@ class Manager(object):
             json.dump(data, f, indent=2)
 
     def name(self):
-        return self.model.serialize()['name'] + '-' + self.step
+        model_name = self.model.serialize()['name']
+        return f'{model_name}-{self.step}'
 
 
 def main(data, steps, learning_rate, regularization, output_dir, model_path, temp_dir, sample_length, batch_size):
@@ -226,13 +233,14 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
         # model = models.Equal()
         # model = models.Freq()
         # model = models.Markov1()
-        model = models.Markov(2)
+        # model = models.Markov(2)
         # model = models.RecurrentL1(hidden=512, activation=jax.nn.sigmoid)
         # model = models.RecurrentL2(hidden=256, activation=jax.nn.sigmoid)
         # model = models.RecurrentGRU(256)
         # model = models.RecurrentConv2(conv=128, hidden=512)
         # model = models.ConvGru(conv=128, hidden=512)
         # model = models.Conv3Gru(conv=128, hidden=256)
+        model = models.Forward1(5, 128)
 
         manager = Manager(model, learning_rate, regularization, steps)
     else:

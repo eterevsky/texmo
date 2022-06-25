@@ -89,13 +89,21 @@ def exp_schedule(initial_steps, total_steps, initial_lr, final_lr):
     return sch
 
 
+def deserialize_params(spec):
+    params = {}
+    for key, value in spec.items():
+        if type(value) is dict:
+            params[key] = deserialize_params(value)
+        else:
+            params[key] = jnp.array(value)
+    return params
+
+
 class Manager(object):
     @staticmethod
     def from_spec(spec):
         model = models.build(spec['model'])
-        params = {}
-        for key, value in spec['params'].items():
-            params[key] = jnp.array(value)
+        params = deserialize_params(spec['params'])
         return Manager(model, spec['learning_rate'], spec['regularization'], spec.get('total_steps', 0), spec['step'], params)
 
     def __init__(self, model, learning_rate, regularization, total_steps, step=0, params=None):
@@ -214,6 +222,7 @@ class Manager(object):
             'loss': self.loss
         }
 
+        print(f'Saving model to {path}')
         with open(path, 'w') as f:
             json.dump(data, f, indent=2)
 
@@ -230,8 +239,7 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
         train_set = None
 
     if model_path is None:
-        model = models.Recurrent3(3, 128, 512, 128)
-
+        model = models.Recurrent3(2, 128, 512, 128)
         manager = Manager(model, learning_rate, regularization, steps)
     else:
         with open(model_path) as f:

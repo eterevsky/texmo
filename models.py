@@ -6,6 +6,9 @@ from model import Model, NCHAR
 import layers
 
 class Equal(Model):
+    def name(self):
+        return 'equal'
+
     def serialize(self):
         return {'name': 'equal'}
 
@@ -14,6 +17,9 @@ class Equal(Model):
 
 
 class Freq(Model):
+    def name(self):
+        return 'freq'
+
     def serialize(self):
         return {'name': 'freq'}
 
@@ -31,6 +37,9 @@ class Markov1(Model):
     def __init__(self):
         super().__init__()
         self.layer = layers.FeedForward(NCHAR, NCHAR)
+
+    def name(self):
+        return 'markov1'
 
     def serialize(self):
         return {'name': 'markov1'}
@@ -55,6 +64,9 @@ class Markov(Model):
         self._suffix = suffix
         self.layer = layers.FeedForward(self._suffix * NCHAR, NCHAR)
 
+    def name(self):
+        return f'markov-{self._suffix}'
+
     def serialize(self):
         return {'name': 'markov', 'suffix': self._suffix}
 
@@ -77,6 +89,9 @@ class Forward1(Model):
         self._hidden = hidden
         self.in_layer = layers.FeedForward(self._suffix * NCHAR, self._hidden)
         self.out_layer = layers.FeedForward(self._hidden, NCHAR)
+
+    def name(self):
+        return f'forward1-{self._suffix}-{self._hidden}'
 
     def serialize(self):
         return {'name': 'forward1', 'suffix': self._suffix, 'hidden': self._hidden}
@@ -103,6 +118,9 @@ class Recurrent1(Model):
         self._hidden = hidden
         self.recurrent_layer = layers.Recurrent(NCHAR, self._hidden, NCHAR)
         self.out_layer = layers.FeedForward(self._hidden, NCHAR)
+
+    def name(self):
+        return f'recurrent1-{self._hidden}'
 
     def serialize(self):
         return {'name': 'recurrent1', 'hidden': self._hidden}
@@ -134,6 +152,9 @@ class Recurrent2(Model):
         self.out1_layer = layers.FeedForward(self._hidden, out)
         self.out2_layer = layers.FeedForward(out, NCHAR)
 
+    def name(self):
+        return f'recurrent2-{self._hidden}-{self._out}'
+
     def serialize(self):
         return {'name': 'recurrent2', 'hidden': self._hidden, 'out': self._out}
 
@@ -160,15 +181,18 @@ class Recurrent2(Model):
 class Recurrent3(Model):
     """Recurrent layer + extra output layer."""
 
-    def __init__(self, suffix, input, hidden, out):
+    def __init__(self, suffix, input, hidden, output):
         self._suffix = suffix
         self._input = input
         self._hidden = hidden
-        self._out = out
+        self._out = output
         self.in_layer = layers.FeedForward(NCHAR*suffix, self._input)
         self.recurrent_layer = layers.Recurrent(self._input, self._hidden, NCHAR)
-        self.out1_layer = layers.FeedForward(self._hidden, out)
-        self.out2_layer = layers.FeedForward(out, NCHAR)
+        self.out1_layer = layers.FeedForward(self._hidden, output)
+        self.out2_layer = layers.FeedForward(output, NCHAR)
+
+    def name(self):
+        return f'recurrent3-{self._input}-{self._hidden}-{self._out}'
 
     def serialize(self):
         return {
@@ -181,7 +205,7 @@ class Recurrent3(Model):
 
     def init_state(self):
         return {
-            'suffix': model.init_suffix(3),
+            'suffix': model.init_suffix(self._suffix),
             'state': self.recurrent_layer.init_state(),
         }
 
@@ -546,6 +570,8 @@ MODELS = {
     'markov1': Markov1,
     'markov': Markov,
     'recurrent1': Recurrent1,
+    'recurrent2': Recurrent2,
+    'recurrent3': Recurrent3,
     'recurrent-gru': RecurrentGRU,
     'conv-gru': ConvGru,
     'conv3-gru': ConvGru,

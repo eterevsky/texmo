@@ -99,9 +99,8 @@ class Forward1(Model):
 
 
 class Recurrent1(Model):
-    def __init__(self, hidden, activation=jax.nn.sigmoid):
+    def __init__(self, hidden):
         self._hidden = hidden
-        self._activation = activation
         self.recurrent_layer = layers.Recurrent(NCHAR, self._hidden, NCHAR)
         self.out_layer = layers.FeedForward(self._hidden, NCHAR)
 
@@ -120,9 +119,95 @@ class Recurrent1(Model):
 
     def step(self, params, state, c):
         state = self.recurrent_layer.step(params['recurrent'], c, state)
-        state = self._activation(state)
+        state = jax.nn.sigmoid(state)
         out = self.out_layer.step(params['out'], state)
         return state, out
+
+
+class Recurrent2(Model):
+    """Recurrent layer + extra output layer."""
+
+    def __init__(self, hidden, out):
+        self._hidden = hidden
+        self._out = out
+        self.recurrent_layer = layers.Recurrent(NCHAR, self._hidden, NCHAR)
+        self.out1_layer = layers.FeedForward(self._hidden, out)
+        self.out2_layer = layers.FeedForward(out, NCHAR)
+
+    def serialize(self):
+        return {'name': 'recurrent2', 'hidden': self._hidden, 'out': self._out}
+
+    def init_state(self):
+        return self.recurrent_layer.init_state()
+
+    def init_params(self, key):
+        keys = jax.random.split(key)
+        return {
+            'recurrent': self.recurrent_layer.init_params(keys[0]),
+            'out1': self.out1_layer.init_params(keys[1]),
+            'out2': self.out2_layer.init_params(keys[2]),
+        }
+
+    def step(self, params, state, c):
+        state = self.recurrent_layer.step(params['recurrent'], c, state)
+        state = jax.nn.sigmoid(state)
+        out1 = self.out1_layer.step(params['out1'], state)
+        out1 = jax.nn.sigmoid(out1)
+        out2 = self.out2_layer.step(params['out2'], out1)
+        return state, out2
+
+
+class Recurrent3(Model):
+    """Recurrent layer + extra output layer."""
+
+    def __init__(self, suffix, input, hidden, out):
+        self._suffix = suffix
+        self._input = input
+        self._hidden = hidden
+        self._out = out
+        self.in_layer = layers.FeedForward(NCHAR*suffix, self._input)
+        self.recurrent_layer = layers.Recurrent(self._input, self._hidden, NCHAR)
+        self.out1_layer = layers.FeedForward(self._hidden, out)
+        self.out2_layer = layers.FeedForward(out, NCHAR)
+
+    def serialize(self):
+        return {
+            'name': 'recurrent3',
+            'suffix': self._suffix,
+            'input': self._input,
+            'hidden': self._hidden,
+            'output': self._out,
+        }
+
+    def init_state(self):
+        return {
+            'suffix': model.init_suffix(3),
+            'state': self.recurrent_layer.init_state(),
+        }
+
+    def init_params(self, key):
+        keys = jax.random.split(key, 4)
+        return {
+            'in': self.in_layer.init_params(keys[0]),
+            'recurrent': self.recurrent_layer.init_params(keys[1]),
+            'out1': self.out1_layer.init_params(keys[2]),
+            'out2': self.out2_layer.init_params(keys[3]),
+        }
+
+    def step(self, params, state, c):
+        suffix = model.stack_suffix(state['suffix'], c)
+        input = self.in_layer.step(params['in'], suffix)
+        input = jax.nn.sigmoid(input)
+        state = self.recurrent_layer.step(params['recurrent'], input, state['state'])
+        state = jax.nn.sigmoid(state)
+        out1 = self.out1_layer.step(params['out1'], state)
+        out1 = jax.nn.sigmoid(out1)
+        out2 = self.out2_layer.step(params['out2'], out1)
+        new_state = {
+            'suffix': suffix[1:],
+            'state': state,
+        }
+        return new_state, out2
 
 
 class RecurrentConv2(Model):

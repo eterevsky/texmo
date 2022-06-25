@@ -230,18 +230,7 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
         train_set = None
 
     if model_path is None:
-        # model = models.Equal()
-        # model = models.Freq()
-        # model = models.Markov1()
-        # model = models.Markov(2)
-        # model = models.RecurrentL1(hidden=512, activation=jax.nn.sigmoid)
-        # model = models.RecurrentL2(hidden=256, activation=jax.nn.sigmoid)
-        # model = models.RecurrentGRU(256)
-        # model = models.RecurrentConv2(conv=128, hidden=512)
-        # model = models.ConvGru(conv=128, hidden=512)
-        # model = models.Conv3Gru(conv=128, hidden=256)
-        # model = models.Forward1(5, 128)
-        model = models.Recurrent1(128)
+        model = models.Recurrent3(3, 128, 512, 128)
 
         manager = Manager(model, learning_rate, regularization, steps)
     else:

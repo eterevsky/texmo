@@ -296,19 +296,22 @@ class Recurrent4(Model):
 
 
 class RecGru(Model):
-    def __init__(self, conv, rec, gru):
+    def __init__(self, conv, rec, gru, skip_rec=False):
         self._conv = conv
         self._rec = rec
         self._gru = gru
-        # self._out = out
+        self._skip_rec = skip_rec
 
         self.conv_layer = layers.FeedForward(2*NCHAR, self._conv)
         self.recurrent_layer = layers.Recurrent(self._conv, self._rec)
-        self.gru_layer = layers.Gru(self._rec, self._gru)
+        gru_input = self._rec + self._conv if skip_rec else self._rec
+        self.gru_layer = layers.Gru(gru_input, self._gru)
         self.out1_layer = layers.FeedForward(self._gru, NCHAR)
         # self.out2_layer = layers.FeedForward(out, NCHAR)
 
-        self.name = f'rec-gru-{conv}-{rec}-{gru}'
+        skip = 's' if self._skip_rec else ''
+
+        self.name = f'rec-gru-{conv}-{rec}{skip}-{gru}'
 
     def serialize(self):
         return {'name': 'rec-gru', 'conv': self._conv, 'rec': self._rec, 'gru': self. _gru}
@@ -336,7 +339,11 @@ class RecGru(Model):
         inp = jax.nn.sigmoid(inp)
         rec_state = self.recurrent_layer.step(params['rec'], inp, state['rec'])
         rec_state = jax.nn.sigmoid(rec_state)
-        gru_state = self.gru_layer.step(params['gru'], rec_state, state['gru'])
+        if self._skip_rec:
+            gru_input = jnp.concatenate([inp, rec_state])
+        else:
+            gru_input = rec_state
+        gru_state = self.gru_layer.step(params['gru'], gru_input, state['gru'])
         out1 = self.out1_layer.step(params['out1'], gru_state)
         # out1 = jax.nn.sigmoid(out1)
         # out2 = self.out2_layer.step(params['out2'], out1)

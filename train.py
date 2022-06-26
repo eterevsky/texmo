@@ -240,7 +240,7 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
 
     if model_path is None:
         # model = models.Recurrent4(128, 128, 512, 128)
-        model = models.RecGru(128, 256, 512)
+        model = models.RecGru(128, 256, 512, skip_rec=True)
         manager = Manager(model, learning_rate, regularization, steps)
     else:
         with open(model_path) as f:

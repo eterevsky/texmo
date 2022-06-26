@@ -227,7 +227,7 @@ class Manager(object):
             json.dump(data, f, indent=2)
 
     def name(self):
-        model_name = self.model.serialize()['name']
+        model_name = self.model.name
         return f'{model_name}-{self.step}'
 
 
@@ -239,7 +239,8 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
         train_set = None
 
     if model_path is None:
-        model = models.Recurrent3(2, 128, 512, 128)
+        # model = models.Recurrent4(128, 128, 512, 128)
+        model = models.RecGru(128, 256, 512)
         manager = Manager(model, learning_rate, regularization, steps)
     else:
         with open(model_path) as f:

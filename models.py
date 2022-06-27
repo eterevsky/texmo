@@ -118,9 +118,7 @@ class Recurrent1(Model):
         self._hidden = hidden
         self.recurrent_layer = layers.Recurrent(NCHAR, self._hidden)
         self.out_layer = layers.FeedForward(self._hidden, NCHAR)
-
-    def name(self):
-        return f'recurrent1-{self._hidden}'
+        self.name = f'recurrent1-{self._hidden}'
 
     def serialize(self):
         return {'name': 'recurrent1', 'hidden': self._hidden}
@@ -151,9 +149,7 @@ class Recurrent2(Model):
         self.recurrent_layer = layers.Recurrent(NCHAR, self._hidden)
         self.out1_layer = layers.FeedForward(self._hidden, out)
         self.out2_layer = layers.FeedForward(out, NCHAR)
-
-    def name(self):
-        return f'recurrent2-{self._hidden}-{self._out}'
+        self.name = f'recurrent2-{self._hidden}-{self._out}'
 
     def serialize(self):
         return {'name': 'recurrent2', 'hidden': self._hidden, 'out': self._out}
@@ -353,6 +349,59 @@ class RecGru(Model):
             'gru': gru_state,
         }
         return new_state, out1
+
+
+class RecGru2(Model):
+    def __init__(self, rec, gru, out, skip_rec=False):
+        self._rec = rec
+        self._gru = gru
+        self._out = out
+        self._skip_rec = skip_rec
+
+        self.recurrent_layer = layers.Recurrent(NCHAR, self._rec)
+        gru_input = (self._rec + NCHAR) if skip_rec else self._rec
+        self.gru_layer = layers.Gru(gru_input, self._gru)
+        self.out1_layer = layers.FeedForward(self._gru, out)
+        self.out2_layer = layers.FeedForward(out, NCHAR)
+
+        skip = 's' if self._skip_rec else ''
+
+        self.name = f'rec-gru2-{rec}{skip}-{gru}-{out}'
+
+    def serialize(self):
+        return {'name': 'rec-gru2', 'out': self._out, 'rec': self._rec, 'gru': self. _gru, 'skip_rec': self._skip_rec}
+
+    def init_params(self, key):
+        keys = jax.random.split(key, 5)
+        return {
+            'rec': self.recurrent_layer.init_params(keys[1]),
+            'gru': self.gru_layer.init_params(keys[2]),
+            'out1': self.out1_layer.init_params(keys[3]),
+            'out2': self.out2_layer.init_params(keys[4]),
+        }
+
+    def init_state(self):
+        return {
+            'rec': self.recurrent_layer.init_state(),
+            'gru': self.gru_layer.init_state(),
+        }
+
+    def step(self, params, state, c):
+        rec_state = self.recurrent_layer.step(params['rec'], c, state['rec'])
+        rec_state = jax.nn.sigmoid(rec_state)
+        if self._skip_rec:
+            gru_input = jnp.concatenate([c, rec_state])
+        else:
+            gru_input = rec_state
+        gru_state = self.gru_layer.step(params['gru'], gru_input, state['gru'])
+        out1 = self.out1_layer.step(params['out1'], gru_state)
+        out1 = jax.nn.sigmoid(out1)
+        out2 = self.out2_layer.step(params['out2'], out1)
+        new_state = {
+            'rec': rec_state,
+            'gru': gru_state,
+        }
+        return new_state, out2
 
 
 class ConvGru(Model):

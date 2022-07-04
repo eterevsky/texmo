@@ -615,6 +615,46 @@ class Conv3Gru(Model):
         return {'h': hn, 'suffix': suffix2}, out
 
 
+class Gru2(Model):
+    def __init__(self, gru):
+        self._conv = conv
+        self._gru = gru
+
+        self.gru_layer = layers.Gru(2*NCHAR, gru)
+        self.out_layer = layers.FeedForward(gru, NCHAR)
+
+        self.name = f'gru2-{gru}'
+
+    def serialize(self):
+        return {'name': 'gru2', 'gru': self. _gru}
+
+    def init_params(self, key):
+        keys = jax.random.split(key, 5)
+        return {
+            'gru': self.gru_layer.init_params(keys[1]),
+            'out': self.out_layer.init_params(keys[2]),
+        }
+
+    def init_state(self):
+        return {
+            'prev': jnp.zeros((NCHAR,)),
+            'gru': self.gru_layer.init_state(),
+        }
+
+    def step(self, params, state, c):
+        prev = state['prev']
+
+        gru_input = jnp.concatenate([prev, c])
+        gru_state = self.gru_layer.step(params['gru'], gru_input, state['gru'])
+        out = self.out_layer.step(params['out'], gru_state)
+
+        new_state = {
+            'prev': c,
+            'gru': gru_state,
+        }
+        return new_state, out
+
+
 MODELS = {
     'equal': Equal,
     'freq': Freq,

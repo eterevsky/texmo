@@ -617,7 +617,6 @@ class Conv3Gru(Model):
 
 class Gru2(Model):
     def __init__(self, gru):
-        self._conv = conv
         self._gru = gru
 
         self.gru_layer = layers.Gru(2*NCHAR, gru)

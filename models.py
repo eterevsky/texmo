@@ -654,6 +654,53 @@ class Gru2(Model):
         return new_state, out
 
 
+class GruGru(Model):
+    def __init__(self, gru1, gru2):
+        self._gru1 = gru1
+        self._gru2 = gru2
+
+        self.gru1_layer = layers.Gru(2*NCHAR, gru1)
+        self.gru2_layer = layers.Gru(gru1, gru2)
+        self.out_layer = layers.FeedForward(gru2, NCHAR)
+
+        self.name = f'gru-gru-{gru1}-{gru2}'
+
+    def serialize(self):
+        return {'name': 'gru-gru', 'gru1': self._gru1, 'gru2': self._gru2}
+
+    def init_params(self, key):
+        keys = jax.random.split(key, 5)
+        return {
+            'gru1': self.gru1_layer.init_params(keys[1]),
+            'gru2': self.gru2_layer.init_params(keys[2]),
+            'out': self.out_layer.init_params(keys[3]),
+        }
+
+    def init_state(self):
+        return {
+            'prev': jnp.zeros((NCHAR,)),
+            'gru1': self.gru1_layer.init_state(),
+            'gru2': self.gru2_layer.init_state(),
+        }
+
+    def step(self, params, state, c):
+        prev = state['prev']
+
+        gru1_input = jnp.concatenate([prev, c])
+        gru1_state = self.gru1_layer.step(params['gru1'], gru1_input, state['gru1'])
+
+        gru2_state = self.gru2_layer.step(params['gru2'], gru1_state, state['gru2'])
+
+        out = self.out_layer.step(params['out'], gru2_state)
+
+        new_state = {
+            'prev': c,
+            'gru1': gru1_state,
+            'gru2': gru2_state,
+        }
+        return new_state, out
+
+
 MODELS = {
     'equal': Equal,
     'freq': Freq,

@@ -243,7 +243,7 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
         # model = models.RecGru2(256, 512, 128, skip_rec=False)
         # model = models.ConvGru2(128, 512)
         # model = models.Gru2(512)
-        model = models.GruGru(512, 512)
+        model = models.GruGru(512, 512, skip=True)
         manager = Manager(model, learning_rate, regularization, steps)
     else:
         with open(model_path) as f:

@@ -708,6 +708,7 @@ class GruGru(Model):
         }
         return new_state, out
 
+
 class Lstm2(Model):
     def __init__(self, lstm):
         self._lstm = lstm
@@ -746,6 +747,51 @@ class Lstm2(Model):
         }
         return new_state, out
 
+
+class LLstm(Model):
+    def __init__(self, lstm1, lstm2):
+        self._lstm1 = lstm1
+        self._lstm2 = lstm2
+
+        self.lstm1_layer = layers.Lstm(2*NCHAR, lstm1)
+        self.lstm2_layer = layers.Lstm(lstm1, lstm2)
+        self.out_layer = layers.FeedForward(lstm2, NCHAR)
+
+        self.name = f'llstm-{lstm1}-{lstm2}'
+
+    def serialize(self):
+        return {'name': 'llstm', 'lstm1': self._lstm1, 'lstm1': self._lstm2}
+
+    def init_params(self, key):
+        keys = jax.random.split(key, 3)
+        return {
+            'lstm1': self.lstm1_layer.init_params(keys[0]),
+            'lstm2': self.lstm2_layer.init_params(keys[1]),
+            'out': self.out_layer.init_params(keys[2]),
+        }
+
+    def init_state(self):
+        return {
+            'prev': jnp.zeros((NCHAR,)),
+            'lstm1': self.lstm1_layer.init_state(),
+            'lstm2': self.lstm2_layer.init_state(),
+        }
+
+    def step(self, params, state, c):
+        prev = state['prev']
+
+        lstm1_input = jnp.concatenate([prev, c])
+        lstm1_state = self.lstm1_layer.step(params['lstm1'], lstm1_input, state['lstm1'])
+        lstm2_state = self.lstm2_layer.step(params['lstm2'], lstm1_state['h'], state['lstm2'])
+
+        out = self.out_layer.step(params['out'], lstm2_state['h'])
+
+        new_state = {
+            'prev': c,
+            'lstm1': lstm1_state,
+            'lstm2': lstm2_state,
+        }
+        return new_state, out
 
 
 MODELS = {

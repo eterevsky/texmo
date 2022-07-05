@@ -138,7 +138,7 @@ class Lstm(Layer):
     def init_state(self):
         return {'h': jnp.zeros((self._state,)), 'c': jnp.zeros((self._state,))}
 
-    def init_params(self, key, scale=0.1):
+    def init_params(self, key, scale=0.01):
         keys = split(key, 9)
         params = {
             'wf': jax.random.normal(keys[0], shape=(self._state, self._input)),

@@ -127,3 +127,57 @@ class Gru(Layer):
         hc = jax.nn.tanh(hc)
 
         return (1 - z) * state + z * hc
+
+
+class Lstm(Layer):
+    def __init__(self, input_size, state_size):
+        super().__init__()
+        self._input = input_size
+        self._state = state_size
+
+    def init_state(self):
+        return {'h': jnp.zeros((self._state,)), 'c': jnp.zeros((self._state,))}
+
+    def init_params(self, key, scale=0.1):
+        keys = split(key, 9)
+        params = {
+            'wf': jax.random.normal(keys[0], shape=(self._state, self._input)),
+            'uf': jax.random.normal(keys[1], shape=(self._state, self._state)),
+            'bf': jax.random.normal(keys[2], shape=(self._state,)),
+
+            'wi': jax.random.normal(keys[3], shape=(self._state, self._input)),
+            'ui': jax.random.normal(keys[4], shape=(self._state, self._state)),
+            'bi': jax.random.normal(keys[5], shape=(self._state,)),
+
+            'wo': jax.random.normal(keys[6], shape=(self._state, self._input)),
+            'uo': jax.random.normal(keys[7], shape=(self._state, self._state)),
+            'bo': jax.random.normal(keys[8], shape=(self._state,)),
+
+            'wc': jax.random.normal(keys[9], shape=(self._state, self._input)),
+            'uc': jax.random.normal(keys[10], shape=(self._state, self._state)),
+            'bc': jax.random.normal(keys[11], shape=(self._state,)),
+        }
+        return scale_params(params, scale)
+
+    def step(self, params, input, state):
+        input = input.flatten()
+
+        h = state['h']
+        c = state['c']
+
+        f = jnp.dot(params['wf'], input) + jnp.dot(params['uf'], h) + params['bf']
+        f = jax.nn.sigmoid(f)
+
+        i = jnp.dot(params['wi'], input) + jnp.dot(params['ui'], h) + params['bi']
+        i = jax.nn.sigmoid(i)
+
+        o = jnp.dot(params['wo'], input) + jnp.dot(params['uo'], h) + params['bo']
+        o = jax.nn.sigmoid(o)
+
+        cn = jnp.dot(params['wc'], input) + jnp.dot(params['uc'], h) + params['bc']
+        cn = jax.nn.tanh(cn)
+
+        c = f * c + i * cn
+        h = o * c
+
+        return {'h': h, 'c': c}

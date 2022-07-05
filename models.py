@@ -708,6 +708,45 @@ class GruGru(Model):
         }
         return new_state, out
 
+class Lstm2(Model):
+    def __init__(self, lstm):
+        self._lstm = lstm
+
+        self.lstm_layer = layers.Lstm(2*NCHAR, lstm)
+        self.out_layer = layers.FeedForward(lstm, NCHAR)
+
+        self.name = f'lstm2-{lstm}'
+
+    def serialize(self):
+        return {'name': 'lstm2', 'lstm': self._lstm}
+
+    def init_params(self, key):
+        keys = jax.random.split(key, 2)
+        return {
+            'lstm': self.lstm_layer.init_params(keys[0]),
+            'out': self.out_layer.init_params(keys[1]),
+        }
+
+    def init_state(self):
+        return {
+            'prev': jnp.zeros((NCHAR,)),
+            'lstm': self.lstm_layer.init_state(),
+        }
+
+    def step(self, params, state, c):
+        prev = state['prev']
+
+        lstm_input = jnp.concatenate([prev, c])
+        lstm_state = self.lstm_layer.step(params['lstm'], lstm_input, state['lstm'])
+        out = self.out_layer.step(params['out'], lstm_state['h'])
+
+        new_state = {
+            'prev': c,
+            'lstm': lstm_state,
+        }
+        return new_state, out
+
+
 
 MODELS = {
     'equal': Equal,

@@ -666,7 +666,7 @@ class GruGru(Model):
 
         s = 's' if skip else ''
 
-        self.name = f'gru-gru-{gru1}{skip}-{gru2}'
+        self.name = f'gru-gru-{gru1}{s}-{gru2}'
 
     def serialize(self):
         return {'name': 'gru-gru', 'gru1': self._gru1, 'gru2': self._gru2, 'skip': self._skip}

@@ -61,7 +61,8 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
     if steps > 0:
         print(f'Training time: {time.time() - start}')
 
-    manager.sample_loss(b'Roses are red\nViolets are blue,\nSugar is sweet\nAnd so are you.')
+    manager.sample_loss(
+        b'Roses are red\nViolets are blue,\nSugar is sweet\nAnd so are you.')
 
     batch = train_set.sample(1024, 1024)
     print('Batch loss:', manager.evaluate(batch))
@@ -91,16 +92,24 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, tem
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-d', '--data', type=str, help='directory with training data')
-    parser.add_argument('-s', '--steps', type=int, default=0, help='number of training steps')
-    parser.add_argument('-l', '--learning-rate', type=float, help='learning rate', default=0.1)
+    parser.add_argument('-d', '--data', type=str,
+                        help='directory with training data')
+    parser.add_argument('-s', '--steps', type=int, default=0,
+                        help='number of training steps')
+    parser.add_argument('-l', '--learning-rate', type=float,
+                        help='learning rate', default=0.1)
     parser.add_argument('-r', '--regularization', type=float, help='L2 regularization coefficient',
                         default=0.1)
-    parser.add_argument('-o', '--output-dir', type=str, default=None, help='directory for saved model')
-    parser.add_argument('-m', '--model-path', default=None, help='load trained model')
-    parser.add_argument('-t', '--temp-dir', default=None, help='directory for intermediate models')
-    parser.add_argument('--sample-length', type=int, default=128, help='length of text fragments used for training')
-    parser.add_argument('-b', '--batch-size', type=int, default=32, help='batch size')
+    parser.add_argument('-o', '--output-dir', type=str,
+                        default=None, help='directory for saved model')
+    parser.add_argument('-m', '--model-path', default=None,
+                        help='load trained model')
+    parser.add_argument('-t', '--temp-dir', default=None,
+                        help='directory for intermediate models')
+    parser.add_argument('--sample-length', type=int, default=128,
+                        help='length of text fragments used for training')
+    parser.add_argument('-b', '--batch-size', type=int,
+                        default=32, help='batch size')
     return parser.parse_args()
 
 

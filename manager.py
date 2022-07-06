@@ -60,7 +60,8 @@ def gpt3_schedule(warmup_steps,
                   end_lr):
     def sch(step):
         warmup_pct = jnp.clip(step, 0, warmup_steps) / warmup_steps
-        anneal_pct = jnp.clip(step - warmup_steps, 0, anneal_steps) / anneal_steps
+        anneal_pct = jnp.clip(step - warmup_steps, 0,
+                              anneal_steps) / anneal_steps
 
         return warmup_pct * peak_lr - (peak_lr - end_lr) * (1 - jnp.cos(jnp.pi * anneal_pct)) / 2
 
@@ -117,9 +118,11 @@ class Manager(object):
     def init(self):
         print('Total parameters:', self.model.total_params(self.params))
         print('Creating batch loss')
-        self._loss_batch = jax.vmap(self.model.loss, in_axes=(None, 0), out_axes=0)
+        self._loss_batch = jax.vmap(
+            self.model.loss, in_axes=(None, 0), out_axes=0)
         print('Creating loss_avg')
-        self._loss_avg = lambda params, xs: jnp.average(self._loss_batch(params, xs)) * LOG2
+        self._loss_avg = lambda params, xs: jnp.average(
+            self._loss_batch(params, xs)) * LOG2
         print('Creating loss_grad')
         self._loss_grad = jax.jit(jax.value_and_grad(self._loss_avg))
         print('Creating optimizer')
@@ -166,10 +169,11 @@ class Manager(object):
         prefix = jnp.array(list(prefix))
         c_selected = prefix[-1]
         prefix = jax.nn.one_hot(prefix, 256)
-        c = prefix[-1,:]
+        c = prefix[-1, :]
 
         state = self.model.init_state()
-        state, _ = jax.lax.scan(lambda s, c: self.model.step(self.params, s, c), state, prefix)
+        state, _ = jax.lax.scan(lambda s, c: self.model.step(
+            self.params, s, c), state, prefix)
 
         out = []
         while len(out) < l and c_selected != 0:
@@ -182,7 +186,8 @@ class Manager(object):
     def train(self, xs):
         xs = jax.nn.one_hot(xs, NCHAR)
         loss, grads = self._loss_grad(self.params, xs)
-        updates, self.opt_state = self.optimizer.update(grads, self.opt_state, self.params)
+        updates, self.opt_state = self.optimizer.update(
+            grads, self.opt_state, self.params)
         self.params = optax.apply_updates(self.params, updates)
 
         self.step += 1

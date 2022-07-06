@@ -1,1 +1,3 @@
-{"model": {"name": "equal"}, "step": 0, "params": {}, "learning_rate": 0.1, "regularization": 0.1}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4c00623a536232059f1be510031efe9ca567a9d190791a0c0cbe663adf803526
+size 98

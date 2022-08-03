@@ -749,7 +749,7 @@ class Lstm2(Model):
 
 
 class LLstm(Model):
-    def __init__(self, lstm1, lstm2):
+    def __init__(self, lstm1, lstm2=512):
         self._lstm1 = lstm1
         self._lstm2 = lstm2
 
@@ -760,7 +760,7 @@ class LLstm(Model):
         self.name = f'llstm-{lstm1}-{lstm2}'
 
     def serialize(self):
-        return {'name': 'llstm', 'lstm1': self._lstm1, 'lstm1': self._lstm2}
+        return {'name': 'llstm', 'lstm1': self._lstm1, 'lstm2': self._lstm2}
 
     def init_params(self, key):
         keys = jax.random.split(key, 3)
@@ -805,6 +805,8 @@ MODELS = {
     'conv-gru': ConvGru,
     'conv3-gru': ConvGru,
     'conv-gru2': ConvGru2,
+    'lstm2': Lstm2,
+    'llstm': LLstm,
 }
 
 def build(spec):

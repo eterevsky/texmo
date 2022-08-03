@@ -814,3 +814,17 @@ def build(spec):
     del spec['name']
     return cls(**spec)
 
+
+def parse(full_name):
+    parts = full_name.split('-')
+    cls = MODELS[parts[0]]
+    args = []
+    kwargs = {}
+    for part in parts[1:]:
+        try:
+            p = int(part)
+            args.append(p)
+        except ValueError:
+            kwargs[part] = True
+
+    return cls(*args, **kwargs)

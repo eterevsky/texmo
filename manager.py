@@ -5,6 +5,7 @@ import math
 import optax
 import os
 
+import models
 from model import NCHAR
 
 

@@ -5,6 +5,7 @@ import math
 import optax
 import os
 
+import models
 from model import NCHAR
 
 
@@ -205,7 +206,7 @@ class Manager(object):
 
     def save(self, dir):
         model = self.model.serialize()
-        model_name = self.full_name
+        model_name = self.name()
 
         path = os.path.join(dir, f'{model_name}.json')
 

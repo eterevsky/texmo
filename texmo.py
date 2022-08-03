@@ -9,11 +9,18 @@ from manager import Manager
 import models
 
 
-def create_manager(model_name, model_path, learning_rate, regularization, steps):
-    if model_name:
-        model = models.build_from_name(model_name)
+def main(data, steps, learning_rate, regularization, output_dir, model_name, model_path, temp_dir, sample_length, batch_size, temp_steps):
+    if data is not None:
+        print(f'Training data: {data}')
+        train_set = DataSet(data)
+    else:
+        train_set = None
+
+    if model_name is not None:
+        model = models.parse(model_name)
         manager = Manager(model, learning_rate, regularization, steps)
     else:
+        assert model_path is not None
         with open(model_path) as f:
             spec = json.load(f)
         manager = Manager.from_spec(spec)
@@ -23,10 +30,7 @@ def create_manager(model_name, model_path, learning_rate, regularization, steps)
             manager.regularization = regularization
 
     manager.init()
-    return manager
 
-
-def train(manager: Manager, steps: int, temp_dir: str, dataset, sample_length, batch_size):
     start = time.time()
 
     step_array = []
@@ -34,7 +38,7 @@ def train(manager: Manager, steps: int, temp_dir: str, dataset, sample_length, b
     recent_losses = []
 
     for i in range(steps):
-        batch = dataset.sample(length=sample_length, batch_size=batch_size)
+        batch = train_set.sample(length=sample_length, batch_size=batch_size)
         loss = manager.train(batch)
         recent_losses.append(loss)
         if manager.step < 10 or manager.step % 10 == 0 and recent_losses:
@@ -47,31 +51,16 @@ def train(manager: Manager, steps: int, temp_dir: str, dataset, sample_length, b
             recent_losses = []
             print(manager.step, avg_loss)
 
-        if manager.step % 100 == 0 and temp_dir is not None:
+        if temp_steps > 0 and manager.step % temp_steps == 0 and temp_dir is not None:
             manager.save(temp_dir)
 
     if steps > 0:
         print(f'Training time: {time.time() - start}')
-    
-    return step_array, losses
-
-
-def main(data, steps, learning_rate, regularization, output_dir, model_path, model_name, temp_dir, sample_length, batch_size):
-    if data is not None:
-        print(f'Training data: {data}')
-        dataset = DataSet(data)
-    else:
-        dataset = None
-
-    manager = create_manager(model_name, model_path, learning_rate, regularization, steps)
-
-    if steps > 0:
-        step_array, losses = train(manager, steps, temp_dir, dataset, sample_length, batch_size)
 
     manager.sample_loss(
         b'Roses are red\nViolets are blue,\nSugar is sweet\nAnd so are you.')
 
-    batch = dataset.sample(1024, 1024)
+    batch = train_set.sample(1024, 1024)
     print('Batch loss:', manager.evaluate(batch))
 
     prefix = b'Roses are red\nViolets are blu'
@@ -100,30 +89,37 @@ def main(data, steps, learning_rate, regularization, output_dir, model_path, mod
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('-m', '--model-path', default=None,
-                        help='load trained model')
-    group.add_argument('-n', '--model-name', default=None,
-                        help='full name of the model to be created')
-
-    parser.add_argument('-d', '--data', type=str, default='data',
+    # Data
+    parser.add_argument('-d', '--data', type=str, required=True,
                         help='directory with training data')
-                        
-    parser.add_argument('-o', '--output-dir', type=str,
-                        default=None, help='directory for saved model')
-    parser.add_argument('-t', '--temp-dir', default=None,
-                        help='directory for intermediate models')
 
+    # Model
+    model_group = parser.add_mutually_exclusive_group(required=True)
+    model_group.add_argument('-m', '--model-path', metavar='PATH', default=None,
+                        help='load trained model from file')
+    model_group.add_argument('-n', '--model-name', metavar='NAME', default=None, help='parse model name')
+
+    parser.add_argument('-o', '--output-dir', type=str, metavar='PATH',
+                        default=None, help='directory for saved model')
+
+    # Training
     parser.add_argument('-s', '--steps', type=int, default=0,
                         help='number of training steps')
-    parser.add_argument('-l', '--learning-rate', type=float,
+    parser.add_argument('-l', '--learning-rate', type=float, metavar='RATE',
                         help='learning rate', default=0.1)
     parser.add_argument('-r', '--regularization', type=float, help='L2 regularization coefficient',
                         default=0.1)
-    parser.add_argument('--sample-length', type=int, default=128,
+    parser.add_argument('--sample-length', type=int, default=128, metavar='LEN',
                         help='length of text fragments used for training')
-    parser.add_argument('-b', '--batch-size', type=int,
+    parser.add_argument('-b', '--batch-size', type=int, metavar='BATCH',
                         default=32, help='batch size')
+
+    # Intermediate models
+    parser.add_argument('-t', '--temp-dir', default=None, metavar='PATH',
+                        help='directory for intermediate models')
+    parser.add_argument('--temp-steps', metavar='N', type=int,
+                        default=1000, help='save intermediate model every N steps')
+
     return parser.parse_args()
 
 

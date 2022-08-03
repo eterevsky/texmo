@@ -775,7 +775,7 @@ class Lstm2(Model):
 
 
 class LLstm(Model):
-    def __init__(self, lstm1, lstm2):
+    def __init__(self, lstm1, lstm2=512):
         self._lstm1 = lstm1
         self._lstm2 = lstm2
 
@@ -786,7 +786,7 @@ class LLstm(Model):
         self.name = f'llstm-{lstm1}-{lstm2}'
 
     def serialize(self):
-        return {'name': 'llstm', 'lstm1': self._lstm1, 'lstm1': self._lstm2}
+        return {'name': 'llstm', 'lstm1': self._lstm1, 'lstm2': self._lstm2}
 
     def init_weights(self, key):
         keys = jax.random.split(key, 3)
@@ -820,3 +820,37 @@ class LLstm(Model):
         return new_state, out
 
 
+MODELS = {
+    'equal': Equal,
+    'freq': Freq,
+    'markov1': Markov1,
+    'markov': Markov,
+    'recurrent1': Recurrent1,
+    'recurrent2': Recurrent2,
+    'recurrent3': Recurrent3,
+    'conv-gru': ConvGru,
+    'conv3-gru': ConvGru,
+    'conv-gru2': ConvGru2,
+    'lstm2': Lstm2,
+    'llstm': LLstm,
+}
+
+def build(spec):
+    cls = MODELS[spec['name']]
+    del spec['name']
+    return cls(**spec)
+
+
+def parse(full_name):
+    parts = full_name.split('-')
+    cls = MODELS[parts[0]]
+    args = []
+    kwargs = {}
+    for part in parts[1:]:
+        try:
+            p = int(part)
+            args.append(p)
+        except ValueError:
+            kwargs[part] = True
+
+    return cls(*args, **kwargs)

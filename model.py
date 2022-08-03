@@ -89,7 +89,9 @@ class Model(object):
     def total_weights(self, weights):
         n = 0
         for p in weights.values():
-            if type(p) is dict:
+            if p is None:
+                continue
+            elif type(p) is dict:
                 n += self.total_weights(p)
             else:
                 n += p.flatten().shape[0]

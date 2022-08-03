@@ -21,13 +21,13 @@ def build_from_name(full_name: str) -> Model:
         if full_name.startswith(name) and len(name) > len(matched_name):
             matched_name = name
             matched_cls = cls
-    
+
     if matched_cls is None:
         raise RuntimeError(f'can\'t find matching model class for {full_name}')
-    
+
     if matched_name == full_name:
         return matched_cls()
-    
+
     params_str = full_name[len(matched_name):]
 
     if not params_str.startswith('-'):
@@ -35,12 +35,19 @@ def build_from_name(full_name: str) -> Model:
 
     params = map(int, params_str[1:].split('-'))
     return matched_cls(*params)
-        
+
+
+def build_from_spec(spec):
+    cls = models[spec['name']]
+    params = spec.copy()
+    del params['name']
+    return cls(**params)
+
 
 @register
 class Equal(Model):
     name = 'equal'
-    
+
     def step(self, weights, state, c):
         return state, jnp.ones_like(c)
 
@@ -82,18 +89,23 @@ class Markov(Model):
     def __init__(self, suffix):
         assert suffix > 1
         super().__init__(suffix=suffix)
+        self.suffix_layer = layers.Suffix(NCHAR, self.suffix)
         self.layer = layers.FeedForward(self.suffix * NCHAR, NCHAR)
 
     def init_state(self):
-        return model.init_suffix(self.suffix)
+        return self.suffix_layer.init_state()
 
     def init_weights(self, key):
-        return self.layer.init_weights(key)
+        key0, key1 = jax.random.split(key)
+        return {
+            'suffix': self.suffix_layer.init_weights(key0),
+            'w': self.layer.init_weights(key1),
+        }
 
     def step(self, weights, state, c):
-        suffix = model.stack_suffix(state, c)
-        out = self.layer.step(weights, suffix)
-        return suffix[1:], out
+        suffix_state, suffix = self.suffix_layer.step(weights['suffix'], c, state)
+        out = self.layer.step(weights['w'], suffix)
+        return suffix_state, out
 
 
 class Forward1(Model):
@@ -806,24 +818,5 @@ class LLstm(Model):
             'lstm2': lstm2_state,
         }
         return new_state, out
-
-
-MODELS = {
-    'equal': Equal,
-    'freq': Freq,
-    'markov1': Markov1,
-    'markov': Markov,
-    'recurrent1': Recurrent1,
-    'recurrent2': Recurrent2,
-    'recurrent3': Recurrent3,
-    'conv-gru': ConvGru,
-    'conv3-gru': ConvGru,
-    'conv-gru2': ConvGru2,
-}
-
-def build(spec):
-    cls = MODELS[spec['name']]
-    del spec['name']
-    return cls(**spec)
 
 

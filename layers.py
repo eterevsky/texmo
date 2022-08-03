@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax.random import split, normal
 
+from model import NCHAR
 
 def scale_weights(weights, scale):
     for k in weights.keys():
@@ -18,6 +19,31 @@ class Layer(object):
 
     def step(self, weights, input):
         return input
+
+
+class Suffix(Layer):
+    def __init__(self, size, length, train_init=False):
+        super().__init__()
+        self._size = size
+        self._length = length
+        self._train_init = train_init
+    
+    def init_weights(self, key, scale=0.1):
+        if self._train_init:
+            return scale * normal(key, shape=(self._length - 1, NCHAR))
+        else:
+            return None
+    
+    def init_state(self, params=None):
+        if self._train_init:
+            return params
+        else:
+            return jnp.ones((self._length - 1, NCHAR)) / NCHAR
+
+    def step(self, weights, input, state):
+        suffix = jnp.vstack((state, input.reshape((1, -1))))
+        return suffix[1:], suffix
+
 
 
 class FeedForward(Layer):

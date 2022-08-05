@@ -13,7 +13,8 @@ LOG2 = 1 / math.log(2)
 
 
 def global_norm(updates):
-    pre_sqrt = sum([jnp.sum(jnp.square(x)) for x in jax.tree_leaves(updates)])
+    pre_sqrt = sum([jnp.sum(jnp.square(x))
+                   for x in jax.tree_util.tree_leaves(updates)])
     return jnp.sqrt(pre_sqrt)
 
 
@@ -34,7 +35,7 @@ def clip_by_global_norm(max_norm) -> optax.GradientTransformation:
         del weights
         g_norm = global_norm(updates)
         trigger = g_norm < max_norm
-        updates = jax.tree_map(
+        updates = jax.tree_util.tree_map(
             lambda t: jnp.where(trigger, t, (t / g_norm) * max_norm), updates)
         return updates, state
 
@@ -48,8 +49,8 @@ def additive_weight_decay(weight_decay: float = 0.0) -> optax.GradientTransforma
         return optax.AdditiveWeightDecayState()
 
     def update_fn(updates, state, weights):
-        updates = jax.tree_multimap(lambda g, p: g + weight_decay * p * (len(g.shape) > 1),
-                                    updates, weights)
+        updates = jax.tree_util.tree_map(lambda g, p: g + weight_decay * p * (len(g.shape) > 1),
+                                         updates, weights)
         return updates, state
 
     return optax.GradientTransformation(init_fn, update_fn)

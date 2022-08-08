@@ -692,7 +692,7 @@ class GruGru(Model):
 
         s = '-skip' if skip else ''
 
-        self.name = f'gru-gru-{gru1}-{gru2}-skip'
+        self.name = f'grugru-{gru1}-{gru2}-skip'
 
     def serialize(self):
         return {'name': 'gru-gru', 'gru1': self._gru1, 'gru2': self._gru2, 'skip': self._skip}
@@ -725,7 +725,12 @@ class GruGru(Model):
 
         gru2_state = self.gru2_layer.step(weights['gru2'], gru2_input, state['gru2'])
 
-        out = self.out_layer.step(weights['out'], gru2_state)
+        if self._skip:
+            out_input = gru2_state + gru2_input
+        else:
+            out_input = gru2_state
+
+        out = self.out_layer.step(weights['out'], out_input)
 
         new_state = {
             'prev': c,
@@ -833,6 +838,7 @@ MODELS = {
     'conv-gru2': ConvGru2,
     'lstm2': Lstm2,
     'llstm': LLstm,
+    'grugru': GruGru,
 }
 
 def build(spec):

@@ -695,7 +695,7 @@ class GruGru(Model):
         self.name = f'grugru-{gru1}-{gru2}-skip'
 
     def serialize(self):
-        return {'name': 'gru-gru', 'gru1': self._gru1, 'gru2': self._gru2, 'skip': self._skip}
+        return {'name': 'grugru', 'gru1': self._gru1, 'gru2': self._gru2, 'skip': self._skip}
 
     def init_weights(self, key):
         keys = jax.random.split(key, 5)

@@ -813,7 +813,13 @@ class LLstm(Model):
 
         lstm1_input = jnp.concatenate([prev, c])
         lstm1_state = self.lstm1_layer.step(weights['lstm1'], lstm1_input, state['lstm1'])
-        lstm2_state = self.lstm2_layer.step(weights['lstm2'], lstm1_state['h'], state['lstm2'])
+
+        if self.skip:
+            lstm2_input = lstm1_state['h'] + lstm1_input
+        else:
+            lstm2_input = lstm1_state['h']
+
+        lstm2_state = self.lstm2_layer.step(weights['lstm2'], lstm2_input, state['lstm2'])
 
         out = self.out_layer.step(weights['out'], lstm2_state['h'])
 

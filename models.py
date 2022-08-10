@@ -749,15 +749,19 @@ class Lstm2(Model):
 
 
 class LLstm(Model):
-    def __init__(self, lstm1, lstm2=512):
+    def __init__(self, lstm1, lstm2=512, skip=False):
         self._lstm1 = lstm1
         self._lstm2 = lstm2
 
         self.lstm1_layer = layers.Lstm(2*NCHAR, lstm1)
         self.lstm2_layer = layers.Lstm(lstm1, lstm2)
         self.out_layer = layers.FeedForward(lstm2, NCHAR)
+        self.skip = skip
 
-        self.name = f'llstm-{lstm1}-{lstm2}'
+        if self.skip:
+            self.name = f'llstm-{lstm1}-{lstm2}-skip'
+        else:
+            self.name = f'llstm-{lstm1}-{lstm2}'
 
     def serialize(self):
         return {'name': 'llstm', 'lstm1': self._lstm1, 'lstm2': self._lstm2}
@@ -782,7 +786,13 @@ class LLstm(Model):
 
         lstm1_input = jnp.concatenate([prev, c])
         lstm1_state = self.lstm1_layer.step(params['lstm1'], lstm1_input, state['lstm1'])
-        lstm2_state = self.lstm2_layer.step(params['lstm2'], lstm1_state['h'], state['lstm2'])
+
+        if self.skip:
+            lstm2_input = lstm1_state['h'] + lstm1_input
+        else:
+            lstm2_input = lstm1_state['h']
+
+        lstm2_state = self.lstm2_layer.step(params['lstm2'], lstm2_input, state['lstm2'])
 
         out = self.out_layer.step(params['out'], lstm2_state['h'])
 

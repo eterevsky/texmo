@@ -81,6 +81,7 @@ def main(data, steps, learning_rate, regularization, output_dir, model_name, mod
     if steps > 0:
         plt.xscale('log')
         plt.yscale('log')
+        plt.ylim(top=8)
         plt.plot(step_array, losses)
         plt.savefig(os.path.join(output_dir, manager.name() + '.png'))
         plt.show()

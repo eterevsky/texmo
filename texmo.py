@@ -54,6 +54,10 @@ def main(data, steps, learning_rate, regularization, output_dir, model_name, mod
         if temp_steps > 0 and manager.step % temp_steps == 0 and temp_dir is not None:
             manager.save(temp_dir)
 
+    print('Model:', model.name)
+    print('Params:', model.total_weights(manager.weights))
+    print('Steps:', steps)
+
     if steps > 0:
         print(f'Training time: {time.time() - start}')
 
@@ -65,12 +69,11 @@ def main(data, steps, learning_rate, regularization, output_dir, model_name, mod
 
     prefix = b'Roses are red\nViolets are blu'
     out = manager.sample(prefix, 256)
-    print(prefix + out)
 
     try:
         s = (prefix + out).decode('utf-8')
     except UnicodeDecodeError:
-        s = '<Invalid UTF-8>'
+        s = repr(prefix + out)
     print()
     print(s)
     print()

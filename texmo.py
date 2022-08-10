@@ -100,8 +100,9 @@ def parse_args():
     # Model
     model_group = parser.add_mutually_exclusive_group(required=True)
     model_group.add_argument('-m', '--model-path', metavar='PATH', default=None,
-                        help='load trained model from file')
-    model_group.add_argument('-n', '--model-name', metavar='NAME', default=None, help='parse model name')
+                             help='load trained model from file')
+    model_group.add_argument(
+        '-n', '--model-name', metavar='NAME', default=None, help='parse model name')
 
     parser.add_argument('-o', '--output-dir', type=str, metavar='PATH',
                         default=None, help='directory for saved model')

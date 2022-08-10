@@ -27,13 +27,13 @@ class Suffix(Layer):
         self._size = size
         self._length = length
         self._train_init = train_init
-    
+
     def init_weights(self, key, scale=0.1):
         if self._train_init:
             return scale * normal(key, shape=(self._length - 1, NCHAR))
         else:
             return None
-    
+
     def init_state(self, params=None):
         if self._train_init:
             return params
@@ -91,6 +91,9 @@ class Recurrent(Layer):
 
 class Convolution(Layer):
     def __init__(self, input_size, kernel_size, output_size):
+        """Transforms []
+
+        """
         super().__init__()
         self._input = input_size
         self._kernel = kernel_size

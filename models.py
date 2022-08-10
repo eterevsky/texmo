@@ -66,7 +66,7 @@ class Markov(Model):
         return suffix_state, out
 
 
-class Forward1(Model):
+class Forward(Model):
     def __init__(self, suffix, hidden=128):
         super().__init__()
         self._suffix = suffix
@@ -74,11 +74,10 @@ class Forward1(Model):
         self.in_layer = layers.FeedForward(self._suffix * NCHAR, self._hidden)
         self.out_layer = layers.FeedForward(self._hidden, NCHAR)
 
-    def name(self):
-        return f'forward1-{self._suffix}-{self._hidden}'
+        self.name = f'forward-{self._suffix}-{self._hidden}'
 
     def serialize(self):
-        return {'name': 'forward1', 'suffix': self._suffix, 'hidden': self._hidden}
+        return {'name': 'forward', 'suffix': self._suffix, 'hidden': self._hidden}
 
     def init_state(self):
         return model.init_suffix(self._suffix)
@@ -92,8 +91,9 @@ class Forward1(Model):
 
     def step(self, weights, state, c):
         suffix = model.stack_suffix(state, c)
-        hidden = self.in_layer.step(weights['input'], suffix)
-        out = self.out_layer.step(weights['output'], hidden)
+        inp = self.in_layer.step(weights['input'], suffix)
+        inp = jnp.tanh(inp)
+        out = self.out_layer.step(weights['output'], inp)
         return suffix[1:], out
 
 
@@ -159,7 +159,7 @@ class Recurrent2(Model):
 
 
 class Recurrent3(Model):
-    """Recurrent layer + extra output layer."""
+    """Suffix + recurrent layer + extra output layer."""
 
     def __init__(self, suffix, input, hidden, output):
         self._suffix = suffix
@@ -435,24 +435,25 @@ class ConvGru2(Model):
 
 
 class ConvGru1(Model):
-    def __init__(self, fwd, gru):
-        self._fwd = fwd
+    def __init__(self, conv, gru):
+        """2-convolution over 3-char suffix + GRU"""
+        self._conv = conv
         self._gru = gru
 
-        self.suffix_layer = layers.Suffix(NCHAR, 2)
-        self.inp_layer = layers.FeedForward(2*NCHAR, fwd)
-        self.gru_layer = layers.Gru(fwd, gru)
+        self.suffix_layer = layers.Suffix(NCHAR, 3)
+        self.conv_layer = layers.FeedForward(2*NCHAR, conv)
+        self.gru_layer = layers.Gru(2*conv, gru)
         self.out_layer = layers.FeedForward(gru, NCHAR)
 
-        self.name = f'convgru1-{fwd}-{gru}'
+        self.name = f'convgru1-{conv}-{gru}'
 
     def serialize(self):
-        return {'name': 'convgru1', 'fwd': self._fwd, 'gru': self._gru}
+        return {'name': 'convgru1', 'conv': self._conv, 'gru': self._gru}
 
     def init_weights(self, key):
         keys = jax.random.split(key, 3)
         return {
-            'inp': self.inp_layer.init_weights(keys[0]),
+            'conv': self.conv_layer.init_weights(keys[0]),
             'gru': self.gru_layer.init_weights(keys[1]),
             'out': self.out_layer.init_weights(keys[2]),
         }
@@ -465,8 +466,14 @@ class ConvGru1(Model):
 
     def step(self, weights, state, c):
         suffix_state, suffix = self.suffix_layer.step(None, c, state['suffix'])
-        gru_input = self.inp_layer.step(weights['inp'], suffix)
+
+        gru_input1 = self.conv_layer.step(weights['conv'], suffix[0:2])
+        gru_input2 = self.conv_layer.step(weights['conv'], suffix[1:3])
+        gru_input = jnp.concatenate([gru_input1, gru_input2])
+        gru_input = jnp.tanh(gru_input)
+
         gru_out = self.gru_layer.step(weights['gru'], gru_input, state['gru'])
+
         out = self.out_layer.step(weights['out'], gru_out)
         new_state = {'suffix': suffix_state, 'gru': gru_out}
         return new_state, out
@@ -836,6 +843,7 @@ MODELS = {
     'freq': Freq,
     'markov1': Markov1,
     'markov': Markov,
+    'forward': Forward,
     'recurrent1': Recurrent1,
     'recurrent2': Recurrent2,
     'recurrent3': Recurrent3,

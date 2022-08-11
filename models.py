@@ -6,45 +6,6 @@ from model import Model, NCHAR
 import layers
 
 
-models = {}
-
-def register(cls):
-    assert cls.name not in models
-    models[cls.name] = cls
-    return cls
-
-
-def build_from_name(full_name: str) -> Model:
-    matched_name = ''
-    matched_cls = None
-    for name, cls in models.items():
-        if full_name.startswith(name) and len(name) > len(matched_name):
-            matched_name = name
-            matched_cls = cls
-
-    if matched_cls is None:
-        raise RuntimeError(f'can\'t find matching model class for {full_name}')
-
-    if matched_name == full_name:
-        return matched_cls()
-
-    params_str = full_name[len(matched_name):]
-
-    if not params_str.startswith('-'):
-        raise RuntimeError('expect `-` after the model name')
-
-    params = map(int, params_str[1:].split('-'))
-    return matched_cls(*params)
-
-
-def build_from_spec(spec):
-    cls = models[spec['name']]
-    params = spec.copy()
-    del params['name']
-    return cls(**params)
-
-
-@register
 class Equal(Model):
     name = 'equal'
 
@@ -52,7 +13,6 @@ class Equal(Model):
         return state, jnp.ones_like(c)
 
 
-@register
 class Freq(Model):
     name = 'freq'
 
@@ -64,7 +24,6 @@ class Freq(Model):
         return state, out
 
 
-@register
 class Markov1(Model):
     """Logistic regression on the previous character."""
     name = 'markov1'
@@ -81,9 +40,8 @@ class Markov1(Model):
         return state, out
 
 
-@register
 class Markov(Model):
-    """Logistic regression on a number of previous characters."""
+    """Logistic regression from the suffix of a given length."""
     name = 'markov'
 
     def __init__(self, suffix):
@@ -872,7 +830,7 @@ MODELS = {
     'recurrent2': Recurrent2,
     'recurrent3': Recurrent3,
     'conv-gru': ConvGru,
-    'conv3-gru': ConvGru,
+    'conv3gru': Conv3Gru,
     'conv-gru2': ConvGru2,
     'lstm2': Lstm2,
     'llstm': LLstm,

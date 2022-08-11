@@ -135,8 +135,10 @@ class Manager(object):
             optax.scale(-self.learning_rate),
             optax.scale_by_schedule(
                 exp_schedule(
-                    self.total_steps//10, self.total_steps,
-                    self.learning_rate, self.learning_rate/10))
+                    10000,   # initial_steps
+                    100000,  # steps to lr/10
+                    self.learning_rate,
+                    self.learning_rate / 10))
         )
 
         self.opt_state = self.optimizer.init(self.weights)

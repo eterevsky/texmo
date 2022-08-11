@@ -476,6 +476,44 @@ class ConvGru2(Model):
         return new_state, out
 
 
+class ConvGru1(Model):
+    def __init__(self, fwd, gru):
+        self._fwd = fwd
+        self._gru = gru
+
+        self.suffix_layer = layers.Suffix(NCHAR, 2)
+        self.inp_layer = layers.FeedForward(2*NCHAR, fwd)
+        self.gru_layer = layers.Gru(fwd, gru)
+        self.out_layer = layers.FeedForward(gru, NCHAR)
+
+        self.name = f'convgru1-{fwd}-{gru}'
+    
+    def serialize(self):
+        return {'name': 'convgru1', 'fwd': self._fwd, 'gru': self._gru}
+
+    def init_weights(self, key):
+        keys = jax.random.split(key, 3)
+        return {
+            'inp': self.inp_layer.init_weights(keys[0]),
+            'gru': self.gru_layer.init_weights(keys[1]),
+            'out': self.out_layer.init_weights(keys[2]),
+        }
+    
+    def init_state(self):
+        return {
+            'suffix': self.suffix_layer.init_state(),
+            'gru': self.gru_layer.init_state(),
+        }
+    
+    def step(self, weights, state, c):
+        suffix_state, suffix = self.suffix_layer.step(None, c, state['suffix'])
+        gru_input = self.inp_layer.step(weights['inp'], suffix)
+        gru_out = self.gru_layer.step(weights['gru'], gru_input, state['gru'])
+        out = self.out_layer.step(weights['out'], gru_out)
+        new_state = {'suffix': suffix_state, 'gru': gru_out}
+        return new_state, out
+
+
 class ConvGru(Model):
     def __init__(self, hidden, conv, **kwargs):
         self._hidden = hidden
@@ -839,6 +877,7 @@ MODELS = {
     'lstm2': Lstm2,
     'llstm': LLstm,
     'grugru': GruGru,
+    'convgru1': ConvGru1,
 }
 
 def build(spec):

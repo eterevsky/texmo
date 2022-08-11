@@ -36,20 +36,22 @@ def main(data, steps, learning_rate, regularization, output_dir, model_name, mod
     step_array = []
     losses = []
     recent_losses = []
+    last_report = 0
 
     for i in range(steps):
         batch = train_set.sample(length=sample_length, batch_size=batch_size)
         loss = manager.train(batch)
         recent_losses.append(loss)
-        if manager.step < 10 or manager.step % 10 == 0 and recent_losses:
+        if len(recent_losses) > 10: recent_losses.pop(0)
+        if manager.step < 10 or manager.step % 10 == 0 or time.time() - last_report > 10:
+            last_report = time.time()
             avg_loss = sum(recent_losses) / len(recent_losses)
 
             if manager.step >= 20:
                 step_array.append(manager.step)
                 losses.append(avg_loss)
 
-            recent_losses = []
-            print(manager.step, avg_loss)
+            print(manager.step, avg_loss, loss)
 
         if temp_steps > 0 and manager.step % temp_steps == 0 and temp_dir is not None:
             manager.save(temp_dir)
@@ -57,15 +59,18 @@ def main(data, steps, learning_rate, regularization, output_dir, model_name, mod
     print('Model:', model.name)
     print('Params:', model.total_weights(manager.weights))
     print('Steps:', steps)
+    data_size = steps * batch_size * sample_length / 1E6
+    print(f'Used {steps:.1f}M data for training')
 
     if steps > 0:
-        print(f'Training time: {time.time() - start}')
+        t = int(time.time() - start)
+        print(f'Training time: {t:.0f} s')
 
     manager.sample_loss(
         b'Roses are red\nViolets are blue,\nSugar is sweet\nAnd so are you.')
 
     batch = train_set.sample(1024, 1024)
-    print('Batch loss:', manager.evaluate(batch))
+    print('Batch loss: {:.4f}'.format(manager.evaluate(batch)))
 
     prefix = b'Roses are red\nViolets are blu'
     out = manager.sample(prefix, 256)
@@ -114,10 +119,10 @@ def parse_args():
                         help='learning rate', default=0.1)
     parser.add_argument('-r', '--regularization', type=float, help='L2 regularization coefficient',
                         default=0.1)
-    parser.add_argument('--sample-length', type=int, default=128, metavar='LEN',
+    parser.add_argument('--sample-length', type=int, default=1024, metavar='LEN',
                         help='length of text fragments used for training')
     parser.add_argument('-b', '--batch-size', type=int, metavar='BATCH',
-                        default=32, help='batch size')
+                        default=256, help='batch size')
 
     # Intermediate models
     parser.add_argument('-t', '--temp-dir', default=None, metavar='PATH',

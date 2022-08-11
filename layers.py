@@ -90,14 +90,13 @@ class Recurrent(Layer):
 
 
 class Convolution(Layer):
-    def __init__(self, input_size, kernel_size, output_size):
-        """Transforms []
-
-        """
+    def __init__(self, input_size, kernel_size, output_size, activation=jnp.tanh):
+        """Transforms [X, input_size] into [X - kernel_size + 1, output_size]"""
         super().__init__()
         self._input = input_size
         self._kernel = kernel_size
         self._output = output_size
+        self._activation = activation
 
     def init_weights(self, key, scale=0.1):
         key0, key1 = split(key)
@@ -114,6 +113,8 @@ class Convolution(Layer):
         out = jax.lax.conv_general_dilated(input, kernel, (1,), 'VALID', (1,), (1,), dn)
         out = jnp.squeeze(out)
         out += jnp.expand_dims(weights['b'], axis=0)
+
+        out = self._activation(out)
 
         return out
 

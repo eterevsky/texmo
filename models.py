@@ -433,6 +433,50 @@ class ConvGru1(Model):
         return new_state, out
 
 
+class ConvGru3(Model):
+    def __init__(self, suffix, conv, gru):
+        """Convolution over X-char suffix + GRU"""
+        self._suffix = suffix
+        self._conv = conv
+        self._gru = gru
+
+        self.suffix_layer = layers.Suffix(NCHAR, suffix)
+        self.conv_layer = layers.Convolution(NCHAR, 2, conv, activation=jax.nn.sigmoid)
+        self.gru_layer = layers.Gru((suffix - 1)*conv, gru)
+        self.out_layer = layers.FeedForward(gru, NCHAR)
+
+        self.name = f'convgru3-{suffix}-{conv}-{gru}'
+
+    def serialize(self):
+        return {'name': 'convgru3', 'suffix': self._suffix, 'conv': self._conv, 'gru': self._gru}
+
+    def init_weights(self, key):
+        keys = jax.random.split(key, 3)
+        return {
+            'conv': self.conv_layer.init_weights(keys[0]),
+            'gru': self.gru_layer.init_weights(keys[1]),
+            'out': self.out_layer.init_weights(keys[2]),
+        }
+
+    def init_state(self):
+        return {
+            'suffix': self.suffix_layer.init_state(),
+            'gru': self.gru_layer.init_state(),
+        }
+
+    def step(self, weights, state, c):
+        suffix_state, suffix = self.suffix_layer.step(None, c, state['suffix'])
+
+        conv = self.conv_layer.step(weights['conv'], suffix)
+        conv = conv.flatten()
+
+        gru_out = self.gru_layer.step(weights['gru'], conv, state['gru'])
+
+        out = self.out_layer.step(weights['out'], gru_out)
+        new_state = {'suffix': suffix_state, 'gru': gru_out}
+        return new_state, out
+
+
 class Gru2(Model):
     def __init__(self, gru):
         self._gru = gru
@@ -636,13 +680,11 @@ MODELS = {
     'recurrent1': Recurrent1,
     'recurrent2': Recurrent2,
     'recurrent3': Recurrent3,
-    'conv-gru': ConvGru,
-    'conv3gru': Conv3Gru,
-    'conv-gru2': ConvGru2,
     'lstm2': Lstm2,
     'llstm': LLstm,
     'grugru': GruGru,
     'convgru1': ConvGru1,
+    'convgru3': ConvGru3,
 }
 
 def build(spec):

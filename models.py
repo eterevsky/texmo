@@ -388,52 +388,6 @@ class RecGru2(Model):
         return new_state, out2
 
 
-class ConvGru2(Model):
-    def __init__(self, conv, gru):
-        self._conv = conv
-        self._gru = gru
-
-        self.conv_layer = layers.FeedForward(2*NCHAR, conv)
-        self.gru_layer = layers.Gru(2*conv, gru)
-        self.out_layer = layers.FeedForward(gru, NCHAR)
-
-        self.name = f'conv-gru2-{conv}-{gru}'
-
-    def serialize(self):
-        return {'name': 'conv-gru2', 'conv': self._conv, 'gru': self. _gru}
-
-    def init_weights(self, key):
-        keys = jax.random.split(key, 5)
-        return {
-            'conv': self.conv_layer.init_weights(keys[0]),
-            'gru': self.gru_layer.init_weights(keys[1]),
-            'out': self.out_layer.init_weights(keys[2]),
-        }
-
-    def init_state(self):
-        return {
-            'suffix': model.init_suffix(3),
-            'gru': self.gru_layer.init_state(),
-        }
-
-    def step(self, weights, state, c):
-        suffix = model.stack_suffix(state['suffix'], c)
-
-        conv_prev = self.conv_layer.step(weights['conv'], jnp.concatenate(suffix[:-1]))
-        conv = self.conv_layer.step(weights['conv'], jnp.concatenate(suffix[1:]))
-        conv_all = jnp.concatenate([conv_prev, conv])
-        conv_all = jax.nn.relu(conv_all)
-
-        gru_state = self.gru_layer.step(weights['gru'], conv_all, state['gru'])
-
-        out = self.out_layer.step(weights['out'], gru_state)
-        new_state = {
-            'suffix': suffix[1:],
-            'gru': gru_state,
-        }
-        return new_state, out
-
-
 class ConvGru1(Model):
     def __init__(self, conv, gru):
         """2-convolution over 3-char suffix + GRU"""

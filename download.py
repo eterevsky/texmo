@@ -4,6 +4,7 @@ for i in range(1001, 10001):
     try:
         raw_text = textget.get_text_by_id(i)
         text = textget.strip_headers(raw_text)
+        text = text.decode('utf8')
     except Exception:
         continue
     text = text.replace('\r', '')

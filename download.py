@@ -1,9 +1,9 @@
-from gutenberg.acquire import load_etext
-from gutenberg.cleanup import strip_headers
+from gutenbergpy import textget
 
-for i in range(101, 1001):
+for i in range(1001, 10001):
     try:
-        text = strip_headers(load_etext(i)).strip()
+        raw_text = textget.get_text_by_id(i)
+        text = textget.strip_headers(raw_text)
     except Exception:
         continue
     text = text.replace('\r', '')

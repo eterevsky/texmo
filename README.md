@@ -45,6 +45,10 @@ python3 train.py -d data -m models/some-model.json
 | grugru-512-512               |  3280128 | 200000         | 1.7049 | 23165 | L0.02
 | lstm-lstm-512-512            |  4329728 | 200000         | 1.6969 |
 
-## Notes
+## Results with length = 1024, batch = 256
 
-According to https://arxiv.org/abs/2203.15556, the amount of training tokens for a model with X params should be roughly 20X. Considering that a token is on average 4 bytes long and we are training on bytes, this translates into 80X bytes.
+| Model                        | Params   | Steps          | Loss   | Time |
+| ---------------------------- | -------- | -------------- | ------ | ---- |
+| equal                        |        0 |                | 8.0000 | 0    |
+| freq                         |      256 | 1000           | 4.9588 | 197 (mac)  |
+| markov1                      |    65792 | 1000           | 3.7303 | 1023 |

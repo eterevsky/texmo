@@ -199,13 +199,15 @@ class Manager(object):
         return loss
 
     def serialize_weights(self, weights):
-        serialized = {}
-        for key, value in weights.items():
-            if type(value) is dict:
+        if weights is None:
+            return None
+        elif type(weights) is dict:
+            serialized = {}
+            for key, value in weights.items():
                 serialized[key] = self.serialize_weights(value)
-            else:
-                serialized[key] = value.tolist()
-        return serialized
+            return serialized
+        else:
+            return weights.tolist()
 
     def save(self, dir):
         model = self.model.serialize()

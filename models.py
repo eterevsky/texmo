@@ -42,27 +42,23 @@ class Markov1(Model):
 
 class Markov(Model):
     """Logistic regression from the suffix of a given length."""
-    name = 'markov'
 
     def __init__(self, suffix):
         assert suffix > 1
         super().__init__(suffix=suffix)
         self.suffix_layer = layers.Suffix(NCHAR, self.suffix)
         self.layer = layers.FeedForward(self.suffix * NCHAR, NCHAR)
+        self.name = f'markov-{suffix}'
 
     def init_state(self):
         return self.suffix_layer.init_state()
 
     def init_weights(self, key):
-        key0, key1 = jax.random.split(key)
-        return {
-            'suffix': self.suffix_layer.init_weights(key0),
-            'w': self.layer.init_weights(key1),
-        }
+        return self.layer.init_weights(key)
 
     def step(self, weights, state, c):
-        suffix_state, suffix = self.suffix_layer.step(weights['suffix'], c, state)
-        out = self.layer.step(weights['w'], suffix)
+        suffix_state, suffix = self.suffix_layer.step(None, c, state)
+        out = self.layer.step(weights, suffix)
         return suffix_state, out
 
 
@@ -463,54 +459,6 @@ class GruGru(Model):
         return new_state, out
 
 
-class RecGru(Model):
-    def __init__(self, rec, gru):
-        self._rec = rec
-        self._gru = gru
-
-        self.suffix_layer = layers.Suffix(2)
-        self.rec_layer = layers.Recurrent(2*NCHAR, rec)
-        self.gru_layer = layers.Gru(rec, gru)
-        self.out_layer = layers.FeedForward(gru, NCHAR)
-
-        self.name = f'recgru-{rec}-{gru}'
-
-    def serialize(self):
-        return {'name': 'recgru', 'rec': self._rec, 'gru': self._gru}
-
-    def init_weights(self, key):
-        keys = jax.random.split(key, 3)
-        return {
-            'rec': self.rec_layer.init_weights(keys[0]),
-            'gru': self.gru_layer.init_weights(keys[1]),
-            'out': self.out_layer.init_weights(keys[2]),
-        }
-
-    def init_state(self):
-        return {
-            'suffix': self.suffix_layer.init_state(),
-            'rec': self.rec_layer.init_state(),
-            'gru': self.gru_layer.init_state(),
-        }
-
-    def step(self, weights, state, c):
-        suffix_state, suffix = self.suffix_layer.step(weights['suffix'], c, state['suffix'])
-
-        rec = self.recurrent_layer.step(weights['rec'], suffix, state['rec'])
-        rec = jax.nn.sigmoid(state)
-
-        gru = self.gru1_layer.step(weights['gru'], rec, state['gru'])
-
-        out = self.out_layer.step(weights['out'], gru)
-
-        new_state = {
-            'suffix': suffix_state,
-            'rec': rec,
-            'gru': gru,
-        }
-        return new_state, out
-
-
 class Lstm2(Model):
     def __init__(self, lstm):
         self._lstm = lstm
@@ -620,7 +568,6 @@ MODELS = {
     'grugru': GruGru,
     'convgru1': ConvGru1,
     'convgru3': ConvGru3,
-    'recgru': RecGru,
 }
 
 def build(spec):

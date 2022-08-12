@@ -135,8 +135,10 @@ class Manager(object):
             optax.scale(-self.learning_rate),
             optax.scale_by_schedule(
                 exp_schedule(
-                    self.total_steps//10, self.total_steps,
-                    self.learning_rate, self.learning_rate/10))
+                    10000,   # initial_steps
+                    100000,  # steps to lr/10
+                    self.learning_rate,
+                    self.learning_rate / 10))
         )
 
         self.opt_state = self.optimizer.init(self.weights)
@@ -197,13 +199,15 @@ class Manager(object):
         return loss
 
     def serialize_weights(self, weights):
-        serialized = {}
-        for key, value in weights.items():
-            if type(value) is dict:
+        if weights is None:
+            return None
+        elif type(weights) is dict:
+            serialized = {}
+            for key, value in weights.items():
                 serialized[key] = self.serialize_weights(value)
-            else:
-                serialized[key] = value.tolist()
-        return serialized
+            return serialized
+        else:
+            return weights.tolist()
 
     def save(self, dir):
         model = self.model.serialize()

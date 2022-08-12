@@ -6,45 +6,6 @@ from model import Model, NCHAR
 import layers
 
 
-models = {}
-
-def register(cls):
-    assert cls.name not in models
-    models[cls.name] = cls
-    return cls
-
-
-def build_from_name(full_name: str) -> Model:
-    matched_name = ''
-    matched_cls = None
-    for name, cls in models.items():
-        if full_name.startswith(name) and len(name) > len(matched_name):
-            matched_name = name
-            matched_cls = cls
-
-    if matched_cls is None:
-        raise RuntimeError(f'can\'t find matching model class for {full_name}')
-
-    if matched_name == full_name:
-        return matched_cls()
-
-    params_str = full_name[len(matched_name):]
-
-    if not params_str.startswith('-'):
-        raise RuntimeError('expect `-` after the model name')
-
-    params = map(int, params_str[1:].split('-'))
-    return matched_cls(*params)
-
-
-def build_from_spec(spec):
-    cls = models[spec['name']]
-    params = spec.copy()
-    del params['name']
-    return cls(**params)
-
-
-@register
 class Equal(Model):
     name = 'equal'
 
@@ -52,7 +13,6 @@ class Equal(Model):
         return state, jnp.ones_like(c)
 
 
-@register
 class Freq(Model):
     name = 'freq'
 
@@ -64,7 +24,6 @@ class Freq(Model):
         return state, out
 
 
-@register
 class Markov1(Model):
     """Logistic regression on the previous character."""
     name = 'markov1'
@@ -81,34 +40,29 @@ class Markov1(Model):
         return state, out
 
 
-@register
 class Markov(Model):
-    """Logistic regression on a number of previous characters."""
-    name = 'markov'
+    """Logistic regression from the suffix of a given length."""
 
     def __init__(self, suffix):
         assert suffix > 1
         super().__init__(suffix=suffix)
         self.suffix_layer = layers.Suffix(NCHAR, self.suffix)
         self.layer = layers.FeedForward(self.suffix * NCHAR, NCHAR)
+        self.name = f'markov-{suffix}'
 
     def init_state(self):
         return self.suffix_layer.init_state()
 
     def init_weights(self, key):
-        key0, key1 = jax.random.split(key)
-        return {
-            'suffix': self.suffix_layer.init_weights(key0),
-            'w': self.layer.init_weights(key1),
-        }
+        return self.layer.init_weights(key)
 
     def step(self, weights, state, c):
-        suffix_state, suffix = self.suffix_layer.step(weights['suffix'], c, state)
-        out = self.layer.step(weights['w'], suffix)
+        suffix_state, suffix = self.suffix_layer.step(None, c, state)
+        out = self.layer.step(weights, suffix)
         return suffix_state, out
 
 
-class Forward1(Model):
+class Forward(Model):
     def __init__(self, suffix, hidden=128):
         super().__init__()
         self._suffix = suffix
@@ -116,11 +70,10 @@ class Forward1(Model):
         self.in_layer = layers.FeedForward(self._suffix * NCHAR, self._hidden)
         self.out_layer = layers.FeedForward(self._hidden, NCHAR)
 
-    def name(self):
-        return f'forward1-{self._suffix}-{self._hidden}'
+        self.name = f'forward-{self._suffix}-{self._hidden}'
 
     def serialize(self):
-        return {'name': 'forward1', 'suffix': self._suffix, 'hidden': self._hidden}
+        return {'name': 'forward', 'suffix': self._suffix, 'hidden': self._hidden}
 
     def init_state(self):
         return model.init_suffix(self._suffix)
@@ -134,8 +87,9 @@ class Forward1(Model):
 
     def step(self, weights, state, c):
         suffix = model.stack_suffix(state, c)
-        hidden = self.in_layer.step(weights['input'], suffix)
-        out = self.out_layer.step(weights['output'], hidden)
+        inp = self.in_layer.step(weights['input'], suffix)
+        inp = jnp.tanh(inp)
+        out = self.out_layer.step(weights['output'], inp)
         return suffix[1:], out
 
 
@@ -201,7 +155,7 @@ class Recurrent2(Model):
 
 
 class Recurrent3(Model):
-    """Recurrent layer + extra output layer."""
+    """Suffix + recurrent layer + extra output layer."""
 
     def __init__(self, suffix, input, hidden, output):
         self._suffix = suffix
@@ -244,7 +198,7 @@ class Recurrent3(Model):
         suffix = model.stack_suffix(state['suffix'], c)
         input = self.in_layer.step(weights['in'], suffix)
         input = jax.nn.sigmoid(input)
-        state = self.recurrent_layer.step(weights['recurrent'], input, state['state'])
+        state = self.recurrent_layer.step(weights['recurrent'], input, state['recurrent'])
         state = jax.nn.sigmoid(state)
         out1 = self.out1_layer.step(weights['out1'], state)
         out1 = jax.nn.sigmoid(out1)
@@ -317,135 +271,24 @@ class Recurrent4(Model):
         return new_state, out2
 
 
-class RecGru(Model):
-    def __init__(self, conv, rec, gru, skip_rec=False):
-        self._conv = conv
-        self._rec = rec
-        self._gru = gru
-        self._skip_rec = skip_rec
-
-        self.conv_layer = layers.FeedForward(2*NCHAR, self._conv)
-        self.recurrent_layer = layers.Recurrent(self._conv, self._rec)
-        gru_input = self._rec + self._conv if skip_rec else self._rec
-        self.gru_layer = layers.Gru(gru_input, self._gru)
-        self.out1_layer = layers.FeedForward(self._gru, NCHAR)
-        # self.out2_layer = layers.FeedForward(out, NCHAR)
-
-        skip = 's' if self._skip_rec else ''
-
-        self.name = f'rec-gru-{conv}-{rec}{skip}-{gru}'
-
-    def serialize(self):
-        return {'name': 'rec-gru', 'conv': self._conv, 'rec': self._rec, 'gru': self. _gru}
-
-    def init_weights(self, key):
-        keys = jax.random.split(key, 5)
-        return {
-            'conv': self.conv_layer.init_weights(keys[0]),
-            'rec': self.recurrent_layer.init_weights(keys[1]),
-            'gru': self.gru_layer.init_weights(keys[2]),
-            'out1': self.out1_layer.init_weights(keys[3]),
-            # 'out2': self.out2_layer.init_weights(keys[4]),
-        }
-
-    def init_state(self):
-        return {
-            'suffix': model.init_suffix(2),
-            'rec': self.recurrent_layer.init_state(),
-            'gru': self.gru_layer.init_state(),
-        }
-
-    def step(self, weights, state, c):
-        suffix = model.stack_suffix(state['suffix'], c)
-        inp = self.conv_layer.step(weights['conv'], suffix)
-        inp = jax.nn.sigmoid(inp)
-        rec_state = self.recurrent_layer.step(weights['rec'], inp, state['rec'])
-        rec_state = jax.nn.sigmoid(rec_state)
-        if self._skip_rec:
-            gru_input = jnp.concatenate([inp, rec_state])
-        else:
-            gru_input = rec_state
-        gru_state = self.gru_layer.step(weights['gru'], gru_input, state['gru'])
-        out1 = self.out1_layer.step(weights['out1'], gru_state)
-        # out1 = jax.nn.sigmoid(out1)
-        # out2 = self.out2_layer.step(weights['out2'], out1)
-        new_state = {
-            'suffix': suffix[1:],
-            'rec': rec_state,
-            'gru': gru_state,
-        }
-        return new_state, out1
-
-
-class RecGru2(Model):
-    def __init__(self, rec, gru, out, skip_rec=False):
-        self._rec = rec
-        self._gru = gru
-        self._out = out
-        self._skip_rec = skip_rec
-
-        self.recurrent_layer = layers.Recurrent(NCHAR, self._rec)
-        gru_input = (self._rec + NCHAR) if skip_rec else self._rec
-        self.gru_layer = layers.Gru(gru_input, self._gru)
-        self.out1_layer = layers.FeedForward(self._gru, out)
-        self.out2_layer = layers.FeedForward(out, NCHAR)
-
-        skip = 's' if self._skip_rec else ''
-
-        self.name = f'rec-gru2-{rec}{skip}-{gru}-{out}'
-
-    def serialize(self):
-        return {'name': 'rec-gru2', 'out': self._out, 'rec': self._rec, 'gru': self. _gru, 'skip_rec': self._skip_rec}
-
-    def init_weights(self, key):
-        keys = jax.random.split(key, 5)
-        return {
-            'rec': self.recurrent_layer.init_weights(keys[1]),
-            'gru': self.gru_layer.init_weights(keys[2]),
-            'out1': self.out1_layer.init_weights(keys[3]),
-            'out2': self.out2_layer.init_weights(keys[4]),
-        }
-
-    def init_state(self):
-        return {
-            'rec': self.recurrent_layer.init_state(),
-            'gru': self.gru_layer.init_state(),
-        }
-
-    def step(self, weights, state, c):
-        rec_state = self.recurrent_layer.step(weights['rec'], c, state['rec'])
-        rec_state = jax.nn.sigmoid(rec_state)
-        if self._skip_rec:
-            gru_input = jnp.concatenate([c, rec_state])
-        else:
-            gru_input = rec_state
-        gru_state = self.gru_layer.step(weights['gru'], gru_input, state['gru'])
-        out1 = self.out1_layer.step(weights['out1'], gru_state)
-        out1 = jax.nn.sigmoid(out1)
-        out2 = self.out2_layer.step(weights['out2'], out1)
-        new_state = {
-            'rec': rec_state,
-            'gru': gru_state,
-        }
-        return new_state, out2
-
-
-class ConvGru2(Model):
+class ConvGru1(Model):
     def __init__(self, conv, gru):
+        """2-convolution over 3-char suffix + GRU"""
         self._conv = conv
         self._gru = gru
 
+        self.suffix_layer = layers.Suffix(NCHAR, 3)
         self.conv_layer = layers.FeedForward(2*NCHAR, conv)
         self.gru_layer = layers.Gru(2*conv, gru)
         self.out_layer = layers.FeedForward(gru, NCHAR)
 
-        self.name = f'conv-gru2-{conv}-{gru}'
+        self.name = f'convgru1-{conv}-{gru}'
 
     def serialize(self):
-        return {'name': 'conv-gru2', 'conv': self._conv, 'gru': self. _gru}
+        return {'name': 'convgru1', 'conv': self._conv, 'gru': self._gru}
 
     def init_weights(self, key):
-        keys = jax.random.split(key, 5)
+        keys = jax.random.split(key, 3)
         return {
             'conv': self.conv_layer.init_weights(keys[0]),
             'gru': self.gru_layer.init_weights(keys[1]),
@@ -454,191 +297,67 @@ class ConvGru2(Model):
 
     def init_state(self):
         return {
-            'suffix': model.init_suffix(3),
+            'suffix': self.suffix_layer.init_state(),
             'gru': self.gru_layer.init_state(),
         }
 
     def step(self, weights, state, c):
-        suffix = model.stack_suffix(state['suffix'], c)
+        suffix_state, suffix = self.suffix_layer.step(None, c, state['suffix'])
 
-        conv_prev = self.conv_layer.step(weights['conv'], jnp.concatenate(suffix[:-1]))
-        conv = self.conv_layer.step(weights['conv'], jnp.concatenate(suffix[1:]))
-        conv_all = jnp.concatenate([conv_prev, conv])
-        conv_all = jax.nn.relu(conv_all)
+        gru_input1 = self.conv_layer.step(weights['conv'], suffix[0:2])
+        gru_input2 = self.conv_layer.step(weights['conv'], suffix[1:3])
+        gru_input = jnp.concatenate([gru_input1, gru_input2])
+        gru_input = jnp.tanh(gru_input)
 
-        gru_state = self.gru_layer.step(weights['gru'], conv_all, state['gru'])
+        gru_out = self.gru_layer.step(weights['gru'], gru_input, state['gru'])
 
-        out = self.out_layer.step(weights['out'], gru_state)
-        new_state = {
-            'suffix': suffix[1:],
-            'gru': gru_state,
-        }
+        out = self.out_layer.step(weights['out'], gru_out)
+        new_state = {'suffix': suffix_state, 'gru': gru_out}
         return new_state, out
 
 
-class ConvGru(Model):
-    def __init__(self, hidden, conv, **kwargs):
-        self._hidden = hidden
+class ConvGru3(Model):
+    def __init__(self, suffix, conv, gru):
+        """Convolution over X-char suffix + GRU"""
+        self._suffix = suffix
         self._conv = conv
+        self._gru = gru
+
+        self.suffix_layer = layers.Suffix(NCHAR, suffix)
+        self.conv_layer = layers.Convolution(NCHAR, 2, conv, activation=jax.nn.sigmoid)
+        self.gru_layer = layers.Gru((suffix - 1)*conv, gru)
+        self.out_layer = layers.FeedForward(gru, NCHAR)
+
+        self.name = f'convgru3-{suffix}-{conv}-{gru}'
 
     def serialize(self):
-        return {'name': 'conv-gru', 'hidden': self._hidden, 'conv': self._conv}
+        return {'name': 'convgru3', 'suffix': self._suffix, 'conv': self._conv, 'gru': self._gru}
 
     def init_weights(self, key):
-        keys = jax.random.split(key, 16)
-        weights = {
-            'winp': 0.1 * jax.random.normal(keys[0], shape=(self._conv, NCHAR)),
-            'wprev': 0.1 * jax.random.normal(keys[1], shape=(self._conv, NCHAR)),
-            'bconv': 0.1 * jax.random.normal(keys[2], shape=(self._conv,)),
-
-            'wz': jax.random.normal(keys[0], shape=(self._hidden, self._conv)),
-            'pz': jax.random.normal(keys[11], shape=(self._hidden, self._conv)),
-            'uz': jax.random.normal(keys[1], shape=(self._hidden, self._hidden)),
-            'bz': jax.random.normal(keys[2], shape=(self._hidden,)),
-
-            'wr': jax.random.normal(keys[3], shape=(self._hidden, self._conv)),
-            'pr': jax.random.normal(keys[12], shape=(self._hidden, self._conv)),
-            'ur': jax.random.normal(keys[4], shape=(self._hidden, self._hidden)),
-            'br': jax.random.normal(keys[5], shape=(self._hidden,)),
-
-            'wh': jax.random.normal(keys[6], shape=(self._hidden, self._conv)),
-            'ph': jax.random.normal(keys[13], shape=(self._hidden, self._conv)),
-            'uh': jax.random.normal(keys[7], shape=(self._hidden, self._hidden)),
-            'bh': jax.random.normal(keys[8], shape=(self._hidden,)),
-
-            'w2': jax.random.normal(keys[14], shape=(self._hidden, self._hidden)),
-            'b2': jax.random.normal(keys[15], shape=(self._hidden,)),
-
-            'wout': jax.random.normal(keys[9], shape=(NCHAR, self._hidden)),
-            'bout': jax.random.normal(keys[10], shape=(NCHAR,))
+        keys = jax.random.split(key, 3)
+        return {
+            'conv': self.conv_layer.init_weights(keys[0]),
+            'gru': self.gru_layer.init_weights(keys[1]),
+            'out': self.out_layer.init_weights(keys[2]),
         }
 
-        for k in weights.keys():
-            weights[k] = 0.1 * weights[k]
-
-        return weights
-
     def init_state(self):
-        return {'h': jnp.zeros((self._hidden,)), 'prev': jnp.zeros((NCHAR,)), 'prev2': jnp.zeros((NCHAR,))}
-
-    def step(self, weights, state, c):
-        """One forward step in the recurrent network.
-
-        Args:
-            weights: dictionary with model parameters
-            state: array with the internal state, initially zero. shape = (256,)
-            c: a single character represented as a one-of. shape = (256,)
-        """
-        h = state['h']
-        prev = state['prev']
-        prev2 = state['prev2']
-
-        conv = jnp.dot(weights['winp'], c) + jnp.dot(weights['wprev'], prev) + weights['bconv']
-        conv = jax.nn.tanh(conv)
-
-        conv_prev = jnp.dot(weights['winp'], prev) + jnp.dot(weights['wprev'], prev2) + weights['bconv']
-        conv_prev = jax.nn.tanh(conv_prev)
-
-        z = jnp.dot(weights['wz'], conv) + jnp.dot(weights['uz'], h) + jnp.dot(weights['pz'], conv_prev) + weights['bz']
-        z = jax.nn.sigmoid(z)
-
-        r = jnp.dot(weights['wr'], conv) + jnp.dot(weights['ur'], h) + jnp.dot(weights['pr'], conv_prev) + weights['br']
-        r = jax.nn.sigmoid(r)
-
-        hc = jnp.dot(weights['wh'], conv) + jnp.dot(weights['uh'], r * h) + jnp.dot(weights['ph'], conv_prev) + weights['bh']
-        hc = jax.nn.tanh(hc)
-
-        hn = (1 - z) * h + z * hc
-
-        t = jnp.dot(weights['w2'], hn) + weights['b2']
-        t = jax.nn.sigmoid(t)
-
-        out = jnp.dot(weights['wout'], t) + weights['bout']
-
-        return {'h': hn, 'prev': c, 'prev2': prev}, out
-
-
-class Conv3Gru(Model):
-    def __init__(self, hidden, conv, **kwargs):
-        self._hidden = hidden
-        self._conv = conv
-
-    def serialize(self):
-        return {'name': 'conv3-gru', 'hidden': self._hidden, 'conv': self._conv}
-
-    def init_weights(self, key):
-        keys = jax.random.split(key, 16)
-        weights = {
-            'winp': 0.1 * jax.random.normal(keys[0], shape=(self._conv, 3*NCHAR)),
-            'bconv': 0.1 * jax.random.normal(keys[2], shape=(self._conv,)),
-
-            'wz': jax.random.normal(keys[0], shape=(self._hidden, self._conv)),
-            'pz': jax.random.normal(keys[11], shape=(self._hidden, self._conv)),
-            'uz': jax.random.normal(keys[1], shape=(self._hidden, self._hidden)),
-            'bz': jax.random.normal(keys[2], shape=(self._hidden,)),
-
-            'wr': jax.random.normal(keys[3], shape=(self._hidden, self._conv)),
-            'pr': jax.random.normal(keys[12], shape=(self._hidden, self._conv)),
-            'ur': jax.random.normal(keys[4], shape=(self._hidden, self._hidden)),
-            'br': jax.random.normal(keys[5], shape=(self._hidden,)),
-
-            'wh': jax.random.normal(keys[6], shape=(self._hidden, self._conv)),
-            'ph': jax.random.normal(keys[13], shape=(self._hidden, self._conv)),
-            'uh': jax.random.normal(keys[7], shape=(self._hidden, self._hidden)),
-            'bh': jax.random.normal(keys[8], shape=(self._hidden,)),
-
-            'w2': jax.random.normal(keys[14], shape=(self._hidden, self._hidden)),
-            'b2': jax.random.normal(keys[15], shape=(self._hidden,)),
-
-            'wout': jax.random.normal(keys[9], shape=(NCHAR, self._hidden)),
-            'bout': jax.random.normal(keys[10], shape=(NCHAR,))
+        return {
+            'suffix': self.suffix_layer.init_state(),
+            'gru': self.gru_layer.init_state(),
         }
 
-        for k in weights.keys():
-            weights[k] = 0.1 * weights[k]
-
-        return weights
-
-    def init_state(self):
-        return {'h': jnp.zeros((self._hidden,)), 'suffix': jnp.zeros((3, NCHAR))}
-
     def step(self, weights, state, c):
-        """One forward step in the recurrent network.
+        suffix_state, suffix = self.suffix_layer.step(None, c, state['suffix'])
 
-        Args:
-            weights: dictionary with model parameters
-            state: state dictionary
-            c: a single character represented as a one-of. shape = (256,)
-        """
-        h = state['h']
-        suffix = state['suffix']
-        suffix = jnp.vstack((suffix, c.reshape((1, -1))))
+        conv = self.conv_layer.step(weights['conv'], suffix)
+        conv = conv.flatten()
 
-        suffix1 = suffix[0:3]
-        suffix2 = suffix[1:4]
+        gru_out = self.gru_layer.step(weights['gru'], conv, state['gru'])
 
-        conv1 = jnp.dot(weights['winp'], suffix1.flatten()) + weights['bconv']
-        conv1 = jax.nn.tanh(conv1)
-        conv2 = jnp.dot(weights['winp'], suffix2.flatten()) + weights['bconv']
-        conv2 = jax.nn.tanh(conv2)
-
-        z = jnp.dot(weights['wz'], conv1) + jnp.dot(weights['uz'], h) + jnp.dot(weights['pz'], conv2) + weights['bz']
-        z = jax.nn.sigmoid(z)
-
-        r = jnp.dot(weights['wr'], conv1) + jnp.dot(weights['ur'], h) + jnp.dot(weights['pr'], conv2) + weights['br']
-        r = jax.nn.sigmoid(r)
-
-        hc = jnp.dot(weights['wh'], conv1) + jnp.dot(weights['uh'], r * h) + jnp.dot(weights['ph'], conv2) + weights['bh']
-        hc = jax.nn.tanh(hc)
-
-        hn = (1 - z) * h + z * hc
-
-        t = jnp.dot(weights['w2'], hn) + weights['b2']
-        t = jax.nn.sigmoid(t)
-
-        out = jnp.dot(weights['wout'], t) + weights['bout']
-
-        return {'h': hn, 'suffix': suffix2}, out
+        out = self.out_layer.step(weights['out'], gru_out)
+        new_state = {'suffix': suffix_state, 'gru': gru_out}
+        return new_state, out
 
 
 class Gru2(Model):
@@ -780,15 +499,19 @@ class Lstm2(Model):
 
 
 class LLstm(Model):
-    def __init__(self, lstm1, lstm2=512):
+    def __init__(self, lstm1, lstm2=512, skip=False):
         self._lstm1 = lstm1
         self._lstm2 = lstm2
 
         self.lstm1_layer = layers.Lstm(2*NCHAR, lstm1)
         self.lstm2_layer = layers.Lstm(lstm1, lstm2)
         self.out_layer = layers.FeedForward(lstm2, NCHAR)
+        self.skip = skip
 
-        self.name = f'llstm-{lstm1}-{lstm2}'
+        if self.skip:
+            self.name = f'llstm-{lstm1}-{lstm2}-skip'
+        else:
+            self.name = f'llstm-{lstm1}-{lstm2}'
 
     def serialize(self):
         return {'name': 'llstm', 'lstm1': self._lstm1, 'lstm2': self._lstm2}
@@ -813,7 +536,13 @@ class LLstm(Model):
 
         lstm1_input = jnp.concatenate([prev, c])
         lstm1_state = self.lstm1_layer.step(weights['lstm1'], lstm1_input, state['lstm1'])
-        lstm2_state = self.lstm2_layer.step(weights['lstm2'], lstm1_state['h'], state['lstm2'])
+
+        if self.skip:
+            lstm2_input = lstm1_state['h'] + lstm1_input
+        else:
+            lstm2_input = lstm1_state['h']
+
+        lstm2_state = self.lstm2_layer.step(weights['lstm2'], lstm2_input, state['lstm2'])
 
         out = self.out_layer.step(weights['out'], lstm2_state['h'])
 
@@ -830,15 +559,15 @@ MODELS = {
     'freq': Freq,
     'markov1': Markov1,
     'markov': Markov,
+    'forward': Forward,
     'recurrent1': Recurrent1,
     'recurrent2': Recurrent2,
     'recurrent3': Recurrent3,
-    'conv-gru': ConvGru,
-    'conv3-gru': ConvGru,
-    'conv-gru2': ConvGru2,
     'lstm2': Lstm2,
     'llstm': LLstm,
     'grugru': GruGru,
+    'convgru1': ConvGru1,
+    'convgru3': ConvGru3,
 }
 
 def build(spec):

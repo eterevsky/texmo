@@ -56,8 +56,8 @@ def main(data, steps, learning_rate, regularization, output_dir, model_name, mod
         if temp_steps > 0 and manager.step % temp_steps == 0 and temp_dir is not None:
             manager.save(temp_dir)
 
-    print('Model:', model.name)
-    print('Params:', model.total_weights(manager.weights))
+    print('Model:', manager.model.name)
+    print('Params:', manager.model.total_weights(manager.weights))
     print('Steps:', steps)
     data_size = steps * batch_size * sample_length / 1E6
     print(f'Used {steps:.1f}M data for training')

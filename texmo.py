@@ -116,7 +116,7 @@ def parse_args():
     parser.add_argument('-s', '--steps', type=int, default=0,
                         help='number of training steps')
     parser.add_argument('-l', '--learning-rate', type=float, metavar='RATE',
-                        help='learning rate', default=0.1)
+                        help='learning rate', default=0.01)
     parser.add_argument('-r', '--regularization', type=float, help='L2 regularization coefficient',
                         default=0.1)
     parser.add_argument('--sample-length', type=int, default=1024, metavar='LEN',

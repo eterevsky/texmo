@@ -409,9 +409,7 @@ class GruGru(Model):
         self.gru2_layer = layers.Gru(gru1, gru2)
         self.out_layer = layers.FeedForward(gru2, NCHAR)
 
-        s = '-skip' if skip else ''
-
-        self.name = f'grugru-{gru1}-{gru2}-skip'
+        self.name = f'grugru-{gru1}-{gru2}{s}'
 
     def serialize(self):
         return {'name': 'grugru', 'gru1': self._gru1, 'gru2': self._gru2, 'skip': self._skip}

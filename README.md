@@ -52,3 +52,4 @@ python3 train.py -d data -m models/some-model.json
 | freq                         |      256 | 1000           | 4.9588 | 197 (mac)  |
 | markov1                      |    65792 | 10000          | 3.7140 | 953  |
 | markov-2                     |   131328 | 10000          | 3.4492 | 1108 |
+| grugru-512-512-skip          |  3280128 | 100000         | 1.7336 | 79015 |

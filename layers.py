@@ -47,10 +47,11 @@ class Suffix(Layer):
 
 
 class FeedForward(Layer):
-    def __init__(self, input_size, output_size):
+    def __init__(self, input_size, output_size, activation=None):
         super().__init__()
         self._input = input_size
         self._output = output_size
+        self._activation = activation
 
     def init_weights(self, key, scale=0.1):
         key0, key1 = split(key)
@@ -62,7 +63,10 @@ class FeedForward(Layer):
         return weights
 
     def step(self, weights, input):
-        return jnp.dot(weights['w'], input.flatten()) + weights['b']
+        out = jnp.dot(weights['w'], input.flatten()) + weights['b']
+        if self._activation is not None:
+            out = self._activation(out)
+        return out
 
 
 class Recurrent(Layer):

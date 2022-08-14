@@ -10,7 +10,7 @@ python3 train.py -d data -s 100000 -o models -t temp
 python3 train.py -d data -m models/some-model.json
 ```
 
-## Results
+## Results with length = 128, batch = 64
 
 | Model                        | Params   | Steps          | Loss   | Time |
 | ---------------------------- | -------- | -------------- | ------ | ---- |
@@ -54,4 +54,4 @@ python3 train.py -d data -m models/some-model.json
 | markov1                      |    65792 | 10000          | 3.7140 | 953  |
 | markov-2                     |   131328 | 10000          | 3.4492 | 1108 |
 | recurrent1-512               |   525056 | 20000          | 2.1799 | 77314? (M1) |
-| grugru-512-512-skip          |  3280128 | 100000         | 1.7336 | 79015 |
+| grugru-512-512               |  3280128 | 100000         | 1.7336 | 79015 |

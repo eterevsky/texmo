@@ -360,6 +360,48 @@ class ConvGru3(Model):
         return new_state, out
 
 
+class Conv3Gru(Model):
+    def __init__(self, inp, gru):
+        """Fully connected over the last 3 chars + GRU"""
+        self._inp = inp
+        self._gru = gru
+
+        self.suffix_layer = layers.Suffix(NCHAR, 3)
+        self.inp_layer = layers.FeedForward(3*NCHAR, inp, activation=jax.nn.sigmoid)
+        self.gru_layer = layers.Gru(inp, gru)
+        self.out_layer = layers.FeedForward(gru, NCHAR)
+
+        self.name = f'conv3gru-{inp}-{gru}'
+
+    def serialize(self):
+        return {'name': 'conv3gru', 'inp': self._inp, 'gru': self._gru}
+
+    def init_weights(self, key):
+        keys = jax.random.split(key, 3)
+        return {
+            'inp': self.inp_layer.init_weights(keys[0]),
+            'gru': self.gru_layer.init_weights(keys[1]),
+            'out': self.out_layer.init_weights(keys[2]),
+        }
+
+    def init_state(self):
+        return {
+            'suffix': self.suffix_layer.init_state(),
+            'gru': self.gru_layer.init_state(),
+        }
+
+    def step(self, weights, state, c):
+        suffix_state, suffix = self.suffix_layer.step(None, c, state['suffix'])
+
+        inp = self.inp_layer.step(weights['inp'], suffix)
+
+        gru_out = self.gru_layer.step(weights['gru'], inp, state['gru'])
+
+        out = self.out_layer.step(weights['out'], gru_out)
+        new_state = {'suffix': suffix_state, 'gru': gru_out}
+        return new_state, out
+
+
 class Gru2(Model):
     def __init__(self, gru):
         self._gru = gru
@@ -566,6 +608,7 @@ MODELS = {
     'grugru': GruGru,
     'convgru1': ConvGru1,
     'convgru3': ConvGru3,
+    'conv3gru': Conv3Gru,
 }
 
 def build(spec):

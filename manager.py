@@ -101,9 +101,9 @@ class Manager(object):
     def from_spec(spec):
         model = models.build(spec['model'])
         weights = deserialize_weights(spec['weights'])
-        return Manager(model, spec['learning_rate'], spec['regularization'], spec.get('total_steps', 0), spec['step'], weights)
+        return Manager(model, spec['learning_rate'], spec['regularization'], spec.get('total_steps', 0), spec['step'], weights, step_losses=spec.get('step_loss', None))
 
-    def __init__(self, model, learning_rate, regularization, total_steps, step=0, weights=None):
+    def __init__(self, model, learning_rate, regularization, total_steps, step=0, weights=None, step_loss=None):
         print('Creating Model')
         self._key = jax.random.PRNGKey(42)
         self.model = model
@@ -116,6 +116,10 @@ class Manager(object):
         else:
             self.weights = self.model.init_weights(self.key())
         self.loss = None
+        if step_loss is None:
+            self.step_loss = []
+        else:
+            self.step_loss = step_loss
 
     def init(self):
         print('Total parameters:', self.model.total_weights(self.weights))
@@ -195,6 +199,7 @@ class Manager(object):
         self.weights = optax.apply_updates(self.weights, updates)
 
         self.step += 1
+        self.step_loss.append(float(loss))
 
         return loss
 
@@ -210,7 +215,7 @@ class Manager(object):
             return weights.tolist()
 
     def save(self, dir):
-        model = self.model.serialize()
+        model_spec = self.model.serialize()
         model_name = self.name()
 
         path = os.path.join(dir, f'{model_name}.json')
@@ -218,13 +223,14 @@ class Manager(object):
         weights = self.serialize_weights(self.weights)
 
         data = {
-            'model': model,
+            'model': model_spec,
             'total_steps': self.total_steps,
             'step': self.step,
             'weights': weights,
             'learning_rate': self.learning_rate,
             'regularization': self.regularization,
-            'loss': self.loss
+            'loss': self.loss,
+            'step_loss': self.step_loss,
         }
 
         print(f'Saving model to {path}')

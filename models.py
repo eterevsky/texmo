@@ -162,13 +162,11 @@ class Recurrent3(Model):
         self._input = input
         self._hidden = hidden
         self._out = output
-        self.in_layer = layers.FeedForward(NCHAR*suffix, self._input)
-        self.recurrent_layer = layers.Recurrent(self._input, self._hidden)
-        self.out1_layer = layers.FeedForward(self._hidden, output)
-        self.out2_layer = layers.FeedForward(output, NCHAR)
-
-    def name(self):
-        return f'recurrent3-{self._input}-{self._hidden}-{self._out}'
+        self.in_layer = layers.FeedForward(NCHAR*suffix, self._input, activation=jax.nn.sigmoid)
+        self.recurrent_layer = layers.Recurrent(self._input, self._hidden, activation=jax.nn.sigmoid)
+        self.out1_layer = layers.FeedForward(self._hidden, output, activation=jax.nn.sigmoid)
+        self.out2_layer = layers.FeedForward(self._out, NCHAR)
+        self.name = f'recurrent3-{self._input}-{self._hidden}-{self._out}'
 
     def serialize(self):
         return {
@@ -182,7 +180,7 @@ class Recurrent3(Model):
     def init_state(self):
         return {
             'suffix': model.init_suffix(self._suffix),
-            'state': self.recurrent_layer.init_state(),
+            'recurrent': self.recurrent_layer.init_state(),
         }
 
     def init_weights(self, key):
@@ -197,15 +195,12 @@ class Recurrent3(Model):
     def step(self, weights, state, c):
         suffix = model.stack_suffix(state['suffix'], c)
         input = self.in_layer.step(weights['in'], suffix)
-        input = jax.nn.sigmoid(input)
         state = self.recurrent_layer.step(weights['recurrent'], input, state['recurrent'])
-        state = jax.nn.sigmoid(state)
         out1 = self.out1_layer.step(weights['out1'], state)
-        out1 = jax.nn.sigmoid(out1)
         out2 = self.out2_layer.step(weights['out2'], out1)
         new_state = {
             'suffix': suffix[1:],
-            'state': state,
+            'recurrent': state,
         }
         return new_state, out2
 

@@ -70,10 +70,11 @@ class FeedForward(Layer):
 
 
 class Recurrent(Layer):
-    def __init__(self, input_size, state_size):
+    def __init__(self, input_size, state_size, activation=None):
         super().__init__()
         self._input = input_size
         self._state = state_size
+        self._activation = activation
 
     def init_state(self):
         return jnp.zeros((self._state,))
@@ -90,6 +91,8 @@ class Recurrent(Layer):
     def step(self, weights, input, state):
         input = input.flatten()
         state = jnp.dot(weights['winput'], input) + jnp.dot(weights['wstate'], state) + weights['b']
+        if self._activation is not None:
+            state = self._activation(state)
         return state
 
 

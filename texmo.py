@@ -60,7 +60,7 @@ def main(data, steps, learning_rate, regularization, output_dir, model_name, mod
     print('Params:', manager.model.total_weights(manager.weights))
     print('Steps:', steps)
     data_size = steps * batch_size * sample_length / 1E6
-    print(f'Used {steps:.1f}M data for training')
+    print(f'Used {data_size:.1f}M data for training')
 
     if steps > 0:
         t = int(time.time() - start)

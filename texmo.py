@@ -1,4 +1,5 @@
 import argparse
+from collections import namedtuple
 import json
 import matplotlib.pyplot as plt
 import os
@@ -9,11 +10,11 @@ from manager import Manager
 import models
 
 
-def report(manager, training_time, steps, train_set, sample_length, batch_size, output_dir):
+def report(manager, training_time, train_set, sample_length, batch_size, output_dir, skip_graph):
     print('Model:', manager.model.name)
     print('Params:', manager.model.total_weights(manager.weights))
-    print('Steps:', steps)
-    data_size = steps * batch_size * sample_length / 1E6
+    print('Steps:', manager.step)
+    data_size = manager.step * batch_size * sample_length / 1E6
     print(f'Used {data_size:.1f}M data for training')
     print(f'Training time: {training_time:.0f} s')
 
@@ -21,7 +22,8 @@ def report(manager, training_time, steps, train_set, sample_length, batch_size, 
         b'Roses are red\nViolets are blue,\nSugar is sweet\nAnd so are you.')
 
     batch = train_set.sample(1024, 1024)
-    print('Batch loss: {:.4f}'.format(manager.evaluate(batch)))
+    batch_loss = manager.evaluate(batch)
+    print(f'Batch loss: {batch_loss:.4f}')
 
     prefix = b'Roses are red\nViolets are blu'
     out = manager.sample(prefix, 256)
@@ -34,7 +36,7 @@ def report(manager, training_time, steps, train_set, sample_length, batch_size, 
     print(s)
     print()
 
-    if steps > 0:
+    if manager.step > 0 and not skip_graph:
         plt.xscale('log')
         plt.yscale('log')
         plt.ylim(top=8)
@@ -42,8 +44,10 @@ def report(manager, training_time, steps, train_set, sample_length, batch_size, 
         plt.savefig(os.path.join(output_dir, manager.name() + '.png'))
         plt.show()
 
+    return batch_loss
 
-def main(data, steps, learning_rate, regularization, output_dir, model_name, model_path, temp_dir, sample_length, batch_size, temp_steps, time_limit):
+
+def main(data, steps, learning_rate, regularization, output_dir, model_name, model_path, temp_dir, sample_length, batch_size, temp_steps, time_limit, skip_graph=False):
     if data is not None:
         print(f'Training data: {data}')
         train_set = DataSet(data)
@@ -86,7 +90,21 @@ def main(data, steps, learning_rate, regularization, output_dir, model_name, mod
     if output_dir is not None:
         manager.save(output_dir)
 
-    report(manager, training_time, steps, train_set, sample_length, batch_size, output_dir)
+    loss = report(manager, training_time, train_set, sample_length, batch_size, output_dir, skip_graph)
+    return loss, manager.step
+
+
+def benchmark(data, time_limit):
+    results = []
+    for name in ('recurrent1-128', 'recurrent1-512', 'recurrent3-2-128-512-128', 'lstm2-512', 'llstm-512-512', 'grugru-512-512', 'convgru1-128-512'):
+        for learning_rate in (0.1, 0.01, 0.001):
+            for regularization in (0.1, 0.01):
+                for batch_size in (64, 128, 256):
+                    loss, step = main(data, 1000000, learning_rate, regularization, None, name, None, None, 256, batch_size, temp_steps=0, time_limit=time_limit, skip_graph=True)
+                    results.append((name, learning_rate, regularization, batch_size, step, loss))
+    for r in results:
+        name, lr, reg, batch_size, step, loss = r
+        print(f'{name:30} L{lr:.3f} R{reg:.2f} {batch_size:3} {step:5} {loss:.4f}')
 
 
 def parse_args():
@@ -102,6 +120,8 @@ def parse_args():
                              help='load trained model from file')
     model_group.add_argument(
         '-n', '--model-name', metavar='NAME', default=None, help='parse model name')
+
+    model_group.add_argument('--benchmark', action='store_true', default=False, help='run a benchmark with various configurations')
 
     parser.add_argument('-o', '--output-dir', type=str, metavar='PATH',
                         default=None, help='directory for saved model')
@@ -125,9 +145,14 @@ def parse_args():
     parser.add_argument('--temp-steps', metavar='N', type=int,
                         default=1000, help='save intermediate model every N steps')
 
+    parser.add_argument('--skip-graph', action='store_true', default=False, help='do not generate the loss graph')
+
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     args = parse_args()
-    main(**vars(args))
+    if args.benchmark:
+        benchmark(args.data, args.time_limit)
+    else:
+        main(**vars(args))

@@ -44,7 +44,7 @@ def report(manager, training_time, train_set, sample_length, batch_size, output_
         plt.savefig(os.path.join(output_dir, manager.name() + '.png'))
         plt.show()
 
-    return batch_loss
+    return batch_loss, data_size
 
 
 def main(data, steps, learning_rate, regularization, output_dir, model_name, model_path, temp_dir, sample_length, batch_size, temp_steps, time_limit, skip_graph=False):
@@ -90,8 +90,9 @@ def main(data, steps, learning_rate, regularization, output_dir, model_name, mod
     if output_dir is not None:
         manager.save(output_dir)
 
-    loss = report(manager, training_time, train_set, sample_length, batch_size, output_dir, skip_graph)
-    return loss, manager.step
+    loss, data_size = report(manager, training_time, train_set,
+                             sample_length, batch_size, output_dir, skip_graph)
+    return loss, manager.step, data_size
 
 
 def benchmark(data, time_limit):
@@ -101,11 +102,13 @@ def benchmark(data, time_limit):
             for sample_length in (128, 256):
                 for regularization in (0.1, 0.01):
                     for batch_size in (64, 128, 256):
-                        loss, step = main(data, 1000000, learning_rate, regularization, None, name, None, None, sample_length, batch_size, temp_steps=0, time_limit=time_limit, skip_graph=True)
-                        results.append((name, learning_rate, regularization, batch_size, step, loss))
+                        loss, step, data_size = main(data, 1000000, learning_rate, regularization, None, name, None, None,
+                                                     sample_length, batch_size, temp_steps=0, time_limit=time_limit, skip_graph=True)
+                        results.append(
+                            (name, learning_rate, regularization, batch_size, step, data_size, loss))
     for r in results:
-        name, lr, reg, batch_size, step, loss = r
-        print(f'{name:30} L{lr:.3f} R{reg:.2f} {batch_size:3} {step:5} {loss:.4f}')
+        name, lr, reg, batch_size, step, data_size, loss = r
+        print(f'{name:30} L{lr:.3f} R{reg:.2f} {batch_size:3} {step:5} {data_size:4.1f}M {loss:.4f}')
 
 
 def parse_args():
@@ -122,7 +125,8 @@ def parse_args():
     model_group.add_argument(
         '-n', '--model-name', metavar='NAME', default=None, help='parse model name')
 
-    model_group.add_argument('--benchmark', action='store_true', default=False, help='run a benchmark with various configurations')
+    model_group.add_argument('--benchmark', action='store_true',
+                             default=False, help='run a benchmark with various configurations')
 
     parser.add_argument('-o', '--output-dir', type=str, metavar='PATH',
                         default=None, help='directory for saved model')
@@ -130,7 +134,8 @@ def parse_args():
     # Training
     parser.add_argument('-s', '--steps', type=int, default=0,
                         help='number of training steps')
-    parser.add_argument('--time-limit', type=int, metavar='SECONDS', help='time limit for training', default=None)
+    parser.add_argument('--time-limit', type=int, metavar='SECONDS',
+                        help='time limit for training', default=None)
     parser.add_argument('-l', '--learning-rate', type=float, metavar='RATE',
                         help='learning rate', default=0.01)
     parser.add_argument('-r', '--regularization', type=float, help='L2 regularization coefficient',
@@ -146,7 +151,8 @@ def parse_args():
     parser.add_argument('--temp-steps', metavar='N', type=int,
                         default=1000, help='save intermediate model every N steps')
 
-    parser.add_argument('--skip-graph', action='store_true', default=False, help='do not generate the loss graph')
+    parser.add_argument('--skip-graph', action='store_true',
+                        default=False, help='do not generate the loss graph')
 
     return parser.parse_args()
 

@@ -96,12 +96,13 @@ def main(data, steps, learning_rate, regularization, output_dir, model_name, mod
 
 def benchmark(data, time_limit):
     results = []
-    for name in ('recurrent1-128', 'recurrent1-512', 'recurrent3-2-128-512-128', 'lstm2-512', 'llstm-512-512', 'grugru-512-512', 'convgru1-128-512'):
-        for learning_rate in (0.1, 0.01, 0.001):
-            for regularization in (0.1, 0.01):
-                for batch_size in (64, 128, 256):
-                    loss, step = main(data, 1000000, learning_rate, regularization, None, name, None, None, 256, batch_size, temp_steps=0, time_limit=time_limit, skip_graph=True)
-                    results.append((name, learning_rate, regularization, batch_size, step, loss))
+    for name in ('recurrent1-512', 'recurrent3-2-128-512-128', 'llstm-512-512', 'grugru-512-512', 'convgru1-128-512'):
+        for learning_rate in (0.1, 0.01):
+            for sample_length in (128, 256):
+                for regularization in (0.1, 0.01):
+                    for batch_size in (64, 128, 256):
+                        loss, step = main(data, 1000000, learning_rate, regularization, None, name, None, None, sample_length, batch_size, temp_steps=0, time_limit=time_limit, skip_graph=True)
+                        results.append((name, learning_rate, regularization, batch_size, step, loss))
     for r in results:
         name, lr, reg, batch_size, step, loss = r
         print(f'{name:30} L{lr:.3f} R{reg:.2f} {batch_size:3} {step:5} {loss:.4f}')

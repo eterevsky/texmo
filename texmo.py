@@ -43,7 +43,7 @@ def report(manager, training_time, steps, train_set, sample_length, batch_size, 
         plt.show()
 
 
-def main(data, steps, learning_rate, regularization, output_dir, model_name, model_path, temp_dir, sample_length, batch_size, temp_steps):
+def main(data, steps, learning_rate, regularization, output_dir, model_name, model_path, temp_dir, sample_length, batch_size, temp_steps, time_limit):
     if data is not None:
         print(f'Training data: {data}')
         train_set = DataSet(data)
@@ -65,10 +65,12 @@ def main(data, steps, learning_rate, regularization, output_dir, model_name, mod
 
     start = time.time()
 
-    step_array = []
     last_report = 0
 
     for i in range(steps):
+        if time_limit is not None and time.time() - start > time_limit:
+            break
+
         batch = train_set.sample(length=sample_length, batch_size=batch_size)
         manager.train(batch)
         if manager.step < 10 or manager.step % 10 == 0 or time.time() - last_report > 10:
@@ -107,6 +109,7 @@ def parse_args():
     # Training
     parser.add_argument('-s', '--steps', type=int, default=0,
                         help='number of training steps')
+    parser.add_argument('--time-limit', type=int, metavar='SECONDS', help='time limit for training', default=None)
     parser.add_argument('-l', '--learning-rate', type=float, metavar='RATE',
                         help='learning rate', default=0.01)
     parser.add_argument('-r', '--regularization', type=float, help='L2 regularization coefficient',

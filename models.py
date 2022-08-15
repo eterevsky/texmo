@@ -591,6 +591,86 @@ class LLstm(Model):
         return new_state, out
 
 
+class RecGru(Model):
+    def __init__(self, rec, gru):
+        self._rec = rec
+        self._gru = gru
+
+        self.rec_layer = layers.Recurrent(NCHAR, rec, activation=jax.nn.sigmoid)
+        self.gru_layer = layers.Gru(rec, gru)
+        self.out_layer = layers.FeedForward(gru, NCHAR)
+
+        self.name = f'recgru-{rec}-{gru}'
+
+    def serialize(self):
+        return {'name': 'recgru', 'rec': self._rec, 'gru': self._gru}
+
+    def init_weights(self, key):
+        keys = jax.random.split(key, 3)
+        return {
+            'rec': self.rec_layer.init_weights(keys[0]),
+            'gru': self.gru_layer.init_weights(keys[1]),
+            'out': self.out_layer.init_weights(keys[2]),
+        }
+
+    def init_state(self):
+        return {
+            'rec': self.rec_layer.init_state(),
+            'gru': self.gru_layer.init_state(),
+        }
+
+    def step(self, weights, state, c):
+        rec_out = self.rec_layer.step(weights['rec'], c, state['rec'])
+        gru_out = self.gru_layer.step(weights['gru'], rec_out, state['gru'])
+        out = self.out_layer.step(weights['out'], gru_out)
+
+        new_state = {
+            'rec': rec_out,
+            'gru': gru_out,
+        }
+        return new_state, out
+
+
+class GruGru2(Model):
+    def __init__(self, gru1, gru2):
+        self._gru1 = gru1
+        self._gru2 = gru2
+
+        self.gru1_layer = layers.Gru(NCHAR, gru1)
+        self.gru2_layer = layers.Gru(gru1, gru2)
+        self.out_layer = layers.FeedForward(gru2, NCHAR)
+
+        self.name = f'grugru2-{gru1}-{gru2}'
+
+    def serialize(self):
+        return {'name': 'grugru2', 'gru1': self._gru1, 'gru2': self._gru2}
+
+    def init_weights(self, key):
+        keys = jax.random.split(key, 3)
+        return {
+            'gru1': self.gru1_layer.init_weights(keys[0]),
+            'gru2': self.gru2_layer.init_weights(keys[1]),
+            'out': self.out_layer.init_weights(keys[2]),
+        }
+
+    def init_state(self):
+        return {
+            'gru1': self.gru1_layer.init_state(),
+            'gru2': self.gru2_layer.init_state(),
+        }
+
+    def step(self, weights, state, c):
+        gru1_out = self.gru1_layer.step(weights['gru1'], c, state['gru1'])
+        gru2_out = self.gru2_layer.step(weights['gru2'], gru1_out, state['gru2'])
+        out = self.out_layer.step(weights['out'], gru2_out)
+
+        new_state = {
+            'gru1': gru1_out,
+            'gru2': gru2_out,
+        }
+        return new_state, out
+
+
 MODELS = {
     'equal': Equal,
     'freq': Freq,
@@ -606,6 +686,8 @@ MODELS = {
     'convgru1': ConvGru1,
     'convgru3': ConvGru3,
     'conv3gru': Conv3Gru,
+    'recgru': RecGru,
+    'grugru2': GruGru2,
 }
 
 def build(spec):

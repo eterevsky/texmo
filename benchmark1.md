@@ -124,4 +124,3 @@ Running on a machine with GTX 3090. Each model is trained for 10 minutes
 | convgru1-128-512               | 0.01 | 256           | 0.01           |    64 |  6290 | 103.1M | 2.3599 |
 | convgru1-128-512               | 0.01 | 256           | 0.01           |   128 |  5402 | 177.0M | 2.3451 |
 | convgru1-128-512               | 0.01 | 256           | 0.01           |   256 |  4379 | 287.0M | 2.3391 |
-|

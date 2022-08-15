@@ -47,7 +47,10 @@ def report(manager, training_time, train_set, sample_length, batch_size, output_
     return batch_loss, data_size
 
 
-def main(data, steps, learning_rate, regularization, output_dir, model_name, model_path, temp_dir, sample_length, batch_size, temp_steps, time_limit, skip_graph=False):
+def main(data, steps, learning_rate, regularization, output_dir, model_name, model_path, temp_dir, sample_length, batch_size, temp_steps, time_limit, skip_graph=False, benchmark=False):
+    if time_limit > 0 and steps == 0:
+        steps = 10000000
+
     if data is not None:
         print(f'Training data: {data}')
         train_set = DataSet(data)
@@ -97,18 +100,18 @@ def main(data, steps, learning_rate, regularization, output_dir, model_name, mod
 
 def benchmark(data, time_limit):
     results = []
-    for name in ('recurrent1-512', 'recurrent3-2-128-512-128', 'llstm-512-512', 'grugru-512-512', 'convgru1-128-512'):
+    for name in ('recgru-128-512', 'grugru-128-512'):
         for learning_rate in (0.1, 0.01):
-            for sample_length in (128, 256):
+            for sample_length in (128,):
                 for regularization in (0.1, 0.01):
                     for batch_size in (64, 128, 256):
                         loss, step, data_size = main(data, 1000000, learning_rate, regularization, None, name, None, None,
                                                      sample_length, batch_size, temp_steps=0, time_limit=time_limit, skip_graph=True)
                         results.append(
-                            (name, learning_rate, regularization, batch_size, step, data_size, loss))
+                            (name, learning_rate, sample_length, regularization, batch_size, step, data_size, loss))
     for r in results:
-        name, lr, reg, batch_size, step, data_size, loss = r
-        print(f'{name:30} L{lr:.3f} R{reg:.2f} {batch_size:3} {step:5} {data_size:4.1f}M {loss:.4f}')
+        name, lr, length, reg, batch_size, step, data_size, loss = r
+        print(f'{name:30} L{lr:.3f} {length}b R{reg:.2f} {batch_size:3} {step:5} {data_size:4.1f}M {loss:.4f}')
 
 
 def parse_args():

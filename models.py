@@ -671,6 +671,102 @@ class GruGru2(Model):
         return new_state, out
 
 
+class GruGru3(Model):
+    def __init__(self, gru1, gru2, gru3):
+        self._gru1 = gru1
+        self._gru2 = gru2
+        self._gru3 = gru3
+
+        self.gru1_layer = layers.Gru(NCHAR, gru1)
+        self.gru2_layer = layers.Gru(gru1, gru2)
+        self.gru3_layer = layers.Gru(gru2, gru3)
+        self.out_layer = layers.FeedForward(gru3, NCHAR)
+
+        self.name = f'grugru3-{gru1}-{gru2}-{gru3}'
+
+    def serialize(self):
+        return {'name': 'grugru3', 'gru1': self._gru1, 'gru2': self._gru2, 'gru3': self._gru3}
+
+    def init_weights(self, key):
+        keys = jax.random.split(key, 4)
+        return {
+            'gru1': self.gru1_layer.init_weights(keys[0]),
+            'gru2': self.gru2_layer.init_weights(keys[1]),
+            'gru3': self.gru3_layer.init_weights(keys[2]),
+            'out': self.out_layer.init_weights(keys[3]),
+        }
+
+    def init_state(self):
+        return {
+            'gru1': self.gru1_layer.init_state(),
+            'gru2': self.gru2_layer.init_state(),
+            'gru3': self.gru3_layer.init_state(),
+        }
+
+    def step(self, weights, state, c):
+        gru1_out = self.gru1_layer.step(weights['gru1'], c, state['gru1'])
+        gru2_out = self.gru2_layer.step(weights['gru2'], gru1_out, state['gru2'])
+        gru3_out = self.gru3_layer.step(weights['gru3'], gru2_out, state['gru3'])
+        out = self.out_layer.step(weights['out'], gru3_out)
+
+        new_state = {
+            'gru1': gru1_out,
+            'gru2': gru2_out,
+            'gru3': gru3_out,
+        }
+        return new_state, out
+
+
+class GruGru4(Model):
+    def __init__(self, gru1, gru2, gru3):
+        self._gru1 = gru1
+        self._gru2 = gru2
+        self._gru3 = gru3
+
+        self.suffix_layer = layers.Suffix(NCHAR, 2)
+        self.gru1_layer = layers.Gru(2*NCHAR, gru1)
+        self.gru2_layer = layers.Gru(gru1, gru2)
+        self.gru3_layer = layers.Gru(gru2, gru3)
+        self.out_layer = layers.FeedForward(gru3, NCHAR)
+
+        self.name = f'grugru4-{gru1}-{gru2}-{gru3}'
+
+    def serialize(self):
+        return {'name': 'grugru4', 'gru1': self._gru1, 'gru2': self._gru2, 'gru3': self._gru3}
+
+    def init_weights(self, key):
+        keys = jax.random.split(key, 4)
+        return {
+            'gru1': self.gru1_layer.init_weights(keys[0]),
+            'gru2': self.gru2_layer.init_weights(keys[1]),
+            'gru3': self.gru3_layer.init_weights(keys[2]),
+            'out': self.out_layer.init_weights(keys[3]),
+        }
+
+    def init_state(self):
+        return {
+            'suffix': model.init_suffix(2),
+            'gru1': self.gru1_layer.init_state(),
+            'gru2': self.gru2_layer.init_state(),
+            'gru3': self.gru3_layer.init_state(),
+        }
+
+    def step(self, weights, state, c):
+        suffix_state, suffix_out = self.suffix_layer.step(None, c, state['suffix'])
+        gru1_out = self.gru1_layer.step(weights['gru1'], suffix_out, state['gru1'])
+        gru2_out = self.gru2_layer.step(weights['gru2'], gru1_out, state['gru2'])
+        gru3_out = self.gru3_layer.step(weights['gru3'], gru2_out, state['gru3'])
+        out = self.out_layer.step(weights['out'], gru3_out)
+
+        new_state = {
+            'suffix': suffix_state,
+            'gru1': gru1_out,
+            'gru2': gru2_out,
+            'gru3': gru3_out,
+        }
+        return new_state, out
+
+
 MODELS = {
     'equal': Equal,
     'freq': Freq,
@@ -688,6 +784,8 @@ MODELS = {
     'conv3gru': Conv3Gru,
     'recgru': RecGru,
     'grugru2': GruGru2,
+    'grugru3': GruGru3,
+    'grugru4': GruGru4,
 }
 
 def build(spec):

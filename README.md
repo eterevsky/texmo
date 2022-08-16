@@ -47,6 +47,13 @@ python3 train.py -d data -m models/some-model.json
 | grugru-512-512               |  3280128 | 200000         | 1.7049 | 23165 | L0.02
 | lstm-lstm-512-512            |  4329728 | 200000         | 1.6969 |
 
+## length = 256, batch = 256
+
+| Model                        | Params   | Steps          | Loss   | Time  |
+| ---------------------------- | -------- | -------------- | ------ | ----- |
+| grugru3-128-512-512          |  2838144 | 108578         | 1.7785 | 30000 |
+
+
 ## Results with length = 1024, batch = 256
 
 | Model                        | Params   | Steps          | Loss   | Time |

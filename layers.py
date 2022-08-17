@@ -4,6 +4,7 @@ from jax.random import split, normal
 
 from model import NCHAR
 
+
 def scale_weights(weights, scale):
     for k in weights.keys():
         weights[k] = scale * weights[k]
@@ -22,11 +23,13 @@ class Layer(object):
 
 
 class Suffix(Layer):
-    def __init__(self, size, length, train_init=False):
+    name = 'suffix'
+
+    def __init__(self, length, train_init=False):
         super().__init__()
-        self._size = size
         self._length = length
         self._train_init = train_init
+        self.full_name = f'suffix.{length}'
 
     def init_weights(self, key, scale=0.1):
         if self._train_init:
@@ -45,13 +48,15 @@ class Suffix(Layer):
         return suffix[1:], suffix
 
 
-
 class FeedForward(Layer):
+    name = 'dense'
+
     def __init__(self, input_size, output_size, activation=None):
         super().__init__()
         self._input = input_size
         self._output = output_size
         self._activation = activation
+        self.full_name = f'dense.{input_size}.{output_size}'
 
     def init_weights(self, key, scale=0.1):
         key0, key1 = split(key)
@@ -69,12 +74,55 @@ class FeedForward(Layer):
         return out
 
 
+class Convolution(Layer):
+    name = 'conv'
+
+    def __init__(self, input_size, kernel_size, output_size, activation=jnp.tanh):
+        """Transforms [X, input_size] into [X - kernel_size + 1, output_size]"""
+        super().__init__()
+        self._input = input_size
+        self._kernel = kernel_size
+        self._output = output_size
+        self._activation = activation
+        self.full_name = f'conv.{input_size}.{kernel_size}.{output_size}'
+
+    def init_weights(self, key, scale=0.1):
+        key0, key1 = split(key)
+        weights = {
+            'kernel': normal(key0, shape=(self._output, self._kernel, self._input)),
+            'b': normal(key1, shape=(self._output,))
+        }
+        return scale_weights(weights, scale)
+
+    def step(self, weights, input):
+        kernel = weights['kernel']
+        input = jnp.expand_dims(input, axis=0)
+        dn = jax.lax.conv_dimension_numbers(
+            input.shape, kernel.shape, ('NWC', 'OWI', 'NWC'))
+        out = jax.lax.conv_general_dilated(
+            input, kernel, (1,), 'VALID', (1,), (1,), dn)
+        out = jnp.squeeze(out)
+        out += jnp.expand_dims(weights['b'], axis=0)
+
+        out = self._activation(out)
+
+        return out
+
+
 class Recurrent(Layer):
-    def __init__(self, input_size, state_size, activation=None):
+    name = 'rec'
+
+    def __init__(self, input_size, state_size, sigmoid=False):
         super().__init__()
         self._input = input_size
         self._state = state_size
-        self._activation = activation
+        if sigmoid:
+            self._activation = jax.nn.sigmoid
+            activation = '.sigmoid'
+        else:
+            self._activation = None
+            activation = ''
+        self.full_name = f'rec.{input_size}.{state_size}{activation}'
 
     def init_state(self):
         return jnp.zeros((self._state,))
@@ -90,47 +138,21 @@ class Recurrent(Layer):
 
     def step(self, weights, input, state):
         input = input.flatten()
-        state = jnp.dot(weights['winput'], input) + jnp.dot(weights['wstate'], state) + weights['b']
+        state = jnp.dot(weights['winput'], input) + \
+            jnp.dot(weights['wstate'], state) + weights['b']
         if self._activation is not None:
             state = self._activation(state)
         return state
 
 
-class Convolution(Layer):
-    def __init__(self, input_size, kernel_size, output_size, activation=jnp.tanh):
-        """Transforms [X, input_size] into [X - kernel_size + 1, output_size]"""
-        super().__init__()
-        self._input = input_size
-        self._kernel = kernel_size
-        self._output = output_size
-        self._activation = activation
-
-    def init_weights(self, key, scale=0.1):
-        key0, key1 = split(key)
-        weights = {
-            'kernel': normal(key0, shape=(self._output, self._kernel, self._input)),
-            'b': normal(key1, shape=(self._output,))
-        }
-        return scale_weights(weights, scale)
-
-    def step(self, weights, input):
-        kernel = weights['kernel']
-        input = jnp.expand_dims(input, axis=0)
-        dn = jax.lax.conv_dimension_numbers(input.shape, kernel.shape, ('NWC', 'OWI', 'NWC'))
-        out = jax.lax.conv_general_dilated(input, kernel, (1,), 'VALID', (1,), (1,), dn)
-        out = jnp.squeeze(out)
-        out += jnp.expand_dims(weights['b'], axis=0)
-
-        out = self._activation(out)
-
-        return out
-
-
 class Gru(Layer):
+    name = 'gru'
+
     def __init__(self, input_size, state_size):
         super().__init__()
         self._input = input_size
         self._state = state_size
+        self.full_name = f'gru.{input_size}.{state_size}'
 
     def init_state(self):
         return jnp.zeros((self._state,))
@@ -154,23 +176,29 @@ class Gru(Layer):
 
     def step(self, weights, input, state):
         input = input.flatten()
-        z = jnp.dot(weights['wz'], input) + jnp.dot(weights['uz'], state) + weights['bz']
+        z = jnp.dot(weights['wz'], input) + \
+            jnp.dot(weights['uz'], state) + weights['bz']
         z = jax.nn.sigmoid(z)
 
-        r = jnp.dot(weights['wr'], input) + jnp.dot(weights['ur'], state) + weights['br']
+        r = jnp.dot(weights['wr'], input) + \
+            jnp.dot(weights['ur'], state) + weights['br']
         r = jax.nn.sigmoid(r)
 
-        hc = jnp.dot(weights['wh'], input) + jnp.dot(weights['uh'], r * state) + weights['bh']
+        hc = jnp.dot(weights['wh'], input) + \
+            jnp.dot(weights['uh'], r * state) + weights['bh']
         hc = jax.nn.tanh(hc)
 
         return (1 - z) * state + z * hc
 
 
 class Lstm(Layer):
+    name = 'lstm'
+
     def __init__(self, input_size, state_size):
         super().__init__()
         self._input = input_size
         self._state = state_size
+        self.full_name = f'lstm.{input_size}.{state_size}'
 
     def init_state(self):
         return {'h': jnp.zeros((self._state,)), 'c': jnp.zeros((self._state,))}
@@ -202,19 +230,33 @@ class Lstm(Layer):
         h = state['h']
         c = state['c']
 
-        f = jnp.dot(weights['wf'], input) + jnp.dot(weights['uf'], h) + weights['bf']
+        f = jnp.dot(weights['wf'], input) + \
+            jnp.dot(weights['uf'], h) + weights['bf']
         f = jax.nn.sigmoid(f)
 
-        i = jnp.dot(weights['wi'], input) + jnp.dot(weights['ui'], h) + weights['bi']
+        i = jnp.dot(weights['wi'], input) + \
+            jnp.dot(weights['ui'], h) + weights['bi']
         i = jax.nn.sigmoid(i)
 
-        o = jnp.dot(weights['wo'], input) + jnp.dot(weights['uo'], h) + weights['bo']
+        o = jnp.dot(weights['wo'], input) + \
+            jnp.dot(weights['uo'], h) + weights['bo']
         o = jax.nn.sigmoid(o)
 
-        cn = jnp.dot(weights['wc'], input) + jnp.dot(weights['uc'], h) + weights['bc']
+        cn = jnp.dot(weights['wc'], input) + \
+            jnp.dot(weights['uc'], h) + weights['bc']
         cn = jax.nn.tanh(cn)
 
         c = f * c + i * cn
         h = o * c
 
         return {'h': h, 'c': c}
+
+
+LAYERS_BY_NAME = {
+    'suffix': Suffix,
+    'dense': FeedForward,
+    'conv': Convolution,
+    'rec': Recurrent,
+    'gru': Gru,
+    'lstm': Lstm,
+}

@@ -46,7 +46,7 @@ class Markov(Model):
     def __init__(self, suffix):
         assert suffix > 1
         super().__init__(suffix=suffix)
-        self.suffix_layer = layers.Suffix(NCHAR, self.suffix)
+        self.suffix_layer = layers.Suffix(self.suffix)
         self.layer = layers.FeedForward(self.suffix * NCHAR, NCHAR)
         self.name = f'markov-{suffix}'
 
@@ -272,7 +272,7 @@ class ConvGru1(Model):
         self._conv = conv
         self._gru = gru
 
-        self.suffix_layer = layers.Suffix(NCHAR, 3)
+        self.suffix_layer = layers.Suffix(3)
         self.conv_layer = layers.FeedForward(2*NCHAR, conv)
         self.gru_layer = layers.Gru(2*conv, gru)
         self.out_layer = layers.FeedForward(gru, NCHAR)
@@ -318,7 +318,7 @@ class ConvGru3(Model):
         self._conv = conv
         self._gru = gru
 
-        self.suffix_layer = layers.Suffix(NCHAR, suffix)
+        self.suffix_layer = layers.Suffix(suffix)
         self.conv_layer = layers.Convolution(NCHAR, 2, conv, activation=jax.nn.sigmoid)
         self.gru_layer = layers.Gru((suffix - 1)*conv, gru)
         self.out_layer = layers.FeedForward(gru, NCHAR)
@@ -361,7 +361,7 @@ class Conv3Gru(Model):
         self._inp = inp
         self._gru = gru
 
-        self.suffix_layer = layers.Suffix(NCHAR, 3)
+        self.suffix_layer = layers.Suffix(3)
         self.inp_layer = layers.FeedForward(3*NCHAR, inp, activation=jax.nn.sigmoid)
         self.gru_layer = layers.Gru(inp, gru)
         self.out_layer = layers.FeedForward(gru, NCHAR)
@@ -404,7 +404,7 @@ class ConvGruGru(Model):
         self._gru1 = gru1
         self._gru2 = gru2
 
-        self.suffix_layer = layers.Suffix(NCHAR, 3)
+        self.suffix_layer = layers.Suffix(3)
         self.conv_layer = layers.FeedForward(2*NCHAR, conv)
         self.gru1_layer = layers.Gru(2*conv, gru1)
         self.gru2_layer = layers.Gru(gru1, gru2)
@@ -773,7 +773,7 @@ class GruGru4(Model):
         self._gru2 = gru2
         self._gru3 = gru3
 
-        self.suffix_layer = layers.Suffix(NCHAR, 2)
+        self.suffix_layer = layers.Suffix(2)
         self.gru1_layer = layers.Gru(2*NCHAR, gru1)
         self.gru2_layer = layers.Gru(gru1, gru2)
         self.gru3_layer = layers.Gru(gru2, gru3)

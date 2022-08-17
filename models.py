@@ -397,6 +397,56 @@ class Conv3Gru(Model):
         return new_state, out
 
 
+class ConvGruGru(Model):
+    def __init__(self, conv, gru1, gru2):
+        """2-convolution over 3-char suffix + GRU"""
+        self._conv = conv
+        self._gru1 = gru1
+        self._gru2 = gru2
+
+        self.suffix_layer = layers.Suffix(NCHAR, 3)
+        self.conv_layer = layers.FeedForward(2*NCHAR, conv)
+        self.gru1_layer = layers.Gru(2*conv, gru1)
+        self.gru2_layer = layers.Gru(gru1, gru2)
+        self.out_layer = layers.FeedForward(gru2, NCHAR)
+
+        self.name = f'convgrugru-{conv}-{gru1}-{gru2}'
+
+    def serialize(self):
+        return {'name': 'convgrugru', 'conv': self._conv, 'gru': self._gru1, 'gru2': self._gru2}
+
+    def init_weights(self, key):
+        keys = jax.random.split(key, 4)
+        return {
+            'conv': self.conv_layer.init_weights(keys[0]),
+            'gru1': self.gru1_layer.init_weights(keys[1]),
+            'gru2': self.gru2_layer.init_weights(keys[2]),
+            'out': self.out_layer.init_weights(keys[3]),
+        }
+
+    def init_state(self):
+        return {
+            'suffix': self.suffix_layer.init_state(),
+            'gru1': self.gru1_layer.init_state(),
+            'gru2': self.gru2_layer.init_state(),
+        }
+
+    def step(self, weights, state, c):
+        suffix_state, suffix = self.suffix_layer.step(None, c, state['suffix'])
+
+        gru_input1 = self.conv_layer.step(weights['conv'], suffix[0:2])
+        gru_input2 = self.conv_layer.step(weights['conv'], suffix[1:3])
+        gru_input = jnp.concatenate([gru_input1, gru_input2])
+        gru_input = jax.nn.sigmoid(gru_input)
+
+        gru1_out = self.gru1_layer.step(weights['gru1'], gru_input, state['gru1'])
+        gru2_out = self.gru2_layer.step(weights['gru2'], gru1_out, state['gru2'])
+
+        out = self.out_layer.step(weights['out'], gru2_out)
+        new_state = {'suffix': suffix_state, 'gru1': gru1_out, 'gru2': gru2_out}
+        return new_state, out
+
+
 class Gru2(Model):
     def __init__(self, gru):
         self._gru = gru
@@ -786,6 +836,7 @@ MODELS = {
     'grugru2': GruGru2,
     'grugru3': GruGru3,
     'grugru4': GruGru4,
+    'convgrugru': ConvGruGru,
 }
 
 def build(spec):

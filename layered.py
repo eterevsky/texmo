@@ -16,9 +16,8 @@ class LayeredModel(Model):
 
     def __init__(self, layers):
         self._layers = []
-
-        layer_names = {}
         layer_objs = []
+        counter = {}
         for layer in layers:
             components = layer.split('.')
             name = components[0]
@@ -32,41 +31,38 @@ class LayeredModel(Model):
                 except ValueError:
                     kwargs[param] = True
             layer_obj = LAYERS_BY_NAME[name](*args, **kwargs)
-            layer_names[name] = layer_names.get(name, 0) + 1
-            layer_objs.append(layer_obj)
+            counter[name] = counter.get(name, 0) + 1
+            self._layers.append((f'{name}{counter[name]}', layer_obj))
 
-        counter = {}
-        for layer_obj in layer_objs:
-            name = layer_obj.name
-            if layer_names[name] == 1:
-                self._layers.append((name, layer_obj))
-            else:
-                counter[name] = counter.get(name, 0) + 1
-                self._layers.append((f'{name}{counter[name]}', layer_obj))
+    @staticmethod
+    def parse(spec):
+        return LayeredModel(spec.split('-'))
 
     @property
     def full_name(self):
-        return '-'.join(l.full_name for l in self._layers)
+        return '-'.join(l.full_name for n, l in self._layers)
 
     def serialize(self):
         spec = {
             'name': 'layered',
             'layers': []
         }
-        for layer in self._layers:
+        for name, layer in self._layers:
             spec['layers'].append(layer.full_name)
+        return spec
 
     def init_weights(self, key):
         weights = {}
-        keys = split(key, len(self._layers))
         for name, layer in self._layers:
-            weights[name] = layer.init_weights(keys.pop())
+            r, key = split(key)
+            weights[name] = layer.init_weights(r)
         return weights
 
     def init_state(self):
         state = {}
         for name, layer in self._layers:
             state[name] = layer.init_state()
+        return state
 
     def step(self, weights, state, input):
         new_state = {}

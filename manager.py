@@ -101,7 +101,7 @@ class Manager(object):
     def from_spec(spec):
         model = models.build(spec['model'])
         weights = deserialize_weights(spec['weights'])
-        return Manager(model, spec['learning_rate'], spec['regularization'], spec.get('total_steps', 0), spec['step'], weights, step_losses=spec.get('step_loss', None))
+        return Manager(model, spec['learning_rate'], spec['regularization'], spec.get('total_steps', 0), spec['step'], weights, step_loss=spec.get('step_loss', None))
 
     def __init__(self, model, learning_rate, regularization, total_steps, step=0, weights=None, step_loss=None):
         print('Creating Model')

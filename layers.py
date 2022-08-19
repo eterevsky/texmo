@@ -47,6 +47,10 @@ class Suffix(Layer):
         suffix = jnp.vstack((state, input.reshape((1, -1))))
         return suffix[1:], suffix
 
+    def step2(self, weights, state, input):
+        suffix = jnp.vstack((state, input.reshape((1, -1))))
+        return suffix[1:], suffix
+
 
 class FeedForward(Layer):
     name = 'dense'
@@ -67,11 +71,20 @@ class FeedForward(Layer):
         weights = scale_weights(weights, scale)
         return weights
 
+    def init_state(self):
+        return None
+
     def step(self, weights, input):
         out = jnp.dot(weights['w'], input.flatten()) + weights['b']
         if self._activation is not None:
             out = self._activation(out)
         return out
+
+    def step2(self, weights, _state, input):
+        out = jnp.dot(weights['w'], input.flatten()) + weights['b']
+        if self._activation is not None:
+            out = self._activation(out)
+        return None, out
 
 
 class Convolution(Layer):

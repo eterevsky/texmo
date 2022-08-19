@@ -413,7 +413,7 @@ class ConvGruGru(Model):
         self.name = f'convgrugru-{conv}-{gru1}-{gru2}'
 
     def serialize(self):
-        return {'name': 'convgrugru', 'conv': self._conv, 'gru': self._gru1, 'gru2': self._gru2}
+        return {'name': 'convgrugru', 'conv': self._conv, 'gru1': self._gru1, 'gru2': self._gru2}
 
     def init_weights(self, key):
         keys = jax.random.split(key, 4)

@@ -6,12 +6,13 @@ import os
 import time
 
 from dataset import DataSet
+import layered
 from manager import Manager
 import models
 
 
 def report(manager, training_time, train_set, sample_length, batch_size, output_dir, skip_graph):
-    print('Model:', manager.model.name)
+    print('Model:', manager.model.full_name)
     print('Params:', manager.model.total_weights(manager.weights))
     print('Steps:', manager.step)
     data_size = manager.step * batch_size * sample_length / 1E6
@@ -41,14 +42,15 @@ def report(manager, training_time, train_set, sample_length, batch_size, output_
         plt.yscale('log')
         plt.ylim(top=8)
         plt.plot(range(1, len(manager.step_loss) + 1), manager.step_loss)
-        plt.savefig(os.path.join(output_dir, manager.name() + '.png'))
+        if output_dir is not None:
+            plt.savefig(os.path.join(output_dir, manager.name() + '.png'))
         plt.show()
 
     return batch_loss, data_size
 
 
-def main(data, steps, learning_rate, regularization, output_dir, model_name, model_path, temp_dir, sample_length, batch_size, temp_steps, time_limit, skip_graph=False, benchmark=False):
-    if time_limit > 0 and steps == 0:
+def main(data, steps, learning_rate, regularization, output_dir, model_name, model_path, layered_model, temp_dir, sample_length, batch_size, temp_steps, time_limit, skip_graph=False, benchmark=False):
+    if time_limit is not None and steps == 0:
         steps = 10000000
 
     if data is not None:
@@ -60,13 +62,14 @@ def main(data, steps, learning_rate, regularization, output_dir, model_name, mod
     if model_name is not None:
         model = models.parse(model_name)
         manager = Manager(model, learning_rate, regularization, steps)
+    elif layered_model is not None:
+        model = layered.LayeredModel.parse(layered_model)
+        manager = Manager(model, learning_rate, regularization, steps)
     else:
         assert model_path is not None
         with open(model_path) as f:
             spec = json.load(f)
         manager = Manager.from_spec(spec)
-        assert learning_rate is None
-        assert regularization is None
 
     manager.init()
 
@@ -127,6 +130,8 @@ def parse_args():
                              help='load trained model from file')
     model_group.add_argument(
         '-n', '--model-name', metavar='NAME', default=None, help='parse model name')
+    model_group.add_argument(
+        '-c', '--layered-model', metavar='SPEC', default=None, help='layer-by-layer model specification')
 
     model_group.add_argument('--benchmark', action='store_true',
                              default=False, help='run a benchmark with various configurations')

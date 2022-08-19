@@ -51,6 +51,7 @@ python3 train.py -d data -m models/some-model.json
 
 | Model                        | Params   | Steps          | Loss   | Time  |
 | ---------------------------- | -------- | -------------- | ------ | ----- |
+| convgrugru-128-512-512       |  2952576 | 50000          | 1.8968 |       |
 | grugru3-128-512-512          |  2838144 | 108578         | 1.7785 | 30000 |
 
 
@@ -64,3 +65,14 @@ python3 train.py -d data -m models/some-model.json
 | markov-2                     |   131328 | 10000          | 3.4492 | 1108 |
 | recurrent1-512               |   525056 | 20000          | 2.1799 | 77314? (M1) |
 | grugru-512-512               |  3280128 | 100000         | 1.7336 | 79015 |
+
+## Layered models
+
+Trained with length = 256, batch = 256.
+
+### 1 Layer
+
+| Model                        | Params   | Steps          | Loss   | Time |
+| ---------------------------- | -------- | -------------- | ------ | ---- |
+| dense.256.256                |    65792 | 10000          | 3.7006 | 607  |
+| suffix.2-dense.512.256       |   131328 | 10000          | 3.4393 | 612  |

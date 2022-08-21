@@ -1,4 +1,4 @@
-import re
+import math
 import jax
 import jax.numpy as jnp
 from jax.random import split, normal
@@ -197,6 +197,8 @@ class Recurrent(Layer):
             'wstate': normal(keys[1], shape=(self._state, self._state)),
             'b': normal(keys[2], shape=(self._state,)),
         }
+        total_size = self._input + self._state
+        scale = math.sqrt(2 / total_size)
         return scale_weights(weights, scale)
 
     def step(self, weights, input, state):
@@ -219,11 +221,17 @@ class Recurrent(Layer):
 class Gru(Layer):
     name = 'gru'
 
-    def __init__(self, input_size, state_size):
+    def __init__(self, input_size, state_size, relu=False):
         super().__init__()
         self._input = input_size
         self._state = state_size
-        self.full_name = f'gru.{input_size}.{state_size}'
+        if relu:
+            self._activation = jax.nn.relu
+            suffix = '.relu'
+        else:
+            self._activation = jnp.tanh
+            suffix = '.tanh'
+        self.full_name = f'gru.{input_size}.{state_size}{suffix}'
 
     def init_state(self):
         return jnp.zeros((self._state,))
@@ -257,9 +265,26 @@ class Gru(Layer):
 
         hc = jnp.dot(weights['wh'], input) + \
             jnp.dot(weights['uh'], r * state) + weights['bh']
-        hc = jax.nn.tanh(hc)
+        hc = self._activation(hc)
 
         return (1 - z) * state + z * hc
+
+    def step2(self, weights, state, input):
+        input = input.flatten()
+        z = jnp.dot(weights['wz'], input) + \
+            jnp.dot(weights['uz'], state) + weights['bz']
+        z = jax.nn.sigmoid(z)
+
+        r = jnp.dot(weights['wr'], input) + \
+            jnp.dot(weights['ur'], state) + weights['br']
+        r = jax.nn.sigmoid(r)
+
+        hc = jnp.dot(weights['wh'], input) + \
+            jnp.dot(weights['uh'], r * state) + weights['bh']
+        hc = self._activation(hc)
+
+        state = (1 - z) * state + z * hc
+        return state, state
 
 
 class Lstm(Layer):

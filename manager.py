@@ -194,9 +194,15 @@ class Manager(object):
     def train(self, xs):
         xs = jax.nn.one_hot(xs, NCHAR)
         loss, grads = self._loss_grad(self.weights, xs)
-        updates, self.opt_state = self.optimizer.update(
-            grads, self.opt_state, self.weights)
-        self.weights = optax.apply_updates(self.weights, updates)
+
+        if loss > 16:
+            self.weights = self.prev_weights
+            print('Revert step')
+        else:
+            updates, self.opt_state = self.optimizer.update(
+                grads, self.opt_state, self.weights)
+            self.prev_weights = self.weights
+            self.weights = optax.apply_updates(self.weights, updates)
 
         self.step += 1
         self.step_loss.append(float(loss))

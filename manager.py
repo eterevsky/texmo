@@ -157,7 +157,7 @@ class Manager(object):
         sarray = jnp.array(list(s))
         soh = jax.nn.one_hot(sarray, NCHAR)
 
-        state = self.model.init_state()
+        state = self.model.init_state(self.weights)
         _, r = self.model.step(self.weights, state, soh[0])
 
         loss = self.model.loss(self.weights, soh)
@@ -179,7 +179,7 @@ class Manager(object):
         prefix = jax.nn.one_hot(prefix, 256)
         c = prefix[-1, :]
 
-        state = self.model.init_state()
+        state = self.model.init_state(self.weights)
         state, _ = jax.lax.scan(lambda s, c: self.model.step(
             self.weights, s, c), state, prefix)
 
@@ -195,14 +195,14 @@ class Manager(object):
         xs = jax.nn.one_hot(xs, NCHAR)
         loss, grads = self._loss_grad(self.weights, xs)
 
-        if loss > 16:
-            self.weights = self.prev_weights
-            print('Revert step')
-        else:
-            updates, self.opt_state = self.optimizer.update(
-                grads, self.opt_state, self.weights)
-            self.prev_weights = self.weights
-            self.weights = optax.apply_updates(self.weights, updates)
+        # if loss > 100:
+        #     self.weights = self.prev_weights
+        #     print('Revert step')
+        # else:
+        updates, self.opt_state = self.optimizer.update(
+            grads, self.opt_state, self.weights)
+        self.prev_weights = self.weights
+        self.weights = optax.apply_updates(self.weights, updates)
 
         self.step += 1
         self.step_loss.append(float(loss))

@@ -63,7 +63,7 @@ def main(data, steps, learning_rate, regularization, output_dir, model_name, mod
         model = models.parse(model_name)
         manager = Manager(model, learning_rate, regularization, steps)
     elif layered_model is not None:
-        model = layered.LayeredModel.parse(layered_model)
+        model = layered.LayeredModel2.parse(layered_model)
         manager = Manager(model, learning_rate, regularization, steps)
     else:
         assert model_path is not None

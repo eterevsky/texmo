@@ -347,6 +347,10 @@ class Lstm(Layer):
 
         return {'h': h, 'c': c}
 
+    def step2(self, weights, state, input):
+        state = self.step(weights, input, state)
+        return state, state['h']
+
 
 LAYERS_BY_NAME = {
     'suffix': Suffix,

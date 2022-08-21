@@ -34,7 +34,7 @@ class Model(object):
         """
         return {}
 
-    def init_state(self):
+    def init_state(self, weights):
         """Initialize the state object."""
         return None
 
@@ -66,7 +66,7 @@ class Model(object):
         return state, out_softmax
 
     def loss(self, weights, x):
-        _, y = jax.lax.scan(lambda s, c: self.step(weights, s, c), self.init_state(), x)
+        _, y = jax.lax.scan(lambda s, c: self.step(weights, s, c), self.init_state(weights), x)
 
         return optax.softmax_cross_entropy(y[:-1,:], x[1:,:])
 

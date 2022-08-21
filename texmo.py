@@ -145,10 +145,10 @@ def parse_args():
     parser.add_argument('--time-limit', type=int, metavar='SECONDS',
                         help='time limit for training', default=None)
     parser.add_argument('-l', '--learning-rate', type=float, metavar='RATE',
-                        help='learning rate', default=0.01)
+                        help='learning rate', default=0.02)
     parser.add_argument('-r', '--regularization', type=float, help='L2 regularization coefficient',
                         default=0.1)
-    parser.add_argument('--sample-length', type=int, default=1024, metavar='LEN',
+    parser.add_argument('--sample-length', type=int, default=256, metavar='LEN',
                         help='length of text fragments used for training')
     parser.add_argument('-b', '--batch-size', type=int, metavar='BATCH',
                         default=256, help='batch size')

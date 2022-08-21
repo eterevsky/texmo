@@ -238,5 +238,5 @@ class Manager(object):
             json.dump(data, f, indent=2)
 
     def name(self):
-        model_name = self.model.name
+        model_name = self.model.full_name
         return f'{model_name}-{self.step}'

@@ -1,3 +1,4 @@
+import re
 import jax
 import jax.numpy as jnp
 from jax.random import split, normal
@@ -15,11 +16,18 @@ class Layer(object):
     def __init__(self):
         pass
 
+    def init_state(self, key):
+        return None
+
     def init_weights(self, key, scale=1.0):
-        return {}
+        return None
 
     def step(self, weights, input):
-        return input
+        raise NotImplementedError
+
+    def step2(self, weights, state, input):
+        """Returns: (state, output)"""
+        raise NotImplementedError
 
 
 class Suffix(Layer):
@@ -55,12 +63,19 @@ class Suffix(Layer):
 class FeedForward(Layer):
     name = 'dense'
 
-    def __init__(self, input_size, output_size, activation=None):
+    def __init__(self, input_size, output_size, activation=None, sigmoid=False, relu=False):
         super().__init__()
         self._input = input_size
         self._output = output_size
+        suffix = ''
+        if sigmoid:
+            activation = jax.nn.sigmoid
+            suffix = '.sigmoid'
+        elif relu:
+            activation = jax.nn.relu
+            suffix = '.relu'
         self._activation = activation
-        self.full_name = f'dense.{input_size}.{output_size}'
+        self.full_name = f'dense.{input_size}.{output_size}{suffix}'
 
     def init_weights(self, key, scale=0.1):
         key0, key1 = split(key)
@@ -80,24 +95,38 @@ class FeedForward(Layer):
             out = self._activation(out)
         return out
 
-    def step2(self, weights, _state, input):
+    def step2(self, weights, state, input):
         out = jnp.dot(weights['w'], input.flatten()) + weights['b']
         if self._activation is not None:
             out = self._activation(out)
-        return None, out
+        return state, out
 
 
 class Convolution(Layer):
     name = 'conv'
 
-    def __init__(self, input_size, kernel_size, output_size, activation=jnp.tanh):
+    def __init__(self, input_size, kernel_size, output_size,
+                 activation=jnp.tanh, tanh=False, sigmoid=False, relu=False):
         """Transforms [X, input_size] into [X - kernel_size + 1, output_size]"""
         super().__init__()
         self._input = input_size
         self._kernel = kernel_size
         self._output = output_size
+        suffix = ''
+        if sigmoid:
+            activation = jax.nn.sigmoid
+            suffix = '.sigmoid'
+        elif relu:
+            activation = jax.nn.relu
+            suffix = '.relu'
+        elif tanh:
+            activation = jnp.tanh
+            suffix = '.tanh'
         self._activation = activation
-        self.full_name = f'conv.{input_size}.{kernel_size}.{output_size}'
+        self.full_name = f'conv.{input_size}.{kernel_size}.{output_size}{suffix}'
+
+    def init_state(self):
+        return None
 
     def init_weights(self, key, scale=0.1):
         key0, key1 = split(key)
@@ -121,21 +150,42 @@ class Convolution(Layer):
 
         return out
 
+    def step2(self, weights, state, input):
+        kernel = weights['kernel']
+        input = jnp.expand_dims(input, axis=0)
+        dn = jax.lax.conv_dimension_numbers(
+            input.shape, kernel.shape, ('NWC', 'OWI', 'NWC'))
+        out = jax.lax.conv_general_dilated(
+            input, kernel, (1,), 'VALID', (1,), (1,), dn)
+        out = jnp.squeeze(out)
+        out += jnp.expand_dims(weights['b'], axis=0)
+
+        out = self._activation(out)
+
+        return state, out
+
 
 class Recurrent(Layer):
     name = 'rec'
 
-    def __init__(self, input_size, state_size, sigmoid=False):
+    def __init__(self, input_size, state_size, sigmoid=False, relu=False,
+                 tanh=False):
         super().__init__()
         self._input = input_size
         self._state = state_size
         if sigmoid:
             self._activation = jax.nn.sigmoid
-            activation = '.sigmoid'
+            suffix = '.sigmoid'
+        elif relu:
+            self._activation = jax.nn.relu
+            suffix = '.relu'
+        elif tanh:
+            self._activation = jnp.tanh
+            suffix = '.tanh'
         else:
             self._activation = None
-            activation = ''
-        self.full_name = f'rec.{input_size}.{state_size}{activation}'
+            suffix = ''
+        self.full_name = f'rec.{input_size}.{state_size}{suffix}'
 
     def init_state(self):
         return jnp.zeros((self._state,))
@@ -156,6 +206,14 @@ class Recurrent(Layer):
         if self._activation is not None:
             state = self._activation(state)
         return state
+
+    def step2(self, weights, state, input):
+        input = input.flatten()
+        state = jnp.dot(weights['winput'], input) + \
+            jnp.dot(weights['wstate'], state) + weights['b']
+        if self._activation is not None:
+            state = self._activation(state)
+        return state, state
 
 
 class Gru(Layer):

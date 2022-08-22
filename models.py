@@ -6,62 +6,6 @@ from model import Model, NCHAR
 import layers
 
 
-class Equal(Model):
-    name = 'equal'
-
-    def step(self, weights, state, c):
-        return state, jnp.ones_like(c)
-
-
-class Freq(Model):
-    name = 'freq'
-
-    def init_weights(self, key):
-        return {'b': jax.random.normal(key, shape=(NCHAR,))}
-
-    def step(self, weights, state, c):
-        out = weights['b']
-        return state, out
-
-
-class Markov1(Model):
-    """Logistic regression on the previous character."""
-    name = 'markov1'
-
-    def __init__(self):
-        super().__init__()
-        self.layer = layers.FeedForward(NCHAR, NCHAR)
-
-    def init_weights(self, key):
-        return self.layer.init_weights(key)
-
-    def step(self, weights, state, c):
-        out = self.layer.step(weights, c)
-        return state, out
-
-
-class Markov(Model):
-    """Logistic regression from the suffix of a given length."""
-
-    def __init__(self, suffix):
-        assert suffix > 1
-        super().__init__(suffix=suffix)
-        self.suffix_layer = layers.Suffix(self.suffix)
-        self.layer = layers.FeedForward(self.suffix * NCHAR, NCHAR)
-        self.name = f'markov-{suffix}'
-
-    def init_state(self):
-        return self.suffix_layer.init_state()
-
-    def init_weights(self, key):
-        return self.layer.init_weights(key)
-
-    def step(self, weights, state, c):
-        suffix_state, suffix = self.suffix_layer.step(None, c, state)
-        out = self.layer.step(weights, suffix)
-        return suffix_state, out
-
-
 class Forward(Model):
     def __init__(self, suffix, hidden=128):
         super().__init__()
@@ -818,10 +762,6 @@ class GruGru4(Model):
 
 
 MODELS = {
-    'equal': Equal,
-    'freq': Freq,
-    'markov1': Markov1,
-    'markov': Markov,
     'forward': Forward,
     'recurrent1': Recurrent1,
     'recurrent2': Recurrent2,

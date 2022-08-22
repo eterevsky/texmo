@@ -14,11 +14,6 @@ python3 train.py -d data -m models/some-model.json
 
 | Model                        | Params   | Steps          | Loss   | Time |
 | ---------------------------- | -------- | -------------- | ------ | ---- |
-| equal                        |        0 |                | 8.0000 | 0    |
-| freq                         |      256 | 10000          | 4.9449 | 508 (WSL)  |
-| markov1                      |    65792 | 10000          | 3.7525 | 493, 645 (WSL) |
-| markov(2)                    |   131328 | 10000          | 3.4896 | 527  |
-| markov(5)                    |   327936 | 20000          | 3.2909 |      |
 | forward(5, 128)              |   196992 | 10000          | 3.2766 | 606  |
 | forward-2-128                |    98688 | 10000          | 3.1193 | 561  |
 | recgru-128-512               |  1165184 | 10297          | 2.7715 | 1200 |
@@ -70,25 +65,30 @@ python3 train.py -d data -m models/some-model.json
 
 Trained with length = 256, batch = 256.
 
+Baseline: predicting each symbol with its prior probability results in loss
+4.9449.
+
 ### 1 Layer
 
 | Model                        | Params   | Steps          | Loss   | Time |
 | ---------------------------- | -------- | -------------- | ------ | ---- |
-| dense.256.256                |    65792 | 10000          | 3.7006 | 607  |
+| suffix.1                     |    65792 | 10000          | 3.7006 | 607  |
 | suffix.2                     |   131328 | 10000          | 3.3875 | 663  |
+| suffix.5                     |   327936 | 10000          | 3.2485 | 640  |
 
 ### 2 Layer
 
-| Model                                        | Params   | Steps   | Loss   | Time |
-| -------------------------------------------- | -------- | ------- | ------ | ---- |
-| suffix.2-dense.512.sigmoid                   |   393984 |   10000 | 3.0425 |  818 |
-| suffix.2-dense.128.relu                      |    98688 |   10000 | 3.0116 |  758 |
+| Model                                        | Params   | Steps   | Loss   | Time | LR  |
+| -------------------------------------------- | -------- | ------- | ------ | ---- | --- |
+| suffix.2-dense.512.sigmoid                   |   393984 |   10000 | 3.0425 |  818 |     |
+| suffix.2-dense.128.relu                      |    98688 |   10000 | 3.0116 |  758 |     |
 | suffix.2-dense.512.relu                      |   393984 |   10000 | 2.9369 |  787 |
 | suffix.3-conv.2.128.relu                     |   131456 |   10000 | 2.7876 | 1067 |
 | suffix.5-conv.2.128.relu                     |   196992 |   10000 | 2.7268 |  987 |
 | rec.128.sigmoid                              |    82304 |   10000 | 2.6419 |  774 |
 | rec.128.relu.init                            |    82432 |   10000 | 2.5738 |  766 |
 | rec.128.relu                                 |    82304 |   10000 | 2.5628 |  766 |
+| suffix.5-dense.128.tanh                      |   196992 |   10000 | 2.5417 |  813 | 0.1 |
 | rec.128.tanh                                 |    82304 |   10000 | 2.4358 |  764 |
 | rec.128.relu                                 |    82304 |   10000 | 2.4615 |  877 |
 | suffix.2-rec.128.relu                        |   115072 |   10000 | 2.4443 |  793 |

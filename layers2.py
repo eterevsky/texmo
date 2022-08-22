@@ -114,14 +114,14 @@ class Dense(Layer2):
         super().__init__(**kwargs)
         assert output_size > 0
         assert not self._train_init_state
-        self._output_size = output_size
-        self.full_name = f"dense.{self._output_size}{self._activation_suffix}"
+        self._state = output_size
+        self.full_name = f"dense.{self._state}{self._activation_suffix}"
         self.output_shape = (output_size,)
 
     def init_weights(self, rng: Rng) -> ArrayTree:
         return {
-            "w": rng.he((self._output_size, self.input_size)),
-            "b": rng.normal((self._output_size,)),
+            "w": rng.he((self._state, self.input_size)),
+            "b": rng.normal((self._state,)),
         }
 
     def init_state(self, weights) -> None:
@@ -144,11 +144,11 @@ class Recurrent(Layer2):
     def __init__(self, output_size: int, ss=False, **kwargs):
         super().__init__(**kwargs)
         assert output_size > 0
-        self._output_size = output_size
+        self._state = output_size
         self._state_skip = ss
         state_skip_suffix = '.ss' if self._state_skip else ''
         self.full_name = (
-            f"rec.{self._output_size}"
+            f"rec.{self._state}"
             + self._activation_suffix
             + self._init_suffix
             + state_skip_suffix
@@ -156,25 +156,25 @@ class Recurrent(Layer2):
         self.output_shape = (output_size,)
 
     def init_weights(self, rng: Rng) -> ArrayTree:
-        he_input_size = self.input_size + self._output_size
+        he_input_size = self.input_size + self._state
         weights = {
             "winput": rng.he(
-                (self._output_size, self.input_size), input_size=he_input_size
+                (self._state, self.input_size), input_size=he_input_size
             ),
             "wstate": rng.he(
-                (self._output_size, self._output_size), input_size=he_input_size
+                (self._state, self._state), input_size=he_input_size
             ),
-            "b": rng.normal((self._output_size,)),
+            "b": rng.normal((self._state,)),
         }
         if self._train_init_state:
-            weights["init_state"] = rng.normal((self._output_size,))
+            weights["init_state"] = rng.normal((self._state,))
         return weights
 
     def init_state(self, weights) -> ArrayTree:
         if self._train_init_state:
             return weights["init_state"]
         else:
-            return jnp.zeros((self._output_size,))
+            return jnp.zeros((self._state,))
 
     def step(self, weights: ArrayTree, state: ArrayTree, input: jnp.ndarray):
         input = input.flatten()
@@ -188,3 +188,61 @@ class Recurrent(Layer2):
         if self._activation is not None:
             new_state = self._activation(new_state)
         return new_state, new_state
+
+
+@layer_cls
+class Gru(Layer2):
+    name = "gru"
+
+    def __init__(self, output_size: int, **kwargs):
+        super().__init__(**kwargs)
+        assert output_size > 0
+        self._state = output_size
+        if self._activation is None:
+            self._activation = jnp.tanh
+            self._activation_suffix = '.tanh'
+        self.full_name = (
+            f"gru.{self._state}"
+            + self._activation_suffix
+            + self._init_suffix
+        )
+        self.output_shape = (output_size,)
+
+    def init_weights(self, rng: Rng) -> ArrayTree:
+        he_input_size = self.input_size + self._state
+        weights = {
+            'wz': rng.he((self._state, self.input_size), input_size=he_input_size),
+            'uz': rng.he((self._state, self._state), input_size=he_input_size),
+            'bz': rng.normal((self._state,)),
+
+            'wr': rng.he((self._state, self.input_size), input_size=he_input_size),
+            'ur': rng.he((self._state, self._state), input_size=he_input_size),
+            'br': rng.normal((self._state,)),
+
+            'wh': rng.he((self._state, self.input_size), input_size=he_input_size),
+            'uh': rng.he((self._state, self._state), input_size=he_input_size),
+            'bh': rng.normal((self._state,)),
+        }
+        if self._train_init_state:
+            weights["init_state"] = rng.normal((self._state,))
+        return weights
+
+    def init_state(self, weights) -> ArrayTree:
+        if self._train_init_state:
+            return weights["init_state"]
+        else:
+            return jnp.zeros((self._state,))
+
+    def step(self, weights: ArrayTree, state: ArrayTree, input: jnp.ndarray):
+        input = input.flatten()
+        z = jnp.dot(weights['wz'], input) + jnp.dot(weights['uz'], state) + weights['bz']
+        z = jax.nn.sigmoid(z)
+
+        r = jnp.dot(weights['wr'], input) + jnp.dot(weights['ur'], state) + weights['br']
+        r = jax.nn.sigmoid(r)
+
+        hc = jnp.dot(weights['wh'], input) + jnp.dot(weights['uh'], r * state) + weights['bh']
+        hc = self._activation(hc)
+
+        state = (1 - z) * state + z * hc
+        return state, state

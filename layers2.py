@@ -246,3 +246,75 @@ class Gru(Layer2):
 
         state = (1 - z) * state + z * hc
         return state, state
+
+
+@layer_cls
+class Lstm(Layer2):
+    name = 'lstm'
+
+    def __init__(self, output_size: int, **kwargs):
+        super().__init__(**kwargs)
+        assert output_size > 0
+        assert self._activation is None
+        self._state = output_size
+        self.full_name = f"lstm.{self._state}{self._init_suffix}"
+        self.output_shape = (output_size,)
+
+    def init_weights(self, rng: Rng) -> ArrayTree:
+        he_input_size = self.input_size + self._state
+        weights = {
+            'wf': rng.he((self._state, self.input_size), input_size=he_input_size),
+            'uf': rng.he((self._state, self._state), input_size=he_input_size),
+            'bf': rng.normal((self._state,)),
+
+            'wi': rng.he((self._state, self.input_size), input_size=he_input_size),
+            'ui': rng.he((self._state, self._state), input_size=he_input_size),
+            'bi': rng.normal((self._state,)),
+
+            'wo': rng.he((self._state, self.input_size), input_size=he_input_size),
+            'uo': rng.he((self._state, self._state), input_size=he_input_size),
+            'bo': rng.normal((self._state,)),
+
+            'wc': rng.he((self._state, self.input_size), input_size=he_input_size),
+            'uc': rng.he((self._state, self._state), input_size=he_input_size),
+            'bc': rng.normal((self._state,)),
+        }
+        if self._train_init_state:
+            weights["init_state"] = {
+                'h': rng.normal((self._state,)),
+                'c': rng.normal((self._state,)),
+            }
+        return weights
+
+    def init_state(self, weights):
+        if self._train_init_state:
+            return weights["init_state"]
+        else:
+            return {'h': jnp.zeros((self._state,)), 'c': jnp.zeros((self._state,))}
+
+    def step(self, weights, state, input):
+        input = input.flatten()
+
+        h = state['h']
+        c = state['c']
+
+        f = jnp.dot(weights['wf'], input) + \
+            jnp.dot(weights['uf'], h) + weights['bf']
+        f = jax.nn.sigmoid(f)
+
+        i = jnp.dot(weights['wi'], input) + \
+            jnp.dot(weights['ui'], h) + weights['bi']
+        i = jax.nn.sigmoid(i)
+
+        o = jnp.dot(weights['wo'], input) + \
+            jnp.dot(weights['uo'], h) + weights['bo']
+        o = jax.nn.sigmoid(o)
+
+        cn = jnp.dot(weights['wc'], input) + \
+            jnp.dot(weights['uc'], h) + weights['bc']
+        cn = jax.nn.tanh(cn)
+
+        c = f * c + i * cn
+        h = o * c
+
+        return {'h': h, 'c': c}, h

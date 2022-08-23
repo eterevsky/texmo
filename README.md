@@ -76,7 +76,7 @@ Baseline: predicting each symbol with its prior probability results in loss
 | suffix.2                     |   131328 | 10000          | 3.3875 | 663  |
 | suffix.5                     |   327936 | 10000          | 3.2485 | 640  |
 
-### 2 Layer
+### 2 Layers
 
 | Model                                        | Params   | Steps   | Loss   | Time | LR  |
 | -------------------------------------------- | -------- | ------- | ------ | ---- | --- |
@@ -96,9 +96,15 @@ Baseline: predicting each symbol with its prior probability results in loss
 | rec.256.relu                                 |   197120 |   20000 | 2.2341 | 1683 |
 | gru.128.tanh                                 |   180864 |   27375 | 2.1509 | 3000 |
 
-### 3 Layer
-#### Without pretraining
+### 3 Layers
 
 | Model                           | Params   | Steps   | Loss   | Time  | LR   |
 | ------------------------------- | -------- | ------- | ------ | ----- | ---- |
+| gru.128.tanh-gru.256.tanh       |   509312 |   87881 | 1.8272 | 14400 | 0.05 |
 | gru.128.tanh-gru.512.tanh       |  1263744 |  161044 | 1.6548 | 30000 | 0.05 |
+
+### 4 Layers
+
+| Model                           | Params   | Steps   | Loss   | Time  | LR   |
+| ------------------------------- | -------- | ------- | ------ | ----- | ---- |
+| gru.128.tanh-gru.512-gru.512    |  2838144 |  108648 | 1.5724 | 30000 | 0.05 |

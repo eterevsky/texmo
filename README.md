@@ -95,3 +95,10 @@ Baseline: predicting each symbol with its prior probability results in loss
 | gru.256.128.relu-dense.128.256               |   180864 |   10000 | 2.2995 | 1025 |
 | rec.256.relu                                 |   197120 |   20000 | 2.2341 | 1683 |
 | gru.128.tanh                                 |   180864 |   27375 | 2.1509 | 3000 |
+
+### 3 Layer
+#### Without pretraining
+
+| Model                           | Params   | Steps   | Loss   | Time  | LR   |
+| ------------------------------- | -------- | ------- | ------ | ----- | ---- |
+| gru.128.tanh-gru.512.tanh       |  1263744 |  161044 | 1.6548 | 30000 | 0.05 |

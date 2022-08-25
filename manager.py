@@ -5,6 +5,8 @@ import math
 import optax
 import os
 
+from layered import LayeredModel2
+
 import models
 from model import NCHAR
 
@@ -99,7 +101,11 @@ def deserialize_weights(spec):
 class Manager(object):
     @staticmethod
     def from_spec(spec):
-        model = models.build(spec['model'])
+        model_spec = spec['model']
+        if model_spec['name'] == 'layered':
+            model = LayeredModel2.from_spec(model_spec)
+        else:
+            model = models.build(model_spec)
         weights = deserialize_weights(spec['weights'])
         return Manager(model, spec['learning_rate'], spec['regularization'], spec.get('total_steps', 0), spec['step'], weights, step_loss=spec.get('step_loss', None))
 

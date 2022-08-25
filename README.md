@@ -108,4 +108,5 @@ Baseline: predicting each symbol with its prior probability results in loss
 
 | Model                           | Params   | Steps   | Loss   | Time  | LR   |
 | ------------------------------- | -------- | ------- | ------ | ----- | ---- |
-| gru.128.tanh-gru.512-gru.512    |  2838144 |  108648 | 1.5724 | 30000 | 0.05 |
+| gru.128-gru.512-gru.512         |  2838144 |  108648 | 1.5724 | 30000 | 0.05 |
+| gru.128-gru.256-gru.1024        |  4641152 |   41622 | 1.5079 | 30000 | 0.05 |

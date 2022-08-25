@@ -102,6 +102,7 @@ Baseline: predicting each symbol with its prior probability results in loss
 | ------------------------------- | -------- | ------- | ------ | ----- | ---- |
 | gru.128.tanh-gru.256.tanh       |   509312 |   87881 | 1.8272 | 14400 | 0.05 |
 | gru.128.tanh-gru.512.tanh       |  1263744 |  161044 | 1.6548 | 30000 | 0.05 |
+| gru.128.tanh-gru.1025.tanh      |  3959046 |   35788 | 1.6040 | 24000 | 0.06 |
 
 ### 4 Layers
 

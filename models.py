@@ -6,64 +6,6 @@ from model import Model, NCHAR
 import layers
 
 
-class Forward(Model):
-    def __init__(self, suffix, hidden=128):
-        super().__init__()
-        self._suffix = suffix
-        self._hidden = hidden
-        self.in_layer = layers.FeedForward(self._suffix * NCHAR, self._hidden)
-        self.out_layer = layers.FeedForward(self._hidden, NCHAR)
-
-        self.name = f'forward-{self._suffix}-{self._hidden}'
-
-    def serialize(self):
-        return {'name': 'forward', 'suffix': self._suffix, 'hidden': self._hidden}
-
-    def init_state(self):
-        return model.init_suffix(self._suffix)
-
-    def init_weights(self, key):
-        key0, key1 = jax.random.split(key)
-        return {
-            'input': self.in_layer.init_weights(key0),
-            'output': self.out_layer.init_weights(key1),
-        }
-
-    def step(self, weights, state, c):
-        suffix = model.stack_suffix(state, c)
-        inp = self.in_layer.step(weights['input'], suffix)
-        inp = jnp.tanh(inp)
-        out = self.out_layer.step(weights['output'], inp)
-        return suffix[1:], out
-
-
-class Recurrent1(Model):
-    def __init__(self, hidden):
-        self._hidden = hidden
-        self.recurrent_layer = layers.Recurrent(NCHAR, self._hidden)
-        self.out_layer = layers.FeedForward(self._hidden, NCHAR)
-        self.name = f'recurrent1-{self._hidden}'
-
-    def serialize(self):
-        return {'name': 'recurrent1', 'hidden': self._hidden}
-
-    def init_state(self):
-        return self.recurrent_layer.init_state()
-
-    def init_weights(self, key):
-        key0, key1 = jax.random.split(key)
-        return {
-            'recurrent': self.recurrent_layer.init_weights(key0),
-            'out': self.out_layer.init_weights(key1)
-        }
-
-    def step(self, weights, state, c):
-        state = self.recurrent_layer.step(weights['recurrent'], c, state)
-        state = jax.nn.sigmoid(state)
-        out = self.out_layer.step(weights['out'], state)
-        return state, out
-
-
 class Recurrent2(Model):
     """Recurrent layer + extra output layer."""
 
@@ -762,8 +704,6 @@ class GruGru4(Model):
 
 
 MODELS = {
-    'forward': Forward,
-    'recurrent1': Recurrent1,
     'recurrent2': Recurrent2,
     'recurrent3': Recurrent3,
     'lstm2': Lstm2,

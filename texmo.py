@@ -1,5 +1,6 @@
 import argparse
 from collections import namedtuple
+from datetime import datetime
 import json
 import matplotlib.pyplot as plt
 import os
@@ -9,6 +10,7 @@ from dataset import DataSet
 import layered
 from manager import Manager
 import models
+from record import TrainingRecord
 
 
 def report(
@@ -19,6 +21,7 @@ def report(
     batch_size,
     output_dir,
     skip_graph,
+    prefix,
 ):
     print("Model:", manager.model.full_name)
     print("Params:", manager.model.total_weights(manager.weights))
@@ -31,12 +34,14 @@ def report(
         b"Roses are red\nViolets are blue,\nSugar is sweet\nAnd so are you."
     )
 
-    batch = train_set.sample(1024, 1024)
-    batch_loss = manager.evaluate(batch)
     print(f"Batch loss: {batch_loss:.4f}")
 
-    prefix = b"Roses are red\nViolets are blu"
-    out = manager.sample(prefix, 256)
+    return batch_loss, data_size
+
+
+def continue_prefix(manager, prefix, length):
+    prefix = prefix.encode()
+    out = manager.sample(prefix, length)
 
     try:
         s = (prefix + out).decode("utf-8")
@@ -46,50 +51,26 @@ def report(
     print(s)
     print()
 
-    if manager.step > 0 and not skip_graph:
-        plt.xscale("log")
-        plt.yscale("log")
-        plt.ylim(top=8)
-        plt.plot(range(1, len(manager.step_loss) + 1), manager.step_loss)
-        if output_dir is not None:
-            plt.savefig(os.path.join(output_dir, manager.name() + ".png"))
-        plt.show()
 
-    return batch_loss, data_size
+def show_loss_graph(manager, output_dir):
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.ylim(top=8)
+    plt.plot(range(1, len(manager.step_loss) + 1), manager.step_loss)
+    if output_dir is not None:
+        plt.savefig(os.path.join(output_dir, manager.name() + ".png"))
+    plt.show()
 
 
-def main(
-    data,
-    steps,
-    learning_rate,
-    regularization,
-    output_dir,
-    model_name,
-    model_path,
-    layered_model,
-    temp_dir,
-    sample_length,
-    batch_size,
-    temp_steps,
-    time_limit,
-    skip_graph=False,
-    benchmark=False,
+def create_manager(
+    model_name, layered_model, model_path, learning_rate, regularization
 ):
-    if time_limit is not None and steps == 0:
-        steps = 10000000
-
-    if data is not None:
-        print(f"Training data: {data}")
-        train_set = DataSet(data)
-    else:
-        train_set = None
-
     if model_name is not None:
         model = models.parse(model_name)
-        manager = Manager(model, learning_rate, regularization, steps)
+        manager = Manager(model, learning_rate, regularization, 100000)
     elif layered_model is not None:
         model = layered.LayeredModel2.parse(layered_model)
-        manager = Manager(model, learning_rate, regularization, steps)
+        manager = Manager(model, learning_rate, regularization, 100000)
     else:
         assert model_path is not None
         with open(model_path) as f:
@@ -97,15 +78,27 @@ def main(
         manager = Manager.from_spec(spec)
 
     manager.init()
+    return manager
 
+
+def train(
+    manager,
+    steps,
+    time_limit,
+    train_set,
+    sample_length,
+    batch_size,
+    temp_steps,
+    temp_dir,
+):
     start = time.time()
+    finish_time = start + time_limit if time_limit else float("inf")
+    if steps is None:
+        steps = float("inf")
 
     last_report = 0
 
-    for i in range(steps):
-        if time_limit is not None and time.time() - start > time_limit:
-            break
-
+    while time.time() < finish_time and manager.step < steps:
         batch = train_set.sample(length=sample_length, batch_size=batch_size)
         manager.train(batch)
         if (
@@ -125,25 +118,100 @@ def main(
         ):
             manager.save(temp_dir)
 
-    training_time = int(time.time() - start)
-    if output_dir is not None:
-        manager.save(output_dir)
+    return time.time() - start
 
-    loss, data_size = report(
-        manager,
-        training_time,
-        train_set,
-        sample_length,
-        batch_size,
-        output_dir,
-        skip_graph,
+
+def main(
+    data,
+    steps,
+    learning_rate,
+    regularization,
+    output_dir,
+    model_name,
+    model_path,
+    layered_model,
+    temp_dir,
+    sample_length,
+    batch_size,
+    temp_steps,
+    time_limit,
+    prefix="Roses are red\nViolets are blu",
+    skip_graph=False,
+    benchmark=False,
+):
+    # If benchmark is true, benchmark() should be called instead of main().
+    assert not benchmark
+
+    if data is not None:
+        print(f"Training data: {data}")
+        train_set = DataSet(data)
+    else:
+        train_set = None
+
+    manager = create_manager(
+        model_name, layered_model, model_path, learning_rate, regularization
     )
-    return loss, manager.step, data_size
+
+    if time_limit is not None or steps is not None:
+        assert data is not None
+        train_time = train(
+            manager,
+            steps,
+            time_limit,
+            train_set,
+            sample_length,
+            batch_size,
+            temp_steps,
+            temp_dir,
+        )
+        if output_dir is not None:
+            manager.save(output_dir)
+    else:
+        train_time = 0
+
+    if data is not None:
+        batch = train_set.sample(1024, 1024)
+        batch_loss = manager.evaluate(batch)
+
+        report = TrainingRecord(
+            timestamp=datetime.now(),
+            model_spec=manager.model.full_name,
+            weights=manager.model.total_weights(manager.weights),
+            steps=manager.step,
+            train_time_s=train_time,
+            learning_rate=manager.learning_rate,
+            regularization=manager.regularization,
+            train_sample_len=sample_length,
+            train_batch=batch_size,
+            total_data=train_set.total_size,
+            loss=batch_loss,
+            test_sample_len=1024,
+            test_batch=1024,
+            test_poisoned=True,
+        )
+
+        print(report)
+    else:
+        report = None
+
+    if prefix is not None:
+        continue_prefix(manager, prefix, 256)
+
+    if manager.step > 0 and not skip_graph:
+        show_loss_graph(manager, output_dir)
+
+    return report
 
 
 def benchmark(data, time_limit):
     results = []
-    for layered in ("gru.128-gru.256", "gru.128-gru.512", "gru.128-gru.1024", "gru.128-gru.512.relu", "gru.128-gru.1024.relu"):
+    for layered in (
+        "gru.128-gru.256",
+        "gru.128-gru.512",
+        "gru.128-gru.1024",
+        "gru.128-gru.512.relu",
+        "gru.128-gru.1024.relu",
+    ):
         for learning_rate in (0.05, 0.02, 0.01):
             for batch_size in (256, 512):
                 loss, step, data_size = main(
@@ -187,7 +255,6 @@ def parse_args():
         "-d",
         "--data",
         type=str,
-        required=True,
         help="directory with training data",
     )
 
@@ -230,10 +297,17 @@ def parse_args():
         default=None,
         help="directory for saved model",
     )
+    parser.add_argument(
+        "-p",
+        "--prefix",
+        type=str,
+        default="Roses are red\nViolets are blu",
+        help="text prefix to be continued",
+    )
 
     # Training
     parser.add_argument(
-        "-s", "--steps", type=int, default=0, help="number of training steps"
+        "-s", "--steps", type=int, default=None, help="number of training steps"
     )
     parser.add_argument(
         "--time-limit",

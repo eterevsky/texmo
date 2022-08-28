@@ -31,3 +31,7 @@ class DataSet(object):
 
     def all(self):
         return b'\n'.join(self.texts)
+
+    @property
+    def total_size(self):
+        return sum(len(t) for t in self.texts)

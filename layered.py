@@ -43,7 +43,7 @@ class LayeredModel2(Model):
             self._layers.append((layer_name, layer_obj))
 
     @staticmethod
-    def parse(spec):
+    def parse(spec: str):
         layers = spec.split("-")
         named_layers = []
         counter = {}
@@ -53,7 +53,7 @@ class LayeredModel2(Model):
                 counter[name] = 0
             counter[name] += 1
             layer_name = f"{name}{counter[name]}"
-            named_layers.append(layer_name, layer)
+            named_layers.append((layer_name, layer))
         named_layers.append(("dense_out", f"dense.{NCHAR}"))
         return LayeredModel2(named_layers)
 

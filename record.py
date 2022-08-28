@@ -59,7 +59,7 @@ class TrainingRecord(object):
             self.loss,
             self.test_sample_len,
             self.test_batch,
-            1 if self.test_poiseoned else 0,
+            1 if self.test_poisoned else 0,
         )
 
     def __str__(self) -> str:

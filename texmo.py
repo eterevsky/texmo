@@ -1,5 +1,6 @@
 import argparse
 from collections import namedtuple
+import csv
 from datetime import datetime
 import json
 import matplotlib.pyplot as plt
@@ -11,32 +12,6 @@ import layered
 from manager import Manager
 import models
 from record import TrainingRecord
-
-
-def report(
-    manager,
-    training_time,
-    train_set,
-    sample_length,
-    batch_size,
-    output_dir,
-    skip_graph,
-    prefix,
-):
-    print("Model:", manager.model.full_name)
-    print("Params:", manager.model.total_weights(manager.weights))
-    print("Steps:", manager.step)
-    data_size = manager.step * batch_size * sample_length / 1e6
-    print(f"Used {data_size:.1f}M data for training")
-    print(f"Training time: {training_time:.0f} s")
-
-    manager.sample_loss(
-        b"Roses are red\nViolets are blue,\nSugar is sweet\nAnd so are you."
-    )
-
-    print(f"Batch loss: {batch_loss:.4f}")
-
-    return batch_loss, data_size
 
 
 def continue_prefix(manager, prefix, length):
@@ -135,6 +110,7 @@ def main(
     batch_size,
     temp_steps,
     time_limit,
+    log,
     prefix="Roses are red\nViolets are blu",
     skip_graph=False,
     benchmark=False,
@@ -191,6 +167,10 @@ def main(
         )
 
         print(report)
+        if log is not None:
+            with open(log, 'a', newline='') as logfile:
+                writer = csv.writer(logfile)
+                writer.writerow(report.csv_tuple())
     else:
         report = None
 
@@ -205,7 +185,7 @@ def main(
     return report
 
 
-def benchmark(data, time_limit):
+def benchmark(data, time_limit, log):
     results = []
     for layered in (
         "gru.128-gru.256",
@@ -231,6 +211,7 @@ def benchmark(data, time_limit):
                     temp_steps=0,
                     time_limit=time_limit,
                     skip_graph=True,
+                    log=log,
                 )
                 results.append(
                     (
@@ -371,6 +352,12 @@ def parse_args():
         default=False,
         help="do not generate the loss graph",
     )
+    parser.add_argument(
+        "--log",
+        default=None,
+        metavar="LOG",
+        help="path to a CSV file for logging"
+    )
 
     return parser.parse_args()
 
@@ -378,6 +365,6 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     if args.benchmark:
-        benchmark(args.data, args.time_limit)
+        benchmark(args.data, args.time_limit, args.log)
     else:
         main(**vars(args))

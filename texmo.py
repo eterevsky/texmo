@@ -197,7 +197,9 @@ def main(
     if prefix is not None:
         continue_prefix(manager, prefix, 256)
 
-    if manager.step > 0 and not skip_graph:
+    if (
+        steps is not None or time_limit is not None or data is not None
+    ) and not skip_graph:
         show_loss_graph(manager, output_dir)
 
     return report

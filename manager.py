@@ -187,7 +187,7 @@ class Manager(object):
 
         state = self.model.init_state(self.weights)
         state, _ = jax.lax.scan(lambda s, c: self.model.step(
-            self.weights, s, c), state, prefix)
+            self.weights, s, c), state, prefix[:-1])
 
         out = []
         while len(out) < l and c_selected != 0:

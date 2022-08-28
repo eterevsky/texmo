@@ -6,40 +6,6 @@ from model import Model, NCHAR
 import layers
 
 
-class Recurrent2(Model):
-    """Recurrent layer + extra output layer."""
-
-    def __init__(self, hidden, out):
-        self._hidden = hidden
-        self._out = out
-        self.recurrent_layer = layers.Recurrent(NCHAR, self._hidden)
-        self.out1_layer = layers.FeedForward(self._hidden, out)
-        self.out2_layer = layers.FeedForward(out, NCHAR)
-        self.name = f'recurrent2-{self._hidden}-{self._out}'
-
-    def serialize(self):
-        return {'name': 'recurrent2', 'hidden': self._hidden, 'out': self._out}
-
-    def init_state(self):
-        return self.recurrent_layer.init_state()
-
-    def init_weights(self, key):
-        keys = jax.random.split(key)
-        return {
-            'recurrent': self.recurrent_layer.init_weights(keys[0]),
-            'out1': self.out1_layer.init_weights(keys[1]),
-            'out2': self.out2_layer.init_weights(keys[2]),
-        }
-
-    def step(self, weights, state, c):
-        state = self.recurrent_layer.step(weights['recurrent'], c, state)
-        state = jax.nn.sigmoid(state)
-        out1 = self.out1_layer.step(weights['out1'], state)
-        out1 = jax.nn.sigmoid(out1)
-        out2 = self.out2_layer.step(weights['out2'], out1)
-        return state, out2
-
-
 class Recurrent3(Model):
     """Suffix + recurrent layer + extra output layer."""
 
@@ -704,7 +670,6 @@ class GruGru4(Model):
 
 
 MODELS = {
-    'recurrent2': Recurrent2,
     'recurrent3': Recurrent3,
     'lstm2': Lstm2,
     'llstm': LLstm,

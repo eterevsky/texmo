@@ -1,3 +1,4 @@
+import csv
 from datetime import datetime
 import time
 
@@ -44,14 +45,25 @@ def train(
     return time.time() - start
 
 
-def train_and_validate(manager, steps, time_limit, train_set, sample_length, batch_size, temp_steps, temp_dir) -> TrainingRecord:
+def train_and_validate(
+    manager,
+    steps,
+    time_limit,
+    train_set,
+    sample_len,
+    batch_size,
+    temp_steps,
+    temp_dir,
+    output_dir,
+    log,
+) -> TrainingRecord:
     if time_limit is not None or steps is not None:
         train_time = train(
             manager,
             steps,
             time_limit,
             train_set,
-            sample_length,
+            sample_len,
             batch_size,
             temp_steps,
             temp_dir,
@@ -72,7 +84,7 @@ def train_and_validate(manager, steps, time_limit, train_set, sample_length, bat
         train_time_s=train_time,
         learning_rate=manager.learning_rate,
         regularization=manager.regularization,
-        train_sample_len=sample_length,
+        train_sample_len=sample_len,
         train_batch=batch_size,
         total_data=train_set.total_size,
         loss=batch_loss,
@@ -83,6 +95,6 @@ def train_and_validate(manager, steps, time_limit, train_set, sample_length, bat
 
     print(report)
     if log is not None:
-        with open(log, 'a', newline='') as logfile:
+        with open(log, "a", newline="") as logfile:
             writer = csv.writer(logfile)
             writer.writerow(report.csv_tuple())

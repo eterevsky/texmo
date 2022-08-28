@@ -69,7 +69,7 @@ class TrainingRecord(object):
         return f"""
 Model: {self.model_spec}, {w:.0f}k weights
 Loss: loss {self.loss:.4f}
-Training: {self.steps} steps, {self.train_time_s} s
+Training: {self.steps} steps, {self.train_time_s:.0f} s
 LR: {self.learning_rate}, R{self.regularization}
 Training data: {train_data:.0f}M / {total_data:.0f}M
         """

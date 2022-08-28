@@ -1,17 +1,15 @@
 import argparse
 from collections import namedtuple
-import csv
-from datetime import datetime
 import json
 import matplotlib.pyplot as plt
 import os
-import time
 
 from dataset import DataSet
 import layered
 from manager import Manager
 import models
 from record import TrainingRecord
+import search
 from train import train_and_validate
 
 
@@ -100,6 +98,7 @@ def main(
             temp_steps,
             temp_dir,
             output_dir,
+            log,
         )
     else:
         report = None
@@ -194,12 +193,17 @@ def parse_args():
         default=None,
         help="layer-by-layer model specification",
     )
-
     model_group.add_argument(
         "--benchmark",
         action="store_true",
         default=False,
         help="run a benchmark with various configurations",
+    )
+    model_group.add_argument(
+        "--search",
+        action="store_true",
+        default=False,
+        help="search the best model configuration",
     )
 
     parser.add_argument(
@@ -294,7 +298,17 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    if args.benchmark:
+    if args.search:
+        search.search(
+            args.data,
+            args.learning_rate,
+            args.sample_length,
+            args.batch_size,
+            args.regularization,
+            args.time_limit,
+            args.log,
+        )
+    elif args.benchmark:
         benchmark(args.data, args.time_limit, args.log)
     else:
         main(**vars(args))

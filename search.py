@@ -1,5 +1,6 @@
 from bisect import bisect_left
 from collections import namedtuple
+import random
 from statistics import median
 
 from dataset import DataSet
@@ -46,24 +47,38 @@ def layer_neighbors(layer):
     length = int(params[0])
     if name == "suffix":
         assert len(params) == 1
-        if l > 2:
+        if length > 2:
             yield f"suffix.{length-1}"
         yield f"suffix.{length+1}"
     else:
-        l = int(params[1])
+        try:
+            l = int(params[0])
+        except Exception:
+            print(layer)
+            print(components)
+            print(params)
+            raise
         if len(params) > 1:
-            activation = params[2]
+            activation = params[1]
         else:
             activation = "tanh"
 
         if name != "gru":
             yield f"gru.{length}.tanh"
-        elif name != "lstm":
+            if name in ("dense", "rec") and length >= 2:
+                yield f"gru.{length // 2}.tanh"
+        if name != "lstm":
             yield f"lstm.{length}"
-        elif name != "rec":
+            if name in ("dense", "rec") and length >= 2:
+                yield f"lstm.{length // 2}"
+        if name != "rec":
             yield f"rec.{length}.{activation}"
-        elif name != "dense":
+            if name in ("gru", "lstm"):
+                yield f"rec.{length*2}.{activation}"
+        if name != "dense":
             yield f"dense.{length}.{activation}"
+            if name in ("gru", "lstm"):
+                yield f"dense.{length*2}.{activation}"
 
         if length > 1:
             new_len = length // 2
@@ -81,9 +96,9 @@ def layer_neighbors(layer):
         if name != "lstm":
             if activation != "tanh":
                 yield f"{name}.{length}.tanh"
-            elif activation != "relu":
+            if activation != "sigmoid":
                 yield f"{name}.{length}.sigmoid"
-            else:
+            if activation != "relu":
                 yield f"{name}.{length}.relu"
 
 
@@ -99,7 +114,7 @@ def spec_neighbors(spec):
     if layers[0] == "suffix.2":
         yield "-".join(layers[1:])
 
-    for i, layer in layers:
+    for i, layer in enumerate(layers):
         for modified in layer_neighbors(layer):
             yield "-".join(layers[:i] + [modified] + layers[i + 1 :])
 
@@ -111,16 +126,18 @@ def conf_neighbors(conf):
     if ilr < len(LRS) - 1:
         yield conf._replace(lr=LRS[ilr + 1])
 
-    if conf.sample_len > 1:
-        yield conf._replace(sample_len=conf.sample_len // 2)
-    yield conf._replace(sample_len=conf.sample_len * 2)
+    for spec in spec_neighbors(conf.spec):
+        yield conf._replace(spec=spec)
 
     if conf.batch > 1:
         yield conf._replace(batch=conf.batch // 2)
-    yield conf._replace(sample_len=conf.sample_len * 2)
+        yield conf._replace(batch=conf.batch // 2, sample_len=conf.sample_len * 2)
+    yield conf._replace(batch=conf.batch * 2)
 
-    for spec in spec_neighbors(conf.spec):
-        yield conf._replace(spec=spec)
+    if conf.sample_len > 1:
+        yield conf._replace(sample_len=conf.sample_len // 2)
+        yield conf._replace(sample_len=conf.sample_len // 2, batch=conf.batch * 2)
+    yield conf._replace(sample_len=conf.sample_len * 2)
 
 
 class ConfResults(object):
@@ -159,6 +176,7 @@ def select_conf(results) -> Configuration:
         score = conf_results.score
         if score >= best_score:
             continue
+        random.shuffle(conf_results.neighbors)
         for neighbor_conf in conf_results.neighbors:
             if neighbor_conf not in results:
                 prev = conf
@@ -177,8 +195,7 @@ def select_conf(results) -> Configuration:
                 best_score = neighbor_score
                 best_count = neighbor_results.report_count
 
-    print(f"{prev} ({prev_score}) -> {best} ({best_count} tries)")
-    return best_count
+    return best
 
 
 def print_top(results):
@@ -191,9 +208,10 @@ def print_top(results):
     print()
     for score, conf, scores in top[:20]:
         if len(scores) > 1:
-            print(conf, score, scores)
+            scores = f" {scores}"
         else:
-            print(conf, score)
+            scores = ""
+        print(f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  B{conf.batch:4}  {score:.4f}{scores}")
     print()
 
 
@@ -210,7 +228,7 @@ def search(
     train_set = DataSet(data)
 
     start_confs = [
-        Configuration("dense.64.tanh", learning_rate, sample_len, batch)
+        Configuration("suffix.2-rec.64.relu-dense.512.relu-dense.128.tanh", learning_rate, sample_len, batch)
     ]
     results = {}
 
@@ -220,6 +238,7 @@ def search(
         else:
             conf = select_conf(results)
 
+        print(f"{conf.spec:32} LR{conf.lr} LEN{conf.sample_len} B{conf.batch}")
         model = LayeredModel2.parse(conf.spec)
         manager = Manager(model, conf.lr, regularization, 100000)
         manager.init()
@@ -241,3 +260,9 @@ def search(
         results[conf].add_report(report)
 
         print_top(results)
+
+
+if __name__ == '__main__':
+    conf = ConfResults(Configuration("suffix.3-dense.128.relu-dense.256.relu-dense.256.tanh", 0.05, 8, 256))
+    for n in conf.neighbors:
+        print(n)

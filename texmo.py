@@ -239,7 +239,7 @@ def parse_args():
         type=float,
         metavar="RATE",
         help="learning rate",
-        default=0.02,
+        default=0.05,
     )
     parser.add_argument(
         "-r",

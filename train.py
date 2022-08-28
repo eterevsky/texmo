@@ -27,7 +27,7 @@ def train(
         manager.train(batch)
         if (
             manager.step < 10
-            or manager.step % 10 == 0
+            or (manager.step % 10 == 0 and time.time() - last_report > 3)
             or time.time() - last_report > 10
         ):
             last_report = time.time()
@@ -35,8 +35,8 @@ def train(
             avg_loss = sum(recent_losses) / len(recent_losses)
             print(f"{manager.step} {avg_loss:.4f} {manager.step_loss[-1]:.4f}")
 
-        if (
-            temp_steps > 0
+        if (temp_steps is not None
+            and temp_steps > 0
             and manager.step % temp_steps == 0
             and temp_dir is not None
         ):
@@ -98,3 +98,5 @@ def train_and_validate(
         with open(log, "a", newline="") as logfile:
             writer = csv.writer(logfile)
             writer.writerow(report.csv_tuple())
+
+    return report

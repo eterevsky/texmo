@@ -4,6 +4,7 @@ import json
 import math
 import optax
 import os
+import random
 
 from layered import LayeredModel2
 
@@ -111,7 +112,7 @@ class Manager(object):
 
     def __init__(self, model, learning_rate, regularization, total_steps, step=0, weights=None, step_loss=None):
         print('Creating Model')
-        self._key = jax.random.PRNGKey(42)
+        self._key = jax.random.PRNGKey(random.randrange(2**32))
         self.model = model
         self.learning_rate = learning_rate
         self.regularization = regularization

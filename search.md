@@ -27,6 +27,27 @@ suffix.4-dense.256.relu-dense.128.tanh                        LR   0.1  LEN  16 
 suffix.4-dense.512.relu-dense.64.tanh-dense.128.relu          LR   0.1  LEN  16  B 256  2.7845
 ```
 
+Training the winner for more time:
+
+```
+Model: suffix.4-dense.256.relu-dense.256.tanh-dense.128.tanh, 394k weights
+Loss: loss 2.3331
+Training: 101779 steps, 6000 s
+LR: 0.1, R0.1
+Training data: 834M / 3836M
+```
+
+Alternative:
+
+```
+Model: suffix.2-rec.128.relu-dense.256.relu-dense.128.tanh, 181k weights
+Loss: loss 2.4527
+Training: 2141 steps, 120 s
+LR: 0.1, R0.1
+Training data: 18M / 3836M
+```
+
+
 ## Training on GPU for 20 seconds
 
 Full log in [search2-gpu-20.csv](search2-gpu-20.csv) (616 configurations).

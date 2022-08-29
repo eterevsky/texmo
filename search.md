@@ -75,6 +75,15 @@ suffix.3-gru.256.tanh-dense.128.tanh                          LR   0.1  LEN  32 
 suffix.2-gru.512.relu-dense.256.relu                          LR   0.1  LEN  32  B 512  2.1914
 ```
 
+Top model:
+
+```
+Model: suffix.3-gru.512.relu-dense.256.tanh, 2165k weights
+Loss: loss 1.8567
+Training: 45200 steps, 6000 s
+LR: 0.1, R0.1
+Training data: 2962M / 3836M
+```
 
 ## Best configurations per max_weights / time_limit
 

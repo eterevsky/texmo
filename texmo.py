@@ -74,6 +74,7 @@ def main(
     skip_graph=False,
     benchmark=False,
     search=False,
+    max_weights=None,
 ):
     # If benchmark is true, benchmark() should be called instead of main().
     assert not benchmark

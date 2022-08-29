@@ -228,7 +228,7 @@ def search(
     train_set = DataSet(data)
 
     start_confs = [
-        Configuration("suffix.2-rec.64.relu-dense.512.relu-dense.128.tanh", learning_rate, sample_len, batch)
+        Configuration("rec.128.relu-dense.256.relu-dense.64.tanh", learning_rate, sample_len, batch)
     ]
     results = {}
 

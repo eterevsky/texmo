@@ -73,9 +73,11 @@ def main(
     prefix="Roses are red\nViolets are blu",
     skip_graph=False,
     benchmark=False,
+    search=False,
 ):
     # If benchmark is true, benchmark() should be called instead of main().
     assert not benchmark
+    assert not search
 
     if data is not None:
         print(f"Training data: {data}")

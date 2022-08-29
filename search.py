@@ -194,14 +194,14 @@ def conf_neighbors(conf, max_weights=None):
                 raise Exception
             yield conf._replace(spec=spec)
 
-    if conf.batch > 1:
-        yield conf._replace(
-            sample_len=conf.sample_len * 2, batch=conf.batch // 2
-        )
-    if conf.sample_len > 2:
-        yield conf._replace(
-            sample_len=conf.sample_len // 2, batch=conf.batch * 2
-        )
+    # if conf.batch > 1:
+    #     yield conf._replace(
+    #         sample_len=conf.sample_len * 2, batch=conf.batch // 2
+    #     )
+    # if conf.sample_len > 2:
+    #     yield conf._replace(
+    #         sample_len=conf.sample_len // 2, batch=conf.batch * 2
+    #     )
 
     yield conf._replace(batch=conf.batch * 2)
     if conf.batch > 1:

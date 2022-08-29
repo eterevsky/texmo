@@ -1,6 +1,6 @@
 from gutenbergpy import textget
 
-for i in range(10001, 20000):
+for i in range(10362, 68890):
     try:
         raw_text = textget.get_text_by_id(i)
         text = textget.strip_headers(raw_text)

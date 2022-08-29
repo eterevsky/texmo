@@ -74,3 +74,14 @@ gru.512.relu-dense.128.tanh                                   LR   0.1  LEN  64 
 suffix.3-gru.256.tanh-dense.128.tanh                          LR   0.1  LEN  32  B1024  2.1913
 suffix.2-gru.512.relu-dense.256.relu                          LR   0.1  LEN  32  B 512  2.1914
 ```
+
+
+## Best configurations per max_weights / time_limit
+
+| Max. weights | Time (s) | Best model            | Loss   | Length  | Batch | LR  |
+| ------------ | -------- | --------------------- | ------ | ------- | ----- | --- |
+| 2^10         | 1        | dense.1.tanh          | 4.3824 |  2      | 1024  | 0.5 |
+| 2^10         | 2        | rec.1.relu            | 4.3383 | 32      |   32  | 0.5 |
+| 2^10         | 4        | rec.1.relu            | 4.3084 |  8      |  256  | 0.2 |
+| 2^11         | 1        | suffix.2-rec.2.tanh   | 4.1110 | 32      |   64  | 0.5 |
+| 2^11         | 2        | suffix.2-dense.2.relu | 4.0332 | 16      |  128  | 0.5 |

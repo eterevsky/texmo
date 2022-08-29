@@ -111,7 +111,6 @@ class Manager(object):
         return Manager(model, spec['learning_rate'], spec['regularization'], spec.get('total_steps', 0), spec['step'], weights, step_loss=spec.get('step_loss', None))
 
     def __init__(self, model, learning_rate, regularization, total_steps, step=0, weights=None, step_loss=None):
-        print('Creating Model')
         self._key = jax.random.PRNGKey(random.randrange(2**32))
         self.model = model
         self.learning_rate = learning_rate
@@ -128,17 +127,21 @@ class Manager(object):
         else:
             self.step_loss = step_loss
 
-    def init(self):
-        print('Total parameters:', self.model.total_weights(self.weights))
-        print('Creating batch loss')
+    def init(self, quiet=False):
+        if not quiet:
+            print('Total parameters:', self.model.total_weights(self.weights))
+            print('Creating batch loss')
         self._loss_batch = jax.vmap(
             self.model.loss, in_axes=(None, 0), out_axes=0)
-        print('Creating loss_avg')
+        if not quiet:
+            print('Creating loss_avg')
         self._loss_avg = lambda weights, xs: jnp.average(
             self._loss_batch(weights, xs)) * LOG2
-        print('Creating loss_grad')
+        if not quiet:
+            print('Creating loss_grad')
         self._loss_grad = jax.jit(jax.value_and_grad(self._loss_avg))
-        print('Creating optimizer')
+        if not quiet:
+            print('Creating optimizer')
         self.optimizer = optax.chain(
             clip_by_global_norm(1),
             optax.scale_by_adam(),

@@ -14,6 +14,7 @@ def train(
     batch_size,
     temp_steps,
     temp_dir,
+    quiet=False,
 ):
     start = time.time()
     finish_time = start + time_limit if time_limit else float("inf")
@@ -25,7 +26,7 @@ def train(
     while time.time() < finish_time and manager.step < steps:
         batch = train_set.sample(length=sample_length, batch_size=batch_size)
         manager.train(batch)
-        if (
+        if not quiet and (
             manager.step < 10
             or (manager.step % 10 == 0 and time.time() - last_report > 3)
             or time.time() - last_report > 10
@@ -35,7 +36,8 @@ def train(
             avg_loss = sum(recent_losses) / len(recent_losses)
             print(f"{manager.step} {avg_loss:.4f} {manager.step_loss[-1]:.4f}")
 
-        if (temp_steps is not None
+        if (
+            temp_steps is not None
             and temp_steps > 0
             and manager.step % temp_steps == 0
             and temp_dir is not None
@@ -56,6 +58,7 @@ def train_and_validate(
     temp_dir,
     output_dir,
     log,
+    quiet=False,
 ) -> TrainingRecord:
     if time_limit is not None or steps is not None:
         train_time = train(
@@ -67,6 +70,7 @@ def train_and_validate(
             batch_size,
             temp_steps,
             temp_dir,
+            quiet=quiet,
         )
         if output_dir is not None:
             manager.save(output_dir)

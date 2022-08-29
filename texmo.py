@@ -203,9 +203,9 @@ def parse_args():
     )
     model_group.add_argument(
         "--search",
-        action="store_true",
-        default=False,
-        help="search the best model configuration",
+        metavar="SPEC",
+        default=None,
+        help="search the best model configuration, starting with a given spec",
     )
 
     parser.add_argument(
@@ -222,6 +222,12 @@ def parse_args():
         type=str,
         default="Roses are red\nViolets are blu",
         help="text prefix to be continued",
+    )
+    parser.add_argument(
+        '--max-weights',
+        type=int,
+        default=None,
+        help='for search, the maximum number of weights in the model'
     )
 
     # Training
@@ -309,6 +315,8 @@ if __name__ == "__main__":
             args.regularization,
             args.time_limit,
             args.log,
+            start_spec=args.search,
+            max_weights=args.max_weights,
         )
     elif args.benchmark:
         benchmark(args.data, args.time_limit, args.log)

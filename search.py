@@ -6,6 +6,7 @@ from statistics import median
 from dataset import DataSet
 from layered import LayeredModel2
 from manager import Manager
+from model import NCHAR
 from train import train_and_validate
 
 
@@ -39,112 +40,185 @@ Configuration = namedtuple(
 )
 
 
-def layer_neighbors(layer):
+def layer_weights(name, size, in_size, out_size):
+    if name == "suffix":
+        return in_size * size * out_size
+    elif name == "dense":
+        return size + size * in_size + size * out_size
+    elif name == "rec":
+        return size + size * in_size + size * size + size * out_size
+    elif name == "gru":
+        return 3 * size + 3 * size * in_size + 3 * size * size + size * out_size
+    elif name == "lstm":
+        return 4 * size + 4 * size * in_size + 4 * size * size + size * out_size
+
+
+def log_distance(x, y):
+    if x < y:
+        return y / x
+    else:
+        return x / y
+
+
+def change_layer_type(name, size, prev_layer, next_layer):
+    if prev_layer is None:
+        in_size = NCHAR
+    else:
+        components = prev_layer.split(".")
+        if components[0] == "suffix":
+            in_size = int(components[1]) * NCHAR
+        else:
+            in_size = int(components[1])
+
+    if next_layer is None:
+        out_size = NCHAR
+    else:
+        components = next_layer.split(".")
+        name = components[0]
+        size = int(components[1])
+        if name in ("dense", "rec"):
+            out_size = size
+        elif name == "gru":
+            out_size = 3 * size
+        elif name == "lstm":
+            out_size = 4 * size
+
+    current_weights = layer_weights(name, size, in_size, out_size)
+
+    for new_type in ("dense", "rec", "gru", "lstm"):
+        if new_type == name:
+            continue
+        new_size = size
+        new_weights = layer_weights(new_type, new_size, in_size, out_size)
+        move_down = new_weights > current_weights
+        dist = log_distance(current_weights, new_weights)
+        prev_dist = 100
+        while dist < prev_dist:
+            best_size = new_size
+            if move_down:
+                if new_size == 1:
+                    break
+                new_size //= 2
+            else:
+                new_size *= 2
+            new_weights = layer_weights(new_type, new_size, in_size, out_size)
+            prev_dist = dist
+            dist = log_distance(current_weights, new_weights)
+        if new_type == "lstm":
+            yield f"lstm.{best_size}"
+        else:
+            yield f"{new_type}.{best_size}.tanh"
+
+
+def layer_neighbors(layer, prev_layer, next_layer):
     components = layer.split(".")
     name = components[0]
     params = components[1:]
     assert len(params) >= 1
-    length = int(params[0])
+    size = int(params[0])
+
     if name == "suffix":
         assert len(params) == 1
-        if length > 2:
-            yield f"suffix.{length-1}"
-        yield f"suffix.{length+1}"
-    else:
-        try:
-            l = int(params[0])
-        except Exception:
-            print(layer)
-            print(components)
-            print(params)
-            raise
-        if len(params) > 1:
-            activation = params[1]
-        else:
-            activation = "tanh"
+        if size > 2:
+            yield f"suffix.{size-1}"
+        yield f"suffix.{size+1}"
+        return
 
-        if name != "gru":
-            yield f"gru.{length}.tanh"
-            if name in ("dense", "rec") and length >= 2:
-                yield f"gru.{length // 2}.tanh"
-        if name != "lstm":
-            yield f"lstm.{length}"
-            if name in ("dense", "rec") and length >= 2:
-                yield f"lstm.{length // 2}"
-        if name != "rec":
-            yield f"rec.{length}.{activation}"
-            if name in ("gru", "lstm"):
-                yield f"rec.{length*2}.{activation}"
-        if name != "dense":
-            yield f"dense.{length}.{activation}"
-            if name in ("gru", "lstm"):
-                yield f"dense.{length*2}.{activation}"
+    activation = "." + params[1] if len(params) > 1 else ""
 
-        if length > 1:
-            new_len = length // 2
-            if name == "lstm":
-                yield f"lstm.{new_len}"
-            else:
-                yield f"{name}.{new_len}.{activation}"
+    if size > 1:
+        yield f"{name}.{size // 2}{activation}"
+    yield f"{name}.{size * 2}{activation}"
 
-        new_len = length * 2
-        if name == "lstm":
-            yield f"lstm.{new_len}"
-        else:
-            yield f"{name}.{new_len}.{activation}"
+    if activation:
+        assert name != "lstm"
+        if activation != "tanh":
+            yield f"{name}.{size}.tanh"
+        if activation != "relu":
+            yield f"{name}.{size}.relu"
 
-        if name != "lstm":
-            if activation != "tanh":
-                yield f"{name}.{length}.tanh"
-            if activation != "sigmoid":
-                yield f"{name}.{length}.sigmoid"
-            if activation != "relu":
-                yield f"{name}.{length}.relu"
+    for neighbor in change_layer_type(name, size, prev_layer, next_layer):
+        yield neighbor
 
 
 def spec_neighbors(spec):
-    yield spec + "-dense.128.tanh"
+    layers = spec.split("-")
+
+    for i, layer in enumerate(layers):
+        prev_layer = layers[i - 1] if i > 0 else None
+        next_layer = layers[i + 1] if i < len(layers) - 1 else None
+        for modified in layer_neighbors(layer, prev_layer, next_layer):
+            yield "-".join(layers[:i] + [modified] + layers[i + 1 :])
+
     if not spec.startswith("suffix"):
         yield "suffix.2-" + spec
-
-    layers = spec.split("-")
-    if len(layers) > 1:
-        yield "-".join(layers[:-1])
-
     if layers[0] == "suffix.2":
         yield "-".join(layers[1:])
 
-    for i, layer in enumerate(layers):
-        for modified in layer_neighbors(layer):
-            yield "-".join(layers[:i] + [modified] + layers[i + 1 :])
+    if len(layers) > 1:
+        yield "-".join(layers[:-1])
+    last_layer_size = int(layers[-1].split(".")[1])
+    out_size = min(256, last_layer_size)
+    yield spec + f"-dense.{out_size}.tanh"
 
 
-def conf_neighbors(conf):
+TOTAL_WEIGHTS_MEMO = {}
+
+
+def total_weights(spec):
+    w = TOTAL_WEIGHTS_MEMO.get(spec, 0)
+    if w > 0:
+        return w
+
+    layer_specs = spec.split("-")
+    weights = 0
+    cur_size = NCHAR
+    for layer_spec in layer_specs:
+        components = layer_spec.split(".")
+        name = components[0]
+        size = int(components[1])
+        weights += layer_weights(name, size, cur_size, 0)
+        cur_size = cur_size * size if name == "suffix" else size
+    weights += cur_size * NCHAR + NCHAR
+    TOTAL_WEIGHTS_MEMO[spec] = weights
+    return weights
+
+
+def conf_neighbors(conf, max_weights=None):
+    yield conf
+
+    for spec in spec_neighbors(conf.spec):
+        if total_weights(spec) <= max_weights:
+            if spec == "rec.1..tanh":
+                print(conf)
+                raise Exception
+            yield conf._replace(spec=spec)
+
+    if conf.batch > 1:
+        yield conf._replace(
+            sample_len=conf.sample_len * 2, batch=conf.batch // 2
+        )
+    if conf.sample_len > 2:
+        yield conf._replace(
+            sample_len=conf.sample_len // 2, batch=conf.batch * 2
+        )
+
+    yield conf._replace(batch=conf.batch * 2)
+    if conf.batch > 1:
+        yield conf._replace(batch=conf.batch // 2)
+
     ilr = LRS.index(conf.lr)
     if ilr > 0:
         yield conf._replace(lr=LRS[ilr - 1])
     if ilr < len(LRS) - 1:
         yield conf._replace(lr=LRS[ilr + 1])
 
-    for spec in spec_neighbors(conf.spec):
-        yield conf._replace(spec=spec)
-
-    if conf.batch > 1:
-        yield conf._replace(batch=conf.batch // 2)
-        yield conf._replace(batch=conf.batch // 2, sample_len=conf.sample_len * 2)
-    yield conf._replace(batch=conf.batch * 2)
-
-    if conf.sample_len > 1:
-        yield conf._replace(sample_len=conf.sample_len // 2)
-        yield conf._replace(sample_len=conf.sample_len // 2, batch=conf.batch * 2)
-    yield conf._replace(sample_len=conf.sample_len * 2)
-
 
 class ConfResults(object):
-    def __init__(self, conf):
+    def __init__(self, conf, max_weights):
         self.conf = conf
         self.reports = []
-        self.neighbors = list(conf_neighbors(conf))
+        self.neighbors = list(conf_neighbors(conf, max_weights))
 
     def add_report(self, report):
         self.reports.append(report)
@@ -176,7 +250,6 @@ def select_conf(results) -> Configuration:
         score = conf_results.score
         if score >= best_score:
             continue
-        random.shuffle(conf_results.neighbors)
         for neighbor_conf in conf_results.neighbors:
             if neighbor_conf not in results:
                 prev = conf
@@ -186,7 +259,9 @@ def select_conf(results) -> Configuration:
                 best_count = 0
                 break
             neighbor_results = results[neighbor_conf]
-            neighbor_score = score + 0.3 * neighbor_results.report_count
+            neighbor_score = (
+                score + min(0.1, score * 0.01) * neighbor_results.report_count
+            )
 
             if neighbor_score < best_score:
                 prev = conf
@@ -208,10 +283,12 @@ def print_top(results):
     print()
     for score, conf, scores in top[:20]:
         if len(scores) > 1:
-            scores = f" {scores}"
+            scores = " [" + ", ".join(f"{s:.4f}" for s in scores) + "]"
         else:
             scores = ""
-        print(f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  B{conf.batch:4}  {score:.4f}{scores}")
+        print(
+            f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  B{conf.batch:4}  {score:.4f}{scores}"
+        )
     print()
 
 
@@ -223,13 +300,15 @@ def search(
     regularization,
     time_limit,
     log,
+    max_weights,
+    start_spec,
 ):
     print(f"Training data: {data}")
     train_set = DataSet(data)
 
-    start_confs = [
-        Configuration("rec.128.relu-dense.256.relu-dense.64.tanh", learning_rate, sample_len, batch)
-    ]
+    assert total_weights(start_spec) <= max_weights
+
+    start_confs = [Configuration(start_spec, learning_rate, sample_len, batch)]
     results = {}
 
     while True:
@@ -238,10 +317,16 @@ def search(
         else:
             conf = select_conf(results)
 
-        print(f"{conf.spec:32} LR{conf.lr} LEN{conf.sample_len} B{conf.batch}")
+        weights = total_weights(conf.spec)
+        print(
+            f"{conf.spec} ({weights})  LR {conf.lr}  LEN {conf.sample_len}  B {conf.batch}"
+        )
         model = LayeredModel2.parse(conf.spec)
         manager = Manager(model, conf.lr, regularization, 100000)
-        manager.init()
+        manager.init(quiet=True)
+        assert manager.model.total_weights(manager.weights) == total_weights(
+            conf.spec
+        )
         report = train_and_validate(
             manager,
             steps=None,
@@ -253,16 +338,24 @@ def search(
             temp_dir=None,
             output_dir=None,
             log=log,
+            quiet=True,
         )
 
         if conf not in results:
-            results[conf] = ConfResults(conf)
+            results[conf] = ConfResults(conf, max_weights)
         results[conf].add_report(report)
 
         print_top(results)
 
 
-if __name__ == '__main__':
-    conf = ConfResults(Configuration("suffix.3-dense.128.relu-dense.256.relu-dense.256.tanh", 0.05, 8, 256))
+if __name__ == "__main__":
+    conf = ConfResults(
+        Configuration(
+            "suffix.3-dense.128.relu-dense.256.relu-dense.256.tanh",
+            0.05,
+            8,
+            256,
+        )
+    )
     for n in conf.neighbors:
         print(n)

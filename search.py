@@ -203,15 +203,15 @@ def conf_neighbors(conf, max_weights=None):
     #         sample_len=conf.sample_len // 2, batch=conf.batch * 2
     #     )
 
+    ilr = LRS.index(conf.lr)
+    if ilr > 0:
+        yield conf._replace(lr=LRS[ilr - 1], batch=conf.batch * 2)
+    if ilr < len(LRS) - 1 and conf.batch > 1:
+        yield conf._replace(lr=LRS[ilr + 1], batch=conf.batch // 2)
+
     yield conf._replace(batch=conf.batch * 2)
     if conf.batch > 1:
         yield conf._replace(batch=conf.batch // 2)
-
-    ilr = LRS.index(conf.lr)
-    if ilr > 0:
-        yield conf._replace(lr=LRS[ilr - 1])
-    if ilr < len(LRS) - 1:
-        yield conf._replace(lr=LRS[ilr + 1])
 
 
 class ConfResults(object):

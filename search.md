@@ -96,7 +96,10 @@ Sample length = 128
 | 2^10         | 4        | rec.1.relu            | 4.3271 |   64  | 0.5 |
 | -------------| -------- | --------------------- | ------ | ----- | --- |
 | 2^11         | 1        | suffix.2-dense.2.tanh | 4.1527 |   16  | 0.5 |
-| 2^11         | 2        | suffix.2-dense.2.relu | 4.0332 |  128  | 0.5 |
+| 2^11         | 2        | rec.2.tanh-gru.4.tanh | 3.9460 |   16  | 0.5 |
+| 2^11         | 4        | rec.2.tanh-dense.8.relu-rec.8.tanh-dense.4.relu | 3.7828 |   32  | 0.2 |
+| 2^11         | 8        | rec.2.tanh-dense.8.relu-rec.8.tanh-dense.4.relu | 3.7165 |   64  | 0.2 |
+
 
 ## Best configurations per max_weights / time_limit (GPU)
 
@@ -109,4 +112,5 @@ Sample length = 128
 | 2^10         | 4        | rec.1.relu            | 4.2969 |  512  | 0.5 |
 | -------------| -------- | --------------------- | ------ | ----- | --- |
 | 2^11         | 1        | suffix.2-rec.2.tanh   | 4.0870 |  256  | 0.5 |
-| 2^11         | 2        |                       | 4.0332 |  128  | 0.5 |
+| 2^11         | 2        | suffix.2-dense.2.relu | 3.9936 |  128  | 0.5 |
+| 2^11         | 4        | rec.2.tanh-gru.4.tanh | 3.8589 |  128  | 0.5 |

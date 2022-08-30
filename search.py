@@ -203,15 +203,16 @@ def conf_neighbors(conf, max_weights=None):
     #         sample_len=conf.sample_len // 2, batch=conf.batch * 2
     #     )
 
-    ilr = LRS.index(conf.lr)
-    if ilr > 0 and conf.batch > 1:
-        yield conf._replace(lr=LRS[ilr - 1], batch=conf.batch // 2)
-    if ilr < len(LRS) - 1:
-        yield conf._replace(lr=LRS[ilr + 1], batch=conf.batch * 2)
-
     yield conf._replace(batch=conf.batch * 2)
     if conf.batch > 1:
         yield conf._replace(batch=conf.batch // 2)
+
+    ilr = LRS.index(conf.lr)
+    if ilr > 0:
+        yield conf._replace(lr=LRS[ilr - 1])
+    if ilr < len(LRS) - 1:
+        yield conf._replace(lr=LRS[ilr + 1])
+
 
 
 class ConfResults(object):
@@ -260,7 +261,7 @@ def select_conf(results) -> Configuration:
                 break
             neighbor_results = results[neighbor_conf]
             neighbor_score = (
-                score + min(0.1, score * 0.01) * neighbor_results.report_count
+                score + min(0.1, score * 0.02) * neighbor_results.report_count
             )
 
             if neighbor_score < best_score:

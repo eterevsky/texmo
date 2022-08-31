@@ -75,15 +75,15 @@ def change_layer_type(name, size, prev_layer, next_layer):
         out_size = NCHAR
     else:
         components = next_layer.split(".")
-        name = components[0]
+        next_name = components[0]
         size = int(components[1])
-        if name in ("dense", "rec"):
+        if next_name in ("dense", "rec"):
             out_size = size
-        elif name == "gru":
+        elif next_name == "gru":
             out_size = 3 * size
-        elif name == "lstm":
+        elif next_name == "lstm":
             out_size = 4 * size
-        elif name == "suffix":
+        elif next_name == "suffix":
             out_size = size * NCHAR  # This is not right!
 
     current_weights = layer_weights(name, size, in_size, out_size)

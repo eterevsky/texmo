@@ -232,7 +232,6 @@ def parse_args():
     )
     parser.add_argument(
         '--immut-layers',
-        type=bool,
         action="store_true",
         default=False,
         help='for search, disable tweaking the layers, except for their size',

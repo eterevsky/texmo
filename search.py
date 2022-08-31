@@ -113,6 +113,7 @@ def change_layer_type(name, size, prev_layer, next_layer):
 def layer_neighbors(layer, prev_layer, next_layer):
     components = layer.split(".")
     name = components[0]
+    if name == 'norm': return
     params = components[1:]
     assert len(params) >= 1
     size = int(params[0])
@@ -147,6 +148,8 @@ def spec_neighbors(spec):
     for i, layer in enumerate(layers):
         prev_layer = layers[i - 1] if i > 0 else None
         next_layer = layers[i + 1] if i < len(layers) - 1 else None
+        if next_layer == 'norm':
+            next_layer = layers[i + 2] if i < len(layers) - 2 else None
         for modified in layer_neighbors(layer, prev_layer, next_layer):
             yield "-".join(layers[:i] + [modified] + layers[i + 1 :])
 
@@ -170,7 +173,9 @@ def spec_neighbors(spec):
 
     if len(layers) > 1:
         yield "-".join(layers[:-1])
-    last_layer_size = int(layers[-1].split(".")[1])
+
+    last_layer = layers[-1] if layers[-1] != "norm" else layers[-2]
+    last_layer_size = int(last_layer.split(".")[1])
     out_size = min(256, last_layer_size)
     yield spec + f"-dense.{out_size}.tanh"
 
@@ -189,6 +194,7 @@ def total_weights(spec):
     for layer_spec in layer_specs:
         components = layer_spec.split(".")
         name = components[0]
+        if name == 'norm': continue
         size = int(components[1])
         weights += layer_weights(name, size, cur_size, 0)
         cur_size = cur_size * size if name == "suffix" else size

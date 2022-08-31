@@ -128,13 +128,13 @@ def layer_neighbors(layer, prev_layer, next_layer, immut_layers):
         yield f"suffix.{size+1}"
         return
 
-    if immut_layers: return
-
     activation = "." + params[1] if len(params) > 1 else ""
 
     if size > 1:
         yield f"{name}.{size // 2}{activation}"
     yield f"{name}.{size * 2}{activation}"
+
+    if immut_layers: return
 
     if activation:
         assert name != "lstm"

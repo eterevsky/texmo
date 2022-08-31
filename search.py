@@ -139,17 +139,17 @@ def layer_neighbors(layer, prev_layer, next_layer):
         if activation != ".relu":
             yield f"{name}.{size}.relu"
 
-    if name != "dense":
-        yield f"dense.{size}.tanh"
-    if name != "rec":
-        yield f"rec.{size}.tanh"
-    if name != "gru":
-        yield f"gru.{size}.tanh"
-    if name != "lstm":
-        yield f"lstm.{size}"
+    # if name != "dense":
+    #     yield f"dense.{size}.tanh"
+    # if name != "rec":
+    #     yield f"rec.{size}.tanh"
+    # if name != "gru":
+    #     yield f"gru.{size}.tanh"
+    # if name != "lstm":
+    #     yield f"lstm.{size}"
 
-    # for neighbor in change_layer_type(name, size, prev_layer, next_layer):
-    #     yield neighbor
+    for neighbor in change_layer_type(name, size, prev_layer, next_layer):
+        yield neighbor
 
 
 def spec_neighbors(spec):

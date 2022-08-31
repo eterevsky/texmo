@@ -179,11 +179,11 @@ def spec_neighbors(spec):
 
     last_layer = layers[-1] if layers[-1] != "norm" else layers[-2]
     components = last_layer.split(".")
-    size = components[1]
+    size = int(components[1])
     if components[0] == 'suffix':
         size *= NCHAR
 
-    out_size = min(128, last_layer_size)
+    out_size = min(128, size)
     yield spec + f"-dense.{out_size}.tanh"
 
 
@@ -202,12 +202,7 @@ def total_weights(spec):
         components = layer_spec.split(".")
         name = components[0]
         if name == 'norm': continue
-        try:
-            size = int(components[1])
-        except IndexError:
-            print('!!!!!!!!!!!!', layer_spec)
-            print('!!!!!!!!!!!!', spec)
-            continue
+        size = int(components[1])
         weights += layer_weights(name, size, cur_size, 0)
         cur_size = cur_size * size if name == "suffix" else size
     weights += cur_size * NCHAR + NCHAR

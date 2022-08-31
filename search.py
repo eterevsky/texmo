@@ -134,13 +134,22 @@ def layer_neighbors(layer, prev_layer, next_layer):
 
     if activation:
         assert name != "lstm"
-        if activation != "tanh":
+        if activation != ".tanh":
             yield f"{name}.{size}.tanh"
-        if activation != "relu":
+        if activation != ".relu":
             yield f"{name}.{size}.relu"
 
-    for neighbor in change_layer_type(name, size, prev_layer, next_layer):
-        yield neighbor
+    if name != "dense":
+        yield f"dense.{size}.tanh"
+    if name != "rec":
+        yield f"rec.{size}.tanh"
+    if name != "gru":
+        yield f"gru.{size}.tanh"
+    if name != "lstm":
+        yield f"lstm.{size}"
+
+    # for neighbor in change_layer_type(name, size, prev_layer, next_layer):
+    #     yield neighbor
 
 
 def spec_neighbors(spec):
@@ -153,6 +162,8 @@ def spec_neighbors(spec):
         next_layer = layers[i + 1] if i < len(layers) - 1 else None
         if next_layer == 'norm':
             next_layer = layers[i + 2] if i < len(layers) - 2 else None
+        assert prev_layer != 'norm'
+        assert next_layer != 'norm'
         for modified in layer_neighbors(layer, prev_layer, next_layer):
             yield "-".join(layers[:i] + [modified] + layers[i + 1 :])
 
@@ -170,7 +181,7 @@ def spec_neighbors(spec):
             and not layers[i].startswith("norm")
             and not layers[i].startswith("suffix")
         ):
-            yield "-".join(layers[:i] + ["norm"] + layers[i + 1 :])
+            yield "-".join(layers[:i] + ["norm"] + layers[i:])
     if not layers[-1].startswith('norm') and not layers[-1].startswith('suffix'):
         yield '-'.join(layers + ['norm'])
 
@@ -216,15 +227,6 @@ def conf_neighbors(conf, max_weights=None):
     for spec in spec_neighbors(conf.spec):
         if max_weights is None or total_weights(spec) <= max_weights:
             yield conf._replace(spec=spec)
-
-    # if conf.batch > 1:
-    #     yield conf._replace(
-    #         sample_len=conf.sample_len * 2, batch=conf.batch // 2
-    #     )
-    # if conf.sample_len > 2:
-    #     yield conf._replace(
-    #         sample_len=conf.sample_len // 2, batch=conf.batch * 2
-    #     )
 
     yield conf._replace(batch=conf.batch * 2)
     if conf.batch > 1:

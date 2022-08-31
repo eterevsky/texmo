@@ -201,7 +201,7 @@ def conf_neighbors(conf, max_weights=None):
     yield conf
 
     for spec in spec_neighbors(conf.spec):
-        if total_weights(spec) <= max_weights:
+        if max_weights is None or total_weights(spec) <= max_weights:
             if spec == "rec.1..tanh":
                 print(conf)
                 raise Exception
@@ -319,7 +319,7 @@ def search(
     print(f"Training data: {data}")
     train_set = DataSet(data)
 
-    assert total_weights(start_spec) <= max_weights
+    assert max_weights is None or total_weights(start_spec) <= max_weights
 
     start_confs = [Configuration(start_spec, learning_rate, sample_len, batch)]
     results = {}

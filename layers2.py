@@ -318,3 +318,28 @@ class Lstm(Layer2):
         h = o * c
 
         return {'h': h, 'c': c}, h
+
+
+@layer_cls
+class Normalize(Layer2):
+    name = 'norm'
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        assert self._activation is None
+        self.full_name = "norm"
+        self.output_shape = self._input_shape
+
+    def init_weights(self, rng: Rng):
+        return None
+
+    def init_state(self, weights):
+        return None
+
+    def step(self, weights, state, input):
+        mean = jnp.mean(input)
+        stddev = jnp.std(input) + 1E-6
+
+        inv = 1 / stddev
+
+        return None, (input - mean) * inv

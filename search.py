@@ -155,6 +155,19 @@ def spec_neighbors(spec):
     if layers[0] == "suffix.2":
         yield "-".join(layers[1:])
 
+    for i in range(1, len(layers)):
+        if layers[i].startswith("norm"):
+            yield "-".join(layers[:i] + layers[i + 1:])
+        elif (
+            not layers[i - 1].startswith("norm")
+            and not layers[i - 1].startswith("suffix")
+            and not layers[i].startswith("norm")
+            and not layers[i].startswith("suffix")
+        ):
+            yield "-".join(layers[:i] + ["norm"] + layers[i + 1 :])
+    if not layers[-1].startswith('norm') and not layers[-1].startswith('suffix'):
+        yield '-'.join(layers + ['norm'])
+
     if len(layers) > 1:
         yield "-".join(layers[:-1])
     last_layer_size = int(layers[-1].split(".")[1])
@@ -212,7 +225,6 @@ def conf_neighbors(conf, max_weights=None):
         yield conf._replace(lr=LRS[ilr - 1])
     if ilr < len(LRS) - 1:
         yield conf._replace(lr=LRS[ilr + 1])
-
 
 
 class ConfResults(object):

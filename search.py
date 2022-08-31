@@ -178,8 +178,12 @@ def spec_neighbors(spec):
         yield "-".join(layers[:-1])
 
     last_layer = layers[-1] if layers[-1] != "norm" else layers[-2]
-    last_layer_size = int(last_layer.split(".")[1])
-    out_size = min(256, last_layer_size)
+    components = last_layer.split(".")
+    size = components[1]
+    if components[0] == 'suffix':
+        size *= NCHAR
+
+    out_size = min(128, last_layer_size)
     yield spec + f"-dense.{out_size}.tanh"
 
 

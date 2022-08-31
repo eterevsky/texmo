@@ -179,8 +179,14 @@ class Manager(object):
         return self._loss_avg(self.weights, xs)
 
     def evaluate(self, xs):
-        xs = jax.nn.one_hot(xs, NCHAR)
-        self.loss = self._loss_avg(self.weights, xs).item()
+        loss = 0
+        for i in range(xs.shape[0] // 256):
+            shard = xs[i*256 : (i+1)*256]
+            shard = jax.nn.one_hot(shard, NCHAR)
+            loss += self._loss_avg(self.weights, shard).item()
+
+        self.loss = loss / (xs.shape[0] // 256)
+
         return self.loss
 
     def sample(self, prefix, l, temperature=0.05):

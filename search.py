@@ -61,7 +61,7 @@ def log_distance(x, y):
 
 
 def change_layer_type(name, size, prev_layer, next_layer):
-    if name == 'norm': return
+    if name == 'norm' or name == 'suffix': return
     if prev_layer is None:
         in_size = NCHAR
     else:
@@ -83,6 +83,8 @@ def change_layer_type(name, size, prev_layer, next_layer):
             out_size = 3 * size
         elif name == "lstm":
             out_size = 4 * size
+        elif name == "suffix":
+            out_size = size * NCHAR  # This is not right!
 
     current_weights = layer_weights(name, size, in_size, out_size)
 
@@ -111,7 +113,7 @@ def change_layer_type(name, size, prev_layer, next_layer):
             yield f"{new_type}.{best_size}.tanh"
 
 
-def layer_neighbors(layer, prev_layer, next_layer):
+def layer_neighbors(layer, prev_layer, next_layer, immut_layers):
     components = layer.split(".")
     name = components[0]
     if name == 'norm': return
@@ -125,6 +127,8 @@ def layer_neighbors(layer, prev_layer, next_layer):
             yield f"suffix.{size-1}"
         yield f"suffix.{size+1}"
         return
+
+    if immut_layers: return
 
     activation = "." + params[1] if len(params) > 1 else ""
 
@@ -152,7 +156,7 @@ def layer_neighbors(layer, prev_layer, next_layer):
         yield neighbor
 
 
-def spec_neighbors(spec):
+def spec_neighbors(spec, immut_layers):
     layers = spec.split("-")
 
     for i, layer in enumerate(layers):
@@ -164,7 +168,7 @@ def spec_neighbors(spec):
             next_layer = layers[i + 2] if i < len(layers) - 2 else None
         assert prev_layer != 'norm'
         assert next_layer != 'norm'
-        for modified in layer_neighbors(layer, prev_layer, next_layer):
+        for modified in layer_neighbors(layer, prev_layer, next_layer, immut_layers):
             yield "-".join(layers[:i] + [modified] + layers[i + 1 :])
 
     if not spec.startswith("suffix"):
@@ -182,8 +186,11 @@ def spec_neighbors(spec):
             and not layers[i].startswith("suffix")
         ):
             yield "-".join(layers[:i] + ["norm"] + layers[i:])
+
     if not layers[-1].startswith('norm') and not layers[-1].startswith('suffix'):
         yield '-'.join(layers + ['norm'])
+
+    if immut_layers: return
 
     if len(layers) > 1:
         yield "-".join(layers[:-1])
@@ -221,10 +228,10 @@ def total_weights(spec):
     return weights
 
 
-def conf_neighbors(conf, max_weights=None):
+def conf_neighbors(conf, max_weights=None, immut_layers=False):
     yield conf
 
-    for spec in spec_neighbors(conf.spec):
+    for spec in spec_neighbors(conf.spec, immut_layers):
         if max_weights is None or total_weights(spec) <= max_weights:
             yield conf._replace(spec=spec)
 
@@ -240,10 +247,10 @@ def conf_neighbors(conf, max_weights=None):
 
 
 class ConfResults(object):
-    def __init__(self, conf, max_weights):
+    def __init__(self, conf, max_weights, immut_layers):
         self.conf = conf
         self.reports = []
-        self.neighbors = list(conf_neighbors(conf, max_weights))
+        self.neighbors = list(conf_neighbors(conf, max_weights, immut_layers))
 
     def add_report(self, report):
         self.reports.append(report)
@@ -327,6 +334,7 @@ def search(
     log,
     max_weights,
     start_spec,
+    immut_layers,
 ):
     print(f"Training data: {data}")
     train_set = DataSet(data)
@@ -367,7 +375,7 @@ def search(
         )
 
         if conf not in results:
-            results[conf] = ConfResults(conf, max_weights)
+            results[conf] = ConfResults(conf, max_weights, immut_layers)
         results[conf].add_report(report)
 
         print_top(results)

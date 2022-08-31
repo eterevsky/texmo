@@ -230,6 +230,13 @@ def parse_args():
         default=None,
         help='for search, the maximum number of weights in the model'
     )
+    parser.add_argument(
+        '--immut-layers',
+        type=bool,
+        action="store_true",
+        default=False,
+        help='for search, disable tweaking the layers, except for their size',
+    )
 
     # Training
     parser.add_argument(
@@ -318,6 +325,7 @@ if __name__ == "__main__":
             args.log,
             start_spec=args.search,
             max_weights=args.max_weights,
+            immut_layers=args.immut_layers,
         )
     elif args.benchmark:
         benchmark(args.data, args.time_limit, args.log)

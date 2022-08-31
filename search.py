@@ -158,7 +158,7 @@ def spec_neighbors(spec):
 
     if not spec.startswith("suffix"):
         yield "suffix.2-" + spec
-    if layers[0] == "suffix.2":
+    if layers[0] == "suffix.2" and len(layers) > 1 and layers[1] != "norm":
         yield "-".join(layers[1:])
 
     for i in range(1, len(layers)):

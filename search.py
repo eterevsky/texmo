@@ -61,6 +61,7 @@ def log_distance(x, y):
 
 
 def change_layer_type(name, size, prev_layer, next_layer):
+    if name == 'norm': return
     if prev_layer is None:
         in_size = NCHAR
     else:

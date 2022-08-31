@@ -201,7 +201,9 @@ def total_weights(spec):
         try:
             size = int(components[1])
         except IndexError:
-            print(layer_spec)
+            print('!!!!!!!!!!!!', layer_spec)
+            print('!!!!!!!!!!!!', spec)
+            continue
         weights += layer_weights(name, size, cur_size, 0)
         cur_size = cur_size * size if name == "suffix" else size
     weights += cur_size * NCHAR + NCHAR
@@ -214,9 +216,6 @@ def conf_neighbors(conf, max_weights=None):
 
     for spec in spec_neighbors(conf.spec):
         if max_weights is None or total_weights(spec) <= max_weights:
-            if spec == "rec.1..tanh":
-                print(conf)
-                raise Exception
             yield conf._replace(spec=spec)
 
     # if conf.batch > 1:

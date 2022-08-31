@@ -148,6 +148,8 @@ def spec_neighbors(spec):
 
     for i, layer in enumerate(layers):
         prev_layer = layers[i - 1] if i > 0 else None
+        if prev_layer == 'norm':
+            prev_layer = layers[i - 2] if i > 1 else None
         next_layer = layers[i + 1] if i < len(layers) - 1 else None
         if next_layer == 'norm':
             next_layer = layers[i + 2] if i < len(layers) - 2 else None
@@ -196,7 +198,10 @@ def total_weights(spec):
         components = layer_spec.split(".")
         name = components[0]
         if name == 'norm': continue
-        size = int(components[1])
+        try:
+            size = int(components[1])
+        except IndexError:
+            print(layer_spec)
         weights += layer_weights(name, size, cur_size, 0)
         cur_size = cur_size * size if name == "suffix" else size
     weights += cur_size * NCHAR + NCHAR

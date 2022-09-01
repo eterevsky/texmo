@@ -225,16 +225,18 @@ def parse_args():
         help="text prefix to be continued",
     )
     parser.add_argument(
-        '--max-weights',
+        "--max-weights",
         type=int,
         default=None,
-        help='for search, the maximum number of weights in the model'
+        help="for search, the maximum number of weights in the model",
     )
     parser.add_argument(
-        '--immut-layers',
-        action="store_true",
-        default=False,
-        help='for search, disable tweaking the layers, except for their size',
+        "-v",
+        "--vary",
+        type=str,
+        default="struct,lr,batch",
+        help="model parameters that can be varied with search. "
+        + "A comma-separated list of struct, size, act, lr, batch, len.",
     )
 
     # Training
@@ -324,7 +326,7 @@ if __name__ == "__main__":
             args.log,
             start_spec=args.search,
             max_weights=args.max_weights,
-            immut_layers=args.immut_layers,
+            vary=args.vary,
         )
     elif args.benchmark:
         benchmark(args.data, args.time_limit, args.log)

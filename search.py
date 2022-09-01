@@ -113,7 +113,7 @@ def change_layer_type(name, size, prev_layer, next_layer):
             yield f"{new_type}.{best_size}.tanh"
 
 
-def layer_neighbors(layer, prev_layer, next_layer, immut_layers):
+def layer_neighbors(layer, prev_layer, next_layer, vary):
     components = layer.split(".")
     name = components[0]
     if name == 'norm': return
@@ -123,20 +123,20 @@ def layer_neighbors(layer, prev_layer, next_layer, immut_layers):
 
     if name == "suffix":
         assert len(params) == 1
-        if size > 2:
-            yield f"suffix.{size-1}"
-        yield f"suffix.{size+1}"
+        if 'size' in vary:
+            if size > 2:
+                yield f"suffix.{size-1}"
+            yield f"suffix.{size+1}"
         return
 
     activation = "." + params[1] if len(params) > 1 else ""
 
-    if size > 1:
-        yield f"{name}.{size // 2}{activation}"
-    yield f"{name}.{size * 2}{activation}"
+    if size in vary:
+        if size > 1:
+            yield f"{name}.{size // 2}{activation}"
+        yield f"{name}.{size * 2}{activation}"
 
-    if immut_layers: return
-
-    if activation:
+    if activation and 'act' in vary:
         assert name != "lstm"
         if activation != ".tanh":
             yield f"{name}.{size}.tanh"
@@ -152,11 +152,12 @@ def layer_neighbors(layer, prev_layer, next_layer, immut_layers):
     # if name != "lstm":
     #     yield f"lstm.{size}"
 
-    for neighbor in change_layer_type(name, size, prev_layer, next_layer):
-        yield neighbor
+    if 'struct' in vary:
+        for neighbor in change_layer_type(name, size, prev_layer, next_layer):
+            yield neighbor
 
 
-def spec_neighbors(spec, immut_layers):
+def spec_neighbors(spec, vary):
     layers = spec.split("-")
 
     for i, layer in enumerate(layers):
@@ -168,32 +169,33 @@ def spec_neighbors(spec, immut_layers):
             next_layer = layers[i + 2] if i < len(layers) - 2 else None
         assert prev_layer != 'norm'
         assert next_layer != 'norm'
-        for modified in layer_neighbors(layer, prev_layer, next_layer, immut_layers):
+        for modified in layer_neighbors(layer, prev_layer, next_layer, vary):
             yield "-".join(layers[:i] + [modified] + layers[i + 1 :])
 
-    if not spec.startswith("suffix"):
-        yield "suffix.2-" + spec
-    if layers[0] == "suffix.2" and len(layers) > 1 and layers[1] != "norm":
-        yield "-".join(layers[1:])
+    if 'size' in vary:
+        if not spec.startswith("suffix"):
+            yield "suffix.2-" + spec
+        if layers[0] == "suffix.2" and len(layers) > 1 and layers[1] != "norm":
+            yield "-".join(layers[1:])
 
-    for i in range(1, len(layers)):
-        if layers[i].startswith("norm"):
-            yield "-".join(layers[:i] + layers[i + 1:])
-        elif (
-            not layers[i - 1].startswith("norm")
-            and not layers[i - 1].startswith("suffix")
-            and not layers[i].startswith("norm")
-            and not layers[i].startswith("suffix")
-        ):
-            yield "-".join(layers[:i] + ["norm"] + layers[i:])
+    if 'norm' in vary:
+        for i in range(1, len(layers)):
+            if layers[i].startswith("norm"):
+                yield "-".join(layers[:i] + layers[i + 1:])
+            elif (
+                not layers[i - 1].startswith("norm")
+                and not layers[i - 1].startswith("suffix")
+                and not layers[i].startswith("norm")
+                and not layers[i].startswith("suffix")
+            ):
+                yield "-".join(layers[:i] + ["norm"] + layers[i:])
 
-    if not layers[-1].startswith('norm') and not layers[-1].startswith('suffix'):
-        yield '-'.join(layers + ['norm'])
+        if not layers[-1].startswith('norm') and not layers[-1].startswith('suffix'):
+            yield '-'.join(layers + ['norm'])
 
-    if immut_layers: return
-
-    if len(layers) > 1:
-        yield "-".join(layers[:-1])
+    if 'struct' in vary:
+        if len(layers) > 1:
+            yield "-".join(layers[:-1])
 
     last_layer = layers[-1] if layers[-1] != "norm" else layers[-2]
     components = last_layer.split(".")
@@ -201,8 +203,9 @@ def spec_neighbors(spec, immut_layers):
     if components[0] == 'suffix':
         size *= NCHAR
 
-    out_size = min(128, size)
-    yield spec + f"-dense.{out_size}.tanh"
+    if 'struct' in vary:
+        out_size = min(128, size)
+        yield spec + f"-dense.{out_size}.tanh"
 
 
 TOTAL_WEIGHTS_MEMO = {}
@@ -228,29 +231,31 @@ def total_weights(spec):
     return weights
 
 
-def conf_neighbors(conf, max_weights=None, immut_layers=False):
+def conf_neighbors(conf, max_weights=None, vary=()):
     yield conf
 
-    for spec in spec_neighbors(conf.spec, immut_layers):
+    for spec in spec_neighbors(conf.spec, vary):
         if max_weights is None or total_weights(spec) <= max_weights:
             yield conf._replace(spec=spec)
 
-    yield conf._replace(batch=conf.batch * 2)
-    if conf.batch > 1:
-        yield conf._replace(batch=conf.batch // 2)
+    if 'batch' in vary:
+        yield conf._replace(batch=conf.batch * 2)
+        if conf.batch > 1:
+            yield conf._replace(batch=conf.batch // 2)
 
-    ilr = LRS.index(conf.lr)
-    if ilr > 0:
-        yield conf._replace(lr=LRS[ilr - 1])
-    if ilr < len(LRS) - 1:
-        yield conf._replace(lr=LRS[ilr + 1])
+    if 'lr' in vary:
+        ilr = LRS.index(conf.lr)
+        if ilr > 0:
+            yield conf._replace(lr=LRS[ilr - 1])
+        if ilr < len(LRS) - 1:
+            yield conf._replace(lr=LRS[ilr + 1])
 
 
 class ConfResults(object):
-    def __init__(self, conf, max_weights, immut_layers):
+    def __init__(self, conf, max_weights, vary):
         self.conf = conf
         self.reports = []
-        self.neighbors = list(conf_neighbors(conf, max_weights, immut_layers))
+        self.neighbors = list(conf_neighbors(conf, max_weights, vary))
 
     def add_report(self, report):
         self.reports.append(report)
@@ -334,10 +339,12 @@ def search(
     log,
     max_weights,
     start_spec,
-    immut_layers,
+    vary='',
 ):
     print(f"Training data: {data}")
     train_set = DataSet(data)
+
+    vary = vary.split(',')
 
     assert max_weights is None or total_weights(start_spec) <= max_weights
 
@@ -375,7 +382,7 @@ def search(
         )
 
         if conf not in results:
-            results[conf] = ConfResults(conf, max_weights, immut_layers)
+            results[conf] = ConfResults(conf, max_weights, vary)
         results[conf].add_report(report)
 
         print_top(results)

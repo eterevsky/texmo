@@ -343,3 +343,43 @@ class Normalize(Layer2):
         inv = 1 / stddev
 
         return None, (input - mean) * inv
+
+
+@layer_cls
+class Convolution(Layer2):
+    name = 'conv'
+
+    def __init__(self, kernel_size, output_size, **kwargs):
+        """Transforms [X, input_size] into [X - kernel_size + 1, output_size]"""
+        super().__init__(**kwargs)
+        self._kernel = kernel_size
+        self._output = output_size
+        assert len(self._input_shape) == 2
+        assert self._input_shape[0] >= self._kernel
+        self.full_name = f'conv.{self._output}.{self._kernel}{self._activation_suffix}'
+        self.output_shape = (self._input_shape[0] - self._kernel + 1, output_size)
+
+    def init_weights(self, rng: Rng):
+        return {
+            'kernel': rng.he((self._kernel, self._output, self._input_shape[1]), self.input_size),
+            'b': rng.normal((self._output,)),
+        }
+
+    def init_state(self, weights):
+        return None
+
+    def step(self, weights, state, input):
+        kernel = weights['kernel']
+        input = jnp.expand_dims(input, axis=0)
+        dn = jax.lax.conv_dimension_numbers(
+            input.shape, kernel.shape, ('NWC', 'WOI', 'NWC'))
+        out = jax.lax.conv_general_dilated(
+            input, kernel, (1,), 'VALID', (1,), (1,), dn)
+        out = jnp.squeeze(out)
+        out += jnp.expand_dims(weights['b'], axis=0)
+
+        out = self._activation(out)
+
+        return state, out
+
+

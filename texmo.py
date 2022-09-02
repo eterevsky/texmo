@@ -7,8 +7,6 @@ import os
 from dataset import DataSet
 import layered
 from manager import Manager
-import models
-from record import TrainingRecord
 import search
 from train import train_and_validate
 
@@ -37,12 +35,9 @@ def show_loss_graph(manager, output_dir):
 
 
 def create_manager(
-    model_name, layered_model, model_path, learning_rate, regularization
+    layered_model, model_path, learning_rate, regularization
 ):
-    if model_name is not None:
-        model = models.parse(model_name)
-        manager = Manager(model, learning_rate, regularization, 100000)
-    elif layered_model is not None:
+    if layered_model is not None:
         model = layered.LayeredModel2.parse(layered_model)
         manager = Manager(model, learning_rate, regularization, 100000)
     else:
@@ -61,7 +56,6 @@ def main(
     learning_rate,
     regularization,
     output_dir,
-    model_name,
     model_path,
     layered_model,
     temp_dir,
@@ -75,6 +69,7 @@ def main(
     benchmark=False,
     search=False,
     max_weights=None,
+    vary=None,
 ):
     # If benchmark is true, benchmark() should be called instead of main().
     assert not benchmark
@@ -87,7 +82,7 @@ def main(
         train_set = None
 
     manager = create_manager(
-        model_name, layered_model, model_path, learning_rate, regularization
+        layered_model, model_path, learning_rate, regularization
     )
 
     if train_set is not None:
@@ -134,7 +129,6 @@ def benchmark(data, time_limit, log):
                     learning_rate,
                     regularization=0.1,
                     output_dir=None,
-                    model_name=None,
                     model_path=None,
                     layered_model=layered,
                     temp_dir=None,

@@ -1,7 +1,6 @@
 import argparse
 from collections import namedtuple
 import json
-import matplotlib.pyplot as plt
 import os
 
 from dataset import DataSet
@@ -11,105 +10,10 @@ import search
 from train import train_and_validate
 
 
-def continue_prefix(manager, prefix, length):
-    prefix = prefix.encode()
-    out = manager.sample(prefix, length)
-
-    try:
-        s = (prefix + out).decode("utf-8")
-    except UnicodeDecodeError:
-        s = repr(prefix + out)
-    print()
-    print(s)
-    print()
 
 
-def show_loss_graph(manager, output_dir):
-    plt.xscale("log")
-    plt.yscale("log")
-    plt.ylim(top=8)
-    plt.plot(range(1, len(manager.step_loss) + 1), manager.step_loss)
-    if output_dir is not None:
-        plt.savefig(os.path.join(output_dir, manager.name() + ".png"))
-    plt.show()
 
 
-def create_manager(
-    layered_model, model_path, learning_rate, regularization
-):
-    if layered_model is not None:
-        model = layered.LayeredModel2.parse(layered_model)
-        manager = Manager(model, learning_rate, regularization, 100000)
-    else:
-        assert model_path is not None
-        with open(model_path) as f:
-            spec = json.load(f)
-        manager = Manager.from_spec(spec)
-
-    manager.init()
-    return manager
-
-
-def main(
-    data,
-    steps,
-    learning_rate,
-    regularization,
-    output_dir,
-    model_path,
-    layered_model,
-    temp_dir,
-    sample_length,
-    batch_size,
-    temp_steps,
-    time_limit,
-    log,
-    prefix="Roses are red\nViolets are blu",
-    skip_graph=False,
-    benchmark=False,
-    search=False,
-    max_weights=None,
-    vary=None,
-):
-    # If benchmark is true, benchmark() should be called instead of main().
-    assert not benchmark
-    assert not search
-
-    if data is not None:
-        print(f"Training data: {data}")
-        train_set = DataSet(data)
-    else:
-        train_set = None
-
-    manager = create_manager(
-        layered_model, model_path, learning_rate, regularization
-    )
-
-    if train_set is not None:
-        report = train_and_validate(
-            manager,
-            steps,
-            time_limit,
-            train_set,
-            sample_length,
-            batch_size,
-            temp_steps,
-            temp_dir,
-            output_dir,
-            log,
-        )
-    else:
-        report = None
-
-    if prefix is not None:
-        continue_prefix(manager, prefix, 256)
-
-    if (
-        steps is not None or time_limit is not None or data is not None
-    ) and not skip_graph:
-        show_loss_graph(manager, output_dir)
-
-    return report
 
 
 def benchmark(data, time_limit, log):

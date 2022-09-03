@@ -1,18 +1,26 @@
+# TexMo — training simple models for text prediction.
+
 ## Train model
 
 ```
-python3 train.py -d data -s 100000 -o models -t temp
+python3 train.py -d data -c rec.128.relu-gru.512.tanh-dense.128 -t 3600 -o models
 ```
 
 ## Evaluate trained model
 
 ```
-python3 train.py -d data -m models/some-model.json --prefix="..."
+python3 eval.py -d data -m models/some-model.json --prefix="..."
 ```
 
-## Layered models
+(Either `-d` or `--prefix` is enough.)
 
-Trained with length = 256, batch = 256.
+## Searching the configurations and metaparameters
+
+```
+python3 search.py -d data -c dense.128 -t 8 --vary=struc,batch,lr
+```
+
+## Results
 
 Baseline: predicting each symbol with its prior probability results in loss
 4.9449.
@@ -29,7 +37,6 @@ Baseline: predicting each symbol with its prior probability results in loss
 
 | Model                                        | Params   | Steps   | Loss   | Time | LR  |
 | -------------------------------------------- | -------- | ------- | ------ | ---- | --- |
-| suffix.2-dense.512.sigmoid                   |   393984 |   10000 | 3.0425 |  818 |     |
 | suffix.2-dense.128.relu                      |    98688 |   10000 | 3.0116 |  758 |     |
 | suffix.2-dense.512.relu                      |   393984 |   10000 | 2.9369 |  787 |
 | suffix.3-conv.2.128.relu                     |   131456 |   10000 | 2.7876 | 1067 |

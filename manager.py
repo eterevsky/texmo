@@ -127,7 +127,7 @@ class Manager(object):
         else:
             self.step_loss = step_loss
 
-    def init(self, quiet=False):
+    def init(self, quiet=False, training=True):
         if not quiet:
             print('Total parameters:', self.model.total_weights(self.weights))
             print('Creating batch loss')
@@ -137,25 +137,30 @@ class Manager(object):
             print('Creating loss_avg')
         self._loss_avg = lambda weights, xs: jnp.average(
             self._loss_batch(weights, xs)) * LOG2
-        if not quiet:
-            print('Creating loss_grad')
-        self._loss_grad = jax.jit(jax.value_and_grad(self._loss_avg))
-        if not quiet:
-            print('Creating optimizer')
-        self.optimizer = optax.chain(
-            clip_by_global_norm(1),
-            optax.scale_by_adam(),
-            additive_weight_decay(self.regularization),
-            optax.scale(-self.learning_rate),
-            optax.scale_by_schedule(
-                exp_schedule(
-                    10000,   # initial_steps
-                    100000,  # steps to lr/10
-                    self.learning_rate,
-                    self.learning_rate / 10))
-        )
+        if training:
+            if not quiet:
+                print('Creating loss_grad')
+            self._loss_grad = jax.jit(jax.value_and_grad(self._loss_avg))
+            if not quiet:
+                print('Creating optimizer')
+            self.optimizer = optax.chain(
+                clip_by_global_norm(1),
+                optax.scale_by_adam(),
+                additive_weight_decay(self.regularization),
+                optax.scale(-self.learning_rate),
+                optax.scale_by_schedule(
+                    exp_schedule(
+                        10000,   # initial_steps
+                        100000,  # steps to lr/10
+                        self.learning_rate,
+                        self.learning_rate / 10))
+            )
 
-        self.opt_state = self.optimizer.init(self.weights)
+            self.opt_state = self.optimizer.init(self.weights)
+        else:
+            self._loss_grad = None
+            self.optimizer = None
+            self.opt_state = None
 
     def key(self):
         self._key, key = jax.random.split(self._key)

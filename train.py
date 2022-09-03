@@ -122,8 +122,8 @@ def create_manager(
     else:
         assert model_path is not None
         with open(model_path) as f:
-            spec = json.load(f)
-        manager = Manager.from_spec(spec)
+            model_json = json.load(f)
+        manager = Manager.from_spec(model_json)
 
     manager.init()
     return manager
@@ -148,7 +148,7 @@ def main(
     model_path,
     model_spec,
     temp_dir,
-    sample_length,
+    sample_len,
     batch_size,
     temp_steps,
     time_limit,
@@ -167,7 +167,7 @@ def main(
         steps,
         time_limit,
         train_set,
-        sample_length,
+        sample_len,
         batch_size,
         temp_steps,
         temp_dir,
@@ -246,7 +246,7 @@ def parse_args():
         default=0.1,
     )
     parser.add_argument(
-        "--sample-length",
+        "--sample-len",
         type=int,
         default=256,
         metavar="LEN",

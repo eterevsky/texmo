@@ -72,6 +72,6 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    print("Texmo model evaluation")
+    print("TexMo model evaluation")
     args = parse_args()
     main(**vars(args))

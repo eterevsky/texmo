@@ -31,3 +31,6 @@ class DataSet(object):
     @property
     def total_size(self):
         return len(self.all)
+
+    def warmup(self):
+        _ = self.sample(64, 64)

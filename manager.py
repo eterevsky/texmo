@@ -16,8 +16,9 @@ LOG2 = 1 / math.log(2)
 
 
 def global_norm(updates):
-    pre_sqrt = sum([jnp.sum(jnp.square(x))
-                   for x in jax.tree_util.tree_leaves(updates)])
+    pre_sqrt = sum(
+        [jnp.sum(jnp.square(x)) for x in jax.tree_util.tree_leaves(updates)]
+    )
     return jnp.sqrt(pre_sqrt)
 
 
@@ -39,36 +40,43 @@ def clip_by_global_norm(max_norm) -> optax.GradientTransformation:
         g_norm = global_norm(updates)
         trigger = g_norm < max_norm
         updates = jax.tree_util.tree_map(
-            lambda t: jnp.where(trigger, t, (t / g_norm) * max_norm), updates)
+            lambda t: jnp.where(trigger, t, (t / g_norm) * max_norm), updates
+        )
         return updates, state
 
     return optax.GradientTransformation(init_fn, update_fn)
 
 
-def additive_weight_decay(weight_decay: float = 0.0) -> optax.GradientTransformation:
+def additive_weight_decay(
+    weight_decay: float = 0.0,
+) -> optax.GradientTransformation:
     """Add a delta emulating L2 regularization to all parameters except biases."""
 
     def init_fn(_):
         return optax.AdditiveWeightDecayState()
 
     def update_fn(updates, state, weights):
-        updates = jax.tree_util.tree_map(lambda g, p: g + weight_decay * p * (len(g.shape) > 1),
-                                         updates, weights)
+        updates = jax.tree_util.tree_map(
+            lambda g, p: g + weight_decay * p * (len(g.shape) > 1),
+            updates,
+            weights,
+        )
         return updates, state
 
     return optax.GradientTransformation(init_fn, update_fn)
 
 
-def gpt3_schedule(warmup_steps,
-                  anneal_steps,
-                  peak_lr,
-                  end_lr):
+def gpt3_schedule(warmup_steps, anneal_steps, peak_lr, end_lr):
     def sch(step):
         warmup_pct = jnp.clip(step, 0, warmup_steps) / warmup_steps
-        anneal_pct = jnp.clip(step - warmup_steps, 0,
-                              anneal_steps) / anneal_steps
+        anneal_pct = (
+            jnp.clip(step - warmup_steps, 0, anneal_steps) / anneal_steps
+        )
 
-        return warmup_pct * peak_lr - (peak_lr - end_lr) * (1 - jnp.cos(jnp.pi * anneal_pct)) / 2
+        return (
+            warmup_pct * peak_lr
+            - (peak_lr - end_lr) * (1 - jnp.cos(jnp.pi * anneal_pct)) / 2
+        )
 
     return sch
 
@@ -102,20 +110,36 @@ def deserialize_weights(spec):
 class Manager(object):
     @staticmethod
     def from_spec(spec):
-        model_spec = spec['model']
-        if model_spec['name'] == 'layered':
+        model_spec = spec["model"]
+        if model_spec["name"] == "layered":
             model = LayeredModel2.from_spec(model_spec)
         else:
             model = models.build(model_spec)
-        weights = deserialize_weights(spec['weights'])
-        return Manager(model, spec['learning_rate'], spec['regularization'], spec.get('total_steps', 0), spec['step'], weights, step_loss=spec.get('step_loss', None))
+        weights = deserialize_weights(spec["weights"])
+        return Manager(
+            model,
+            spec["learning_rate"],
+            spec["regularization"],
+            spec.get("total_steps", 0),
+            spec["step"],
+            weights,
+            step_loss=spec.get("step_loss", None),
+        )
 
-    def __init__(self, model, learning_rate, regularization, total_steps, step=0, weights=None, step_loss=None):
+    def __init__(
+        self,
+        model,
+        learning_rate,
+        regularization,
+        step=0,
+        weights=None,
+        step_loss=None,
+    ):
         self._key = jax.random.PRNGKey(random.randrange(2**32))
         self.model = model
         self.learning_rate = learning_rate
         self.regularization = regularization
-        self.total_steps = total_steps
+        self.total_steps = 100000
         self.step = step
         if weights is not None:
             self.weights = weights
@@ -129,20 +153,23 @@ class Manager(object):
 
     def init(self, quiet=False, training=True):
         if not quiet:
-            print('Total parameters:', self.model.total_weights(self.weights))
-            print('Creating batch loss')
+            print("Total parameters:", self.model.total_weights(self.weights))
+            print("Creating batch loss")
         self._loss_batch = jax.vmap(
-            self.model.loss, in_axes=(None, 0), out_axes=0)
+            self.model.loss, in_axes=(None, 0), out_axes=0
+        )
         if not quiet:
-            print('Creating loss_avg')
-        self._loss_avg = lambda weights, xs: jnp.average(
-            self._loss_batch(weights, xs)) * LOG2
+            print("Creating loss_avg")
+        self._loss_avg = (
+            lambda weights, xs: jnp.average(self._loss_batch(weights, xs))
+            * LOG2
+        )
         if training:
             if not quiet:
-                print('Creating loss_grad')
+                print("Creating loss_grad")
             self._loss_grad = jax.jit(jax.value_and_grad(self._loss_avg))
             if not quiet:
-                print('Creating optimizer')
+                print("Creating optimizer")
             self.optimizer = optax.chain(
                 clip_by_global_norm(1),
                 optax.scale_by_adam(),
@@ -150,10 +177,12 @@ class Manager(object):
                 optax.scale(-self.learning_rate),
                 optax.scale_by_schedule(
                     exp_schedule(
-                        10000,   # initial_steps
+                        10000,  # initial_steps
                         100000,  # steps to lr/10
                         self.learning_rate,
-                        self.learning_rate / 10))
+                        self.learning_rate / 10,
+                    )
+                ),
             )
 
             self.opt_state = self.optimizer.init(self.weights)
@@ -177,7 +206,7 @@ class Manager(object):
 
         loss = self.model.loss(self.weights, soh)
 
-        print('Sample loss:', jnp.average(loss))
+        print("Sample loss:", jnp.average(loss))
 
     def batch_loss(self, xs):
         xs = jax.nn.one_hot(xs, NCHAR)
@@ -186,7 +215,7 @@ class Manager(object):
     def evaluate(self, xs):
         loss = 0
         for i in range(xs.shape[0] // 256):
-            shard = xs[i*256 : (i+1)*256]
+            shard = xs[i * 256 : (i + 1) * 256]
             shard = jax.nn.one_hot(shard, NCHAR)
             loss += self._loss_avg(self.weights, shard).item()
 
@@ -201,8 +230,9 @@ class Manager(object):
         c = prefix[-1, :]
 
         state = self.model.init_state(self.weights)
-        state, _ = jax.lax.scan(lambda s, c: self.model.step(
-            self.weights, s, c), state, prefix[:-1])
+        state, _ = jax.lax.scan(
+            lambda s, c: self.model.step(self.weights, s, c), state, prefix[:-1]
+        )
 
         out = []
         while len(out) < l and c_selected != 0:
@@ -221,7 +251,8 @@ class Manager(object):
         #     print('Revert step')
         # else:
         updates, self.opt_state = self.optimizer.update(
-            grads, self.opt_state, self.weights)
+            grads, self.opt_state, self.weights
+        )
         self.prev_weights = self.weights
         self.weights = optax.apply_updates(self.weights, updates)
 
@@ -245,25 +276,25 @@ class Manager(object):
         model_spec = self.model.serialize()
         model_name = self.name()
 
-        path = os.path.join(dir, f'{model_name}.json')
+        path = os.path.join(dir, f"{model_name}.json")
 
         weights = self.serialize_weights(self.weights)
 
         data = {
-            'model': model_spec,
-            'total_steps': self.total_steps,
-            'step': self.step,
-            'weights': weights,
-            'learning_rate': self.learning_rate,
-            'regularization': self.regularization,
-            'loss': self.loss,
-            'step_loss': self.step_loss,
+            "model": model_spec,
+            "total_steps": self.total_steps,
+            "step": self.step,
+            "weights": weights,
+            "learning_rate": self.learning_rate,
+            "regularization": self.regularization,
+            "loss": self.loss,
+            "step_loss": self.step_loss,
         }
 
-        print(f'Saving model to {path}')
-        with open(path, 'w') as f:
+        print(f"Saving model to {path}")
+        with open(path, "w") as f:
             json.dump(data, f, indent=2)
 
     def name(self):
         model_name = self.model.full_name
-        return f'{model_name}-{self.step}'
+        return f"{model_name}-{self.step}"

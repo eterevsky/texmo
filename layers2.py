@@ -146,7 +146,7 @@ class Recurrent(Layer2):
         assert output_size > 0
         self._state = output_size
         self._state_skip = ss
-        state_skip_suffix = '.ss' if self._state_skip else ''
+        state_skip_suffix = ".ss" if self._state_skip else ""
         self.full_name = (
             f"rec.{self._state}"
             + self._activation_suffix
@@ -200,28 +200,30 @@ class Gru(Layer2):
         self._state = output_size
         if self._activation is None:
             self._activation = jnp.tanh
-            self._activation_suffix = '.tanh'
+            self._activation_suffix = ".tanh"
         self.full_name = (
-            f"gru.{self._state}"
-            + self._activation_suffix
-            + self._init_suffix
+            f"gru.{self._state}" + self._activation_suffix + self._init_suffix
         )
         self.output_shape = (output_size,)
 
     def init_weights(self, rng: Rng) -> ArrayTree:
         he_input_size = self.input_size + self._state
         weights = {
-            'wz': rng.he((self._state, self.input_size), input_size=he_input_size),
-            'uz': rng.he((self._state, self._state), input_size=he_input_size),
-            'bz': rng.normal((self._state,)),
-
-            'wr': rng.he((self._state, self.input_size), input_size=he_input_size),
-            'ur': rng.he((self._state, self._state), input_size=he_input_size),
-            'br': rng.normal((self._state,)),
-
-            'wh': rng.he((self._state, self.input_size), input_size=he_input_size),
-            'uh': rng.he((self._state, self._state), input_size=he_input_size),
-            'bh': rng.normal((self._state,)),
+            "wz": rng.he(
+                (self._state, self.input_size), input_size=he_input_size
+            ),
+            "uz": rng.he((self._state, self._state), input_size=he_input_size),
+            "bz": rng.normal((self._state,)),
+            "wr": rng.he(
+                (self._state, self.input_size), input_size=he_input_size
+            ),
+            "ur": rng.he((self._state, self._state), input_size=he_input_size),
+            "br": rng.normal((self._state,)),
+            "wh": rng.he(
+                (self._state, self.input_size), input_size=he_input_size
+            ),
+            "uh": rng.he((self._state, self._state), input_size=he_input_size),
+            "bh": rng.normal((self._state,)),
         }
         if self._train_init_state:
             weights["init_state"] = rng.normal((self._state,))
@@ -235,13 +237,25 @@ class Gru(Layer2):
 
     def step(self, weights: ArrayTree, state: ArrayTree, input: jnp.ndarray):
         input = input.flatten()
-        z = jnp.dot(weights['wz'], input) + jnp.dot(weights['uz'], state) + weights['bz']
+        z = (
+            jnp.dot(weights["wz"], input)
+            + jnp.dot(weights["uz"], state)
+            + weights["bz"]
+        )
         z = jax.nn.sigmoid(z)
 
-        r = jnp.dot(weights['wr'], input) + jnp.dot(weights['ur'], state) + weights['br']
+        r = (
+            jnp.dot(weights["wr"], input)
+            + jnp.dot(weights["ur"], state)
+            + weights["br"]
+        )
         r = jax.nn.sigmoid(r)
 
-        hc = jnp.dot(weights['wh'], input) + jnp.dot(weights['uh'], r * state) + weights['bh']
+        hc = (
+            jnp.dot(weights["wh"], input)
+            + jnp.dot(weights["uh"], r * state)
+            + weights["bh"]
+        )
         hc = self._activation(hc)
 
         state = (1 - z) * state + z * hc
@@ -250,7 +264,7 @@ class Gru(Layer2):
 
 @layer_cls
 class Lstm(Layer2):
-    name = 'lstm'
+    name = "lstm"
 
     def __init__(self, output_size: int, **kwargs):
         super().__init__(**kwargs)
@@ -263,26 +277,31 @@ class Lstm(Layer2):
     def init_weights(self, rng: Rng) -> ArrayTree:
         he_input_size = self.input_size + self._state
         weights = {
-            'wf': rng.he((self._state, self.input_size), input_size=he_input_size),
-            'uf': rng.he((self._state, self._state), input_size=he_input_size),
-            'bf': rng.normal((self._state,)),
-
-            'wi': rng.he((self._state, self.input_size), input_size=he_input_size),
-            'ui': rng.he((self._state, self._state), input_size=he_input_size),
-            'bi': rng.normal((self._state,)),
-
-            'wo': rng.he((self._state, self.input_size), input_size=he_input_size),
-            'uo': rng.he((self._state, self._state), input_size=he_input_size),
-            'bo': rng.normal((self._state,)),
-
-            'wc': rng.he((self._state, self.input_size), input_size=he_input_size),
-            'uc': rng.he((self._state, self._state), input_size=he_input_size),
-            'bc': rng.normal((self._state,)),
+            "wf": rng.he(
+                (self._state, self.input_size), input_size=he_input_size
+            ),
+            "uf": rng.he((self._state, self._state), input_size=he_input_size),
+            "bf": rng.normal((self._state,)),
+            "wi": rng.he(
+                (self._state, self.input_size), input_size=he_input_size
+            ),
+            "ui": rng.he((self._state, self._state), input_size=he_input_size),
+            "bi": rng.normal((self._state,)),
+            "wo": rng.he(
+                (self._state, self.input_size), input_size=he_input_size
+            ),
+            "uo": rng.he((self._state, self._state), input_size=he_input_size),
+            "bo": rng.normal((self._state,)),
+            "wc": rng.he(
+                (self._state, self.input_size), input_size=he_input_size
+            ),
+            "uc": rng.he((self._state, self._state), input_size=he_input_size),
+            "bc": rng.normal((self._state,)),
         }
         if self._train_init_state:
             weights["init_state"] = {
-                'h': rng.normal((self._state,)),
-                'c': rng.normal((self._state,)),
+                "h": rng.normal((self._state,)),
+                "c": rng.normal((self._state,)),
             }
         return weights
 
@@ -290,39 +309,54 @@ class Lstm(Layer2):
         if self._train_init_state:
             return weights["init_state"]
         else:
-            return {'h': jnp.zeros((self._state,)), 'c': jnp.zeros((self._state,))}
+            return {
+                "h": jnp.zeros((self._state,)),
+                "c": jnp.zeros((self._state,)),
+            }
 
     def step(self, weights, state, input):
         input = input.flatten()
 
-        h = state['h']
-        c = state['c']
+        h = state["h"]
+        c = state["c"]
 
-        f = jnp.dot(weights['wf'], input) + \
-            jnp.dot(weights['uf'], h) + weights['bf']
+        f = (
+            jnp.dot(weights["wf"], input)
+            + jnp.dot(weights["uf"], h)
+            + weights["bf"]
+        )
         f = jax.nn.sigmoid(f)
 
-        i = jnp.dot(weights['wi'], input) + \
-            jnp.dot(weights['ui'], h) + weights['bi']
+        i = (
+            jnp.dot(weights["wi"], input)
+            + jnp.dot(weights["ui"], h)
+            + weights["bi"]
+        )
         i = jax.nn.sigmoid(i)
 
-        o = jnp.dot(weights['wo'], input) + \
-            jnp.dot(weights['uo'], h) + weights['bo']
+        o = (
+            jnp.dot(weights["wo"], input)
+            + jnp.dot(weights["uo"], h)
+            + weights["bo"]
+        )
         o = jax.nn.sigmoid(o)
 
-        cn = jnp.dot(weights['wc'], input) + \
-            jnp.dot(weights['uc'], h) + weights['bc']
+        cn = (
+            jnp.dot(weights["wc"], input)
+            + jnp.dot(weights["uc"], h)
+            + weights["bc"]
+        )
         cn = jax.nn.tanh(cn)
 
         c = f * c + i * cn
         h = o * c
 
-        return {'h': h, 'c': c}, h
+        return {"h": h, "c": c}, h
 
 
 @layer_cls
 class Normalize(Layer2):
-    name = 'norm'
+    name = "norm"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -338,7 +372,7 @@ class Normalize(Layer2):
 
     def step(self, weights, state, input):
         mean = jnp.mean(input)
-        stddev = jnp.std(input) + 1E-6
+        stddev = jnp.std(input) + 1e-6
 
         inv = 1 / stddev
 
@@ -347,7 +381,7 @@ class Normalize(Layer2):
 
 @layer_cls
 class Convolution(Layer2):
-    name = 'conv'
+    name = "conv"
 
     def __init__(self, kernel_size, output_size, **kwargs):
         """Transforms [X, input_size] into [X - kernel_size + 1, output_size]"""
@@ -356,30 +390,38 @@ class Convolution(Layer2):
         self._output = output_size
         assert len(self._input_shape) == 2
         assert self._input_shape[0] >= self._kernel
-        self.full_name = f'conv.{self._output}.{self._kernel}{self._activation_suffix}'
-        self.output_shape = (self._input_shape[0] - self._kernel + 1, output_size)
+        self.full_name = (
+            f"conv.{self._output}.{self._kernel}{self._activation_suffix}"
+        )
+        self.output_shape = (
+            self._input_shape[0] - self._kernel + 1,
+            output_size,
+        )
 
     def init_weights(self, rng: Rng):
         return {
-            'kernel': rng.he((self._kernel, self._output, self._input_shape[1]), self.input_size),
-            'b': rng.normal((self._output,)),
+            "kernel": rng.he(
+                (self._kernel, self._output, self._input_shape[1]),
+                self.input_size,
+            ),
+            "b": rng.normal((self._output,)),
         }
 
     def init_state(self, weights):
         return None
 
     def step(self, weights, state, input):
-        kernel = weights['kernel']
+        kernel = weights["kernel"]
         input = jnp.expand_dims(input, axis=0)
         dn = jax.lax.conv_dimension_numbers(
-            input.shape, kernel.shape, ('NWC', 'WOI', 'NWC'))
+            input.shape, kernel.shape, ("NWC", "WOI", "NWC")
+        )
         out = jax.lax.conv_general_dilated(
-            input, kernel, (1,), 'VALID', (1,), (1,), dn)
+            input, kernel, (1,), "VALID", (1,), (1,), dn
+        )
         out = jnp.squeeze(out)
-        out += jnp.expand_dims(weights['b'], axis=0)
+        out += jnp.expand_dims(weights["b"], axis=0)
 
         out = self._activation(out)
 
         return state, out
-
-

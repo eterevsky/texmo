@@ -1,4 +1,5 @@
 from copy import deepcopy
+from unittest import result
 
 from model import NCHAR
 
@@ -20,14 +21,31 @@ def total_size(shape):
 
 
 class LayerSpec(object):
+    has_weights = True
+    has_size = True
+    has_activation = True
+
     def __init__(self, size=None, tanh=False, relu=False):
-        self._size = size
+        if self.has_size:
+            assert size is not None
+            self._size = size
+        else:
+            assert size is None
+            self._size = None
+
         if tanh:
             self._activation = "tanh"
         elif relu:
             self._activation = "relu"
         else:
             self._activation = None
+
+        assert (
+            self.has_activation
+            and self._activation is not None
+            or not self.has_activation
+            and self._activation is None
+        )
 
     @staticmethod
     def parse(spec: str):
@@ -47,10 +65,14 @@ class LayerSpec(object):
         return layer_cls(*args, **kwargs)
 
     def __str__(self):
-        raise NotImplementedError
+        size = f".{self._size}" if self._size is not None else ""
+        activation = (
+            f".{self._activation}" if self._activation is not None else ""
+        )
+        return f"{self.name}{size}{activation}"
 
     def output_shape(self, input_shape):
-        raise NotImplementedError
+        return (self._size,)
 
     def weights(self, input_shape):
         raise NotImplementedError
@@ -66,7 +88,7 @@ class LayerSpec(object):
                 raise KeyError
         return copy
 
-    def neighbors(self, vary):
+    def neighbors(self, vary, input_shape):
         if "size" in vary:
             for neighbor in self.neighbors_size():
                 yield neighbor
@@ -75,6 +97,9 @@ class LayerSpec(object):
                 yield neighbor
         if self.name == "suffix" and "suffix" in vary:
             for neighbor in self.neighbors_suffix():
+                yield neighbor
+        if "struct" in vary and self.has_weights:
+            for neighbor in self.neighbors_struct(input_shape):
                 yield neighbor
 
     def neighbors_size(self):
@@ -91,6 +116,32 @@ class LayerSpec(object):
         if self._activation != "relu":
             yield self.replace(activation="relu")
 
+    def neighbors_struct(self, input_shape):
+        for name, layer_cls in registry.items():
+            if not layer_cls.has_weights:
+                continue
+            new_layer = layer_cls(size=self._size, relu=layer_cls.has_activation)
+            yield new_layer
+
+            relu = False
+            tanh = False
+            if layer_cls.has_activation:
+                if self._activation == 'tanh':
+                    tanh = True
+                elif self._activation == 'relu':
+                    relu = True
+                else:
+                    tanh = True
+
+            if new_layer.weights(input_shape) < self.weights(input_shape):
+                yield layer_cls(size=2 * self._size, relu=relu, tanh=tanh)
+
+            if (
+                new_layer.weights(input_shape) > self.weights(input_shape)
+                and self._size > 1
+            ):
+                yield layer_cls(size=self._size // 2, relu=relu, tanh=tanh)
+
     def is_valid(self, prev_layer):
         return (
             self._size is None or (type(self._size) is int and self._size >= 1)
@@ -100,6 +151,9 @@ class LayerSpec(object):
 @layer_spec
 class SuffixSpec(LayerSpec):
     name = "suffix"
+    has_weights = False
+    has_size = False
+    has_activation = False
 
     def __init__(self, length):
         super().__init__()
@@ -143,14 +197,55 @@ class DenseSpec(LayerSpec):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def __str__(self):
-        return f"dense.{self._size}.{self._activation}"
-
-    def output_shape(self, input_shape):
-        return (self._size,)
-
     def weights(self, input_shape):
         return total_size(input_shape) * self._size + self._size
+
+
+@layer_spec
+class RecSpec(LayerSpec):
+    name = "rec"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def weights(self, input_shape):
+        return (
+            total_size(input_shape) * self._size
+            + self._size * self._size
+            + self._size
+        )
+
+
+@layer_spec
+class GruSpec(LayerSpec):
+    name = "gru"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def weights(self, input_shape):
+        return 3 * (
+            total_size(input_shape) * self._size
+            + self._size * self._size
+            + self._size
+        )
+
+
+@layer_spec
+class LstmSpec(LayerSpec):
+    name = "lstm"
+    has_activation = False
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        assert self._activation is None
+
+    def weights(self, input_shape):
+        return 4 * (
+            total_size(input_shape) * self._size
+            + self._size * self._size
+            + self._size
+        )
 
 
 class ModelSpec(object):
@@ -174,6 +269,9 @@ class ModelSpec(object):
 
     def __eq__(self, other):
         return str(self) == str(other)
+
+    def __lt__(self, other):
+        return str(self) < str(other)
 
     def __hash__(self):
         return hash(str(self))
@@ -212,8 +310,9 @@ class ModelSpec(object):
         return shape
 
     def neighbors(self, vary):
+        shape = (NCHAR,)
         for i, layer in enumerate(self._layers):
-            for mod_layer in layer.neighbors(vary):
+            for mod_layer in layer.neighbors(vary, shape):
                 neighbor = ModelSpec(
                     self._layers[:i] + [mod_layer] + self._layers[i + 1 :]
                 )
@@ -232,6 +331,8 @@ class ModelSpec(object):
                 assert neighbor.is_valid()
                 yield neighbor
 
+            shape = layer.output_shape(shape)
+
         if "suffix" in vary and self._layers[-1].name != "suffix":
             neighbor = ModelSpec(self._layers + [SuffixSpec(2)])
             assert neighbor.is_valid()
@@ -246,5 +347,7 @@ class ModelSpec(object):
 
 if __name__ == "__main__":
     spec = ModelSpec.parse("suffix.2-dense.128.tanh")
-    for neighbor in spec.neighbors(vary=["struct", "suffix", "size", "activation"]):
+    for neighbor in spec.neighbors(
+        vary=["struct", "suffix", "size", "activation"]
+    ):
         print(str(neighbor))

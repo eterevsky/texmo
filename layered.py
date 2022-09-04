@@ -1,6 +1,5 @@
 from jax.random import split
 
-from layers import LAYERS_BY_NAME
 import layers2
 from model import Model, NCHAR
 import prng

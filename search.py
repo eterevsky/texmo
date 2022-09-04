@@ -1,4 +1,4 @@
-from bisect import bisect_left
+import argparse
 from collections import namedtuple
 import random
 from statistics import median
@@ -7,7 +7,7 @@ from dataset import DataSet
 from layered import LayeredModel2
 from manager import Manager
 from model import NCHAR
-from train import train_and_validate
+from train import train_and_eval
 
 
 LRS = [
@@ -51,6 +51,10 @@ def layer_weights(name, size, in_size, out_size):
         return 3 * size + 3 * size * in_size + 3 * size * size + size * out_size
     elif name == "lstm":
         return 4 * size + 4 * size * in_size + 4 * size * size + size * out_size
+    elif name == "conv":
+        return (
+            size * in_size * out_size
+        )  # This is not right, but this will have to do
 
 
 def log_distance(x, y):
@@ -61,7 +65,8 @@ def log_distance(x, y):
 
 
 def change_layer_type(name, size, prev_layer, next_layer):
-    if name == 'norm' or name == 'suffix': return
+    if name == "norm" or name == "suffix":
+        return
     if prev_layer is None:
         in_size = NCHAR
     else:
@@ -116,14 +121,15 @@ def change_layer_type(name, size, prev_layer, next_layer):
 def layer_neighbors(layer, prev_layer, next_layer, vary):
     components = layer.split(".")
     name = components[0]
-    if name == 'norm': return
+    if name == "norm":
+        return
     params = components[1:]
     assert len(params) >= 1
     size = int(params[0])
 
     if name == "suffix":
         assert len(params) == 1
-        if 'size' in vary:
+        if "size" in vary:
             if size > 2:
                 yield f"suffix.{size-1}"
             yield f"suffix.{size+1}"
@@ -136,7 +142,7 @@ def layer_neighbors(layer, prev_layer, next_layer, vary):
             yield f"{name}.{size // 2}{activation}"
         yield f"{name}.{size * 2}{activation}"
 
-    if activation and 'act' in vary:
+    if activation and "act" in vary:
         assert name != "lstm"
         if activation != ".tanh":
             yield f"{name}.{size}.tanh"
@@ -152,7 +158,7 @@ def layer_neighbors(layer, prev_layer, next_layer, vary):
     # if name != "lstm":
     #     yield f"lstm.{size}"
 
-    if 'struct' in vary:
+    if "struct" in vary:
         for neighbor in change_layer_type(name, size, prev_layer, next_layer):
             yield neighbor
 
@@ -162,26 +168,26 @@ def spec_neighbors(spec, vary):
 
     for i, layer in enumerate(layers):
         prev_layer = layers[i - 1] if i > 0 else None
-        if prev_layer == 'norm':
+        if prev_layer == "norm":
             prev_layer = layers[i - 2] if i > 1 else None
         next_layer = layers[i + 1] if i < len(layers) - 1 else None
-        if next_layer == 'norm':
+        if next_layer == "norm":
             next_layer = layers[i + 2] if i < len(layers) - 2 else None
-        assert prev_layer != 'norm'
-        assert next_layer != 'norm'
+        assert prev_layer != "norm"
+        assert next_layer != "norm"
         for modified in layer_neighbors(layer, prev_layer, next_layer, vary):
             yield "-".join(layers[:i] + [modified] + layers[i + 1 :])
 
-    if 'size' in vary:
+    if "size" in vary:
         if not spec.startswith("suffix"):
             yield "suffix.2-" + spec
         if layers[0] == "suffix.2" and len(layers) > 1 and layers[1] != "norm":
             yield "-".join(layers[1:])
 
-    if 'norm' in vary:
+    if "norm" in vary:
         for i in range(1, len(layers)):
             if layers[i].startswith("norm"):
-                yield "-".join(layers[:i] + layers[i + 1:])
+                yield "-".join(layers[:i] + layers[i + 1 :])
             elif (
                 not layers[i - 1].startswith("norm")
                 and not layers[i - 1].startswith("suffix")
@@ -190,20 +196,22 @@ def spec_neighbors(spec, vary):
             ):
                 yield "-".join(layers[:i] + ["norm"] + layers[i:])
 
-        if not layers[-1].startswith('norm') and not layers[-1].startswith('suffix'):
-            yield '-'.join(layers + ['norm'])
+        if not layers[-1].startswith("norm") and not layers[-1].startswith(
+            "suffix"
+        ):
+            yield "-".join(layers + ["norm"])
 
-    if 'struct' in vary:
+    if "struct" in vary:
         if len(layers) > 1:
             yield "-".join(layers[:-1])
 
     last_layer = layers[-1] if layers[-1] != "norm" else layers[-2]
     components = last_layer.split(".")
     size = int(components[1])
-    if components[0] == 'suffix':
+    if components[0] == "suffix":
         size *= NCHAR
 
-    if 'struct' in vary:
+    if "struct" in vary:
         out_size = min(128, size)
         yield spec + f"-dense.{out_size}.tanh"
 
@@ -222,7 +230,8 @@ def total_weights(spec):
     for layer_spec in layer_specs:
         components = layer_spec.split(".")
         name = components[0]
-        if name == 'norm': continue
+        if name == "norm":
+            continue
         size = int(components[1])
         weights += layer_weights(name, size, cur_size, 0)
         cur_size = cur_size * size if name == "suffix" else size
@@ -238,12 +247,12 @@ def conf_neighbors(conf, max_weights=None, vary=()):
         if max_weights is None or total_weights(spec) <= max_weights:
             yield conf._replace(spec=spec)
 
-    if 'batch' in vary:
+    if "batch" in vary:
         yield conf._replace(batch=conf.batch * 2)
         if conf.batch > 1:
             yield conf._replace(batch=conf.batch // 2)
 
-    if 'lr' in vary:
+    if "lr" in vary:
         ilr = LRS.index(conf.lr)
         if ilr > 0:
             yield conf._replace(lr=LRS[ilr - 1])
@@ -278,8 +287,6 @@ class ConfResults(object):
 
 
 def select_conf(results) -> Configuration:
-    prev = None
-    prev_score = 0
     best = None
     best_score = 10000
     for conf, conf_results in results.items():
@@ -289,11 +296,8 @@ def select_conf(results) -> Configuration:
             continue
         for neighbor_conf in conf_results.neighbors:
             if neighbor_conf not in results:
-                prev = conf
-                prev_score = score
                 best = neighbor_conf
                 best_score = score
-                best_count = 0
                 break
             neighbor_results = results[neighbor_conf]
             neighbor_score = (
@@ -301,11 +305,8 @@ def select_conf(results) -> Configuration:
             )
 
             if neighbor_score < best_score:
-                prev = conf
-                prev_score = score
                 best = neighbor_conf
                 best_score = neighbor_score
-                best_count = neighbor_results.report_count
 
     return best
 
@@ -329,26 +330,29 @@ def print_top(results):
     print()
 
 
-def search(
+def main(
     data,
+    model_spec,
     learning_rate,
     sample_len,
-    batch,
+    batch_size,
     regularization,
     time_limit,
     log,
     max_weights,
-    start_spec,
-    vary='',
+    vary="",
 ):
-    print(f"Training data: {data}")
-    train_set = DataSet(data)
+    print(f"Loading dataset from {data}")
+    dataset = DataSet(data)
+    dataset.warmup()
 
-    vary = vary.split(',')
+    vary = vary.split(",")
 
-    assert max_weights is None or total_weights(start_spec) <= max_weights
+    assert max_weights is None or total_weights(model_spec) <= max_weights
 
-    start_confs = [Configuration(start_spec, learning_rate, sample_len, batch)]
+    start_confs = [
+        Configuration(model_spec, learning_rate, sample_len, batch_size)
+    ]
     results = {}
 
     while True:
@@ -367,11 +371,11 @@ def search(
         assert manager.model.total_weights(manager.weights) == total_weights(
             conf.spec
         )
-        report = train_and_validate(
+        report = train_and_eval(
             manager,
             steps=None,
             time_limit=time_limit,
-            train_set=train_set,
+            train_set=dataset,
             sample_len=conf.sample_len,
             batch_size=conf.batch,
             temp_steps=None,
@@ -388,14 +392,86 @@ def search(
         print_top(results)
 
 
-if __name__ == "__main__":
-    conf = ConfResults(
-        Configuration(
-            "suffix.3-dense.128.relu-dense.256.relu-dense.256.tanh",
-            0.05,
-            8,
-            256,
-        )
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "-d",
+        "--data",
+        type=str,
+        required=True,
+        help="directory with training data",
     )
-    for n in conf.neighbors:
-        print(n)
+    parser.add_argument(
+        "-c",
+        "--model-spec",
+        metavar="SPEC",
+        default="dense.128.tanh",
+        help="initial model spec",
+    )
+    parser.add_argument(
+        "--max-weights",
+        type=int,
+        default=None,
+        help="the maximum number of weights in the model",
+    )
+    parser.add_argument(
+        "-v",
+        "--vary",
+        type=str,
+        default="struct,lr,batch",
+        help="model parameters that can be varied with search. "
+        + "A comma-separated list of struct, size, act, lr, batch, len.",
+    )
+    parser.add_argument(
+        "-t",
+        "--time-limit",
+        type=int,
+        default=8,
+        metavar="SECONDS",
+        help="time limit for training",
+    )
+    parser.add_argument(
+        "-l",
+        "--learning-rate",
+        type=float,
+        metavar="RATE",
+        help="learning rate",
+        default=0.05,
+    )
+    parser.add_argument(
+        "-r",
+        "--regularization",
+        type=float,
+        help="L2 regularization coefficient",
+        default=0.1,
+    )
+    parser.add_argument(
+        "--sample-len",
+        type=int,
+        default=128,
+        metavar="LEN",
+        help="length of text fragments used for training",
+    )
+    parser.add_argument(
+        "-b",
+        "--batch-size",
+        type=int,
+        metavar="BATCH",
+        default=32,
+        help="training data batch size",
+    )
+    parser.add_argument(
+        "--log",
+        default=None,
+        metavar="LOG",
+        help="path to a CSV file for logging",
+    )
+
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    print("TexMo parameter search")
+    args = parse_args()
+    main(**vars(args))

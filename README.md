@@ -1,62 +1,26 @@
+# TexMo — training simple models for text prediction.
+
 ## Train model
 
 ```
-python3 train.py -d data -s 100000 -o models -t temp
+python3 train.py -d data -c rec.128.relu-gru.512.tanh-dense.128 -t 3600 -o models
 ```
 
 ## Evaluate trained model
 
 ```
-python3 train.py -d data -m models/some-model.json
+python3 eval.py -d data -m models/some-model.json --prefix="..."
 ```
 
-## Results with length = 128, batch = 64
+(Either `-d` or `--prefix` is enough.)
 
-| Model                        | Params   | Steps          | Loss   | Time |
-| ---------------------------- | -------- | -------------- | ------ | ---- |
-| recurrent3(3, 128, 512, 128) |   525312 | 100000         | 2.2153 | 8707 |
-| recurrent3(2, 128, 512, 128) |   492544 | 100000         | 2.1947 | 9030 |
-| recurrent-conv2(128, 512)    |          | 10000          | 2.6631 |
-| recurrent-l1(256)            |          | 20000          | 2.4929 |
-| convgru3-5-128-512           |  1771392 | 10000          | 2.5427 | 10524 |
-| grugru2-128-512              |  1263744 | 9470           | 2.2572 | 1200 |
-| recurrent-l1(512)            |          | 50000          | 2.2196 |
-| conv3gru-128-256             |  1214346 | 100000         | 2.1048 | 55064 (M1) |
-| recurrent-conv2(128, 512)    |          | 100000         | 2.0748 |
-| rec-gru-128-256-512          |  1476736 | 200000         | 1.9856 | 20577|
-| llstm-512-512                |  4329728 | 100000         | 1.9837 | 13229 | L0.01
-| lstm2-512                    |  2230528 | 100000         | 1.9256 | | L0.02
-| grugru-512-512-skip          |  3280128 | 100000         | 1.9097 |
-| gru2-512                     |  1705728 | 100000         | 1.8571 | 8436 |
-| gru-gru-512-512              |  3280128 | 100000         | 1.8658 | 11474 |
-| grugru-512-512-skip          |  3280128 | 300000         | 1.8622 | 287776+ | L0.02
-| convgru1-128-512             |  1378176 | 100000         | 1.8384 | 9379 |
-| gru-gru-512s-512             |  3280128 | 100000         | 1.7708 | 11549 | L0.02
-| grugru-512-512               |  3280128 | 200000         | 1.7049 | 23165 | L0.02
-| lstm-lstm-512-512            |  4329728 | 200000         | 1.6969 |
+## Searching the configurations and metaparameters
 
-## length = 256, batch = 256
+```
+python3 search.py -d data -c dense.128 -t 8 --vary=struc,batch,lr
+```
 
-| Model                        | Params   | Steps          | Loss   | Time  |
-| ---------------------------- | -------- | -------------- | ------ | ----- |
-| convgrugru-128-512-512       |  2952576 | 50000          | 1.8968 |       |
-| grugru3-128-512-512          |  2838144 | 108578         | 1.7785 | 30000 |
-
-
-## Results with length = 1024, batch = 256
-
-| Model                        | Params   | Steps          | Loss   | Time |
-| ---------------------------- | -------- | -------------- | ------ | ---- |
-| equal                        |        0 |                | 8.0000 | 0    |
-| freq                         |      256 | 1000           | 4.9588 | 197 (mac)  |
-| markov1                      |    65792 | 10000          | 3.7140 | 953  |
-| markov-2                     |   131328 | 10000          | 3.4492 | 1108 |
-| recurrent1-512               |   525056 | 20000          | 2.1799 | 77314? (M1) |
-| grugru-512-512               |  3280128 | 100000         | 1.7336 | 79015 |
-
-## Layered models
-
-Trained with length = 256, batch = 256.
+## Results
 
 Baseline: predicting each symbol with its prior probability results in loss
 4.9449.
@@ -73,7 +37,6 @@ Baseline: predicting each symbol with its prior probability results in loss
 
 | Model                                        | Params   | Steps   | Loss   | Time | LR  |
 | -------------------------------------------- | -------- | ------- | ------ | ---- | --- |
-| suffix.2-dense.512.sigmoid                   |   393984 |   10000 | 3.0425 |  818 |     |
 | suffix.2-dense.128.relu                      |    98688 |   10000 | 3.0116 |  758 |     |
 | suffix.2-dense.512.relu                      |   393984 |   10000 | 2.9369 |  787 |
 | suffix.3-conv.2.128.relu                     |   131456 |   10000 | 2.7876 | 1067 |
@@ -98,6 +61,7 @@ Baseline: predicting each symbol with its prior probability results in loss
 | gru.128.tanh-dense.128.tanh     |   197376 |   20000 | 2.2652 |  2437 | 0.05 |
 | rec.128.tanh-gru.512.tanh       |  1165184 |   10000 | 1.9288 |  1612 | 0.05 |
 | gru.128.tanh-gru.256.tanh       |   509312 |   87881 | 1.8272 | 14400 | 0.05 |
+| gru.512.tanh-gru.512.tanh       |  2887k   |   16019 | 1.7119 |  3000 | 0.05 | B128
 | gru.128.tanh-gru.512.tanh       |  1263744 |  161044 | 1.6548 | 30000 | 0.05 |
 | gru.128.tanh-gru.1025.tanh      |  3959046 |   35788 | 1.6040 | 24000 | 0.06 |
 

@@ -95,16 +95,13 @@ class LayerSpec(object):
         if "activation" in vary or "act" in vary:
             for neighbor in self.neighbors_activation():
                 yield neighbor
-        if self.name == "suffix" and "suffix" in vary:
-            for neighbor in self.neighbors_suffix():
-                yield neighbor
         if "struct" in vary and self.has_weights:
             for neighbor in self.neighbors_struct(input_shape):
                 yield neighbor
 
     def neighbors_size(self):
         if self._size is not None:
-            if self._size > 1:
+            if self._size > 2 or self.name != "suffix" and self._size > 1:
                 yield self.replace(size=self._size // 2)
             yield self.replace(size=self._size * 2)
 
@@ -152,40 +149,22 @@ class LayerSpec(object):
 class SuffixSpec(LayerSpec):
     name = "suffix"
     has_weights = False
-    has_size = False
+    has_size = True
     has_activation = False
 
-    def __init__(self, length):
-        super().__init__()
-        self._length = length
-
-    def __str__(self):
-        return f"suffix.{self._length}"
+    def __init__(self, size):
+        super().__init__(size=size)
 
     def output_shape(self, input_shape):
-        return (self._length,) + input_shape
+        return (self._size,) + input_shape
 
     def weights(self, input_shape):
         return 0
 
-    def replace(self, **kwargs):
-        copy = deepcopy(self)
-        for key, value in kwargs.items():
-            if key == "length":
-                copy._length = value
-            else:
-                raise KeyError
-        return copy
-
-    def neighbors_suffix(self):
-        if self._length > 1:
-            yield self.replace(length=self._length - 1)
-        yield self.replace(length=self._length + 1)
-
     def is_valid(self, prev_layer):
         return (
-            type(self._length) is int
-            and self._length >= 2
+            super().is_valid(prev_layer)
+            and self._size >= 2
             and (prev_layer is None or prev_layer.name != "suffix")
         )
 

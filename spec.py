@@ -162,6 +162,7 @@ class SuffixSpec(LayerSpec):
         return (
             super().is_valid(prev_layer)
             and self._size >= 2
+            and self._size in (2, 4, 8, 16, 32, 64, 128, 256, 512, 1024)
             and (prev_layer is None or prev_layer.name != "suffix")
         )
 
@@ -286,6 +287,7 @@ class ModelSpec(object):
         return shape
 
     def neighbors(self, vary):
+        assert self.is_valid()
         shape = (NCHAR,)
         for i, layer in enumerate(self._layers):
             for mod_layer in layer.neighbors(vary, shape):
@@ -293,6 +295,9 @@ class ModelSpec(object):
                     self._layers[:i] + [mod_layer] + self._layers[i + 1 :]
                 )
                 neighbor.simplify()
+                if not neighbor.is_valid():
+                    print(self)
+                    print(neighbor)
                 assert neighbor.is_valid()
                 yield neighbor
 

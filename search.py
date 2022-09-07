@@ -1,5 +1,6 @@
 import argparse
 from collections import namedtuple
+import csv
 import itertools
 from statistics import median, StatisticsError
 
@@ -7,6 +8,7 @@ from dataset import DataSet
 from layered import LayeredModel2
 from manager import Manager
 from model import NCHAR
+from record import TrainingRecord
 from spec import ModelSpec
 from train import train_and_eval
 
@@ -39,6 +41,13 @@ LRS = [
 Configuration = namedtuple(
     "Configuration", ["spec", "lr", "sample_len", "batch"]
 )
+
+
+def conf_from_record(record):
+    spec = ModelSpec.parse(record.model_spec)
+    return Configuration(
+        spec, record.learning_rate, record.train_sample_len, record.train_batch
+    )
 
 
 def conf_neighbors(conf, max_weights=None, vary=()):
@@ -118,18 +127,23 @@ class ResultsSet(object):
                     yield neighbor_results.score
 
         try:
-            score = median(itertools.chain(conf_results.scores, iter_neighbors()))
+            score = median(
+                itertools.chain(conf_results.scores, iter_neighbors())
+            )
         except StatisticsError:
             score = 1000
 
         return score
 
     def add_conf(self, conf):
-        conf_results = ConfResults(conf, self._max_weights, self._vary)
-        self._conf_to_results[conf] = conf_results
+        if conf not in self._conf_to_results:
+            conf_results = ConfResults(conf, self._max_weights, self._vary)
+            self._conf_to_results[conf] = conf_results
 
     def add_run(self, conf, report):
         self.total_runs += 1
+
+        self.add_conf(conf)
 
         conf_results = self._conf_to_results[conf]
         conf_results.add_report(report)
@@ -152,12 +166,18 @@ class ResultsSet(object):
         i + 1 <= N // 2^k -> >= k
         (i + 1) * 2^k <= N
         """
+        if len(self._conf_to_results) == 1:
+            for v in self._conf_to_results.values():
+                return v
+
         k = 16
         k2 = 3**k
         for i, conf_results in enumerate(
             sorted(
                 self._conf_to_results.values(),
-                key=lambda r: r.cluster_score
+                key=lambda r: min(
+                    r.cluster_score, r.score if r.scores else 1000
+                ),
             )
         ):
             while k > 1 and (i + 1) * k2 > self.total_runs:
@@ -167,20 +187,45 @@ class ResultsSet(object):
                 return conf_results
 
     def top_self_score(self, n):
-        return sorted(self._conf_to_results.values(),
-                      key=lambda r: r.score if r.report_count > 0 else r.cluster_score)[:n]
+        return sorted(
+            self._conf_to_results.values(),
+            key=lambda r: r.score if r.report_count > 0 else r.cluster_score,
+        )[:n]
 
 
 def print_top(results):
     print()
     for conf_results in results.top_self_score(20):
         conf = conf_results.conf
-        score = f"{conf_results.score:.4f}" if conf_results.report_count > 0 else "      "
+        score = (
+            f"{conf_results.score:.4f}"
+            if conf_results.report_count > 0
+            else "      "
+        )
         print(
             f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  "
             + f"B{conf.batch:4}  {score} ({conf_results.report_count}) {conf_results.cluster_score:.4f}"
         )
     print()
+
+
+def load_previous_runs(results, path, max_weights, time_limit):
+    print(f"Loading previous runs from {path}")
+    with open(path) as csvfile:
+        reader = csv.reader(csvfile)
+        for row in reader:
+            record = TrainingRecord.from_csv_tuple(row)
+            try:
+                conf = conf_from_record(record)
+            except Exception:
+                continue
+
+            if (
+                conf.spec.is_valid()
+                and (max_weights is None or record.weights <= max_weights)
+            ) and time_limit / 1.1 < record.train_time_s < time_limit * 1.1:
+                results.add_run(conf, record)
+    print("Runs loaded:", results.total_runs)
 
 
 def main(
@@ -192,6 +237,7 @@ def main(
     regularization,
     time_limit,
     log,
+    load,
     max_weights,
     vary="",
 ):
@@ -205,7 +251,14 @@ def main(
     assert max_weights is None or model_spec.weights() <= max_weights
 
     results = ResultsSet(max_weights, vary)
-    results.add_conf(Configuration(model_spec, learning_rate, sample_len, batch_size))
+
+    if load is not None:
+        load_previous_runs(results, load, max_weights, time_limit)
+
+    results.add_conf(
+        Configuration(model_spec, learning_rate, sample_len, batch_size)
+    )
+    first = True
 
     while True:
         conf_results = results.select_conf()
@@ -233,8 +286,11 @@ def main(
             quiet=True,
         )
 
-        results.add_run(conf, report)
-        print_top(results)
+        if first:
+            first = False
+        else:
+            results.add_run(conf, report)
+            print_top(results)
 
 
 def parse_args():
@@ -251,7 +307,7 @@ def parse_args():
         "-c",
         "--model-spec",
         metavar="SPEC",
-        default="dense.128.tanh",
+        default="dense.1.tanh",
         help="initial model spec",
     )
     parser.add_argument(
@@ -311,6 +367,12 @@ def parse_args():
         default=None,
         metavar="LOG",
         help="path to a CSV file for logging",
+    )
+    parser.add_argument(
+        "--load",
+        default=None,
+        metavar="LOG",
+        help="a CSV log file with previous runs",
     )
 
     return parser.parse_args()

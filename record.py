@@ -39,6 +39,13 @@ class TrainingRecord(object):
             test_poisoned = bool(int(test_poisoned))
         self.test_poisoned = test_poisoned
 
+    @staticmethod
+    def from_csv_tuple(row):
+        if len(row) != 15:
+            print(row)
+        skip_trian_data = row[:9] + row[10:]
+        return TrainingRecord(*skip_trian_data)
+
     @property
     def train_data(self):
         return self.steps * self.train_sample_len * self.train_batch

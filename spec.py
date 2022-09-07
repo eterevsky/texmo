@@ -265,6 +265,8 @@ class ModelSpec(object):
 
     def is_valid(self):
         prev_layer = None
+        if len(self._layers) == 0:
+            return False
         for layer in self._layers:
             if not layer.is_valid(prev_layer):
                 return False
@@ -296,8 +298,8 @@ class ModelSpec(object):
                 )
                 neighbor.simplify()
                 if not neighbor.is_valid():
-                    print(self)
-                    print(neighbor)
+                    assert str(self) == "suffix.2"
+                    continue
                 assert neighbor.is_valid()
                 yield neighbor
 

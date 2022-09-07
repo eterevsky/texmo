@@ -172,6 +172,13 @@ class ResultsSet(object):
 
         k = 16
         k2 = 3**k
+
+        for conf_results in self._conf_to_results.values():
+            if conf_results.cluster_score is None:
+                print(conf_results.conf.spec, conf_results.conf)
+                print(conf_results.score)
+            assert conf_results.cluster_score is not None
+
         for i, conf_results in enumerate(
             sorted(
                 self._conf_to_results.values(),

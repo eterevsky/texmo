@@ -1,7 +1,7 @@
 import argparse
 from collections import namedtuple
-import random
-from statistics import median
+import itertools
+from statistics import median, StatisticsError
 
 from dataset import DataSet
 from layered import LayeredModel2
@@ -66,6 +66,7 @@ class ConfResults(object):
         self.conf = conf
         self.reports = []
         self.neighbors = list(conf_neighbors(conf, max_weights, vary))
+        self.cluster_score = None
 
     def add_report(self, report):
         self.reports.append(report)
@@ -84,52 +85,100 @@ class ConfResults(object):
     @property
     def scores(self):
         return list(
-            report.loss if report.loss < 1000 else 1000
-            for report in self.reports
+            sorted(
+                report.loss if report.loss < 1000 else 1000
+                for report in self.reports
+            )
         )
 
 
-def select_conf(results) -> Configuration:
-    best = None
-    best_score = 10000
-    for conf, conf_results in results.items():
-        assert conf_results.report_count > 0
-        score = conf_results.score
-        if score >= best_score:
-            continue
-        for neighbor_conf in conf_results.neighbors:
-            if neighbor_conf not in results:
-                best = neighbor_conf
-                best_score = score
-                break
-            neighbor_results = results[neighbor_conf]
-            neighbor_score = (
-                score + min(0.1, score * 0.02) * neighbor_results.report_count
+class ResultsSet(object):
+    def __init__(self, max_weights, vary):
+        # Configuraion -> ConfResults
+        self._conf_to_results = {}
+        self.total_runs = 0
+        self._max_weights = max_weights
+        self._vary = vary
+
+    def cluster_score(self, conf):
+        """Score based on train runs +
+
+        A median of all trials of a given configuration + all known (median)
+        scores of its neighbors.
+        """
+        conf_results = self._conf_to_results[conf]
+
+        def iter_neighbors():
+            for neighbor in conf_results.neighbors:
+                neighbor_results = self._conf_to_results.get(neighbor)
+                if (
+                    neighbor_results is not None
+                    and neighbor_results.report_count > 0
+                ):
+                    yield neighbor_results.score
+
+        try:
+            score = median(itertools.chain(conf_results.scores, iter_neighbors()))
+        except StatisticsError:
+            score = 1000
+
+        return score
+
+    def add_conf(self, conf):
+        conf_results = ConfResults(conf, self._max_weights, self._vary)
+        self._conf_to_results[conf] = conf_results
+
+    def add_run(self, conf, report):
+        self.total_runs += 1
+
+        conf_results = self._conf_to_results[conf]
+        conf_results.add_report(report)
+
+        conf_results.cluster_score = self.cluster_score(conf)
+
+        for neighbor in conf_results.neighbors:
+            if neighbor in self._conf_to_results:
+                neighbor_results = self._conf_to_results[neighbor]
+            else:
+                neighbor_results = ConfResults(
+                    neighbor, self._max_weights, self._vary
+                )
+                self._conf_to_results[neighbor] = neighbor_results
+
+            neighbor_results.cluster_score = self.cluster_score(neighbor)
+
+    def select_conf(self):
+        """
+        i + 1 <= N // 2^k -> >= k
+        (i + 1) * 2^k <= N
+        """
+        k = 16
+        k2 = 3**k
+        for i, conf_results in enumerate(
+            sorted(
+                self._conf_to_results.values(),
+                key=lambda r: r.cluster_score
             )
+        ):
+            while k > 1 and (i + 1) * k2 > self.total_runs:
+                k -= 1
+                k2 //= 3
+            if conf_results.report_count < k:
+                return conf_results
 
-            if neighbor_score < best_score:
-                best = neighbor_conf
-                best_score = neighbor_score
-
-    return best
+    def top_self_score(self, n):
+        return sorted(self._conf_to_results.values(),
+                      key=lambda r: r.score if r.report_count > 0 else r.cluster_score)[:n]
 
 
 def print_top(results):
-    top = []
-    for conf_results in results.values():
-        top.append((conf_results.score, conf_results.conf, conf_results.scores))
-
-    top.sort()
-
     print()
-    for score, conf, scores in top[:20]:
-        if len(scores) > 1:
-            scores = " [" + ", ".join(f"{s:.4f}" for s in sorted(scores)) + "]"
-        else:
-            scores = ""
+    for conf_results in results.top_self_score(20):
+        conf = conf_results.conf
+        score = f"{conf_results.score:.4f}" if conf_results.report_count > 0 else "      "
         print(
             f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  "
-            + f"B{conf.batch:4}  {score:.4f}{scores}"
+            + f"B{conf.batch:4}  {score} ({conf_results.report_count}) {conf_results.cluster_score:.4f}"
         )
     print()
 
@@ -155,17 +204,12 @@ def main(
 
     assert max_weights is None or model_spec.weights() <= max_weights
 
-    start_conf = Configuration(
-        model_spec, learning_rate, sample_len, batch_size
-    )
-    results = {}
+    results = ResultsSet(max_weights, vary)
+    results.add_conf(Configuration(model_spec, learning_rate, sample_len, batch_size))
 
     while True:
-        if results:
-            conf = select_conf(results)
-        else:
-            conf = start_conf
-
+        conf_results = results.select_conf()
+        conf = conf_results.conf
         weights = conf.spec.weights()
         print(
             f"{conf.spec} ({weights})  LR {conf.lr}  LEN {conf.sample_len}  "
@@ -189,10 +233,7 @@ def main(
             quiet=True,
         )
 
-        if conf not in results:
-            results[conf] = ConfResults(conf, max_weights, vary)
-        results[conf].add_report(report)
-
+        results.add_run(conf, report)
         print_top(results)
 
 

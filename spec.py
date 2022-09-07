@@ -101,7 +101,7 @@ class LayerSpec(object):
 
     def neighbors_size(self):
         if self._size is not None:
-            if self._size > 2 or self.name != "suffix" and self._size > 1:
+            if self._size > 1:
                 yield self.replace(size=self._size // 2)
             yield self.replace(size=self._size * 2)
 
@@ -114,30 +114,27 @@ class LayerSpec(object):
             yield self.replace(activation="relu")
 
     def neighbors_struct(self, input_shape):
-        for name, layer_cls in registry.items():
+        for layer_cls in registry.values():
             if not layer_cls.has_weights:
                 continue
-            new_layer = layer_cls(size=self._size, relu=layer_cls.has_activation)
-            yield new_layer
 
-            relu = False
-            tanh = False
             if layer_cls.has_activation:
-                if self._activation == 'tanh':
-                    tanh = True
-                elif self._activation == 'relu':
-                    relu = True
-                else:
-                    tanh = True
+                activations = ((True, False), (False, True))
+            else:
+                activations = ((False, False),)
 
-            if new_layer.weights(input_shape) < self.weights(input_shape):
-                yield layer_cls(size=2 * self._size, relu=relu, tanh=tanh)
+            for relu, tanh in activations:
+                new_layer = layer_cls(size=self._size, relu=relu, tanh=tanh)
+                yield new_layer
 
-            if (
-                new_layer.weights(input_shape) > self.weights(input_shape)
-                and self._size > 1
-            ):
-                yield layer_cls(size=self._size // 2, relu=relu, tanh=tanh)
+                if new_layer.weights(input_shape) < self.weights(input_shape):
+                    yield layer_cls(size=2 * self._size, relu=relu, tanh=tanh)
+
+                if (
+                    new_layer.weights(input_shape) > self.weights(input_shape)
+                    and self._size > 1
+                ):
+                    yield layer_cls(size=self._size // 2, relu=relu, tanh=tanh)
 
     def is_valid(self, prev_layer):
         return (
@@ -322,6 +319,11 @@ class ModelSpec(object):
             neighbor = ModelSpec(self._layers + [DenseSpec(size, relu=True)])
             assert neighbor.is_valid()
             yield neighbor
+
+            if len(self._layers) > 1 and self._layers[-1].has_weights:
+                neighbor = ModelSpec(self._layers[:-1])
+                assert neighbor.is_valid()
+                yield neighbor
 
 
 if __name__ == "__main__":

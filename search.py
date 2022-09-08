@@ -252,19 +252,20 @@ def main(
     dataset = DataSet(data)
     dataset.warmup()
 
-    model_spec = ModelSpec.parse(model_spec)
     vary = vary.split(",")
-
-    assert max_weights is None or model_spec.weights() <= max_weights
 
     results = ResultsSet(max_weights, vary)
 
     if load is not None:
         load_previous_runs(results, load, max_weights, time_limit)
 
-    results.add_conf(
-        Configuration(model_spec, learning_rate, sample_len, batch_size)
-    )
+    if model_spec is not None:
+        model_spec = ModelSpec.parse(model_spec)
+        assert max_weights is None or model_spec.weights() <= max_weights
+        results.add_conf(
+            Configuration(model_spec, learning_rate, sample_len, batch_size)
+        )
+
     first = True
 
     while True:
@@ -314,7 +315,7 @@ def parse_args():
         "-c",
         "--model-spec",
         metavar="SPEC",
-        default="dense.1.tanh",
+        default=None,
         help="initial model spec",
     )
     parser.add_argument(

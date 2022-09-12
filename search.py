@@ -2,6 +2,7 @@ import argparse
 from collections import namedtuple
 import csv
 import itertools
+import math
 from statistics import median, StatisticsError
 
 from dataset import DataSet
@@ -69,154 +70,142 @@ def conf_neighbors(conf, max_weights=None, vary=()):
         if ilr < len(LRS) - 1:
             yield conf._replace(lr=LRS[ilr + 1])
 
+    if "len" in vary:
+        if conf.sample_len >= 4:
+            yield conf._replace(sample_len=conf.sample_len // 2)
+        yield conf._replace(sample_len=conf.sample_len * 2)
+
+
+INF = float("inf")
+
 
 class ConfResults(object):
     def __init__(self, conf, max_weights, vary):
         self.conf = conf
-        self.reports = []
-        self.neighbors = list(conf_neighbors(conf, max_weights, vary))
+        self.neighbor_confs = list(conf_neighbors(conf, max_weights, vary))
+        self.scores = []
         self.cluster_score = None
 
     def add_report(self, report):
-        self.reports.append(report)
+        score = report.loss
+        if math.isnan(score):
+            score = INF
+        self.scores.append(score)
 
     @property
-    def report_count(self):
-        return len(self.reports)
+    def scores_count(self):
+        return len(self.scores)
 
     @property
     def score(self):
-        return median(
-            report.loss if report.loss < 1000 else 1000
-            for report in self.reports
-        )
-
-    @property
-    def scores(self):
-        return list(
-            sorted(
-                report.loss if report.loss < 1000 else 1000
-                for report in self.reports
-            )
-        )
+        return median(self.scores)
 
 
 class ResultsSet(object):
     def __init__(self, max_weights, vary):
-        # Configuraion -> ConfResults
-        self._conf_to_results = {}
+        # Configuration -> ConfResults
+        self._results = {}
+        self._sorted_results = []
         self.total_runs = 0
         self._max_weights = max_weights
         self._vary = vary
+        self.startup_conf = None
 
-    def cluster_score(self, conf):
-        """Score based on train runs +
+    def add_conf(self, conf):
+        if conf in self._results:
+            return
+        conf_results = ConfResults(conf, self._max_weights, self._vary)
+        self._results[conf] = conf_results
+        self._sorted_results.append(conf_results)
 
-        A median of all trials of a given configuration + all known (median)
-        scores of its neighbors.
-        """
-        conf_results = self._conf_to_results[conf]
+    def cluster_score(self, conf_results):
+        if conf_results.cluster_score is not None:
+            return conf_results.cluster_score
+
+        self_score = conf_results.score if conf_results.scores else INF
 
         def iter_neighbors():
-            for neighbor in conf_results.neighbors:
-                neighbor_results = self._conf_to_results.get(neighbor)
-                if (
-                    neighbor_results is not None
-                    and neighbor_results.report_count > 0
-                ):
-                    yield neighbor_results.score
+            for neighbor_conf in conf_results.neighbor_confs:
+                neighbor = self._results.get(neighbor_conf)
+                if neighbor is not None and neighbor.scores:
+                    yield neighbor.score
 
         try:
-            score = median(
+            neighbor_score = median(
                 itertools.chain(conf_results.scores, iter_neighbors())
             )
         except StatisticsError:
-            score = 1000
+            neighbor_score = INF
 
-        return score
-
-    def add_conf(self, conf):
-        if conf not in self._conf_to_results:
-            conf_results = ConfResults(conf, self._max_weights, self._vary)
-            self._conf_to_results[conf] = conf_results
-
-    def add_run(self, conf, report):
-        self.total_runs += 1
-
-        self.add_conf(conf)
-
-        conf_results = self._conf_to_results[conf]
-        conf_results.add_report(report)
-
-        conf_results.cluster_score = self.cluster_score(conf)
-
-        for neighbor in conf_results.neighbors:
-            if neighbor in self._conf_to_results:
-                neighbor_results = self._conf_to_results[neighbor]
-            else:
-                neighbor_results = ConfResults(
-                    neighbor, self._max_weights, self._vary
-                )
-                self._conf_to_results[neighbor] = neighbor_results
-
-            neighbor_results.cluster_score = self.cluster_score(neighbor)
+        cluster_score = min(self_score, neighbor_score)
+        conf_results.cluster_score = cluster_score
+        return cluster_score
 
     def select_conf(self):
         """
         i + 1 <= N // 2^k -> >= k
         (i + 1) * 2^k <= N
         """
-        if len(self._conf_to_results) == 1:
-            for v in self._conf_to_results.values():
-                return v
+        if self.startup_conf is not None:
+            conf = self.startup_conf
+            self.startup_conf = None
+
+            if conf not in self._results:
+                self.add_conf(conf)
+            return self._results[conf]
+
+        self._sorted_results.sort(key=self.cluster_score)
 
         k = 16
         k2 = 3**k
+        best_conf_results = None
+        best_count_gap = 0
 
-        for conf_results in self._conf_to_results.values():
-            if conf_results.cluster_score is None:
-                print(conf_results.conf.spec, conf_results.conf)
-                print(conf_results.score)
-            assert conf_results.cluster_score is not None
-
-        for i, conf_results in enumerate(
-            sorted(
-                self._conf_to_results.values(),
-                key=lambda r: min(
-                    r.cluster_score, r.score if r.scores else 1000
-                ),
-            )
-        ):
+        for i, conf_results in enumerate(self._sorted_results):
             while k > 1 and (i + 1) * k2 > self.total_runs:
                 k -= 1
                 k2 //= 3
-            if conf_results.report_count < k:
-                return conf_results
+            if k - conf_results.scores_count > best_count_gap:
+                best_count_gap = k - conf_results.scores_count
+                best_conf_results = conf_results
+            if best_count_gap >= k:
+                break
 
-    def top_self_score(self, n):
-        return sorted(
-            self._conf_to_results.values(),
-            key=lambda r: r.score if r.report_count > 0 else r.cluster_score,
-        )[:n]
+        return best_conf_results
+
+    def add_run(self, conf, report):
+        self.total_runs += 1
+
+        self.add_conf(conf)
+        conf_results = self._results[conf]
+
+        for neighbor_conf in conf_results.neighbor_confs:
+            self.add_conf(neighbor_conf)
+            self._results[neighbor_conf].cluster_score = None
+
+        conf_results.add_report(report)
+        conf_results.cluster_score = None
+
+    def top_score(self, n):
+        self._sorted_results.sort(key=self.cluster_score)
+        return self._sorted_results[:n]
 
 
 def print_top(results):
     print()
-    for conf_results in results.top_self_score(20):
+    for conf_results in results.top_score(20):
         conf = conf_results.conf
-        score = (
-            f"{conf_results.score:.4f}"
-            if conf_results.report_count > 0
-            else "      "
-        )
+        score = f"{conf_results.score:.4f}" if conf_results.scores else "      "
         print(
             f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  "
-            + f"B{conf.batch:4}  {score} ({conf_results.report_count}) {conf_results.cluster_score:.4f}"
+            + f"B{conf.batch:4}  {score} ({conf_results.scores_count}) {conf_results.cluster_score:.4f}"
         )
     print()
 
 
-def load_previous_runs(results, path, max_weights, time_limit):
+def load_previous_runs(
+    results, path, max_weights, time_limit, sample_len, vary
+):
     print(f"Loading previous runs from {path}")
     with open(path) as csvfile:
         reader = csv.reader(csvfile)
@@ -230,6 +219,11 @@ def load_previous_runs(results, path, max_weights, time_limit):
             if (
                 conf.spec.is_valid()
                 and (max_weights is None or record.weights <= max_weights)
+                and (
+                    "len" in vary
+                    or sample_len is None
+                    or record.train_sample_len == sample_len
+                )
             ) and time_limit / 1.1 < record.train_time_s < time_limit * 1.1:
                 results.add_run(conf, record)
     print("Runs loaded:", results.total_runs)
@@ -257,7 +251,9 @@ def main(
     results = ResultsSet(max_weights, vary)
 
     if load is not None:
-        load_previous_runs(results, load, max_weights, time_limit)
+        load_previous_runs(
+            results, load, max_weights, time_limit, sample_len, vary
+        )
 
     if model_spec is not None:
         model_spec = ModelSpec.parse(model_spec)

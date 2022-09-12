@@ -209,6 +209,40 @@ class GruSpec(LayerSpec):
 
 
 @layer_spec
+class MgruSpec(LayerSpec):
+    name = "mgru"
+    has_activation = False
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        assert self._activation is None
+
+    def weights(self, input_shape):
+        return 2 * (
+            total_size(input_shape) * self._size
+            + self._size * self._size
+            + self._size
+        )
+
+
+@layer_spec
+class CaruSpec(LayerSpec):
+    name = "caru"
+    has_activation = False
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        assert self._activation is None
+
+    def weights(self, input_shape):
+        return (
+            2 * total_size(input_shape) * self._size
+            + 2 * self._size * self._size
+            + 3 * self._size
+        )
+
+
+@layer_spec
 class LstmSpec(LayerSpec):
     name = "lstm"
     has_activation = False

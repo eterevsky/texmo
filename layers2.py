@@ -263,6 +263,120 @@ class Gru(Layer2):
 
 
 @layer_cls
+class Mgru(Layer2):
+    name = "mgru"
+
+    def __init__(self, output_size: int, **kwargs):
+        super().__init__(**kwargs)
+        assert output_size > 0
+        assert self._activation is None
+        self._state = output_size
+        self.full_name = f"mgru.{self._state}" + self._init_suffix
+        self.output_shape = (output_size,)
+
+    def init_weights(self, rng: Rng) -> ArrayTree:
+        he_input_size = self.input_size + self._state
+        weights = {
+            "wf": rng.he(
+                (self._state, self.input_size), input_size=he_input_size
+            ),
+            "uf": rng.he((self._state, self._state), input_size=he_input_size),
+            "bf": rng.normal((self._state,)),
+            "wh": rng.he(
+                (self._state, self.input_size), input_size=he_input_size
+            ),
+            "uh": rng.he((self._state, self._state), input_size=he_input_size),
+            "bh": rng.normal((self._state,)),
+        }
+        if self._train_init_state:
+            weights["init_state"] = rng.normal((self._state,))
+        return weights
+
+    def init_state(self, weights) -> ArrayTree:
+        if self._train_init_state:
+            return weights["init_state"]
+        else:
+            return jnp.zeros((self._state,))
+
+    def step(self, weights: ArrayTree, state: ArrayTree, input: jnp.ndarray):
+        input = input.flatten()
+        f = (
+            jnp.dot(weights["wf"], input)
+            + jnp.dot(weights["uf"], state)
+            + weights["bf"]
+        )
+        f = jax.nn.sigmoid(f)
+
+        hc = (
+            jnp.dot(weights["wh"], input)
+            + jnp.dot(weights["uh"], f * state)
+            + weights["bh"]
+        )
+        hc = jnp.tanh(hc)
+
+        state = (1 - f) * state + f * hc
+        return state, state
+
+
+@layer_cls
+class Caru(Layer2):
+    name = "caru"
+
+    def __init__(self, output_size: int, **kwargs):
+        super().__init__(**kwargs)
+        assert output_size > 0
+        assert self._activation is None
+        self._state = output_size
+        self.full_name = f"caru.{self._state}" + self._init_suffix
+        self.output_shape = (output_size,)
+
+    def init_weights(self, rng: Rng) -> ArrayTree:
+        he_input_size = self.input_size + self._state
+        weights = {
+            "wx": rng.he(
+                (self._state, self.input_size), input_size=he_input_size
+            ),
+            "bx": rng.normal((self._state,)),
+            "wn": rng.he((self._state, self._state), input_size=he_input_size),
+            "bn": rng.normal((self._state,)),
+            "whz": rng.he((self._state, self._state), input_size=he_input_size),
+            "wvz": rng.he(
+                (self._state, self.input_size), input_size=he_input_size
+            ),
+            "bz": rng.normal((self._state,)),
+        }
+        if self._train_init_state:
+            weights["init_state"] = rng.normal((self._state,))
+        return weights
+
+    def init_state(self, weights) -> ArrayTree:
+        if self._train_init_state:
+            return weights["init_state"]
+        else:
+            return jnp.zeros((self._state,))
+
+    def step(self, weights: ArrayTree, state: ArrayTree, input: jnp.ndarray):
+        input = input.flatten()
+
+        x = jnp.dot(weights["wx"], input) + weights["bx"]
+
+        n = jnp.dot(weights["wn"], state) + weights["bn"] + x
+        n = jnp.tanh(n)
+
+        z = (
+            jnp.dot(weights["whz"], state)
+            + jnp.dot(weights["wvz"], input)
+            + weights["bz"]
+        )
+        z = jax.nn.sigmoid(z)
+
+        l = jax.nn.sigmoid(x) * z
+
+        state = (1 - l) * state + l * n
+        return state, state
+
+
+@layer_cls
 class Lstm(Layer2):
     name = "lstm"
 

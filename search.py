@@ -3,6 +3,7 @@ from collections import namedtuple
 import csv
 import itertools
 import math
+import random
 from statistics import median, StatisticsError
 
 from dataset import DataSet
@@ -158,6 +159,7 @@ class ResultsSet(object):
 
         k = 16
         k2 = 3**k
+        stop_early = random.choice([False, True])
         best_conf_results = None
         best_count_gap = 0
 
@@ -168,6 +170,7 @@ class ResultsSet(object):
             if k - conf_results.scores_count > best_count_gap:
                 best_count_gap = k - conf_results.scores_count
                 best_conf_results = conf_results
+                if stop_early: break
             if best_count_gap >= k:
                 break
 

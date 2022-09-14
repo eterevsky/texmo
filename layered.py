@@ -70,11 +70,11 @@ class LayeredModel2(Model):
             spec["layers"].append([name, layer.full_name])
         return spec
 
-    def init_weights(self, key):
+    def init_weights(self, key, init_scale=1):
         rng = prng.Rng(key)
         weights = {}
         for name, layer in self._layers:
-            weights[name] = layer.init_weights(rng)
+            weights[name] = layer.init_weights(rng, init_scale=1)
         return weights
 
     def init_state(self, weights):

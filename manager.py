@@ -134,6 +134,7 @@ class Manager(object):
         step=0,
         weights=None,
         step_loss=None,
+        init_scale=1,
     ):
         self._key = jax.random.PRNGKey(random.randrange(2**32))
         self.model = model
@@ -141,10 +142,11 @@ class Manager(object):
         self.regularization = regularization
         self.total_steps = 100000
         self.step = step
+        self.init_scale = init_scale
         if weights is not None:
             self.weights = weights
         else:
-            self.weights = self.model.init_weights(self.key())
+            self.weights = self.model.init_weights(self.key(), self.init_scale)
         self.loss = None
         if step_loss is None:
             self.step_loss = []

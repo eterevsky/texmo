@@ -19,6 +19,7 @@ class TrainingRecord(object):
         test_sample_len: Union[int, str],
         test_batch: Union[int, str],
         test_poisoned: Union[bool, str],
+        init_scale: Union[int, str, None] = 1,
     ):
         if not isinstance(timestamp, datetime):
             timestamp = datetime.fromisoformat(timestamp)
@@ -38,13 +39,16 @@ class TrainingRecord(object):
         if isinstance(test_poisoned, str):
             test_poisoned = bool(int(test_poisoned))
         self.test_poisoned = test_poisoned
+        if init_scale is None:
+            init_scale = 1
+        self.init_scale = int(init_scale)
 
     @staticmethod
     def from_csv_tuple(row):
-        if len(row) != 15:
+        if len(row) not in (15, 16):
             print(row)
-        skip_trian_data = row[:9] + row[10:]
-        return TrainingRecord(*skip_trian_data)
+        skip_train_data = row[:9] + row[10:]
+        return TrainingRecord(*skip_train_data)
 
     @property
     def train_data(self):
@@ -67,6 +71,7 @@ class TrainingRecord(object):
             self.test_sample_len,
             self.test_batch,
             1 if self.test_poisoned else 0,
+            1 if self.init_scale else 0
         )
 
     def __str__(self) -> str:
@@ -77,6 +82,6 @@ class TrainingRecord(object):
 Model: {self.model_spec}, {w:.0f}k weights
 Loss: loss {self.loss:.4f}
 Training: {self.steps} steps, {self.train_time_s:.0f} s
-LR: {self.learning_rate}, R{self.regularization}
+LR: {self.learning_rate}, R{self.regularization}, init {self.init_scale}
 Training data: {train_data:.0f}M / {total_data:.0f}M
         """

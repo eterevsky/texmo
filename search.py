@@ -1,4 +1,5 @@
 import argparse
+from bisect import bisect
 from collections import namedtuple
 import csv
 import itertools
@@ -41,15 +42,30 @@ LRS = [
 
 
 Configuration = namedtuple(
-    "Configuration", ["spec", "lr", "sample_len", "batch"]
+    "Configuration",
+    ["spec", "lr", "sample_len", "batch", "regularization", "init_scale"],
 )
 
 
 def conf_from_record(record):
     spec = ModelSpec.parse(record.model_spec)
     return Configuration(
-        spec, record.learning_rate, record.train_sample_len, record.train_batch
+        spec,
+        record.learning_rate,
+        record.train_sample_len,
+        record.train_batch,
+        record.regularization,
+        1.0,
     )
+
+
+def neighbor_numbers(x):
+    """Produce neighbor numbers from an close to exponent but readable table"""
+    i = LRS.index(x)
+    if i > 0:
+        yield LRS[i - 1]
+    if i < len(LRS) - 1:
+        yield LRS[i + 1]
 
 
 def conf_neighbors(conf, max_weights=None, vary=()):
@@ -65,16 +81,36 @@ def conf_neighbors(conf, max_weights=None, vary=()):
             yield conf._replace(batch=conf.batch // 2)
 
     if "lr" in vary:
-        ilr = LRS.index(conf.lr)
-        if ilr > 0:
-            yield conf._replace(lr=LRS[ilr - 1])
-        if ilr < len(LRS) - 1:
-            yield conf._replace(lr=LRS[ilr + 1])
+        for x in neighbor_numbers(conf.lr):
+            yield conf._replace(lr=x)
 
     if "len" in vary:
         if conf.sample_len >= 4:
             yield conf._replace(sample_len=conf.sample_len // 2)
         yield conf._replace(sample_len=conf.sample_len * 2)
+
+    if "regularization" in vary:
+        for x in neighbor_numbers(conf.regularization):
+            yield conf._replace(regularization=x)
+
+    if "init_scale" in vary:
+        for x in neighbor_numbers(conf.init_scale):
+            yield conf._replace(init_scale=x)
+
+
+def is_power2(x):
+    return type(x) is int and x >= 1 and x & (x - 1) == 0
+
+
+def conf_is_valid(conf):
+    return (
+        conf.spec.is_valid()
+        and conf.lr in LRS
+        and is_power2(conf.sample_len)
+        and is_power2(conf.batch)
+        and conf.regularization in LRS
+        and conf.init_scale in LRS
+    )
 
 
 INF = float("inf")
@@ -170,7 +206,8 @@ class ResultsSet(object):
             if k - conf_results.scores_count > best_count_gap:
                 best_count_gap = k - conf_results.scores_count
                 best_conf_results = conf_results
-                if stop_early: break
+                if stop_early:
+                    break
             if best_count_gap >= k:
                 break
 
@@ -201,7 +238,7 @@ def print_top(results):
         score = f"{conf_results.score:.4f}" if conf_results.scores else "      "
         print(
             f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  "
-            + f"B{conf.batch:4}  {score} ({conf_results.scores_count}) {conf_results.cluster_score:.4f}"
+            + f"B{conf.batch:4}  R{conf.regularization:4}  I{conf.init_scale:4}  {score} ({conf_results.scores_count})"
         )
     print()
 
@@ -219,8 +256,7 @@ def load_previous_runs(
             except Exception:
                 continue
 
-            if (
-                conf.spec.is_valid()
+            if (conf_is_valid(conf)
                 and (max_weights is None or record.weights <= max_weights)
                 and (
                     "len" in vary
@@ -243,6 +279,7 @@ def main(
     log,
     load,
     max_weights,
+    init_scale,
     vary="",
 ):
     print(f"Loading dataset from {data}")
@@ -262,7 +299,14 @@ def main(
         model_spec = ModelSpec.parse(model_spec)
         assert max_weights is None or model_spec.weights() <= max_weights
         results.add_conf(
-            Configuration(model_spec, learning_rate, sample_len, batch_size)
+            Configuration(
+                model_spec,
+                learning_rate,
+                sample_len,
+                batch_size,
+                regularization,
+                init_scale=init_scale,
+            )
         )
 
     first = True
@@ -273,10 +317,15 @@ def main(
         weights = conf.spec.weights()
         print(
             f"{conf.spec} ({weights})  LR {conf.lr}  LEN {conf.sample_len}  "
-            + f"B {conf.batch}"
+            + f"B {conf.batch}  R {conf.regularization}  I {conf.init_scale}"
         )
         model = LayeredModel2.parse(str(conf.spec))
-        manager = Manager(model, conf.lr, regularization)
+        manager = Manager(
+            model,
+            conf.lr,
+            regularization=conf.regularization,
+            init_scale=conf.init_scale,
+        )
         manager.init(quiet=True)
         assert model.total_weights(manager.weights) == weights
         report = train_and_eval(
@@ -380,6 +429,12 @@ def parse_args():
         default=None,
         metavar="LOG",
         help="a CSV log file with previous runs",
+    )
+    parser.add_argument(
+        "--init_scale",
+        default=0.1,
+        type=float,
+        help="scale weight initialization"
     )
 
     return parser.parse_args()

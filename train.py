@@ -118,7 +118,7 @@ def create_manager(
 ):
     if model_spec is not None:
         model = layered.LayeredModel2.parse(model_spec)
-        manager = Manager(model, learning_rate, regularization, 100000)
+        manager = Manager(model, learning_rate, regularization)
     else:
         assert model_path is not None
         with open(model_path) as f:

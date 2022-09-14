@@ -47,7 +47,7 @@ class Layer2(object):
             prod *= dim
         return prod
 
-    def init_weights(self, rng: Rng) -> ArrayTree:
+    def init_weights(self, rng: Rng, init_scale: float) -> ArrayTree:
         return None
 
     def init_state(self, weights: ArrayTree) -> ArrayTree:
@@ -85,9 +85,9 @@ class Suffix(Layer2):
         self.output_shape = (length,) + self._input_shape
         self._state_shape = (length - 1,) + self._input_shape
 
-    def init_weights(self, rng: Rng) -> ArrayTree:
+    def init_weights(self, rng: Rng, init_scale: float) -> ArrayTree:
         if self._train_init_state:
-            return {"init_state": rng.normal(self._state_shape)}
+            return {"init_state": rng.normal(self._state_shape) * init_scale}
         else:
             return None
 
@@ -118,10 +118,10 @@ class Dense(Layer2):
         self.full_name = f"dense.{self._state}{self._activation_suffix}"
         self.output_shape = (output_size,)
 
-    def init_weights(self, rng: Rng) -> ArrayTree:
+    def init_weights(self, rng: Rng, init_scale: float) -> ArrayTree:
         return {
-            "w": rng.he((self._state, self.input_size)),
-            "b": rng.normal((self._state,)),
+            "w": rng.he((self._state, self.input_size)) * init_scale,
+            "b": rng.normal((self._state,)) * init_scale,
         }
 
     def init_state(self, weights) -> None:
@@ -155,19 +155,21 @@ class Recurrent(Layer2):
         )
         self.output_shape = (output_size,)
 
-    def init_weights(self, rng: Rng) -> ArrayTree:
+    def init_weights(self, rng: Rng, init_scale: float) -> ArrayTree:
         he_input_size = self.input_size + self._state
         weights = {
             "winput": rng.he(
                 (self._state, self.input_size), input_size=he_input_size
-            ),
+            )
+            * init_scale,
             "wstate": rng.he(
                 (self._state, self._state), input_size=he_input_size
-            ),
-            "b": rng.normal((self._state,)),
+            )
+            * init_scale,
+            "b": rng.normal((self._state,)) * init_scale,
         }
         if self._train_init_state:
-            weights["init_state"] = rng.normal((self._state,))
+            weights["init_state"] = rng.normal((self._state,)) * init_scale
         return weights
 
     def init_state(self, weights) -> ArrayTree:
@@ -206,27 +208,33 @@ class Gru(Layer2):
         )
         self.output_shape = (output_size,)
 
-    def init_weights(self, rng: Rng) -> ArrayTree:
+    def init_weights(self, rng: Rng, init_scale: float) -> ArrayTree:
         he_input_size = self.input_size + self._state
         weights = {
             "wz": rng.he(
                 (self._state, self.input_size), input_size=he_input_size
-            ),
-            "uz": rng.he((self._state, self._state), input_size=he_input_size),
-            "bz": rng.normal((self._state,)),
+            )
+            * init_scale,
+            "uz": rng.he((self._state, self._state), input_size=he_input_size)
+            * init_scale,
+            "bz": rng.normal((self._state,)) * init_scale,
             "wr": rng.he(
                 (self._state, self.input_size), input_size=he_input_size
-            ),
-            "ur": rng.he((self._state, self._state), input_size=he_input_size),
-            "br": rng.normal((self._state,)),
+            )
+            * init_scale,
+            "ur": rng.he((self._state, self._state), input_size=he_input_size)
+            * init_scale,
+            "br": rng.normal((self._state,)) * init_scale,
             "wh": rng.he(
                 (self._state, self.input_size), input_size=he_input_size
-            ),
-            "uh": rng.he((self._state, self._state), input_size=he_input_size),
-            "bh": rng.normal((self._state,)),
+            )
+            * init_scale,
+            "uh": rng.he((self._state, self._state), input_size=he_input_size)
+            * init_scale,
+            "bh": rng.normal((self._state,)) * init_scale,
         }
         if self._train_init_state:
-            weights["init_state"] = rng.normal((self._state,))
+            weights["init_state"] = rng.normal((self._state,)) * init_scale
         return weights
 
     def init_state(self, weights) -> ArrayTree:
@@ -274,22 +282,26 @@ class Mgru(Layer2):
         self.full_name = f"mgru.{self._state}" + self._init_suffix
         self.output_shape = (output_size,)
 
-    def init_weights(self, rng: Rng) -> ArrayTree:
+    def init_weights(self, rng: Rng, init_scale: float) -> ArrayTree:
         he_input_size = self.input_size + self._state
         weights = {
             "wf": rng.he(
                 (self._state, self.input_size), input_size=he_input_size
-            ),
-            "uf": rng.he((self._state, self._state), input_size=he_input_size),
-            "bf": rng.normal((self._state,)),
+            )
+            * init_scale,
+            "uf": rng.he((self._state, self._state), input_size=he_input_size)
+            * init_scale,
+            "bf": rng.normal((self._state,)) * init_scale,
             "wh": rng.he(
                 (self._state, self.input_size), input_size=he_input_size
-            ),
-            "uh": rng.he((self._state, self._state), input_size=he_input_size),
-            "bh": rng.normal((self._state,)),
+            )
+            * init_scale,
+            "uh": rng.he((self._state, self._state), input_size=he_input_size)
+            * init_scale,
+            "bh": rng.normal((self._state,)) * init_scale,
         }
         if self._train_init_state:
-            weights["init_state"] = rng.normal((self._state,))
+            weights["init_state"] = rng.normal((self._state,)) * init_scale
         return weights
 
     def init_state(self, weights) -> ArrayTree:
@@ -330,23 +342,27 @@ class Caru(Layer2):
         self.full_name = f"caru.{self._state}" + self._init_suffix
         self.output_shape = (output_size,)
 
-    def init_weights(self, rng: Rng) -> ArrayTree:
+    def init_weights(self, rng: Rng, init_scale: float) -> ArrayTree:
         he_input_size = self.input_size + self._state
         weights = {
             "wx": rng.he(
                 (self._state, self.input_size), input_size=he_input_size
-            ),
-            "bx": rng.normal((self._state,)),
-            "wn": rng.he((self._state, self._state), input_size=he_input_size),
-            "bn": rng.normal((self._state,)),
-            "whz": rng.he((self._state, self._state), input_size=he_input_size),
+            )
+            * init_scale,
+            "bx": rng.normal((self._state,)) * init_scale,
+            "wn": rng.he((self._state, self._state), input_size=he_input_size)
+            * init_scale,
+            "bn": rng.normal((self._state,)) * init_scale,
+            "whz": rng.he((self._state, self._state), input_size=he_input_size)
+            * init_scale,
             "wvz": rng.he(
                 (self._state, self.input_size), input_size=he_input_size
-            ),
-            "bz": rng.normal((self._state,)),
+            )
+            * init_scale,
+            "bz": rng.normal((self._state,)) * init_scale,
         }
         if self._train_init_state:
-            weights["init_state"] = rng.normal((self._state,))
+            weights["init_state"] = rng.normal((self._state,)) * init_scale
         return weights
 
     def init_state(self, weights) -> ArrayTree:
@@ -388,34 +404,42 @@ class Lstm(Layer2):
         self.full_name = f"lstm.{self._state}{self._init_suffix}"
         self.output_shape = (output_size,)
 
-    def init_weights(self, rng: Rng) -> ArrayTree:
+    def init_weights(self, rng: Rng, init_scale: float) -> ArrayTree:
         he_input_size = self.input_size + self._state
         weights = {
             "wf": rng.he(
                 (self._state, self.input_size), input_size=he_input_size
-            ),
-            "uf": rng.he((self._state, self._state), input_size=he_input_size),
-            "bf": rng.normal((self._state,)),
+            )
+            * init_scale,
+            "uf": rng.he((self._state, self._state), input_size=he_input_size)
+            * init_scale,
+            "bf": rng.normal((self._state,)) * init_scale,
             "wi": rng.he(
                 (self._state, self.input_size), input_size=he_input_size
-            ),
-            "ui": rng.he((self._state, self._state), input_size=he_input_size),
-            "bi": rng.normal((self._state,)),
+            )
+            * init_scale,
+            "ui": rng.he((self._state, self._state), input_size=he_input_size)
+            * init_scale,
+            "bi": rng.normal((self._state,)) * init_scale,
             "wo": rng.he(
                 (self._state, self.input_size), input_size=he_input_size
-            ),
-            "uo": rng.he((self._state, self._state), input_size=he_input_size),
-            "bo": rng.normal((self._state,)),
+            )
+            * init_scale,
+            "uo": rng.he((self._state, self._state), input_size=he_input_size)
+            * init_scale,
+            "bo": rng.normal((self._state,)) * init_scale,
             "wc": rng.he(
                 (self._state, self.input_size), input_size=he_input_size
-            ),
-            "uc": rng.he((self._state, self._state), input_size=he_input_size),
-            "bc": rng.normal((self._state,)),
+            )
+            * init_scale,
+            "uc": rng.he((self._state, self._state), input_size=he_input_size)
+            * init_scale,
+            "bc": rng.normal((self._state,)) * init_scale,
         }
         if self._train_init_state:
             weights["init_state"] = {
-                "h": rng.normal((self._state,)),
-                "c": rng.normal((self._state,)),
+                "h": rng.normal((self._state,)) * init_scale,
+                "c": rng.normal((self._state,)) * init_scale,
             }
         return weights
 
@@ -512,13 +536,14 @@ class Convolution(Layer2):
             output_size,
         )
 
-    def init_weights(self, rng: Rng):
+    def init_weights(self, rng: Rng, init_scale: float):
         return {
             "kernel": rng.he(
                 (self._kernel, self._output, self._input_shape[1]),
                 self.input_size,
-            ),
-            "b": rng.normal((self._output,)),
+            )
+            * init_scale,
+            "b": rng.normal((self._output,)) * init_scale,
         }
 
     def init_state(self, weights):

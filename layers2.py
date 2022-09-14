@@ -564,3 +564,53 @@ class Convolution(Layer2):
         out = self._activation(out)
 
         return state, out
+
+
+@layer_cls
+class Convolution2(Layer2):
+    name = "conv2"
+
+    def __init__(self, kernel_size, output_size, **kwargs):
+        """Transforms [X, input_size] into [X - kernel_size + 1, output_size]
+
+        Alternative implementation not using jax conv.
+        """
+        super().__init__(**kwargs)
+        self._kernel = kernel_size
+        self._output = output_size
+        assert len(self._input_shape) == 2
+        assert self._input_shape[0] >= self._kernel
+        self.full_name = (
+            f"conv2.{self._output}.{self._kernel}{self._activation_suffix}"
+        )
+        self.output_shape = (
+            self._input_shape[0] - self._kernel + 1,
+            output_size,
+        )
+
+    def init_weights(self, rng: Rng, init_scale: float):
+        return {
+            "kernel": rng.he(
+                (self._output, self._kernel * self._input_shape[1]),
+                self.input_size,
+            )
+            * init_scale,
+            "b": rng.normal((self._output,)) * init_scale,
+        }
+
+    def init_state(self, weights):
+        return None
+
+    def step(self, weights, state, input):
+        kernel = weights["kernel"]
+        out_list = []
+        for i in range(self._input_shape[0] - self._kernel + 1):
+            slice = input[i:i+kernel,:]
+            slice = slice.flatten()
+            o = jnp.dot(kernel, slice) + weights["b"]
+            out_list.append(o)
+
+        out = jnp.stack(o)
+        out = self._activation(out)
+
+        return state, out

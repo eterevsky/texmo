@@ -115,6 +115,8 @@ class LayerSpec(object):
 
     def neighbors_struct(self, input_shape):
         for layer_cls in registry.values():
+            if layer_cls.name == 'caru':
+                continue
             if not layer_cls.has_weights:
                 continue
 

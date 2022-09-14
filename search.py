@@ -38,6 +38,9 @@ LRS = [
     10,
     20,
     50,
+    100,
+    200,
+    500,
 ]
 
 
@@ -281,6 +284,7 @@ def main(
     max_weights,
     init_scale,
     vary="",
+    max_attempts=1000000,
 ):
     print(f"Loading dataset from {data}")
     dataset = DataSet(data)
@@ -311,7 +315,7 @@ def main(
 
     first = True
 
-    while True:
+    for _ in range(max_attempts):
         conf_results = results.select_conf()
         conf = conf_results.conf
         weights = conf.spec.weights()
@@ -440,7 +444,14 @@ def parse_args():
     return parser.parse_args()
 
 
+# if __name__ == "__main__":
+#     print("TexMo parameter search")
+#     args = parse_args()
+#     main(**vars(args))
+
+
 if __name__ == "__main__":
-    print("TexMo parameter search")
-    args = parse_args()
-    main(**vars(args))
+    for i in range(10, 24):
+        max_weights = 2**i
+        main("data", None, 0.1, 128, 256, 0.1, 2, "search4-gpu.csv", "search4-gpu.csv", max_weights, 0.1, vary="lr,batch,init_scale,size,activation,struct", max_attempts=1000)
+

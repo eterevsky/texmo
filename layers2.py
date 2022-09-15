@@ -1,5 +1,7 @@
 import jax
 from jax import numpy as jnp
+import math
+import numpy as np
 from typing import Dict, Union, Tuple
 
 from prng import Rng
@@ -605,7 +607,7 @@ class Convolution2(Layer2):
         kernel = weights["kernel"]
         out_list = []
         for i in range(self._input_shape[0] - self._kernel + 1):
-            slice = input[i:i+kernel,:]
+            slice = input[i : i + kernel, :]
             slice = slice.flatten()
             o = jnp.dot(kernel, slice) + weights["b"]
             out_list.append(o)
@@ -614,3 +616,55 @@ class Convolution2(Layer2):
         out = self._activation(out)
 
         return state, out
+
+
+@layer_cls
+class Attention(Layer2):
+    name = "attention"
+
+    def __init__(self, length, pos=False, **kwargs):
+        super().__init__(**kwargs)
+        assert self._activation is None
+        assert length > 1
+        self._length = length
+        pos_suffix = '.pos' if pos else ''
+        self.full_name = f"attention.{length}{pos_suffix}"
+        self.output_shape = self._input_shape
+        self._state_shape = (length - 1,) + self._input_shape
+        self._dk = 1 / math.sqrt(self._input_shape[0])
+        self._use_pos = pos
+
+    def init_weights(self, rng: Rng, init_scale: float) -> ArrayTree:
+        if self._use_pos:
+            return {
+                "pe": rng.he(
+                    (self._length, self.output_shape[0]),
+                    self._length * self.output_shape[0],
+                )
+                * init_scale,
+            }
+        else:
+            return None
+
+    def init_state(self, weights: ArrayTree) -> ArrayTree:
+        item_size = 1
+        for dim in self._state_shape[1:]:
+            item_size *= dim
+        return jnp.ones(self._state_shape) / item_size
+
+    def step(
+        self, weights: ArrayTree, state: ArrayTree, input: jnp.ndarray
+    ) -> Tuple[ArrayTree, ArrayTree]:
+        suffix = jnp.vstack((state, input.reshape((1, -1))))
+        next_suffix = suffix[1:]
+
+        if self._use_pos:
+            suffix += weights["pe"]
+
+        input = suffix[-1]
+
+        prod = jnp.matmul(suffix, jnp.transpose(input))
+        weight = jax.nn.softmax(prod * self._dk)
+        out = jnp.matmul(weight, suffix)
+
+        return next_suffix, out

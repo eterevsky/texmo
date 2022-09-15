@@ -451,7 +451,7 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    for i in range(10, 24):
+    for i in range(12, 25):
         max_weights = 2**i
         main("data", None, 0.1, 128, 256, 0.1, 2, "search4-gpu.csv", "search4-gpu.csv", max_weights, 0.1, vary="lr,batch,init_scale,size,activation,struct", max_attempts=1000)
 

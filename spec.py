@@ -95,7 +95,7 @@ class LayerSpec(object):
         if "activation" in vary or "act" in vary:
             for neighbor in self.neighbors_activation():
                 yield neighbor
-        if "struct" in vary and self.has_weights:
+        if "struct" in vary and self.has_weights or "suffix" in vary and self.name in ("suffix", "attention"):
             for neighbor in self.neighbors_struct(input_shape):
                 yield neighbor
 
@@ -165,8 +165,47 @@ class SuffixSpec(LayerSpec):
             super().is_valid(prev_layer)
             and self._size >= 2
             and self._size in (2, 4, 8, 16, 32, 64, 128, 256, 512, 1024)
-            and (prev_layer is None or prev_layer.name != "suffix")
+            and (prev_layer is None or prev_layer.name not in ("suffix", "attention"))
         )
+
+    def neighbors_struct(self, input_shape):
+        yield AttentionSpec(self._size, True)
+        yield AttentionSpec(self._size, False)
+
+
+@layer_spec
+class AttentionSpec(LayerSpec):
+    name = "attention"
+    has_weights = False
+    has_size = True
+    has_activation = False
+
+    def __init__(self, size, pos):
+        super().__init__(size=size)
+        self._pos = pos
+
+    def __str__(self):
+        if self._pos:
+            return f"attention.{self._size}.pos"
+        else:
+            return f"attention.{self._size}"
+
+    def output_shape(self, input_shape):
+        return input_shape
+
+    def weights(self, input_shape):
+        return input_shape[0] * self._size if self._pos else 0
+
+    def is_valid(self, prev_layer):
+        return (
+            super().is_valid(prev_layer)
+            and self._size >= 2
+            and (prev_layer is None or prev_layer.name not in ("suffix", "attention"))
+        )
+
+    def neighbors_struct(self, input_shape):
+        yield SuffixSpec(self._size)
+        yield AttentionSpec(self._size, not self._pos)
 
 
 @layer_spec
@@ -312,7 +351,7 @@ class ModelSpec(object):
     def simplify(self):
         i = 0
         while i < len(self._layers):
-            if str(self._layers[i]) == "suffix.1":
+            if str(self._layers[i]) in ("suffix.1", "attention.1", "attention.1.pos"):
                 self._layers.pop(i)
             else:
                 i += 1
@@ -334,28 +373,34 @@ class ModelSpec(object):
                 )
                 neighbor.simplify()
                 if not neighbor.is_valid():
-                    assert str(self) == "suffix.2"
                     continue
                 assert neighbor.is_valid()
                 yield neighbor
 
             if (
                 "suffix" in vary
-                and (i == 0 or self._layers[i - 1].name != "suffix")
-                and self._layers[i].name != "suffix"
+                and (i == 0 or self._layers[i - 1].name not in ("suffix", "attention"))
+                and self._layers[i].name not in ("suffix", "attention")
             ):
-                neighbor = ModelSpec(
-                    self._layers[:i] + [SuffixSpec(2)] + self._layers[i:]
-                )
-                assert neighbor.is_valid()
-                yield neighbor
+                for layer in (SuffixSpec(2), AttentionSpec(2, False), AttentionSpec(2, True)):
+                    neighbor = ModelSpec(
+                        self._layers[:i] + [layer] + self._layers[i:]
+                    )
+                    if not neighbor.is_valid():
+                        print(neighbor)
+                    assert neighbor.is_valid()
+                    yield neighbor
 
             shape = layer.output_shape(shape)
 
-        if "suffix" in vary and self._layers[-1].name != "suffix":
-            neighbor = ModelSpec(self._layers + [SuffixSpec(2)])
-            assert neighbor.is_valid()
-            yield neighbor
+        if "suffix" in vary and self._layers[-1].name not in ("suffix", "attention"):
+                for layer in (SuffixSpec(2), AttentionSpec(2, False), AttentionSpec(2, True)):
+                    neighbor = ModelSpec(self._layers + [layer])
+                    if not neighbor.is_valid():
+                        print(self._layers[-1].name)
+                        print(neighbor)
+                    assert neighbor.is_valid()
+                    yield neighbor
 
         if "struct" in vary:
             size = min(total_size(self.output_shape()), NCHAR // 2)

@@ -247,7 +247,7 @@ def print_top(results):
 
 
 def load_previous_runs(
-    results, path, max_weights, time_limit, sample_len, vary
+    results, path, max_weights, time_limit, sample_len, init_scale, vary
 ):
     print(f"Loading previous runs from {path}")
     with open(path) as csvfile:
@@ -259,13 +259,15 @@ def load_previous_runs(
             except Exception:
                 continue
 
-            if (conf_is_valid(conf)
+            if (
+                conf_is_valid(conf)
                 and (max_weights is None or record.weights <= max_weights)
                 and (
                     "len" in vary
                     or sample_len is None
                     or record.train_sample_len == sample_len
                 )
+                and ("init_scale" in vary or record.init_scale == init_scale)
             ) and time_limit / 1.1 < record.train_time_s < time_limit * 1.1:
                 results.add_run(conf, record)
     print("Runs loaded:", results.total_runs)
@@ -296,7 +298,7 @@ def main(
 
     if load is not None:
         load_previous_runs(
-            results, load, max_weights, time_limit, sample_len, vary
+            results, load, max_weights, time_limit, sample_len, init_scale, vary
         )
 
     if model_spec is not None:
@@ -436,22 +438,35 @@ def parse_args():
     )
     parser.add_argument(
         "--init_scale",
-        default=0.1,
+        default=1,
         type=float,
-        help="scale weight initialization"
+        help="scale weight initialization",
     )
 
     return parser.parse_args()
 
 
-# if __name__ == "__main__":
-#     print("TexMo parameter search")
-#     args = parse_args()
-#     main(**vars(args))
-
-
 if __name__ == "__main__":
-    for i in range(12, 25):
-        max_weights = 2**i
-        main("data", None, 0.1, 128, 256, 0.1, 2, "search4-gpu.csv", "search4-gpu.csv", max_weights, 0.1, vary="lr,batch,init_scale,size,activation,struct", max_attempts=1000)
+    print("TexMo parameter search")
+    args = parse_args()
+    main(**vars(args))
 
+
+# if __name__ == "__main__":
+#     for i in range(10, 25):
+#         max_weights = 2**i
+#         main(
+#             "data",
+#             None,
+#             0.1,
+#             128,
+#             256,
+#             0.1,
+#             8,
+#             "search4-gpu.csv",
+#             "search4-gpu.csv",
+#             max_weights,
+#             1,
+#             vary="lr,batch,size,activation,struct,suffix",
+#             max_attempts=200,
+#         )

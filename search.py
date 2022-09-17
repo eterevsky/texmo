@@ -446,27 +446,27 @@ def parse_args():
     return parser.parse_args()
 
 
-# if __name__ == "__main__":
-#     print("TexMo parameter search")
-#     args = parse_args()
-#     main(**vars(args))
-
-
 if __name__ == "__main__":
-    for i in range(10, 64):
-        max_weights = 2**i
-        main(
-            "data",
-            None,
-            0.1,
-            128,
-            256,
-            0.1,
-            64,
-            "search4-gpu.csv",
-            "search4-gpu.csv",
-            max_weights,
-            1,
-            vary="lr,batch,size,activation,struct,suffix",
-            max_attempts=60,
-        )
+    print("TexMo parameter search")
+    args = parse_args()
+    main(**vars(args))
+
+
+# if __name__ == "__main__":
+#     for i in range(10, 64):
+#         max_weights = 2**i
+#         main(
+#             "data",
+#             None,
+#             0.1,
+#             128,
+#             256,
+#             0.1,
+#             32,
+#             "search4-gpu.csv",
+#             "search4-gpu.csv",
+#             max_weights,
+#             1,
+#             vary="lr,batch,size,activation,struct,suffix",
+#             max_attempts=60,
+#         )

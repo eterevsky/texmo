@@ -453,7 +453,7 @@ if __name__ == "__main__":
 
 
 # if __name__ == "__main__":
-#     for i in range(10, 64):
+#     for i in range(11, 64):
 #         max_weights = 2**i
 #         main(
 #             "data",
@@ -462,11 +462,11 @@ if __name__ == "__main__":
 #             128,
 #             256,
 #             0.1,
-#             32,
+#             16,
 #             "search4-gpu.csv",
 #             "search4-gpu.csv",
 #             max_weights,
 #             1,
 #             vary="lr,batch,size,activation,struct,suffix",
-#             max_attempts=60,
+#             max_attempts=150,
 #         )

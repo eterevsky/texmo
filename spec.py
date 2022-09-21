@@ -4,6 +4,10 @@ from unittest import result
 from model import NCHAR
 
 
+class ObsoleteSpec(Exception):
+    pass
+
+
 registry = {}
 
 
@@ -25,7 +29,10 @@ class LayerSpec(object):
     has_size = True
     has_activation = True
 
-    def __init__(self, size=None, tanh=False, relu=False):
+    def __init__(self, size=None, tanh=False, relu=False, sigmoid=False):
+        if sigmoid:
+            raise ObsoleteSpec('sigmoid')
+
         if self.has_size:
             assert size is not None
             self._size = size
@@ -61,7 +68,11 @@ class LayerSpec(object):
             except ValueError:
                 kwargs[param] = True
 
-        layer_cls = registry[name]
+        try:
+            layer_cls = registry[name]
+        except KeyError as e:
+            if name == 'norm':
+                raise ObsoleteSpec(e)
         return layer_cls(*args, **kwargs)
 
     def __str__(self):
@@ -180,7 +191,7 @@ class AttentionSpec(LayerSpec):
     has_size = True
     has_activation = False
 
-    def __init__(self, size, pos):
+    def __init__(self, size, pos=False):
         super().__init__(size=size)
         self._pos = pos
 

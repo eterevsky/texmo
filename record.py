@@ -1,4 +1,5 @@
 from datetime import datetime
+import math
 from typing import Dict, Union, Tuple
 
 
@@ -19,7 +20,7 @@ class TrainingRecord(object):
         test_sample_len: Union[int, str],
         test_batch: Union[int, str],
         test_poisoned: Union[bool, str],
-        init_scale: Union[int, str, None] = 1,
+        init_scale: Union[float, str, None] = None,
     ):
         if not isinstance(timestamp, datetime):
             timestamp = datetime.fromisoformat(timestamp)
@@ -40,8 +41,8 @@ class TrainingRecord(object):
             test_poisoned = bool(int(test_poisoned))
         self.test_poisoned = test_poisoned
         if init_scale is None:
-            init_scale = 1
-        self.init_scale = int(init_scale)
+            init_scale = 1.0
+        self.init_scale = float(init_scale)
 
     @staticmethod
     def from_csv_tuple(row):
@@ -53,6 +54,21 @@ class TrainingRecord(object):
     @property
     def train_data(self):
         return self.steps * self.train_sample_len * self.train_batch
+
+    @property
+    def time_round(self):
+        log = math.log2(self.train_time_s)
+        ilog = round(log)
+        if abs(log - ilog) < 0.1:
+            return 2 ** ilog
+        else:
+            return None
+
+    @property
+    def weights_limit(self):
+        """The closest power of two that's greater than the number of weights."""
+        log = math.log2(self.train_time_s)
+        return 2 ** math.ceil(log)
 
     def csv_tuple(self) -> Tuple:
         return (
@@ -71,7 +87,7 @@ class TrainingRecord(object):
             self.test_sample_len,
             self.test_batch,
             1 if self.test_poisoned else 0,
-            1 if self.init_scale else 0
+            self.init_scale,
         )
 
     def __str__(self) -> str:

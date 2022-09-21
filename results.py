@@ -44,6 +44,13 @@ class ConfResults(object):
     def score(self):
         return median(self.scores)
 
+    @property
+    def weights_limit(self):
+        """The number of weights rounded up to a power of 2."""
+        weights = self.conf.spec.weights()
+        log = math.log2(weights)
+        return 2 ** math.ceil(log)
+
 
 class ResultSet(object):
     def __init__(self, t=None):

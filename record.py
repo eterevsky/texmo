@@ -64,12 +64,6 @@ class TrainingRecord(object):
         else:
             return None
 
-    @property
-    def weights_limit(self):
-        """The closest power of two that's greater than the number of weights."""
-        log = math.log2(self.train_time_s)
-        return 2 ** math.ceil(log)
-
     def csv_tuple(self) -> Tuple:
         return (
             self.timestamp.isoformat(timespec="seconds"),

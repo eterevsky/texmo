@@ -38,7 +38,7 @@ def main():
     plt.xscale("log")
     plt.yscale("log")
 
-    for t in (1, 2, 4, 8, 16, 32, 64):
+    for t in (1, 2, 4, 8, 16, 32, 64, 128):
         x, y = max_points(records, t + 0.2, 1E7)
         plt.plot(x, y)
 

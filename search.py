@@ -395,6 +395,7 @@ def parse_args():
         metavar="SECONDS",
         help="time limit for training",
     )
+    parser.add_argumen
     parser.add_argument(
         "-l",
         "--learning-rate",

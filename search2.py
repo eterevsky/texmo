@@ -17,20 +17,29 @@ from train import train_and_eval
 RUNS_EXP = 0.55
 
 
-def select_time(result_set):
+def select_time(result_set, max_time):
     with latency.timer("select_time"):
-        total_runs = result_set.total_runs
+        total_runs = 0
+        t = 1
+        i = 0
+        while t <= max_time:
+            total_runs += result_set.runs_count(t)
+            i += 1
+            t *= 2
+
+        # total = x + x * re + x * re^2 + ... + x * re^(i-1) = x * (1 - re^i) / (1 - re)
+
 
         # Number of expected runs for t
         t = 1
-        expected_runs = total_runs * (1 - RUNS_EXP)
+        expected_runs = total_runs * (1 - RUNS_EXP) / (1 - RUNS_EXP**i)
 
         best_t = 1
-        most_lacking_runs = 0
+        most_lacking_runs = -100
 
         print(f"Total runs: {total_runs}")
 
-        while expected_runs >= 1:
+        while expected_runs >= 1 and (max_time is None or t <= max_time):
             complete_runs = result_set.runs_count(t)
             gap = expected_runs - complete_runs
             print(
@@ -55,9 +64,9 @@ def select_max_weights(result_set, t):
         return int(2**l)
 
 
-def select_conf(result_set, time_limit):
+def select_conf(result_set, max_time):
     with latency.timer("select_conf"):
-        t = time_limit if time_limit is not None else select_time(result_set)
+        t = select_time(result_set, max_time)
         max_weights = select_max_weights(result_set, t)
 
         print(f"\nT = {t}  W ≤ {max_weights}")
@@ -133,16 +142,9 @@ def select_conf(result_set, time_limit):
 
 def main(
     data,
-    model_spec,
-    learning_rate,
-    sample_len,
-    batch_size,
-    regularization,
-    time_limit,
     log,
     load,
-    max_weights,
-    init_scale,
+    max_time,
     vary="",
 ):
     print(f"Loading dataset from {data}")
@@ -153,16 +155,15 @@ def main(
 
     if load:
         print(f"Loading old results from {load}")
-        result_set = ResultSet.from_csv(load, time_limit, vary)
-        confs = result_set.total_confs
+        result_set = ResultSet.from_csv(load, None, vary)
 
         print(f"Loaded {result_set.total_runs} runs, {result_set.total_confs} confs")
     else:
-        result_set = ResultSet(time_limit, vary)
+        result_set = ResultSet(None, vary)
 
     first = True
     while True:
-        conf = select_conf(result_set, time_limit)
+        conf = select_conf(result_set, max_time)
         weights = conf.spec.weights()
         print(
             f"\nT = {conf.t}  {conf.spec} ({weights})  LR {conf.lr}  LEN {conf.sample_len}  "
@@ -211,19 +212,6 @@ def parse_args():
         help="directory with training data",
     )
     parser.add_argument(
-        "-c",
-        "--model-spec",
-        metavar="SPEC",
-        default=None,
-        help="initial model spec",
-    )
-    parser.add_argument(
-        "--max-weights",
-        type=int,
-        default=None,
-        help="the maximum number of weights in the model",
-    )
-    parser.add_argument(
         "-v",
         "--vary",
         type=str,
@@ -232,42 +220,11 @@ def parse_args():
         + "A comma-separated list of struct, size, act, lr, batch, len.",
     )
     parser.add_argument(
-        "-t",
-        "--time-limit",
+        "--max-time",
         type=int,
         default=None,
         metavar="SECONDS",
-        help="time limit for training",
-    )
-    parser.add_argument(
-        "-l",
-        "--learning-rate",
-        type=float,
-        metavar="RATE",
-        help="learning rate",
-        default=0.05,
-    )
-    parser.add_argument(
-        "-r",
-        "--regularization",
-        type=float,
-        help="L2 regularization coefficient",
-        default=0.1,
-    )
-    parser.add_argument(
-        "--sample-len",
-        type=int,
-        default=128,
-        metavar="LEN",
-        help="length of text fragments used for training",
-    )
-    parser.add_argument(
-        "-b",
-        "--batch-size",
-        type=int,
-        metavar="BATCH",
-        default=32,
-        help="training data batch size",
+        help="maximum time limit for training",
     )
     parser.add_argument(
         "--log",
@@ -280,12 +237,6 @@ def parse_args():
         default=None,
         metavar="LOG",
         help="a CSV log file with previous runs",
-    )
-    parser.add_argument(
-        "--init_scale",
-        default=1,
-        type=float,
-        help="scale weight initialization",
     )
 
     return parser.parse_args()

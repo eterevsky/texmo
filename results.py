@@ -4,6 +4,7 @@ import itertools
 import math
 from statistics import median, StatisticsError
 
+import latency
 from record import TrainingRecord
 from spec import ModelSpec, ObsoleteSpec
 
@@ -186,8 +187,8 @@ class ResultSet(object):
             if cr.conf.spec.weights() <= max_weights
         )
 
-    def confs_count(self, t):
-        return sum(1 for cr in self.results_for_t(t) if cr.scores)
+    def confs_count(self, t, max_weights=INF):
+        return sum(1 for cr in self.results_for_t(t) if cr.scores and cr.conf.spec.weights() <= max_weights)
 
     def top_conf(self, t):
         """A configuration with the highest (self) score with time = t."""
@@ -200,12 +201,13 @@ class ResultSet(object):
         return results_for_t[conf]
 
     def top_confs(self, t, max_weights):
-        matching_crs = (
-            cr
-            for cr in self.results_for_t(t)
-            if cr.conf.spec.weights() <= max_weights
-        )
-        return sorted(matching_crs, key=lambda cr: cr.score)
+        with latency.timer("top_confs"):
+            matching_crs = (
+                cr
+                for cr in self.results_for_t(t)
+                if cr.conf.spec.weights() <= max_weights
+            )
+            return sorted(matching_crs, key=lambda cr: cr.score)
 
     def find(self, conf):
         return self._conf_results.get(conf.t, {}).get(conf, None)
@@ -236,12 +238,17 @@ class ResultSet(object):
         return cluster_score
 
     def top_cluster_confs(self, t, max_weights):
-        matching_crs = (
-            cr
-            for cr in self.results_for_t(t)
-            if cr.conf.spec.weights() <= max_weights
-        )
-        return sorted(matching_crs, key=lambda cr: self.cluster_score(t, cr))
+        with latency.timer("top_cluster_confs"):
+            matching_crs = (
+                cr
+                for cr in self.results_for_t(t)
+                if cr.conf.spec.weights() <= max_weights
+            )
+            return sorted(matching_crs, key=lambda cr: self.cluster_score(t, cr))
+
+    @property
+    def total_confs(self):
+        return sum(len(r) for r in self._conf_results.values())
 
     @property
     def total_runs(self):

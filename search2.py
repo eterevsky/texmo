@@ -5,111 +5,130 @@ import random
 
 from results import ResultSet, Configuration
 from dataset import DataSet
+import latency
 from layered import LayeredModel2
 from manager import Manager
 from spec import ModelSpec
 from train import train_and_eval
 
 
-RUNS_EXP = 0.5
+# The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
+# with t = 2^k
+RUNS_EXP = 0.55
+
 
 def select_time(result_set):
-    total_runs = result_set.total_runs
+    with latency.timer("select_time"):
+        total_runs = result_set.total_runs
 
-    # Number of expected runs for t
-    t = 1
-    expected_runs = total_runs * (1 - RUNS_EXP)
+        # Number of expected runs for t
+        t = 1
+        expected_runs = total_runs * (1 - RUNS_EXP)
 
-    best_t = 1
-    most_lacking_runs = 0
+        best_t = 1
+        most_lacking_runs = 0
 
-    print(f"Total runs: {total_runs}")
+        print(f"Total runs: {total_runs}")
 
-    while expected_runs >= 1:
-        complete_runs = result_set.runs_count(t)
-        gap = expected_runs - complete_runs
-        print(f"t = {t}  complete = {complete_runs}  expected = {expected_runs}  gap = {gap}")
-        if expected_runs - complete_runs > most_lacking_runs:
-            most_lacking_runs = expected_runs - complete_runs
-            best_t = t
-        t *= 2
-        expected_runs *= RUNS_EXP
+        while expected_runs >= 1:
+            complete_runs = result_set.runs_count(t)
+            gap = expected_runs - complete_runs
+            print(
+                f"t = {t}  complete = {complete_runs}  expected = {expected_runs:.2f}  gap = {gap:.2f}"
+            )
+            if expected_runs - complete_runs > most_lacking_runs:
+                most_lacking_runs = expected_runs - complete_runs
+                best_t = t
+            t *= 2
+            expected_runs *= RUNS_EXP
 
-    return best_t
+        return best_t
 
 
 def select_max_weights(result_set, t):
-    top_cr = result_set.top_conf(t)
-    if top_cr is None:
-        return 1024
-    maxw = top_cr.conf.spec.weights()
-    l = random.uniform(10, math.log2(maxw) + 1)
-    return int(2**l)
+    with latency.timer("select_max_weights"):
+        top_cr = result_set.top_conf(t)
+        if top_cr is None:
+            return 1024
+        maxw = top_cr.conf.spec.weights()
+        l = random.uniform(10, math.log2(maxw) + 1)
+        return int(2**l)
 
 
 def select_conf(result_set, time_limit):
-    t = time_limit if time_limit is not None else select_time(result_set)
-    max_weights = select_max_weights(result_set, t)
+    with latency.timer("select_conf"):
+        t = time_limit if time_limit is not None else select_time(result_set)
+        max_weights = select_max_weights(result_set, t)
 
-    if t > 1:
-        top_weights_m1 = result_set.top_conf(t // 2).conf.spec.weights()
-        nconfs = result_set.confs_count(t // 2)
-        n_top_confs = round(nconfs / (4 * (math.log2(top_weights_m1) - 9)))
-        for cr in islice(
-            result_set.top_confs(t // 2, max_weights), n_top_confs
-        ):
-            conf_t = cr.conf._replace(t=t)
-            if not result_set.find(conf_t):
-                return conf_t
+        print(f"\nT = {t}  W ≤ {max_weights}")
 
-    nruns = result_set.runs_count(t, max_weights)
-    # Estimation for the number of runs with weights between
-    # max_weights // 2 and max_weights
-    effective_nruns = nruns / (math.log2(max_weights) - 9)
+        if t > 1:
+            with latency.timer("select_conf-previous"):
+                t2 = t // 2
+                nconfs = result_set.confs_count(t2)
+                n_top_confs = round(
+                    nconfs / (4 * (math.log2(max_weights) - 9))
+                )
+                print(f"Checking {n_top_confs} out of {nconfs} confs for T = {t2}, W ≤ {max_weights} ")
+                for i, cr in enumerate(result_set.top_confs(t2, max_weights)):
+                    if i >= n_top_confs: break
+                    conf_t = cr.conf._replace(t=t)
+                    if not result_set.find(conf_t):
+                        print(f"Picked conf #{i}")
+                        return conf_t
 
-    # The number of runs per conf depends on the order by cluster score.
-    # The number of confs with >= n+1 runs is 1/3 of all the confs with
-    # >= n runs.
-    # This means that confs with the order <= 2 * enr / 3^k should have
-    # >= k runs.
+        with latency.timer("select_conf-neighbors"):
+            nruns = result_set.runs_count(t, max_weights)
+            # Estimation for the number of runs with weights between
+            # max_weights // 2 and max_weights
+            effective_nruns = nruns / (math.log2(max_weights) - 9)
 
-    print(f"\nT = {t}  Weights = {max_weights}")
+            # The number of runs per conf depends on the order by cluster score.
+            # The number of confs with >= n+1 runs is 1/3 of all the confs with
+            # >= n runs.
+            # This means that confs with the order <= 2 * enr / 3^k should have
+            # >= k runs.
 
-    best_conf = None
-    best_gap = -1
+            best_conf = None
+            best_gap = -1
 
-    k = 16
-    for i, cr in enumerate(result_set.top_cluster_confs(t, max_weights)):
-        while i + 1 > 2 * effective_nruns / 3 ** (k - 1) and k > 1:
-            k -= 1
-        conf = cr.conf
-        if i < 20:
-            score = f"{cr.score:.4f}" if cr.scores else "      "
-            count = len(cr.scores)
-            print(
-                f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  "
-                + f"B{conf.batch:4}  R{conf.regularization:4}  I{conf.init_scale:4}  {score} ({count})"
-            )
-        gap = k - len(cr.scores)
-        if gap > best_gap:
-            best_conf = conf
-            best_gap = gap
-        if gap > k and i > 20:
-            break
+            print()
 
-    if best_conf is not None:
-        return best_conf
+            k = 16
+            for i, cr in enumerate(
+                result_set.top_cluster_confs(t, max_weights)
+            ):
+                while i + 1 > 2 * effective_nruns / 3 ** (k - 1) and k > 1:
+                    k -= 1
+                conf = cr.conf
+                if i < 20:
+                    score = f"{cr.score:.4f}" if cr.scores else "      "
+                    count = len(cr.scores)
+                    print(
+                        f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  "
+                        + f"B{conf.batch:4}  R{conf.regularization:4}  "
+                        + f"I{conf.init_scale:4}  {score} ({count})"
+                    )
+                gap = k - len(cr.scores)
+                if gap > best_gap:
+                    best_conf = conf
+                    best_gap = gap
+                if gap > k and i > 20:
+                    break
 
-    default_conf = Configuration(
-        spec=ModelSpec.parse("dense.1.relu"),
-        lr=0.5,
-        sample_len=128,
-        batch=256,
-        regularization=0.1,
-        init_scale=1,
-        t=t,
-    )
-    return default_conf
+            if best_conf is not None:
+                return best_conf
+
+        default_conf = Configuration(
+            spec=ModelSpec.parse("dense.1.relu"),
+            lr=0.5,
+            sample_len=128,
+            batch=256,
+            regularization=0.1,
+            init_scale=1,
+            t=t,
+        )
+        return default_conf
 
 
 def main(
@@ -133,7 +152,11 @@ def main(
     vary = vary.split(",")
 
     if load:
+        print(f"Loading old results from {load}")
         result_set = ResultSet.from_csv(load, time_limit, vary)
+        confs = result_set.total_confs
+
+        print(f"Loaded {result_set.total_runs} runs, {result_set.total_confs} confs")
     else:
         result_set = ResultSet(time_limit, vary)
 
@@ -142,7 +165,7 @@ def main(
         conf = select_conf(result_set, time_limit)
         weights = conf.spec.weights()
         print(
-            f"\n{conf.spec} ({weights})  LR {conf.lr}  LEN {conf.sample_len}  "
+            f"\nT = {conf.t}  {conf.spec} ({weights})  LR {conf.lr}  LEN {conf.sample_len}  "
             + f"B {conf.batch}  R {conf.regularization}  I {conf.init_scale}"
         )
         model = LayeredModel2.parse(str(conf.spec))
@@ -175,7 +198,6 @@ def main(
             # res = result_set.find(conf)
             # print(res.neighbors)
             # return
-
 
 
 def parse_args():
@@ -272,4 +294,8 @@ def parse_args():
 if __name__ == "__main__":
     print("TexMo parameter search")
     args = parse_args()
-    main(**vars(args))
+    try:
+        main(**vars(args))
+    except KeyboardInterrupt:
+        print("\nInterrupted\n")
+        latency.report()

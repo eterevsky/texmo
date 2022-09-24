@@ -241,7 +241,8 @@ def print_top(results):
         score = f"{conf_results.score:.4f}" if conf_results.scores else "      "
         print(
             f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  "
-            + f"B{conf.batch:4}  R{conf.regularization:4}  I{conf.init_scale:4}  {score} ({conf_results.scores_count})"
+            + f"B{conf.batch:4}  R{conf.regularization:4} "
+            + f"I{conf.init_scale:4}  {score} ({conf_results.scores_count})"
         )
     print()
 
@@ -446,10 +447,10 @@ def parse_args():
     return parser.parse_args()
 
 
-if __name__ == "__main__":
-    print("TexMo parameter search")
-    args = parse_args()
-    main(**vars(args))
+# if __name__ == "__main__":
+#     print("TexMo parameter search")
+#     args = parse_args()
+#     main(**vars(args))
 
 
 # if __name__ == "__main__":

@@ -315,7 +315,7 @@ def main(
             )
         )
 
-    first = False
+    first = True
 
     for _ in range(max_attempts):
         conf_results = results.select_conf()
@@ -452,21 +452,21 @@ if __name__ == "__main__":
     main(**vars(args))
 
 
-if __name__ == "__main__":
-    for i in range(11, 64):
-        max_weights = 2**i
-        main(
-            "data",
-            None,
-            0.1,
-            128,
-            256,
-            0.1,
-            128,
-            "search4-gpu.csv",
-            "search4-gpu.csv",
-            max_weights,
-            1,
-            vary="lr,batch,size,activation,struct,suffix",
-            max_attempts=30,
-        )
+# if __name__ == "__main__":
+#     for i in range(11, 64):
+#         max_weights = 2**i
+#         main(
+#             "data",
+#             None,
+#             0.1,
+#             128,
+#             256,
+#             0.1,
+#             128,
+#             "search4-gpu.csv",
+#             "search4-gpu.csv",
+#             max_weights,
+#             1,
+#             vary="lr,batch,size,activation,struct,suffix",
+#             max_attempts=30,
+#         )

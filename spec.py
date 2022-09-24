@@ -426,7 +426,7 @@ class ModelSpec(object):
 
 
 if __name__ == "__main__":
-    spec = ModelSpec.parse("suffix.2-dense.128.tanh")
+    spec = ModelSpec.parse("attention.4-dense.128.relu")
     for neighbor in spec.neighbors(
         vary=["struct", "suffix", "size", "activation"]
     ):

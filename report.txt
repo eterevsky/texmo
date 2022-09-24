@@ -1,110 +1,44 @@
-| ------- | ---- | ---- | --------------------------------------------------------------------------------- | ------ | --------- |
-|    1024 |    1 |  807 | rec.1.tanh                                                                        | 4.3755 | B256 LR0.5 |
-|         |    2 | 1368 | rec.1.relu                                                                        | 4.3417 | B1024 LR0.5 |
-|         |    4 |  807 | dense.1.tanh-suffix.4-mgru.1                                                      | 4.3088 | B1024 LR0.5 |
-|         |    8 |  281 | rec.1.relu                                                                        | 4.2928 | B2048 LR0.5 |
-|         |   16 |    6 | dense.1.relu                                                                      | 4.3105 | B256 LR0.2 |
-|         |   32 |  128 | rec.1.relu                                                                        | 4.2852 | B1024 LR0.2 |
-|         |   64 |   73 | dense.1.tanh-mgru.1-attention.2.pos                                               | 4.2919 | B32 LR0.2 |
-|         |  128 |    2 | dense.1.relu                                                                      | 4.3685 | B32 LR0.05 |
-| ------- | ---- | ---- | --------------------------------------------------------------------------------- | ------ | --------- |
-|    2048 |    1 | 1999 | rec.2.tanh-suffix.2                                                               | 4.0726 | B512 LR0.5 |
-|         |    2 | 2798 | dense.2.tanh-suffix.3-dense.4.relu                                                | 3.9028 | B256 LR0.5 |
-|         |    4 | 4808 | dense.2.tanh-suffix.3-dense.8.tanh-dense.4.relu                                   | 3.7872 | B2048 LR0.5 |
-|         |    8 |  846 | rec.2.tanh-dense.8.tanh-rec.8.tanh-suffix.2-dense.4.relu                          | 3.7839 | B256 LR0.2 |
-|         |   16 |  829 | rec.2.tanh-suffix.2-dense.8.tanh-attention.2-lstm.4                               | 3.7222 | B256 LR0.2 |
-|         |   32 |  123 | suffix.2-rec.2.relu-gru.2.relu                                                    | 3.9238 | B512 LR0.2 |
-|         |   64 |   60 | suffix.2-dense.2.tanh-mgru.2-attention.2.pos                                      | 3.9361 | B32 LR0.2 |
-|         |  128 |    1 | dense.2.relu                                                                      | 4.0808 | B32 LR0.05 |
-| ------- | ---- | ---- | --------------------------------------------------------------------------------- | ------ | --------- |
-|    4096 |    1 | 5927 | suffix.2-dense.4.tanh                                                             | 3.7919 | B128 LR0.5 |
-|         |    2 | 5655 | dense.4.tanh-suffix.3-dense.8.relu                                                | 3.6322 | B256 LR0.5 |
-|         |    4 | 2244 | rec.4.tanh-suffix.2-dense.32.relu-dense.8.relu                                    | 3.5339 | B256 LR0.2 |
-|         |    8 |  202 | dense.4.tanh-dense.32.relu-rec.8.tanh-suffix.4-dense.8.relu                       | 3.4794 | B256 LR0.2 |
-|         |   16 | 5583 | rec.4.tanh-suffix.3-dense.32.relu-dense.8.relu                                    | 3.3355 | B1024 LR0.2 |
-|         |   32 |  124 | suffix.2-rec.4.tanh-suffix.2-dense.4.relu                                         | 3.5288 | B1024 LR0.2 |
-|         |   64 |   65 | suffix.2-dense.4.tanh-gru.4.relu                                                  | 3.5204 | B128 LR0.2 |
-|         |  128 |    1 | dense.4.relu                                                                      | 3.8845 | B32 LR0.05 |
-| ------- | ---- | ---- | --------------------------------------------------------------------------------- | ------ | --------- |
-|    8192 |    1 | 1128 | suffix.2-dense.8.tanh                                                             | 3.5791 | B256 LR0.5 |
-|         |    2 | 1261 | suffix.2-dense.8.tanh                                                             | 3.4579 | B512 LR0.5 |
-|         |    4 |  623 | rec.16.tanh-dense.32.tanh-dense.8.relu                                            | 3.3508 | B256 LR0.2 |
-|         |    8 |  199 | dense.8.tanh-dense.16.tanh-rec.16.tanh-suffix.4-dense.16.relu                     | 3.2492 | B256 LR0.2 |
-|         |   16 |  154 | dense.8.tanh-suffix.4-dense.32.tanh-dense.16.tanh-suffix.2-dense.8.relu           | 3.2020 | B512 LR0.2 |
-|         |   32 |  127 | suffix.4-rec.4.tanh-suffix.8-dense.32.tanh-dense.8.relu                           | 3.2584 | B1024 LR0.2 |
-|         |   64 |   59 | suffix.2-dense.8.tanh-suffix.4-gru.8.tanh                                         | 3.2262 | B256 LR0.2 |
-|         |  128 |    1 | dense.8.relu                                                                      | 3.7177 | B32 LR0.05 |
-| ------- | ---- | ---- | --------------------------------------------------------------------------------- | ------ | --------- |
-|   16384 |    1 | 1239 | suffix.2-dense.16.tanh                                                            | 3.4107 | B512 LR0.5 |
-|         |    2 | 1919 | dense.16.tanh-suffix.4-dense.32.relu                                              | 3.2327 | B256 LR0.2 |
-|         |    4 |  738 | rec.32.tanh-dense.16.relu                                                         | 3.1270 | B512 LR0.2 |
-|         |    8 |  232 | rec.32.tanh-dense.16.relu                                                         | 3.0114 | B512 LR0.2 |
-|         |   16 |  146 | suffix.4-dense.8.tanh-suffix.2-dense.64.relu-suffix.2-dense.16.tanh-dense.16.relu | 2.9920 | B512 LR0.2 |
-|         |   32 |  125 | suffix.4-rec.8.tanh-suffix.8-dense.32.tanh-suffix.2-dense.16.relu                 | 2.9962 | B1024 LR0.2 |
-|         |   64 |   58 | dense.16.tanh-suffix.8-gru.16.tanh-dense.16.relu                                  | 2.9308 | B256 LR0.2 |
-|         |  128 |    1 | dense.16.relu                                                                     | 3.7111 | B32 LR0.05 |
-| ------- | ---- | ---- | --------------------------------------------------------------------------------- | ------ | --------- |
-|   32768 |    1 | 1082 | suffix.2-dense.32.relu                                                            | 3.3257 | B512 LR0.5 |
-|         |    2 | 2010 | rec.16.tanh-suffix.2-dense.64.relu-suffix.2-dense.64.tanh                         | 3.1634 | B256 LR0.2 |
-|         |    4 |  830 | rec.32.tanh-suffix.2-dense.64.relu                                                | 2.9504 | B1024 LR0.2 |
-|         |    8 |  331 | rec.32.tanh-dense.64.tanh-dense.64.tanh                                           | 2.7946 | B512 LR0.2 |
-|         |   16 |  160 | suffix.2-rec.32.tanh-suffix.2-dense.32.relu                                       | 2.8232 | B512 LR0.2 |
-|         |   32 |  133 | suffix.2-rec.16.tanh-suffix.4-dense.128.tanh-dense.32.relu                        | 2.6639 | B1024 LR0.2 |
-|         |   64 |   59 | suffix.2-dense.32.tanh-attention.4-gru.32.tanh-dense.32.relu                      | 2.6883 | B256 LR0.2 |
-|         |  128 |    1 | dense.32.relu                                                                     | 3.6706 | B32 LR0.05 |
-| ------- | ---- | ---- | --------------------------------------------------------------------------------- | ------ | --------- |
-|   65536 |    1 |  680 | suffix.2-dense.64.relu                                                            | 3.2233 | B512 LR0.5 |
-|         |    2 | 1371 | suffix.4-dense.32.tanh-dense.64.relu                                              | 3.0087 | B256 LR0.2 |
-|         |    4 |  655 | suffix.4-dense.32.tanh-dense.128.relu-dense.64.tanh                               | 2.8181 | B512 LR0.2 |
-|         |    8 |  529 | gru.32.tanh-dense.128.relu-dense.64.tanh                                          | 2.7307 | B512 LR0.2 |
-|         |   16 |  243 | gru.32.tanh-suffix.4-dense.64.relu                                                | 2.6331 | B1024 LR0.2 |
-|         |   32 |  126 | suffix.2-rec.16.tanh-suffix.4-dense.256.relu-rec.64.tanh                          | 2.5214 | B1024 LR0.2 |
-|         |   64 |   65 | suffix.2-dense.32.relu-suffix.2-gru.64.tanh-dense.64.relu                         | 2.4501 | B256 LR0.2 |
-|         |  128 |    9 | suffix.2-dense.64.tanh                                                            | 3.0818 | B32 LR0.05 |
-| ------- | ---- | ---- | --------------------------------------------------------------------------------- | ------ | --------- |
-|  131072 |    1 | 1078 | suffix.5-dense.64.relu                                                            | 3.0871 | B64 LR0.2 |
-|         |    2 |  360 | suffix.4-dense.64.tanh-dense.128.relu                                             | 2.9227 | B512 LR0.2 |
-|         |    4 |  528 | suffix.4-dense.64.tanh-dense.128.relu                                             | 2.7407 | B512 LR0.2 |
-|         |    8 |  262 | gru.64.tanh-dense.256.relu-dense.64.tanh                                          | 2.5919 | B512 LR0.2 |
-|         |   16 |  239 | gru.64.tanh-suffix.2-dense.128.relu                                               | 2.4427 | B512 LR0.2 |
-|         |   32 |  138 | suffix.2-rec.32.tanh-suffix.4-dense.256.relu-dense.128.tanh                       | 2.4026 | B512 LR0.1 |
-|         |   64 |   70 | suffix.2-dense.64.relu-suffix.2-gru.64.tanh-dense.128.tanh                        | 2.3340 | B512 LR0.1 |
-|         |  128 |    5 | suffix.4-dense.64.tanh                                                            | 2.8393 | B32 LR0.05 |
-| ------- | ---- | ---- | --------------------------------------------------------------------------------- | ------ | --------- |
-|  262144 |    1 |  742 | suffix.4-dense.128.relu                                                           | 2.9560 | B256 LR0.2 |
-|         |    2 |  351 | suffix.3-dense.256.relu-suffix.2-dense.64.tanh                                    | 2.7573 | B256 LR0.2 |
-|         |    4 |  611 | suffix.4-dense.128.relu-dense.256.relu                                            | 2.6440 | B256 LR0.2 |
-|         |    8 |  199 | suffix.4-dense.128.relu-dense.256.relu                                            | 2.5732 | B256 LR0.2 |
-|         |   16 |  358 | gru.64.tanh-suffix.2-dense.512.relu                                               | 2.3478 | B1024 LR0.2 |
-|         |   32 |   66 | suffix.4-rec.128.relu-dense.256.relu-dense.128.relu                               | 2.3309 | B512 LR0.1 |
-|         |   64 |   47 | suffix.2-dense.128.relu-suffix.4-gru.64.tanh-dense.256.relu                       | 2.2193 | B512 LR0.1 |
-|         |  128 |    6 | suffix.8-dense.64.tanh                                                            | 2.8009 | B32 LR0.05 |
-| ------- | ---- | ---- | --------------------------------------------------------------------------------- | ------ | --------- |
-|  524288 |    1 |  808 | suffix.5-dense.256.relu                                                           | 2.8564 | B128 LR0.2 |
-|         |    2 |  482 | suffix.6-dense.256.relu                                                           | 2.6892 | B128 LR0.2 |
-|         |    4 |  596 | suffix.5-dense.256.relu                                                           | 2.5800 | B256 LR0.2 |
-|         |    8 |  222 | suffix.4-dense.256.relu-suffix.4-dense.128.tanh                                   | 2.4715 | B256 LR0.1 |
-|         |   16 |  398 | suffix.2-gru.128.tanh-dense.256.relu                                              | 2.2866 | B512 LR0.2 |
-|         |   32 |  153 | gru.128.tanh-dense.1024.relu-dense.128.tanh                                       | 2.1876 | B512 LR0.1 |
-|         |   64 |   62 | suffix.2-dense.128.relu-suffix.4-gru.128.tanh-dense.256.tanh-attention.2.pos      | 2.0914 | B512 LR0.1 |
-|         |  128 |   11 | suffix.4-dense.256.relu                                                           | 2.6007 | B32 LR0.05 |
-| ------- | ---- | ---- | --------------------------------------------------------------------------------- | ------ | --------- |
-| 1048576 |    1 |  337 | suffix.5-dense.512.relu                                                           | 2.8051 | B256 LR0.2 |
-|         |    2 |  861 | suffix.5-dense.512.relu                                                           | 2.6163 | B256 LR0.2 |
-|         |    4 | 1006 | suffix.5-dense.512.relu                                                           | 2.5206 | B256 LR0.2 |
-|         |    8 |  411 | suffix.4-dense.512.relu-rec.64.tanh-suffix.2-dense.1024.relu                      | 2.4209 | B256 LR0.1 |
-|         |   16 | 1077 | suffix.2-rec.256.relu-suffix.2-dense.1024.relu                                    | 2.2762 | B256 LR0.1 |
-|         |   32 | 1442 | suffix.2-gru.256.tanh-suffix.2-dense.512.relu                                     | 2.0864 | B512 LR0.1 |
-|         |   64 |  272 | suffix.2-dense.128.relu-suffix.2-gru.256.tanh-dense.1024.relu                     | 1.9852 | B512 LR0.1 |
-|         |  128 |    8 | suffix.4-rec.256.relu-mgru.256-dense.512.relu                                     | 2.1931 | B512 LR0.05 |
-| ------- | ---- | ---- | --------------------------------------------------------------------------------- | ------ | --------- |
-| 2097152 |    1 |  260 | suffix.4-dense.1024.relu                                                          | 2.7867 | B128 LR0.2 |
-|         |    2 | 1096 | suffix.5-dense.1024.relu                                                          | 2.5860 | B256 LR0.2 |
-|         |    4 |  820 | suffix.5-dense.1024.relu                                                          | 2.4834 | B512 LR0.2 |
-|         |    8 | 1336 | suffix.6-dense.1024.relu-dense.256.tanh                                           | 2.3757 | B256 LR0.1 |
-|         |   16 |  952 | suffix.2-rec.256.relu-suffix.3-dense.1024.relu                                    | 2.2422 | B256 LR0.1 |
-|         |   64 | 1328 | suffix.2-dense.1024.relu-gru.256.tanh-dense.1024.relu                             | 1.9516 | B512 LR0.1 |
-| ------- | ---- | ---- | --------------------------------------------------------------------------------- | ------ | --------- |
-| 8388608 |  128 |   90 | suffix.8-dense.2048.relu-suffix.4-dense.128.tanh-dense.256.tanh                   | 2.1470 | B128 LR0.05 |
-| ------- | ---- | ---- | --------------------------------------------------------------------------------- | ------ | --------- |
-| 16777216 |  128 |  129 | suffix.8-dense.4096.relu-suffix.4-dense.128.tanh-dense.512.tanh-dense.128.relu    | 2.1334 | B128 LR0.05 |
+| ------- | ---- | ---- | ------------------------------------- | ------ | --------- |
+|    1024 |    1 |   54 | dense.1.relu                          | 4.4045 | B64 LR0.5 |
+|         |    2 |   17 | dense.1.tanh-attention.8.pos          | 4.3871 | B16 LR0.5 |
+|         |    4 |    5 | rec.1.tanh                            | 4.3641 | B128 LR0.5 |
+|         |    8 |    3 | dense.1.relu                          | 4.4050 | B256 LR0.5 |
+|         |   16 |    3 | dense.1.tanh                          | 4.3876 | B256 LR0.5 |
+|         |   32 |    4 | rec.1.relu                            | 4.3050 | B256 LR0.5 |
+|         |   64 |    4 | dense.1.relu                          | 4.3446 | B256 LR0.5 |
+|         |  128 |    4 | dense.1.relu                          | 4.3470 | B256 LR0.5 |
+|         |  256 |    2 | rec.1.relu                            | 4.3022 | B256 LR0.5 |
+|         |  512 |    3 | dense.1.relu                          | 4.3133 | B256 LR0.5 |
+|         | 1024 |    3 | dense.1.relu                          | 4.3672 | B256 LR0.5 |
+|         | 2048 |    1 | dense.1.relu                          | 4.3100 | B256 LR0.5 |
+|         | 4096 |    1 | dense.1.relu                          | 4.2904 | B256 LR0.5 |
+|         | 8192 |    1 | dense.1.relu                          | 4.2950 | B256 LR0.5 |
+| ------- | ---- | ---- | ------------------------------------- | ------ | --------- |
+|    2048 |    1 |  209 | rec.2.tanh-suffix.2                   | 4.1183 | B16 LR0.5 |
+|         |    2 |   98 | dense.2.tanh-suffix.2-dense.4.relu    | 3.9971 | B32 LR0.5 |
+|         |    4 |   51 | rec.2.tanh-suffix.2                   | 3.9656 | B64 LR0.5 |
+|         |    8 |   21 | dense.2.tanh-suffix.2                 | 3.9735 | B256 LR0.5 |
+|         |   16 |   17 | dense.2.tanh-suffix.2                 | 3.9643 | B256 LR0.5 |
+|         |   32 |    8 | dense.2.relu                          | 4.0645 | B256 LR0.5 |
+|         |   64 |    5 | rec.2.tanh                            | 4.0505 | B256 LR0.5 |
+|         |  128 |    4 | dense.2.relu                          | 4.0604 | B256 LR0.5 |
+|         |  256 |    3 | dense.2.relu                          | 4.0652 | B256 LR0.5 |
+|         |  512 |    1 | dense.2.relu                          | 4.0367 | B256 LR0.5 |
+|         | 4096 |    1 | dense.2.relu                          | 4.0403 | B256 LR0.5 |
+| ------- | ---- | ---- | ------------------------------------- | ------ | --------- |
+|    4096 |    1 |  126 | dense.4.tanh-suffix.2                 | 3.8376 | B16 LR0.5 |
+|         |    2 |   62 | suffix.2-dense.4.relu                 | 3.7343 | B16 LR0.2 |
+|         |    4 |   32 | rec.4.relu-suffix.2                   | 3.6974 | B64 LR0.5 |
+|         |    8 |   15 | rec.4.tanh                            | 3.7361 | B64 LR0.5 |
+|         |   16 |    4 | dense.4.tanh-suffix.2-dense.8.relu    | 3.7205 | B32 LR0.5 |
+| ------- | ---- | ---- | ------------------------------------- | ------ | --------- |
+|    8192 |    1 |   74 | suffix.2-dense.8.tanh                 | 3.6633 | B32 LR0.5 |
+|         |    2 |   44 | rec.8.relu-suffix.2-dense.16.relu     | 3.5351 | B32 LR0.2 |
+|         |    4 |   25 | suffix.2-dense.8.relu                 | 3.5207 | B32 LR0.5 |
+|         |    8 |   16 | suffix.2-dense.8.tanh-attention.2.pos | 3.4366 | B32 LR0.2 |
+|         |   16 |    3 | suffix.2-dense.8.tanh-attention.2.pos | 3.4175 | B32 LR0.2 |
+| ------- | ---- | ---- | ------------------------------------- | ------ | --------- |
+|   16384 |    1 |   24 | dense.16.tanh-suffix.2                | 3.6434 | B32 LR0.5 |
+|         |    2 |   18 | rec.16.relu-suffix.2                  | 3.3572 | B32 LR0.2 |
+|         |    4 |    6 | suffix.2-rec.8.relu-suffix.2          | 3.4212 | B32 LR0.2 |
+|         |    8 |    3 | suffix.2-rec.8.relu-suffix.2          | 3.4108 | B32 LR0.2 |

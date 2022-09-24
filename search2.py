@@ -11,7 +11,7 @@ from spec import ModelSpec
 from train import train_and_eval
 
 
-RUNS_EXP = 0.5
+RUNS_EXP = 0.55
 
 def select_time(result_set):
     total_runs = result_set.total_runs

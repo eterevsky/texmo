@@ -446,14 +446,14 @@ def parse_args():
     return parser.parse_args()
 
 
-if __name__ == "__main__":
-    print("TexMo parameter search")
-    args = parse_args()
-    main(**vars(args))
+# if __name__ == "__main__":
+#     print("TexMo parameter search")
+#     args = parse_args()
+#     main(**vars(args))
 
 
 if __name__ == "__main__":
-    for i in range(11, 64):
+    for i in range(10, 64):
         max_weights = 2**i
         main(
             "data",

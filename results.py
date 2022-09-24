@@ -144,6 +144,8 @@ class ResultSet(object):
             return
         if not conf.spec.is_valid():
             return
+        if conf.t is None or conf.t < 1:
+            return
 
         if conf.t not in self._conf_results:
             self._conf_results[conf.t] = {}

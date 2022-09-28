@@ -14,7 +14,7 @@ from train import train_and_eval
 
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
 # with t = 2^k
-RUNS_EXP = 0.55
+RUNS_EXP = 0.6
 
 
 def select_time(result_set, max_time):
@@ -55,13 +55,14 @@ def select_time(result_set, max_time):
 
 
 def select_max_weights(result_set, t):
-    with latency.timer("select_max_weights"):
-        top_cr = result_set.top_conf(t)
-        if top_cr is None:
-            return 1024
-        maxw = top_cr.conf.spec.weights()
-        l = random.uniform(10, math.log2(maxw) + 1)
-        return int(2**l)
+    return 2**24
+    # with latency.timer("select_max_weights"):
+    #     top_cr = result_set.top_conf(t)
+    #     if top_cr is None:
+    #         return 1024
+    #     maxw = top_cr.conf.spec.weights()
+    #     l = random.uniform(10, math.log2(maxw) + 1)
+    #     return int(2**l)
 
 
 def select_conf(result_set, max_time):
@@ -75,9 +76,10 @@ def select_conf(result_set, max_time):
             with latency.timer("select_conf-previous"):
                 t2 = t // 2
                 nconfs = result_set.confs_count(t2)
-                n_top_confs = round(
-                    nconfs / (4 * (math.log2(max_weights) - 9))
-                )
+                # n_top_confs = round(
+                #     nconfs / (4 * (math.log2(max_weights) - 9))
+                # )
+                n_top_confs = round(nconfs / 4)
                 print(f"Checking {n_top_confs} out of {nconfs} confs for T = {t2}, W ≤ {max_weights} ")
                 for i, cr in enumerate(result_set.top_confs(t2, max_weights)):
                     if i >= n_top_confs: break

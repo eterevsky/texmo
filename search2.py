@@ -3,6 +3,7 @@ from itertools import islice
 import math
 import random
 
+import results
 from results import ResultSet, Configuration
 from dataset import DataSet
 import latency
@@ -19,16 +20,19 @@ RUNS_EXP = 0.6
 
 def select_time(result_set, max_time):
     with latency.timer("select_time"):
+        runs_count = result_set.runs_count_per_t()
         total_runs = 0
         t = 1
         i = 0
-        while t <= max_time:
-            total_runs += result_set.runs_count(t)
+        while t <= max_time and t in runs_count:
+            total_runs += runs_count.get(t, 0)
             i += 1
             t *= 2
 
-        # total = x + x * re + x * re^2 + ... + x * re^(i-1) = x * (1 - re^i) / (1 - re)
+        if total_runs == 0:
+            return 1
 
+        # total = x + x * re + x * re^2 + ... + x * re^(i-1) = x * (1 - re^i) / (1 - re)
 
         # Number of expected runs for t
         t = 1
@@ -40,7 +44,7 @@ def select_time(result_set, max_time):
         print(f"Total runs: {total_runs}")
 
         while expected_runs >= 1 and (max_time is None or t <= max_time):
-            complete_runs = result_set.runs_count(t)
+            complete_runs = runs_count.get(t, 0)
             gap = expected_runs - complete_runs
             print(
                 f"t = {t}  complete = {complete_runs}  expected = {expected_runs:.2f}  gap = {gap:.2f}"
@@ -56,11 +60,11 @@ def select_time(result_set, max_time):
 
 def select_max_weights(result_set, t):
     with latency.timer("select_max_weights"):
-        top_cr = result_set.top_conf(t)
-        if top_cr is None:
+        top_conf = result_set.top_conf(t)
+        if top_conf is None:
             return 1024
-        maxw = top_cr.conf.spec.weights()
-        l = random.uniform(10, math.log2(maxw) + 1)
+        maxw = top_conf.spec.weights()
+        l = random.uniform(10, math.log2(maxw) + 2)
         return int(2**l)
 
 
@@ -75,14 +79,17 @@ def select_conf(result_set, max_time):
             with latency.timer("select_conf-previous"):
                 t2 = t // 2
                 nconfs = result_set.confs_count(t2)
-                n_top_confs = round(
-                    nconfs / (4 * (math.log2(max_weights) - 9))
+                n_top_confs = round(nconfs / (4 * (math.log2(max_weights) - 9)))
+                print(
+                    f"Checking {n_top_confs} out of {nconfs} confs for "
+                    + f"T = {t2}, W ≤ {max_weights}"
                 )
-                print(f"Checking {n_top_confs} out of {nconfs} confs for T = {t2}, W ≤ {max_weights} ")
-                for i, cr in enumerate(result_set.top_confs(t2, max_weights)):
-                    if i >= n_top_confs: break
-                    conf_t = cr.conf._replace(t=t)
-                    if not result_set.find(conf_t):
+                for i, conf in enumerate(result_set.top_confs(t2, max_weights)):
+                    if i >= n_top_confs:
+                        break
+                    conf_t = conf._replace(t=t)
+                    conf_t, score = result_set.find(conf_t)
+                    if score is None:
                         print(f"Picked conf #{i}")
                         return conf_t
 
@@ -104,21 +111,19 @@ def select_conf(result_set, max_time):
             print()
 
             k = 16
-            for i, cr in enumerate(
+            for i, (conf, results) in enumerate(
                 result_set.top_cluster_confs(t, max_weights)
             ):
                 while i + 1 > 2 * effective_nruns / 3 ** (k - 1) and k > 1:
                     k -= 1
-                conf = cr.conf
                 if i < 20:
-                    score = f"{cr.score:.4f}" if cr.scores else "      "
-                    count = len(cr.scores)
+                    score = f"{results.score:.4f}" if results.score else "      "
                     print(
                         f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  "
                         + f"B{conf.batch:4}  R{conf.regularization:4}  "
-                        + f"I{conf.init_scale:4}  {score} ({count})"
+                        + f"I{conf.init_scale:4}  {score} ({results.num_runs})"
                     )
-                gap = k - len(cr.scores)
+                gap = k - results.num_runs
                 if gap > best_gap:
                     best_conf = conf
                     best_gap = gap
@@ -129,6 +134,7 @@ def select_conf(result_set, max_time):
                 return best_conf
 
         default_conf = Configuration(
+            id=None,
             spec=ModelSpec.parse("dense.1.relu"),
             lr=0.5,
             sample_len=128,
@@ -140,33 +146,28 @@ def select_conf(result_set, max_time):
         return default_conf
 
 
-def main(
-    data,
-    log,
-    load,
-    max_time,
-    vary="",
-):
+def main(data, db, log, max_time, vary=""):
     print(f"Loading dataset from {data}")
     dataset = DataSet(data)
     dataset.warmup()
 
+    print(f"Creating ResultSet from {db}")
+    db = results.open_db(db)
     vary = vary.split(",")
+    result_set = ResultSet(db=db, t=None, vary=vary)
 
-    if load:
-        print(f"Loading old results from {load}")
-        result_set = ResultSet.from_csv(load, None, vary)
+    print("Updating cluster scores")
+    result_set.update_all_cluster_scores()
 
-        print(f"Loaded {result_set.total_runs} runs, {result_set.total_confs} confs")
-    else:
-        result_set = ResultSet(None, vary)
+    print("Starting search")
 
     first = True
     while True:
         conf = select_conf(result_set, max_time)
         weights = conf.spec.weights()
         print(
-            f"\nT = {conf.t}  {conf.spec} ({weights})  LR {conf.lr}  LEN {conf.sample_len}  "
+            f"\nT = {conf.t}  {conf.spec} ({weights})  LR {conf.lr}  "
+            + f"LEN {conf.sample_len}  "
             + f"B {conf.batch}  R {conf.regularization}  I {conf.init_scale}"
         )
         model = LayeredModel2.parse(str(conf.spec))
@@ -215,7 +216,7 @@ def parse_args():
         "-v",
         "--vary",
         type=str,
-        default="struct,size,suffix,lr,batch,activation",
+        default="layer,type,size,suffix,batch,lr",
         help="model parameters that can be varied with search. "
         + "A comma-separated list of struct, size, act, lr, batch, len.",
     )
@@ -233,10 +234,10 @@ def parse_args():
         help="path to a CSV file for logging",
     )
     parser.add_argument(
-        "--load",
-        default=None,
-        metavar="LOG",
-        help="a CSV log file with previous runs",
+        "--db",
+        type=str,
+        required=True,
+        help="path to the SQLite database with the results",
     )
 
     return parser.parse_args()

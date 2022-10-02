@@ -1,5 +1,6 @@
 import math
 import matplotlib.pyplot as plt
+import sqlite3
 import sys
 
 from record import TrainingRecord
@@ -11,15 +12,13 @@ def max_points(result_set, t, maxx):
     y = []
     min_loss = 5
 
-    for cr in sorted(
-        result_set.all_results(), key=lambda cr: cr.conf.spec.weights()
-    ):
-        if not cr.scores or cr.conf.t != t:
+    for conf, results in result_set.all_results_by_weights():
+        if conf.t != t or not results.score:
             continue
-        if cr.score > min_loss:
+        if results.score > min_loss:
             continue
 
-        weights = cr.conf.spec.weights()
+        weights = conf.spec.weights()
 
         if x:
             if x[-1] < weights - 1:
@@ -30,8 +29,8 @@ def max_points(result_set, t, maxx):
                 y.pop()
 
         x.append(weights)
-        y.append(cr.score)
-        min_loss = cr.score
+        y.append(results.score)
+        min_loss = results.score
 
     x.append(maxx)
     y.append(min_loss)
@@ -40,24 +39,25 @@ def max_points(result_set, t, maxx):
 
 
 def get_top_confs(result_set):
-    top_confs = {}  # (weights_limit, time_round)
+    top_confs = {}  # (weights_limit, time_round) -> (conf, score)
     count = {}  # (weights_limit, time_round) -> count
-    for cr in result_set.all_results():
-        weights = cr.conf.spec.weights()
+    for conf, results in result_set.all_results_by_weights():
+        # print(conf)
+        weights = conf.spec.weights()
         weights_bucket = 2 ** math.ceil(math.log2(weights))
         try:
-            count[(weights_bucket, cr.conf.t)] += len(cr.scores)
+            count[(weights_bucket, conf.t)] += results.num_runs
         except KeyError:
-            count[(weights_bucket, cr.conf.t)] = len(cr.scores)
+            count[(weights_bucket, conf.t)] = results.num_runs
 
         while weights_bucket < 2**33:
-            key = (weights_bucket, cr.conf.t)
+            key = (weights_bucket, conf.t)
             if key in top_confs:
-                top_cr = top_confs[key]
-                if cr.score < top_cr.score:
-                    top_confs[key] = cr
+                top_conf, top_score = top_confs[key]
+                if results.score < top_score:
+                    top_confs[key] = (conf, results.score)
             else:
-                top_confs[key] = cr
+                top_confs[key] = (conf, results.score)
             weights_bucket *= 2
 
     return top_confs, count
@@ -65,8 +65,8 @@ def get_top_confs(result_set):
 
 def print_top_confs(top_confs, run_count, filename):
     spec_len = 0
-    for cr in top_confs.values():
-        l = len(str(cr.conf.spec))
+    for conf, score in top_confs.values():
+        l = len(str(conf.spec))
         if l > spec_len:
             spec_len = l
     with open(filename, "w") as out:
@@ -77,12 +77,12 @@ def print_top_confs(top_confs, run_count, filename):
                 t = 2**log_t
                 if (weights, t) not in top_confs:
                     continue
-                cr = top_confs[(weights, t)]
+                conf, score = top_confs[(weights, t)]
                 count = run_count.get((weights, t), 0)
                 if (
                     count == 0
                     or log_weights > 10
-                    and top_confs[(weights // 2, t)].conf == cr.conf
+                    and top_confs[(weights // 2, t)][0] == conf
                 ):
                     continue
                 if first_weight_line:
@@ -98,25 +98,28 @@ def print_top_confs(top_confs, run_count, filename):
                     print("|         | ", file=out, end="")
                 print(f"{t:>4} | {count:>4} | ", file=out, end="")
                 print(
-                    cr.conf.spec,
-                    " " * (spec_len - len(str(cr.conf.spec))),
+                    conf.spec,
+                    " " * (spec_len - len(str(conf.spec))),
                     file=out,
                     end="",
                 )
-                print(f"| {cr.score:.4f} | ", file=out, end="")
-                print(f"B{cr.conf.batch} LR{cr.conf.lr} |", file=out)
+                print(f"| {score:.4f} | ", file=out, end="")
+                print(f"B{conf.batch} LR{conf.lr} |", file=out)
 
 
 def main(fname):
-    result_set = ResultSet.from_csv(fname)
+    result_set = ResultSet(sqlite3.connect(fname))
+    print("created result_set")
 
     top_confs, run_count = get_top_confs(result_set)
+    print("prepared data for report.txt")
     print_top_confs(top_confs, run_count, "report.txt")
+    print("printed report.txt")
 
     plt.xscale("log")
     plt.yscale("log")
 
-    for t in (1, 2, 4, 8, 16, 32, 64, 128):
+    for t in (1, 2, 4, 8, 16, 32, 64, 128, 256):
         x, y = max_points(result_set, t, 1e8)
         plt.plot(x, y, label=str(t))
 

@@ -47,7 +47,8 @@ def select_time(result_set, max_time):
             complete_runs = runs_count.get(t, 0)
             gap = expected_runs - complete_runs
             print(
-                f"t = {t}  complete = {complete_runs}  expected = {expected_runs:.2f}  gap = {gap:.2f}"
+                f"t = {t}  complete = {complete_runs}  "
+                + f"expected = {expected_runs:.2f}  gap = {gap:.2f}"
             )
             if expected_runs - complete_runs > most_lacking_runs:
                 most_lacking_runs = expected_runs - complete_runs
@@ -117,7 +118,9 @@ def select_conf(result_set, max_time):
                 while i + 1 > 2 * effective_nruns / 3 ** (k - 1) and k > 1:
                     k -= 1
                 if i < 20:
-                    score = f"{results.score:.4f}" if results.score else "      "
+                    score = (
+                        f"{results.score:.4f}" if results.score else "      "
+                    )
                     print(
                         f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  "
                         + f"B{conf.batch:4}  R{conf.regularization:4}  "

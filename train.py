@@ -1,6 +1,7 @@
 import argparse
 import csv
 from datetime import datetime
+import jax
 import json
 import matplotlib.pyplot as plt
 import os
@@ -106,6 +107,10 @@ def train_and_eval(
         with open(log, "a", newline="") as logfile:
             writer = csv.writer(logfile)
             writer.writerow(report.csv_tuple())
+
+    # Clear all GPU memory
+    backend = jax.lib.xla_bridge.get_backend()
+    for buf in backend.live_buffers(): buf.delete()
 
     return report
 

@@ -96,7 +96,8 @@ CONF_FIELDS = "id, spec, lr, sample_len, batch, regularization, init_scale, t"
 
 def conf_from_row(row):
     """Create Configuration from a database row."""
-    if row is None: return None
+    if row is None:
+        return None
     spec = ModelSpec.parse(row[1])
     return Configuration(row[0], spec, *row[2:])
 
@@ -193,6 +194,22 @@ def all_conf_neighbors(conf):
     if conf.t > 1:
         yield conf._replace(t=conf.t // 2), VARY["time"]
     yield conf._replace(t=conf.t * 2), VARY["time"]
+
+
+def is_power2(x):
+    return type(x) is int and x >= 1 and x & (x - 1) == 0
+
+
+def conf_is_valid(conf):
+    return (
+        conf.spec.is_valid()
+        and conf.lr in LRS
+        and is_power2(conf.sample_len)
+        and is_power2(conf.batch)
+        and conf.regularization in LRS
+        and conf.init_scale in LRS
+        and is_power2(conf.t)
+    )
 
 
 class ResultSet(object):
@@ -371,12 +388,16 @@ class ResultSet(object):
             self_scores[conf_id] = median(runs)
 
         for conf_id, conf_neighbors in neighbors.items():
-            neighbor_scores = (self_scores[neighbor]
-                               for neighbor in conf_neighbors
-                               if neighbor in self_scores)
+            neighbor_scores = (
+                self_scores[neighbor]
+                for neighbor in conf_neighbors
+                if neighbor in self_scores
+            )
             try:
                 if conf_id in runs:
-                    cluster_score = median(chain(neighbor_scores, runs[conf_id]))
+                    cluster_score = median(
+                        chain(neighbor_scores, runs[conf_id])
+                    )
                 else:
                     cluster_score = median(neighbor_scores)
             except StatisticsError:
@@ -386,7 +407,9 @@ class ResultSet(object):
                 """
                 UPDATE conf SET score = ?, cluster_score = ?
                 WHERE id = ?
-                """, (self_scores.get(conf_id), cluster_score, conf_id))
+                """,
+                (self_scores.get(conf_id), cluster_score, conf_id),
+            )
 
         self._db.commit()
 
@@ -404,8 +427,8 @@ class ResultSet(object):
 
             # TODO: make neighbors symmetric
             neighbors = self._db.execute(
-                "SELECT conf2_id FROM neighbor " +
-                f"WHERE conf1_id = ? AND neighbor.vary in ({self._vary_str})",
+                "SELECT conf2_id FROM neighbor "
+                + f"WHERE conf1_id = ? AND neighbor.vary in ({self._vary_str})",
                 (conf_id,),
             )
             for (neighbor_id,) in neighbors:
@@ -419,7 +442,7 @@ class ResultSet(object):
             conf = conf_from_record(record)
         except ObsoleteSpec:
             return
-        if not conf.spec.is_valid() or conf.t is None or conf.t < 1:
+        if not conf_is_valid(conf):
             # print("invalid")
             return
 
@@ -515,20 +538,20 @@ class ResultSet(object):
     def top_conf(self, t):
         """A configuration with the highest (self) score with time = t."""
         cur = self._db.execute(
-            f"SELECT {CONF_FIELDS} FROM conf " +
-            "WHERE t = ? AND score IS NOT NULL " +
-            "ORDER BY score LIMIT 1",
-            (t,)
+            f"SELECT {CONF_FIELDS} FROM conf "
+            + "WHERE t = ? AND score IS NOT NULL "
+            + "ORDER BY score LIMIT 1",
+            (t,),
         )
         return conf_from_row(cur.fetchone())
 
     def top_confs(self, t, max_weights):
         with latency.timer("top_confs"):
             cur = self._db.execute(
-                f"SELECT {CONF_FIELDS} FROM conf " +
-                "WHERE t = ? AND weights <= ? AND score IS NOT NULL " +
-                "ORDER BY score",
-                (t, max_weights)
+                f"SELECT {CONF_FIELDS} FROM conf "
+                + "WHERE t = ? AND weights <= ? AND score IS NOT NULL "
+                + "ORDER BY score",
+                (t, max_weights),
             )
             return map(conf_from_row, cur)
 
@@ -542,7 +565,9 @@ class ResultSet(object):
         return conf, cur.fetchone()[0]
 
     def find_by_id(self, conf_id):
-        cur = self._db.execute(f"SELECT {CONF_FIELDS} FROM conf WHERE id = ?", (conf_id,))
+        cur = self._db.execute(
+            f"SELECT {CONF_FIELDS} FROM conf WHERE id = ?", (conf_id,)
+        )
         return conf_from_row(cur.fetchone())
 
     def cluster_score(self, t, cr):
@@ -560,9 +585,7 @@ class ResultSet(object):
                     yield neighbor_results.score
 
         try:
-            neighbor_score = median(
-                chain(cr.scores, iter_neighbors())
-            )
+            neighbor_score = median(chain(cr.scores, iter_neighbors()))
         except StatisticsError:
             neighbor_score = INF
 
@@ -571,7 +594,7 @@ class ResultSet(object):
         return cluster_score
 
     def top_cluster_confs(self, t, max_weights, limit=None):
-        limit_clause = f"LIMIT {limit}" if limit else "";
+        limit_clause = f"LIMIT {limit}" if limit else ""
         cur = self._db.execute(
             f"""
             SELECT {CONF_FIELDS},
@@ -583,8 +606,9 @@ class ResultSet(object):
               AND weights <= ?
               AND cluster_score IS NOT NULL
             ORDER BY cluster_score
-            """ + limit_clause,
-            (t, max_weights)
+            """
+            + limit_clause,
+            (t, max_weights),
         )
         for row in cur:
             conf = conf_from_row(row[:8])

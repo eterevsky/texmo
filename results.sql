@@ -17,6 +17,8 @@ CREATE TABLE conf (
 );
 
 CREATE INDEX conf_spec ON conf(spec);
+CREATE INDEX conf_score ON conf(score);
+CREATE INDEX conf_cluster_score ON conf(cluster_score);
 
 CREATE TABLE neighbor (
     conf1_id INTEGER NOT NULL,
@@ -34,5 +36,8 @@ CREATE TABLE run (
     timestamp TEXT,
     test_sample_len INTEGER,
     test_batch INTEGER,
-    loss REAL NOT NULL
+    loss REAL NOT NULL,
+    FOREIGN KEY (conf_id) REFERENCES conf(id)
 );
+
+CREATE INDEX run_conf_id ON run(conf_id);

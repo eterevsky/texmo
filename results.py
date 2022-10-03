@@ -308,35 +308,36 @@ class ResultSet(object):
         self._db.commit()
 
     def _update_cluster_score(self, conf_id):
-        self._update_neighbors(conf=None, conf_id=conf_id)
-        cur_runs = self._db.execute(
-            "SELECT loss FROM run WHERE conf_id = ?", (conf_id,)
-        )
-        run_scores = [row[0] for row in cur_runs]
-        self_score = median(run_scores) if run_scores else None
-        cur_neighbors = self._db.execute(
-            f"""
-            SELECT run.loss
-            FROM run, neighbor
-            WHERE neighbor.conf1_id = ?
-              AND neighbor.vary in ({self._vary_str})
-              AND run.conf_id = neighbor.conf2_id
-              AND run.loss IS NOT NULL
-            """,
-            [conf_id],
-        )
-        neighbor_scores = [row[0] for row in cur_neighbors]
-        try:
-            cluster_score = median(chain(run_scores, neighbor_scores))
-        except StatisticsError:
-            # If we don't have any scores
-            cluster_score = None
-        if self_score is not None and self_score < cluster_score:
-            cluster_score = self_score
-        self._db.execute(
-            "UPDATE conf SET cluster_score = ? WHERE id = ?",
-            (cluster_score, conf_id),
-        )
+        with latency.timer("update_cluster_score"):
+            self._update_neighbors(conf=None, conf_id=conf_id)
+            cur_runs = self._db.execute(
+                "SELECT loss FROM run WHERE conf_id = ?", (conf_id,)
+            )
+            run_scores = [row[0] for row in cur_runs]
+            self_score = median(run_scores) if run_scores else None
+            cur_neighbors = self._db.execute(
+                f"""
+                SELECT run.loss
+                FROM run, neighbor
+                WHERE neighbor.conf1_id = ?
+                AND neighbor.vary in ({self._vary_str})
+                AND run.conf_id = neighbor.conf2_id
+                AND run.loss IS NOT NULL
+                """,
+                [conf_id],
+            )
+            neighbor_scores = [row[0] for row in cur_neighbors]
+            try:
+                cluster_score = median(chain(run_scores, neighbor_scores))
+            except StatisticsError:
+                # If we don't have any scores
+                cluster_score = None
+            if self_score is not None and self_score < cluster_score:
+                cluster_score = self_score
+            self._db.execute(
+                "UPDATE conf SET cluster_score = ? WHERE id = ?",
+                (cluster_score, conf_id),
+            )
 
     def update_all_cluster_scores(self):
         neighbors = {}
@@ -390,24 +391,25 @@ class ResultSet(object):
         self._db.commit()
 
     def _update_scores(self, conf_id):
-        cur = self._db.execute(
-            "SELECT loss FROM run WHERE conf_id = ?", [conf_id]
-        )
-        score = median(row[0] for row in cur)
-        self._db.execute(
-            "UPDATE conf SET score = ? WHERE id = ?", [score, conf_id]
-        )
+        with latency.timer("_update_scores"):
+            cur = self._db.execute(
+                "SELECT loss FROM run WHERE conf_id = ?", [conf_id]
+            )
+            score = median(row[0] for row in cur)
+            self._db.execute(
+                "UPDATE conf SET score = ? WHERE id = ?", [score, conf_id]
+            )
 
-        self._update_cluster_score(conf_id)
+            self._update_cluster_score(conf_id)
 
-        # TODO: make neighbors symmetric
-        neighbors = self._db.execute(
-            "SELECT conf2_id FROM neighbor " +
-            f"WHERE conf1_id = ? AND neighbor.vary in ({self._vary_str})",
-            (conf_id,),
-        )
-        for (neighbor_id,) in neighbors:
-            self._update_cluster_score(neighbor_id)
+            # TODO: make neighbors symmetric
+            neighbors = self._db.execute(
+                "SELECT conf2_id FROM neighbor " +
+                f"WHERE conf1_id = ? AND neighbor.vary in ({self._vary_str})",
+                (conf_id,),
+            )
+            for (neighbor_id,) in neighbors:
+                self._update_cluster_score(neighbor_id)
 
     def add_record(self, record, update_scores=True, commit=True):
         if self._t is not None and record.time_round != self._t:
@@ -418,6 +420,7 @@ class ResultSet(object):
         except ObsoleteSpec:
             return
         if not conf.spec.is_valid() or conf.t is None or conf.t < 1:
+            # print("invalid")
             return
 
         conf = self._find_or_add_conf(conf)
@@ -441,7 +444,8 @@ class ResultSet(object):
         if update_scores:
             self._update_scores(conf.id)
         if commit:
-            self._db.commit()
+            with latency.timer("add_record-commit"):
+                self._db.commit()
 
     def all_results_by_weights(self):
         cur = self._db.execute(
@@ -495,24 +499,36 @@ class ResultSet(object):
         )
         return dict(cur)
 
-    def confs_count(self, t, max_weights=INF):
-        cur = self._db.execute(
-            "SELECT COUNT(*) FROM conf WHERE t = ? AND weights < ? AND score NOT NULL",
-            [t, max_weights],
-        )
+    def confs_count(self, t, max_weights=None):
+        if max_weights is None:
+            cur = self._db.execute(
+                "SELECT COUNT(*) FROM conf WHERE t = ? AND score NOT NULL",
+                (t,),
+            )
+        else:
+            cur = self._db.execute(
+                "SELECT COUNT(*) FROM conf WHERE t = ? AND weights < ? AND score NOT NULL",
+                (t, max_weights),
+            )
         return cur.fetchone()[0]
 
     def top_conf(self, t):
         """A configuration with the highest (self) score with time = t."""
         cur = self._db.execute(
-            f"SELECT {CONF_FIELDS} FROM conf ORDER BY score LIMIT 1"
+            f"SELECT {CONF_FIELDS} FROM conf " +
+            "WHERE t = ? AND score IS NOT NULL " +
+            "ORDER BY score LIMIT 1",
+            (t,)
         )
         return conf_from_row(cur.fetchone())
 
     def top_confs(self, t, max_weights):
         with latency.timer("top_confs"):
             cur = self._db.execute(
-                f"SELECT {CONF_FIELDS} FROM conf ORDER BY score"
+                f"SELECT {CONF_FIELDS} FROM conf " +
+                "WHERE t = ? AND weights <= ? AND score IS NOT NULL " +
+                "ORDER BY score",
+                (t, max_weights)
             )
             return map(conf_from_row, cur)
 
@@ -554,7 +570,8 @@ class ResultSet(object):
         cr.cluster_score = cluster_score
         return cluster_score
 
-    def top_cluster_confs(self, t, max_weights):
+    def top_cluster_confs(self, t, max_weights, limit=None):
+        limit_clause = f"LIMIT {limit}" if limit else "";
         cur = self._db.execute(
             f"""
             SELECT {CONF_FIELDS},
@@ -566,7 +583,7 @@ class ResultSet(object):
               AND weights <= ?
               AND cluster_score IS NOT NULL
             ORDER BY cluster_score
-            """,
+            """ + limit_clause,
             (t, max_weights)
         )
         for row in cur:
@@ -614,7 +631,9 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    print("Opening the database", args.db)
     db = open_db(args.db)
-    # result_set = ResultSet.from_csv(args.load, db=db)
-    result_set = ResultSet(db)
+    print("Importing the runs from", args.load)
+    result_set = ResultSet.from_csv(args.load, db=db)
+    print("Updating scores")
     result_set.update_all_scores()

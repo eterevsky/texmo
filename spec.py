@@ -428,11 +428,14 @@ class ModelSpec(object):
         prev_layer = None
         if len(self._layers) == 0:
             return False
+        has_non_suffix_layer = False
         for layer in self._layers:
             if not layer.is_valid(prev_layer):
                 return False
+            if layer.name in ("dense", "rec", "gru", "mgru", "lstm"):
+                has_non_suffix_layer = True
             prev_layer = layer
-        return True
+        return has_non_suffix_layer
 
     def simplify(self):
         i = 0
@@ -465,7 +468,7 @@ class ModelSpec(object):
                 yield neighbor, vary
 
             if layer in (SuffixSpec(2),):
-                neighbor = ModelSpec(self._layers[:i] + self._layers[i + 1 :])
+                neighbor = ModelSpec(self._layers[:i] + self._layers[i + 1:])
                 assert neighbor.is_valid()
                 yield neighbor, "suffix"
 
@@ -579,6 +582,6 @@ class ModelSpec(object):
 
 
 if __name__ == "__main__":
-    spec = ModelSpec.parse("suffix.2-dense.1.relu")
+    spec = ModelSpec.parse("rec.8.tanh")
     for neighbor, vary in spec.all_neighbors():
         print(str(neighbor), vary)

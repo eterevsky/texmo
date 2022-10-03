@@ -42,7 +42,6 @@ def get_top_confs(result_set):
     top_confs = {}  # (weights_limit, time_round) -> (conf, score)
     count = {}  # (weights_limit, time_round) -> count
     for conf, results in result_set.all_results_by_weights():
-        # print(conf)
         weights = conf.spec.weights()
         weights_bucket = 2 ** math.ceil(math.log2(weights))
         try:

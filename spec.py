@@ -493,28 +493,55 @@ class ModelSpec(object):
             assert neighbor.is_valid()
             yield neighbor, "suffix"
 
-        size = min(total_size(self.output_shape()), NCHAR // 2)
-        for layer in (
-            DenseSpec(size, relu=True),
-            DenseSpec(size, tanh=True),
-            RecSpec(size, relu=True),
-            RecSpec(size, tanh=True),
-            GruSpec(size, tanh=True),
-            LstmSpec(size),
-            MgruSpec(size),
-        ):
-            neighbor = ModelSpec(self._layers + [layer])
-            assert neighbor.is_valid()
+        for neighbor in self.neighbors_add_layer():
             yield neighbor, "layer"
 
-        if (
-            len(self._layers) > 1
-            and self._layers[-1].name in ("dense", "rec", "gru", "mgru", "lstm")
-            and self._layers[-2].name in ("dense", "rec", "gru", "mgru", "lstm")
-        ):
-            neighbor = ModelSpec(self._layers[:-1])
-            assert neighbor.is_valid()
+        neighbor = self.neighbor_remove_layer()
+        if neighbor is not None:
             yield neighbor, "layer"
+
+    def neighbors_add_layer(self):
+        end_size = min(total_size(self.output_shape()), NCHAR // 2)
+        for size in (end_size, end_size * 2):
+            for layer in (
+                DenseSpec(size, relu=True),
+                DenseSpec(size, tanh=True),
+                RecSpec(size, relu=True),
+                RecSpec(size, tanh=True),
+                GruSpec(size, tanh=True),
+                LstmSpec(size),
+                MgruSpec(size),
+            ):
+                neighbor = ModelSpec(self._layers + [layer])
+                assert neighbor.is_valid()
+                yield neighbor
+
+    def neighbor_remove_layer(self):
+        TRANSFORM_LAYERS = ("dense", "rec", "gru", "mgru", "lstm")
+
+        if len(self._layers) < 2: return
+        if self._layers[-1].name not in TRANSFORM_LAYERS:
+            return
+
+        has_another_transform_layer = False
+        shape = (NCHAR,)
+        for layer in self._layers[:-1]:
+            shape = layer.output_shape(shape)
+            if layer.name in TRANSFORM_LAYERS:
+                has_another_transform_layer = True
+
+        # We can't leave only suffix / attention layers.
+        if not has_another_transform_layer: return
+
+        # Output size of the last but one layer.
+        end_size = min(total_size(shape), NCHAR // 2)
+
+        if self._layers[-1]._size not in (end_size, end_size * 2):
+            return
+
+        neighbor = ModelSpec(self._layers[:-1])
+        assert neighbor.is_valid()
+        return neighbor
 
     def neighbors(self, vary):
         assert self.is_valid()
@@ -582,6 +609,6 @@ class ModelSpec(object):
 
 
 if __name__ == "__main__":
-    spec = ModelSpec.parse("rec.8.tanh")
+    spec = ModelSpec.parse("rec.8.tanh-suffix.32-dense.256.tanh")
     for neighbor, vary in spec.all_neighbors():
         print(str(neighbor), vary)

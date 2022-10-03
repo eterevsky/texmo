@@ -292,6 +292,16 @@ class ResultSet(object):
                 {"conf1_id": conf.id, "conf2_id": neighbor.id, "vary": vary},
             )
 
+    def update_all_neighbors(self):
+        self._db.execute("DELETE FROM neighbor")
+        cur = self._db.execute(f"SELECT {CONF_FIELDS} FROM conf " +
+                                "WHERE score IS NOT NULL OR cluster_score IS NOT NULL")
+        for i, row in enumerate(cur):
+            if i % 1000 == 0: print(i)
+            conf = conf_from_row(row)
+            self._update_neighbors(conf)
+        self._db.commit()
+
     def update_all_scores(self):
         cur = self._db.execute("SELECT conf_id, loss FROM run")
         scores = {}
@@ -633,7 +643,12 @@ if __name__ == "__main__":
     args = parse_args()
     print("Opening the database", args.db)
     db = open_db(args.db)
-    print("Importing the runs from", args.load)
-    result_set = ResultSet.from_csv(args.load, db=db)
-    print("Updating scores")
-    result_set.update_all_scores()
+    # print("Importing the runs from", args.load)
+    # result_set = ResultSet.from_csv(args.load, db=db)
+    # print("Updating scores")
+    # result_set.update_all_scores()
+    print("Creating ResultSet")
+    result_set = ResultSet(db=db)
+    print("Updating neighbors")
+    result_set.update_all_neighbors()
+

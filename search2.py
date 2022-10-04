@@ -91,7 +91,7 @@ def select_conf_prev_time(result_set, t, max_weights):
         t2 = t // 2
         with latency.timer("select_conf_prev_time-confs_count"):
             nconfs = result_set.confs_count(t2)
-        n_top_confs = round(nconfs / (4 * (math.log2(max_weights) - 9)))
+        n_top_confs = round(nconfs / (8 * (math.log2(max_weights) - 9)))
         print(
             f"Checking {n_top_confs} out of {nconfs} confs for "
             + f"T = {t2}, W ≤ {max_weights}"

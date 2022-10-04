@@ -103,7 +103,15 @@ def print_top_confs(top_confs, run_count, filename):
                     end="",
                 )
                 print(f"| {score:.4f} | ", file=out, end="")
-                print(f"B{conf.batch} LR{conf.lr} |", file=out)
+                print(f"B{conf.batch} LR{conf.lr}", file=out, end="")
+                if conf.sample_len != 128:
+                    print(f" LEN{conf.sample_len}", file=out, end="")
+                if conf.regularization != 0.1:
+                    print(f" R{conf.regularization}", file=out, end="")
+                if conf.init_scale != 1.0:
+                    print(f" i{conf.init_scale}", file=out, end="")
+
+                print(" |", file=out)
 
 
 def main(fname):

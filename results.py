@@ -102,33 +102,6 @@ def conf_from_row(row):
     return Configuration(row[0], spec, *row[2:])
 
 
-def conf_neighbors(conf, vary=()):
-    for spec in conf.spec.neighbors(vary):
-        yield conf._replace(spec=spec)
-
-    if "batch" in vary:
-        yield conf._replace(batch=conf.batch * 2)
-        if conf.batch > 1:
-            yield conf._replace(batch=conf.batch // 2)
-
-    if "lr" in vary:
-        for x in neighbor_numbers(conf.lr):
-            yield conf._replace(lr=x)
-
-    if "len" in vary:
-        if conf.sample_len >= 4:
-            yield conf._replace(sample_len=conf.sample_len // 2)
-        yield conf._replace(sample_len=conf.sample_len * 2)
-
-    if "regularization" in vary:
-        for x in neighbor_numbers(conf.regularization):
-            yield conf._replace(regularization=x)
-
-    if "init_scale" in vary:
-        for x in neighbor_numbers(conf.init_scale):
-            yield conf._replace(init_scale=x)
-
-
 VARY = {
     # Add an extra layer
     "layer": 1,
@@ -311,12 +284,27 @@ class ResultSet(object):
 
     def update_all_neighbors(self):
         self._db.execute("DELETE FROM neighbor")
-        cur = self._db.execute(f"SELECT {CONF_FIELDS} FROM conf " +
-                                "WHERE score IS NOT NULL OR cluster_score IS NOT NULL")
+        cur = self._db.execute(
+            f"SELECT {CONF_FIELDS} FROM conf " + "WHERE score IS NOT NULL"
+        )
         for i, row in enumerate(cur):
-            if i % 1000 == 0: print(i)
+            if i % 1000 == 0:
+                print(i)
             conf = conf_from_row(row)
             self._update_neighbors(conf)
+
+        print("Populating neighbors of neighbors")
+        cur = self._db.execute(
+            f"SELECT {CONF_FIELDS} FROM conf, neighbor "
+            + "WHERE conf.id = neighbor.conf2_id "
+            + "GROUP BY conf2_id"
+        )
+        for i, row in enumerate(cur):
+            if i % 1000 == 0:
+                print(i)
+            conf = conf_from_row(row)
+            self._update_neighbors(conf)
+
         self._db.commit()
 
     def update_all_scores(self):
@@ -675,4 +663,3 @@ if __name__ == "__main__":
     result_set = ResultSet(db=db)
     print("Updating neighbors")
     result_set.update_all_neighbors()
-

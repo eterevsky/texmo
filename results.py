@@ -323,7 +323,7 @@ class ResultSet(object):
         self._db.commit()
 
     def _update_cluster_score(self, conf_id):
-s        with latency.timer("update_cluster_score"):
+        with latency.timer("update_cluster_score"):
             self._update_neighbors(conf=None, conf_id=conf_id)
             cur_runs = self._db.execute(
                 "SELECT loss FROM run WHERE conf_id = ?", (conf_id,)

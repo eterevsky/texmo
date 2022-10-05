@@ -109,9 +109,10 @@ def train_and_eval(
             writer = csv.writer(logfile)
             writer.writerow(report.csv_tuple())
 
-    # Clear all GPU memory
-    backend = jax.lib.xla_bridge.get_backend()
-    for buf in backend.live_buffers(): buf.delete()
+    if quiet:
+        # Clear all GPU memory
+        backend = jax.lib.xla_bridge.get_backend()
+        for buf in backend.live_buffers(): buf.delete()
 
     return report
 

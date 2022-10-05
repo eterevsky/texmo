@@ -409,32 +409,16 @@ class Lstm(Layer2):
     def init_weights(self, rng: Rng, init_scale: float) -> ArrayTree:
         he_input_size = self.input_size + self._state
         weights = {
-            "wf": rng.he(
-                (self._state, self.input_size), input_size=he_input_size
-            )
-            * init_scale,
-            "uf": rng.he((self._state, self._state), input_size=he_input_size)
+            "wf": rng.he((self._state, he_input_size), input_size=he_input_size)
             * init_scale,
             "bf": rng.normal((self._state,)) * init_scale,
-            "wi": rng.he(
-                (self._state, self.input_size), input_size=he_input_size
-            )
-            * init_scale,
-            "ui": rng.he((self._state, self._state), input_size=he_input_size)
+            "wi": rng.he((self._state, he_input_size), input_size=he_input_size)
             * init_scale,
             "bi": rng.normal((self._state,)) * init_scale,
-            "wo": rng.he(
-                (self._state, self.input_size), input_size=he_input_size
-            )
-            * init_scale,
-            "uo": rng.he((self._state, self._state), input_size=he_input_size)
+            "wo": rng.he((self._state, he_input_size), input_size=he_input_size)
             * init_scale,
             "bo": rng.normal((self._state,)) * init_scale,
-            "wc": rng.he(
-                (self._state, self.input_size), input_size=he_input_size
-            )
-            * init_scale,
-            "uc": rng.he((self._state, self._state), input_size=he_input_size)
+            "wc": rng.he((self._state, he_input_size), input_size=he_input_size)
             * init_scale,
             "bc": rng.normal((self._state,)) * init_scale,
         }
@@ -460,32 +444,18 @@ class Lstm(Layer2):
         h = state["h"]
         c = state["c"]
 
-        f = (
-            jnp.dot(weights["wf"], input)
-            + jnp.dot(weights["uf"], h)
-            + weights["bf"]
-        )
+        input_h = jnp.concatenate((input, h))
+
+        f = jnp.dot(weights["wf"], input_h) + weights["bf"]
         f = jax.nn.sigmoid(f)
 
-        i = (
-            jnp.dot(weights["wi"], input)
-            + jnp.dot(weights["ui"], h)
-            + weights["bi"]
-        )
+        i = jnp.dot(weights["wi"], input_h) + weights["bi"]
         i = jax.nn.sigmoid(i)
 
-        o = (
-            jnp.dot(weights["wo"], input)
-            + jnp.dot(weights["uo"], h)
-            + weights["bo"]
-        )
+        o = jnp.dot(weights["wo"], input_h) + weights["bo"]
         o = jax.nn.sigmoid(o)
 
-        cn = (
-            jnp.dot(weights["wc"], input)
-            + jnp.dot(weights["uc"], h)
-            + weights["bc"]
-        )
+        cn = jnp.dot(weights["wc"], input_h) + weights["bc"]
         cn = jax.nn.tanh(cn)
 
         c = f * c + i * cn
@@ -528,7 +498,7 @@ class Attention(Layer2):
         assert self._activation is None
         assert length > 1
         self._length = length
-        pos_suffix = '.pos' if pos else ''
+        pos_suffix = ".pos" if pos else ""
         self.full_name = f"attention.{length}{pos_suffix}"
         self.output_shape = self._input_shape
         self._state_shape = (length - 1,) + self._input_shape

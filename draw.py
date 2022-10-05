@@ -1,11 +1,12 @@
+import argparse
 import math
 import matplotlib.pyplot as plt
 import sqlite3
-import sys
 
-from record import TrainingRecord
 from results import ResultSet
-
+from configuration import Configuration
+from spec import ModelSpec
+from resultdb import ResultDB
 
 def max_points(result_set, t, maxx):
     x = []
@@ -81,6 +82,7 @@ def print_top_confs(top_confs, run_count, filename):
                 if (
                     count == 0
                     or log_weights > 10
+                    and (weights // 2, t) in top_confs
                     and top_confs[(weights // 2, t)][0] == conf
                 ):
                     continue
@@ -114,9 +116,38 @@ def print_top_confs(top_confs, run_count, filename):
                 print(" |", file=out)
 
 
-def main(fname):
-    result_set = ResultSet(sqlite3.connect(fname))
-    print("created result_set")
+def main(
+    db,
+    vary,
+    spec,
+    batch,
+    lr,
+    sample_len,
+    regularization,
+    init_scale,
+    time,
+):
+    init_conf = Configuration(
+        None,
+        ModelSpec.parse(spec),
+        lr=lr,
+        sample_len=sample_len,
+        batch=batch,
+        regularization=regularization,
+        init_scale=init_scale,
+        t=time,
+    )
+
+    print("Initial configuration:", init_conf)
+    vary = vary.split(",")
+    print("Variables:", vary)
+    t = None if "time" in vary else time
+
+    print(f"Creating ResultDB from {db}")
+    result_db = ResultDB(db)
+
+    print(f"Creaing ResultSet.")
+    result_set = ResultSet(result_db, init_conf, vary)
 
     top_confs, run_count = get_top_confs(result_set)
     print("prepared data for report.txt")
@@ -134,5 +165,71 @@ def main(fname):
     plt.show()
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "-v",
+        "--vary",
+        type=str,
+        default="layer,type,size,suffix,batch,lr,time",
+        help="model parameters that can be varied with search. "
+        + "A comma-separated list of struct, size, act, lr, batch, len.",
+    )
+    parser.add_argument(
+        "-s", "--spec", type=str, default="dense.1.relu", help="initial spec"
+    )
+    parser.add_argument(
+        "-b",
+        "--batch",
+        type=int,
+        default=256,
+        help="batch size, has to be a power of two",
+    )
+    parser.add_argument(
+        "-l",
+        "--lr",
+        type=float,
+        default=0.5,
+        help="initial learning rate, has to be 0.1, 0.2 or 0.5 multiplied by a power of 10",
+    )
+    parser.add_argument(
+        "--sample-len",
+        type=int,
+        default=128,
+        help="length of the training samples, power of two",
+    )
+    parser.add_argument(
+        "-r",
+        "--regularization",
+        type=float,
+        default=0.1,
+        help="regularization coefficient, has to be 0.1, 0.2 or 0.5 multiplied by a power of 10",
+    )
+    parser.add_argument(
+        "-i",
+        "--init-scale",
+        type=float,
+        default=1.0,
+        help="coefficient for the initial weights, has to be 0.1, 0.2 or 0.5 multiplied by a power of 10",
+    )
+    parser.add_argument(
+        "-t",
+        "--time",
+        type=int,
+        default=None,
+        help="training time (power of 2)",
+    )
+    parser.add_argument(
+        "--db",
+        type=str,
+        required=True,
+        help="path to the SQLite database with the results",
+    )
+
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    main(sys.argv[1])
+    args = parse_args()
+    main(**vars(args))

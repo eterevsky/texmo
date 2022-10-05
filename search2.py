@@ -93,7 +93,12 @@ def select_conf_prev_time(result_set, t, max_weights):
         t2 = t // 2
         with latency.timer("select_conf_prev_time-confs_count"):
             nconfs = result_set.confs_count(t2)
-        n_top_confs = round(nconfs / (8 * (math.log2(max_weights) - 9)))
+        actual_max_weights = max_weights
+        for top_conf, _ in result_set.top_cluster_confs(
+            t, max_weights, limit=1
+        ):
+            actual_max_weights = top_conf.spec.weights()
+        n_top_confs = round(nconfs / (8 * (math.log2(actual_max_weights) - 9)))
         print(
             f"Checking {n_top_confs} out of {nconfs} confs for "
             + f"T = {t2}, W ≤ {max_weights}"
@@ -113,6 +118,7 @@ def select_conf_neighbors(result_set, t, max_weights):
     with latency.timer("select_conf_neighbors"):
         nruns = result_set.runs_count(t, max_weights)
 
+        actual_max_weights = max_weights
         for top_conf, _ in result_set.top_cluster_confs(
             t, max_weights, limit=1
         ):
@@ -166,7 +172,7 @@ def select_conf(result_set, max_time, t, max_weights, init_conf):
         if conf is not None:
             return conf
 
-        return init_conf
+        return init_conf._replace(t=t)
 
 
 def main(

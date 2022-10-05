@@ -2,6 +2,7 @@ import argparse
 from itertools import islice
 import math
 import random
+from resultdb import ResultDB
 
 import results
 from results import ResultSet, Configuration
@@ -76,7 +77,8 @@ def print_top_confs(result_set, t, max_weights):
         for i, (conf, results) in enumerate(
             result_set.top_cluster_confs(t, max_weights, limit=20)
         ):
-            if i >= 20: break
+            if i >= 20:
+                break
             score = f"{results.score:.4f}" if results.score else "      "
             print(
                 f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  "
@@ -99,7 +101,7 @@ def select_conf_prev_time(result_set, t, max_weights):
         for i, conf in enumerate(result_set.top_confs(t2, max_weights)):
             if i >= n_top_confs:
                 break
-            conf_t = conf._replace(t=t)
+            conf_t = conf._replace(id=None, t=t)
             conf_t, score = result_set.find(conf_t)
             if score is None:
                 print(f"Picked conf #{i}")
@@ -110,9 +112,15 @@ def select_conf_prev_time(result_set, t, max_weights):
 def select_conf_neighbors(result_set, t, max_weights):
     with latency.timer("select_conf_neighbors"):
         nruns = result_set.runs_count(t, max_weights)
+
+        for top_conf, _ in result_set.top_cluster_confs(
+            t, max_weights, limit=1
+        ):
+            actual_max_weights = top_conf.spec.weights()
+
         # Estimation for the number of runs with weights between
         # max_weights // 2 and max_weights
-        effective_nruns = nruns / (math.log2(max_weights) - 9)
+        effective_nruns = nruns / (math.log2(actual_max_weights) - 9)
 
         # The number of runs per conf depends on the order by cluster score.
         # The number of confs with >= n+1 runs is 1/3 of all the confs with
@@ -136,18 +144,20 @@ def select_conf_neighbors(result_set, t, max_weights):
             if gap > k:
                 break
 
-        if best_conf is not None:
-            return best_conf
+        return best_conf
 
 
-def select_conf(result_set, max_time):
+def select_conf(result_set, max_time, t, max_weights, init_conf):
     with latency.timer("select_conf"):
-        t = select_time(result_set, max_time)
-        max_weights = select_max_weights(result_set, t)
+        fixed_time = t is not None
+        if t is None:
+            t = select_time(result_set, max_time)
+        if max_weights is None:
+            max_weights = select_max_weights(result_set, t)
 
         print_top_confs(result_set, t, max_weights)
 
-        if t > 1:
+        if t > 1 and not fixed_time:
             conf = select_conf_prev_time(result_set, t, max_weights)
             if conf is not None:
                 return conf
@@ -156,37 +166,55 @@ def select_conf(result_set, max_time):
         if conf is not None:
             return conf
 
-        default_conf = Configuration(
-            id=None,
-            spec=ModelSpec.parse("dense.1.relu"),
-            lr=0.5,
-            sample_len=128,
-            batch=256,
-            regularization=0.1,
-            init_scale=1,
-            t=t,
-        )
-        return default_conf
+        return init_conf
 
 
-def main(data, db, log, max_time, vary=""):
+def main(
+    data,
+    db,
+    log,
+    max_time,
+    vary,
+    spec,
+    batch,
+    lr,
+    sample_len,
+    regularization,
+    init_scale,
+    time,
+    max_weights,
+):
+    init_conf = Configuration(
+        None,
+        ModelSpec.parse(spec),
+        lr=lr,
+        sample_len=sample_len,
+        batch=batch,
+        regularization=regularization,
+        init_scale=init_scale,
+        t=time,
+    )
+
+    print("Initial configuration:", init_conf)
+    vary = vary.split(",")
+    print("Variables:", vary)
+    t = None if "time" in vary else time
+
     print(f"Loading dataset from {data}")
     dataset = DataSet(data)
     dataset.warmup()
 
-    print(f"Creating ResultSet from {db}")
-    db = results.open_db(db)
-    vary = vary.split(",")
-    result_set = ResultSet(db=db, t=None, vary=vary)
+    print(f"Creating ResultDB from {db}")
+    result_db = ResultDB(db)
 
-    print("Updating cluster scores")
-    result_set.update_all_cluster_scores()
+    print(f"Creaing ResultSet.")
+    result_set = ResultSet(result_db, init_conf, vary)
 
     print("Starting search")
 
     first = True
     while True:
-        conf = select_conf(result_set, max_time)
+        conf = select_conf(result_set, max_time, t, max_weights, init_conf)
         weights = conf.spec.weights()
         print(
             f"\nT = {conf.t}  {conf.spec} ({weights})  LR {conf.lr}  "
@@ -218,6 +246,8 @@ def main(data, db, log, max_time, vary=""):
 
         if first:
             first = False
+        elif record.time_round is None:
+            print("Bad training time, skipping")
         else:
             with latency.timer("add_record"):
                 result_set.add_record(record)
@@ -238,9 +268,53 @@ def parse_args():
         "-v",
         "--vary",
         type=str,
-        default="layer,type,size,suffix,batch,lr",
+        default="layer,type,size,suffix,batch,lr,time",
         help="model parameters that can be varied with search. "
         + "A comma-separated list of struct, size, act, lr, batch, len.",
+    )
+    parser.add_argument(
+        "-s", "--spec", type=str, default="dense.1.relu", help="initial spec"
+    )
+    parser.add_argument(
+        "-b",
+        "--batch",
+        type=int,
+        default=256,
+        help="batch size, has to be a power of two",
+    )
+    parser.add_argument(
+        "-l",
+        "--lr",
+        type=float,
+        default=0.5,
+        help="initial learning rate, has to be 0.1, 0.2 or 0.5 multiplied by a power of 10",
+    )
+    parser.add_argument(
+        "--sample-len",
+        type=int,
+        default=128,
+        help="length of the training samples, power of two",
+    )
+    parser.add_argument(
+        "-r",
+        "--regularization",
+        type=float,
+        default=0.1,
+        help="regularization coefficient, has to be 0.1, 0.2 or 0.5 multiplied by a power of 10",
+    )
+    parser.add_argument(
+        "-i",
+        "--init-scale",
+        type=float,
+        default=1.0,
+        help="coefficient for the initial weights, has to be 0.1, 0.2 or 0.5 multiplied by a power of 10",
+    )
+    parser.add_argument(
+        "-t",
+        "--time",
+        type=int,
+        default=None,
+        help="training time (power of 2)",
     )
     parser.add_argument(
         "--max-time",
@@ -248,6 +322,12 @@ def parse_args():
         default=None,
         metavar="SECONDS",
         help="maximum time limit for training",
+    )
+    parser.add_argument(
+        "--max-weights",
+        type=int,
+        default=None,
+        help="max weights. Will vary if left undefined",
     )
     parser.add_argument(
         "--log",

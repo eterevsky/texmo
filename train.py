@@ -100,6 +100,7 @@ def train_and_eval(
         test_sample_len=1024,
         test_batch=1024,
         test_poisoned=True,
+        init_scale=manager.init_scale,
     )
 
     print(report)

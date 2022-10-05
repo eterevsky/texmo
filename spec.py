@@ -1,4 +1,5 @@
 from copy import deepcopy
+from mimetypes import init
 from unittest import result
 
 from model import NCHAR, Model
@@ -468,7 +469,7 @@ class ModelSpec(object):
                 yield neighbor, vary
 
             if layer in (SuffixSpec(2),):
-                neighbor = ModelSpec(self._layers[:i] + self._layers[i + 1:])
+                neighbor = ModelSpec(self._layers[:i] + self._layers[i + 1 :])
                 assert neighbor.is_valid()
                 yield neighbor, "suffix"
 
@@ -519,7 +520,8 @@ class ModelSpec(object):
     def neighbor_remove_layer(self):
         TRANSFORM_LAYERS = ("dense", "rec", "gru", "mgru", "lstm")
 
-        if len(self._layers) < 2: return
+        if len(self._layers) < 2:
+            return
         if self._layers[-1].name not in TRANSFORM_LAYERS:
             return
 
@@ -531,7 +533,8 @@ class ModelSpec(object):
                 has_another_transform_layer = True
 
         # We can't leave only suffix / attention layers.
-        if not has_another_transform_layer: return
+        if not has_another_transform_layer:
+            return
 
         # Output size of the last but one layer.
         end_size = min(total_size(shape), NCHAR // 2)
@@ -606,6 +609,49 @@ class ModelSpec(object):
                 neighbor = ModelSpec(self._layers[:-1])
                 assert neighbor.is_valid()
                 yield neighbor
+
+
+def is_reachable_spec(init_spec: ModelSpec, spec: ModelSpec, vary):
+    if "suffix" not in vary:
+        for layer in spec._layers:
+            if layer.name == "suffix":
+                return False
+
+    if "attn" not in vary:
+        for layer in spec._layers:
+            if layer.name == "attn":
+                return False
+
+    init_non_suffix_layers = []
+    for layer in init_spec._layers:
+        if layer.name not in ("suffix", "attention", "attn"):
+            init_non_suffix_layers.append(layer)
+
+    spec_non_suffix_layers = []
+    for layer in spec._layers:
+        if layer.name not in ("suffix", "attention", "attn"):
+            spec_non_suffix_layers.append(layer)
+
+    if "layer" not in vary and len(init_non_suffix_layers) != len(
+        spec_non_suffix_layers
+    ):
+        return False
+
+    if "type" not in vary:
+        for l1, l2 in zip(init_non_suffix_layers, spec_non_suffix_layers):
+            if (
+                l1.name != l2.name
+                or l1.has_activation
+                and l1._activation != l2._activation
+            ):
+                return False
+
+    if "size" not in vary:
+        for l1, l2 in zip(init_non_suffix_layers, spec_non_suffix_layers):
+            if l1._size != l2._size:
+                return False
+
+    return True
 
 
 if __name__ == "__main__":

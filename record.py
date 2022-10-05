@@ -1,6 +1,6 @@
 from datetime import datetime
 import math
-from typing import Dict, Union, Tuple
+from typing import Union, Tuple
 
 
 class TrainingRecord(object):
@@ -20,7 +20,7 @@ class TrainingRecord(object):
         test_sample_len: Union[int, str],
         test_batch: Union[int, str],
         test_poisoned: Union[bool, str],
-        init_scale: Union[float, str, None] = None,
+        init_scale: Union[float, str, None],
     ):
         if not isinstance(timestamp, datetime):
             timestamp = datetime.fromisoformat(timestamp)
@@ -92,6 +92,6 @@ class TrainingRecord(object):
 Model: {self.model_spec}, {w:.0f}k weights
 Loss: loss {self.loss:.4f}
 Training: {self.steps} steps, {self.train_time_s:.0f} s
-LR: {self.learning_rate}, R{self.regularization}, init {self.init_scale}
+B {self.train_batch}  LEN {self.train_sample_len}  LR {self.learning_rate}  R {self.regularization}  init {self.init_scale}
 Training data: {train_data:.0f}M / {total_data:.0f}M
         """

@@ -22,7 +22,7 @@ from spec import ModelSpec, ObsoleteSpec, is_reachable_spec
 
 
 class ResultSet(object):
-    def __init__(self, result_db, init_conf, vary):
+    def __init__(self, result_db, init_conf, vary, populate_neighbors=True):
         self._result_db = result_db
         self._vary = vary
         self._db = sqlite3.connect(":memory:")
@@ -30,9 +30,9 @@ class ResultSet(object):
             self._db.executescript(schema.read())
 
         if self._result_db is not None:
-            self._import_from_result_db(init_conf, vary)
+            self._import_from_result_db(init_conf, vary, populate_neighbors)
 
-    def _import_from_result_db(self, init_conf, vary):
+    def _import_from_result_db(self, init_conf, vary, populate_neighbors):
         """Import from the persistent DB all matching confs.
 
         The confs are selected using init_conf and vary. Only the confs are
@@ -57,10 +57,11 @@ class ResultSet(object):
 
         print("Populating scores from run results")
         self.update_all_scores()
-        print("Populating neighbors")
-        self.update_all_neighbors()
-        print("Populating cluster scores")
-        self.update_all_cluster_scores()
+        if populate_neighbors:
+            print("Populating neighbors")
+            self.update_all_neighbors()
+            print("Populating cluster scores")
+            self.update_all_cluster_scores()
 
     def find_conf_id(self, conf):
         cur = self._db.execute(

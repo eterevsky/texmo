@@ -383,6 +383,9 @@ class LstmSpec(LayerSpec):
         )
 
 
+neighbors_cache = {}
+
+
 class ModelSpec(object):
     def __init__(self, layer_specs):
         self._layers = list(layer_specs)
@@ -457,7 +460,7 @@ class ModelSpec(object):
             shape = layer.output_shape(shape)
         return shape
 
-    def all_neighbors(self):
+    def _all_neighbors(self):
         assert self.is_valid()
         shape = (NCHAR,)
         for i, layer in enumerate(self._layers):
@@ -500,6 +503,14 @@ class ModelSpec(object):
         neighbor = self.neighbor_remove_layer()
         if neighbor is not None:
             yield neighbor, "layer"
+
+    def all_neighbors(self):
+        neighbors = neighbors_cache.get(self)
+        if neighbors is not None:
+            return neighbors
+        neighbors = list(self._all_neighbors())
+        neighbors_cache[self] = neighbors
+        return neighbors
 
     def neighbors_add_layer(self):
         end_size = min(total_size(self.output_shape()), NCHAR // 2)

@@ -147,7 +147,7 @@ def main(
     result_db = ResultDB(db)
 
     print(f"Creaing ResultSet.")
-    result_set = ResultSet(result_db, init_conf, vary)
+    result_set = ResultSet(result_db, init_conf, vary, populate_neighbors=False)
 
     top_confs, run_count = get_top_confs(result_set)
     print("prepared data for report.txt")

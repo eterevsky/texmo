@@ -250,10 +250,13 @@ def main(
             quiet=True,
         )
 
+        if record.time_round is None:
+            print("Bad training time, skipping")
+            record.time_round = conf.t
+            record.loss = INF
+
         if first:
             first = False
-        elif record.time_round is None:
-            print("Bad training time, skipping")
         else:
             with latency.timer("add_record"):
                 result_set.add_record(record)

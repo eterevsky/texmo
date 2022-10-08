@@ -17,6 +17,7 @@ from train import train_and_eval
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
 # with t = 2^k
 RUNS_EXP = 0.6
+INF = float("inf")
 
 
 def select_time(result_set, max_time):

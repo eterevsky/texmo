@@ -250,6 +250,9 @@ class ResultSet(object):
                     cluster_score = median(
                         chain(neighbor_scores, runs[conf_id])
                     )
+                    self_score = self_scores[conf_id]
+                    if self_score < cluster_score:
+                        cluster_score = self_score
                 else:
                     cluster_score = median(neighbor_scores)
             except StatisticsError:

@@ -44,6 +44,8 @@ class TrainingRecord(object):
             init_scale = 1.0
         self.init_scale = float(init_scale)
 
+        self.time_round = self._time_round()
+
     @staticmethod
     def from_csv_tuple(row):
         if len(row) not in (15, 16):
@@ -55,8 +57,7 @@ class TrainingRecord(object):
     def train_data(self):
         return self.steps * self.train_sample_len * self.train_batch
 
-    @property
-    def time_round(self):
+    def _time_round(self):
         log = math.log2(self.train_time_s)
         ilog = round(log)
         if abs(log - ilog) < 0.1:

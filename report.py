@@ -151,8 +151,8 @@ def main(
 
     top_confs, run_count = get_top_confs(result_set)
     print("prepared data for report.txt")
-    print_top_confs(top_confs, run_count, "report.txt")
-    print("printed report.txt")
+    print_top_confs(top_confs, run_count, "results/report.txt")
+    print("wrote report.txt")
 
     plt.xscale("log")
     plt.yscale("log")
@@ -161,7 +161,7 @@ def main(
         x, y = max_points(result_set, t, 1e8)
         plt.plot(x, y, label=str(t))
 
-    plt.savefig("graph.png")
+    plt.savefig("results/graph.png")
     plt.show()
 
 

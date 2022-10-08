@@ -88,17 +88,22 @@ def print_top_confs(result_set, t, max_weights):
         print()
 
 
-def select_conf_prev_time(result_set, t, max_weights):
+def select_conf_prev_time(result_set, t, max_weights, fixed_weights):
     with latency.timer("select_conf_prev_time"):
         t2 = t // 2
         with latency.timer("select_conf_prev_time-confs_count"):
             nconfs = result_set.confs_count(t2)
-        actual_max_weights = max_weights
-        for top_conf, _ in result_set.top_cluster_confs(
-            t, max_weights, limit=1
-        ):
-            actual_max_weights = top_conf.spec.weights()
-        n_top_confs = round(nconfs / (8 * (math.log2(actual_max_weights) - 9)))
+
+        if fixed_weights:
+            n_top_confs = nconfs // 8
+        else:
+            actual_max_weights = max_weights
+            for top_conf, _ in result_set.top_cluster_confs(
+                t, max_weights, limit=1
+            ):
+                actual_max_weights = top_conf.spec.weights()
+            n_top_confs = round(nconfs / (8 * (math.log2(actual_max_weights) - 9)))
+
         print(
             f"Checking {n_top_confs} out of {nconfs} confs for "
             + f"T = {t2}, W ≤ {max_weights}"
@@ -155,16 +160,18 @@ def select_conf_neighbors(result_set, t, max_weights):
 
 def select_conf(result_set, max_time, t, max_weights, init_conf):
     with latency.timer("select_conf"):
+        fixed_weights = max_weights is not None
+
         fixed_time = t is not None
         if t is None:
             t = select_time(result_set, max_time)
-        if max_weights is None:
+        if not fixed_weights:
             max_weights = select_max_weights(result_set, t)
 
         print_top_confs(result_set, t, max_weights)
 
         if t > 1 and not fixed_time:
-            conf = select_conf_prev_time(result_set, t, max_weights)
+            conf = select_conf_prev_time(result_set, t, max_weights, fixed_weights)
             if conf is not None:
                 return conf
 

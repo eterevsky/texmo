@@ -287,10 +287,10 @@ def parse_args():
         "-v",
         "--vary",
         type=str,
-        default="layer,type,size,suffix,batch,lr,time",
+        default="layer,type,size,suffix,attn,batch,lr,time",
         help="model parameters that can be varied with search. "
-        + "A comma-separated list of layer, type, size, suffix, batch, len, lr, reg, init, time. "
-        + "(Default: layer,type,size,suffix,batch,lr,time)",
+        + "A comma-separated list of layer, type, size, suffix, attn, batch, len, lr, reg, init, time. "
+        + "(Default: layer,type,size,suffix,attn,batch,lr,time)",
     )
     parser.add_argument(
         "-s", "--spec", type=str, default="dense.1.relu", help="initial spec"

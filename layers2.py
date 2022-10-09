@@ -10,6 +10,10 @@ from prng import Rng
 ArrayTree = Union[None, jnp.ndarray, Dict[str, "ArrayTree"]]
 
 
+def is_power2(x):
+    return type(x) is int and x >= 1 and x & (x - 1) == 0
+
+
 class Layer2(object):
     name = "OVERRIDE"
 
@@ -539,3 +543,72 @@ class Attention(Layer2):
         out = jnp.matmul(weight, suffix)
 
         return next_suffix, out
+
+
+@layer_cls
+class Attn(Layer2):
+    name = "attn"
+
+    def __init__(self, length, heads, size, **kwargs):
+        """Create a multi-headed attention layer.
+
+        Args:
+            length: the length of the suffix that attention will be applied to
+            heads: number of independent attention heads
+            size: total output size, has to be a multiple of `heads`
+        """
+        super().__init__(**kwargs)
+        assert type(length) is int
+        assert length >= 2
+        self._length = length
+        assert type(heads) is int
+        assert heads >= 1
+        self._heads = heads
+        assert type(size) is int
+        assert size >= 1
+        assert size % heads == 0
+        self._size = size
+        # The size of each key/query/value component
+        self._comp_size = self._size // heads
+        self.full_name = f"attn.{length}.{heads}.{size}"
+        self.output_shape = (size,)
+        self._score_scale = 1 / math.sqrt(self._comp_size)
+
+    def init_weights(self, rng: Rng, init_scale: float) -> ArrayTree:
+        weights = {
+            "wkey": rng.he((self._heads, self._comp_size, self.input_size)) * init_scale,
+            "wquery": rng.he((self._heads, self._comp_size, self.input_size)) * init_scale,
+            "wvalue": rng.he((self._heads, self._comp_size, self.input_size)) * init_scale,
+            "bkey": rng.normal((self._length, self._heads, self._comp_size)) * init_scale * 0.1,
+            "bquery": rng.normal((self._heads, self._comp_size)) * init_scale * 0.1,
+        }
+        return weights
+
+    def init_state(self, weights: ArrayTree) -> ArrayTree:
+        return {
+            "keys": jnp.zeros((self._length - 1, self._heads, self._comp_size)),
+            "values": jnp.zeros((self._length - 1, self._heads, self._comp_size)),
+        }
+
+    def step(
+        self, weights: ArrayTree, state: ArrayTree, input: jnp.ndarray
+    ) -> Tuple[ArrayTree, ArrayTree]:
+        input = input.flatten()
+        key = jnp.dot(weights["wkey"], input)
+        query = jnp.dot(weights["wquery"], input) + weights["bquery"]
+        value = jnp.dot(weights["wvalue"], input)
+
+        keys = jnp.vstack((state["keys"], key.reshape((1, self._heads, -1))))
+        values = jnp.vstack((state["values"], value.reshape((1, self._heads, -1))))
+
+        biased_keys = keys + weights["bkey"]
+
+        scores = self._score_scale * jnp.einsum("hT,phT->hp", query, biased_keys)
+        weights = jax.nn.softmax(scores)  # head,position -> weight
+
+        attn_value = jnp.einsum("hp,phv->hv", weights, values)
+        attn_value = attn_value.flatten()
+
+        next_keys = keys[:-1,:,:]
+        next_values = values[:-1,:,:]
+        return {"keys": next_keys, "values": next_values}, attn_value

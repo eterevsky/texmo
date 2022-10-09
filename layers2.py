@@ -576,18 +576,27 @@ class Attn(Layer2):
 
     def init_weights(self, rng: Rng, init_scale: float) -> ArrayTree:
         weights = {
-            "wkey": rng.he((self._heads, self._comp_size, self.input_size)) * init_scale,
-            "wquery": rng.he((self._heads, self._comp_size, self.input_size)) * init_scale,
-            "wvalue": rng.he((self._heads, self._comp_size, self.input_size)) * init_scale,
-            "bkey": rng.normal((self._length, self._heads, self._comp_size)) * init_scale * 0.1,
-            "bquery": rng.normal((self._heads, self._comp_size)) * init_scale * 0.1,
+            "wkey": rng.he((self._heads, self._comp_size, self.input_size))
+            * init_scale,
+            "wquery": rng.he((self._heads, self._comp_size, self.input_size))
+            * init_scale,
+            "wvalue": rng.he((self._heads, self._comp_size, self.input_size))
+            * init_scale,
+            "bkey": rng.normal((self._length, self._heads, self._comp_size))
+            * init_scale
+            * 0.1,
+            "bquery": rng.normal((self._heads, self._comp_size))
+            * init_scale
+            * 0.1,
         }
         return weights
 
     def init_state(self, weights: ArrayTree) -> ArrayTree:
         return {
             "keys": jnp.zeros((self._length - 1, self._heads, self._comp_size)),
-            "values": jnp.zeros((self._length - 1, self._heads, self._comp_size)),
+            "values": jnp.zeros(
+                (self._length - 1, self._heads, self._comp_size)
+            ),
         }
 
     def step(
@@ -599,16 +608,20 @@ class Attn(Layer2):
         value = jnp.dot(weights["wvalue"], input)
 
         keys = jnp.vstack((state["keys"], key.reshape((1, self._heads, -1))))
-        values = jnp.vstack((state["values"], value.reshape((1, self._heads, -1))))
+        values = jnp.vstack(
+            (state["values"], value.reshape((1, self._heads, -1)))
+        )
 
         biased_keys = keys + weights["bkey"]
 
-        scores = self._score_scale * jnp.einsum("hT,phT->hp", query, biased_keys)
+        scores = self._score_scale * jnp.einsum(
+            "hT,phT->hp", query, biased_keys
+        )
         weights = jax.nn.softmax(scores)  # head,position -> weight
 
         attn_value = jnp.einsum("hp,phv->hv", weights, values)
         attn_value = attn_value.flatten()
 
-        next_keys = keys[:-1,:,:]
-        next_values = values[:-1,:,:]
+        next_keys = keys[:-1, :, :]
+        next_values = values[:-1, :, :]
         return {"keys": next_keys, "values": next_values}, attn_value

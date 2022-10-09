@@ -33,4 +33,11 @@ class DataSet(object):
         return len(self.all)
 
     def warmup(self):
-        _ = self.sample(64, 64)
+        _ = self.sample(1024, 1024)
+
+
+def build_dataset(data):
+    print(f"Loading dataset from {data}")
+    dataset = DataSet(data)
+    dataset.warmup()
+    return dataset

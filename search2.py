@@ -1,4 +1,5 @@
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from itertools import islice
 import math
 import random
@@ -6,7 +7,7 @@ from resultdb import ResultDB
 
 import results
 from results import ResultSet, Configuration
-from dataset import DataSet
+from dataset import DataSet, build_dataset
 import latency
 from layered import LayeredModel2
 from manager import Manager
@@ -214,15 +215,16 @@ def main(
     print("Variables:", vary)
     t = None if "time" in vary else time
 
-    print(f"Loading dataset from {data}")
-    dataset = DataSet(data)
-    dataset.warmup()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        dataset_future = executor.submit(build_dataset, data)
 
-    print(f"Creating ResultDB from {db}")
-    result_db = ResultDB(db)
+        print(f"Creating ResultDB from {db}")
+        result_db = ResultDB(db)
 
-    print(f"Creaing ResultSet.")
-    result_set = ResultSet(result_db, init_conf, vary)
+        print(f"Creaing ResultSet.")
+        result_set = ResultSet(result_db, init_conf, vary)
+
+        dataset = dataset_future.result()
 
     print("Starting search")
 
@@ -287,7 +289,8 @@ def parse_args():
         type=str,
         default="layer,type,size,suffix,batch,lr,time",
         help="model parameters that can be varied with search. "
-        + "A comma-separated list of struct, size, act, lr, batch, len.",
+        + "A comma-separated list of layer, type, size, suffix, batch, len, lr, reg, init, time. "
+        + "(Default: layer,type,size,suffix,batch,lr,time)",
     )
     parser.add_argument(
         "-s", "--spec", type=str, default="dense.1.relu", help="initial spec"

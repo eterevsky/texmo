@@ -39,29 +39,30 @@ class ResultSet(object):
         selected that can be reached via neighbor links from the init_conf
         by varying the `vary` parameters.
         """
-        print("Importing relevant configurations and results from ResultDB")
-        n = 0
-        for conf, loss in self._result_db.get_confs_runs(init_conf, vary):
-            if not is_reachable_spec(init_conf.spec, conf.spec, vary):
-                continue
+        with latency.timer("_import_from_result_db"):
+            print("Importing relevant configurations and results from ResultDB")
+            n = 0
+            for conf, loss in self._result_db.get_confs_runs(init_conf, vary):
+                if not is_reachable_spec(init_conf.spec, conf.spec, vary):
+                    continue
 
-            conf = conf._replace(id=None)
-            conf = self._find_or_add_conf(conf)
+                conf = conf._replace(id=None)
+                conf = self._find_or_add_conf(conf)
 
-            n += 1
-            self._db.execute(
-                "INSERT INTO run(conf_id, loss) VALUES(?, ?)", (conf.id, loss)
-            )
+                n += 1
+                self._db.execute(
+                    "INSERT INTO run(conf_id, loss) VALUES(?, ?)", (conf.id, loss)
+                )
 
-        print(f"Imported {n} runs")
+            print(f"Imported {n} runs")
 
-        print("Populating scores from run results")
-        self.update_all_scores()
-        if populate_neighbors:
-            print("Populating neighbors")
-            self.update_all_neighbors()
-            print("Populating cluster scores")
-            self.update_all_cluster_scores()
+            print("Populating scores from run results")
+            self.update_all_scores()
+            if populate_neighbors:
+                print("Populating neighbors")
+                self.update_all_neighbors()
+                print("Populating cluster scores")
+                self.update_all_cluster_scores()
 
     def find_conf_id(self, conf):
         cur = self._db.execute(
@@ -117,71 +118,77 @@ class ResultSet(object):
         return conf._replace(id=id)
 
     def _update_neighbors(self, conf=None, conf_id=None):
-        if conf is not None:
-            if conf_id is not None:
-                assert conf.id == conf_id
-            else:
-                conf_id = conf.id
+        with latency.timer("_update_neighbors"):
+            if conf is not None:
+                if conf_id is not None:
+                    assert conf.id == conf_id
+                else:
+                    conf_id = conf.id
 
-        cur = self._db.execute(
-            f"""
-            SELECT 1 FROM neighbor
-            WHERE conf1_id = :id
-            LIMIT 1
-            """,
-            {"id": conf_id},
-        )
-        if cur.fetchone():
-            return
-
-        if conf is None:
-            conf = self.find_by_id(conf_id)
-            assert conf is not None
-            assert conf.id == conf_id
-
-        for neighbor in conf_neighbors(conf, self._vary):
-            neighbor = neighbor._replace(id=None)
-            neighbor = self._find_or_add_conf(neighbor)
-            self._db.execute(
-                "INSERT INTO neighbor(conf1_id, conf2_id) VALUES (?, ?)",
-                (conf.id, neighbor.id),
+            cur = self._db.execute(
+                f"""
+                SELECT 1 FROM neighbor
+                WHERE conf1_id = :id
+                LIMIT 1
+                """,
+                {"id": conf_id},
             )
+            if cur.fetchone():
+                return
+
+            if conf is None:
+                conf = self.find_by_id(conf_id)
+                assert conf is not None
+                assert conf.id == conf_id
+
+            for neighbor in conf_neighbors(conf, self._vary):
+                neighbor = neighbor._replace(id=None)
+                neighbor = self._find_or_add_conf(neighbor)
+                self._db.execute(
+                    "INSERT INTO neighbor(conf1_id, conf2_id) VALUES (?, ?)",
+                    (conf.id, neighbor.id),
+                )
 
     def update_all_neighbors(self):
         self._db.execute("DELETE FROM neighbor")
-        cur = self._db.execute(
-            f"SELECT {CONF_FIELDS} FROM conf " + "WHERE score IS NOT NULL"
-        )
-        for i, row in enumerate(cur):
-            conf = conf_from_row(row)
-            self._update_neighbors(conf)
+        with latency.timer("update_all_neighbors.1"):
+            cur = self._db.execute(
+                f"SELECT {CONF_FIELDS} FROM conf " + "WHERE score IS NOT NULL"
+            )
+            for i, row in enumerate(cur):
+                conf = conf_from_row(row)
+                self._update_neighbors(conf)
+            print(f"Updated neighbors for {i} confs")
 
-        print("Populating neighbors of neighbors")
-        cur = self._db.execute(
-            f"SELECT {CONF_FIELDS} FROM conf, neighbor "
-            + "WHERE conf.id = neighbor.conf2_id "
-            + "GROUP BY conf2_id"
-        )
-        for i, row in enumerate(cur):
-            conf = conf_from_row(row)
-            self._update_neighbors(conf)
+        # with latency.timer("update_all_neighbors.2"):
+        #     print("Populating neighbors of neighbors")
+        #     cur = self._db.execute(
+        #         f"SELECT {CONF_FIELDS} FROM conf, neighbor "
+        #         + "WHERE conf.id = neighbor.conf2_id "
+        #         + "GROUP BY conf2_id"
+        #     )
+        #     for i, row in enumerate(cur):
+        #         conf = conf_from_row(row)
+        #         self._update_neighbors(conf)
+        #     print(f"Updated neighbors for {i} confs")
 
         self._db.commit()
 
     def update_all_scores(self):
-        cur = self._db.execute("SELECT conf_id, loss FROM run")
-        scores = {}
-        for conf_id, loss in cur:
-            if conf_id not in scores:
-                scores[conf_id] = []
-            scores[conf_id].append(loss)
+        with latency.timer("update_all_scores"):
+            cur = self._db.execute("SELECT conf_id, loss FROM run")
+            scores = {}
+            for conf_id, loss in cur:
+                if conf_id not in scores:
+                    scores[conf_id] = []
+                scores[conf_id].append(loss)
 
-        for conf_id, conf_scores in scores.items():
-            score = median(conf_scores)
-            self._db.execute(
-                "UPDATE conf SET score = ? WHERE id = ?", [score, conf_id]
-            )
-        self._db.commit()
+            for conf_id, conf_scores in scores.items():
+                score = median(conf_scores)
+                self._db.execute(
+                    "UPDATE conf SET score = ? WHERE id = ?", [score, conf_id]
+                )
+            self._db.commit()
 
     def _update_cluster_score(self, conf_id):
         with latency.timer("update_cluster_score"):
@@ -195,8 +202,8 @@ class ResultSet(object):
                 f"""
                 SELECT conf.score
                 FROM conf, neighbor
-                WHERE neighbor.conf1_id = ?
-                AND conf.id = neighbor.conf2_id
+                WHERE neighbor.conf2_id = ?
+                AND conf.id = neighbor.conf1_id
                 AND conf.score IS NOT NULL
                 """,
                 (conf_id,),
@@ -218,12 +225,12 @@ class ResultSet(object):
         neighbors = {}
         cur = self._db.execute("SELECT conf1_id, conf2_id FROM neighbor")
         for conf1_id, conf2_id in cur:
-            conf1_neighbors = neighbors.get(conf1_id)
-            if conf1_neighbors:
-                conf1_neighbors.append(conf2_id)
+            conf2_neighbors = neighbors.get(conf2_id)
+            if conf2_neighbors:
+                conf2_neighbors.append(conf1_id)
             else:
-                conf1_neighbors = [conf2_id]
-                neighbors[conf1_id] = conf1_neighbors
+                conf2_neighbors = [conf1_id]
+                neighbors[conf2_id] = conf2_neighbors
 
         runs = {}
         cur = self._db.execute("SELECT conf_id, loss FROM run")

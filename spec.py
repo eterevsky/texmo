@@ -1,4 +1,5 @@
 from copy import deepcopy
+from functools import cache
 from mimetypes import init
 from unittest import result
 
@@ -23,6 +24,9 @@ def total_size(shape):
     for dim in shape:
         prod *= dim
     return prod
+
+
+_layer_cache = {}
 
 
 class LayerSpec(object):
@@ -63,8 +67,14 @@ class LayerSpec(object):
             and self._activation is None
         )
 
+        self._str = self.to_str()
+
     @staticmethod
     def parse(spec: str):
+        cached_layer = _layer_cache.get(spec)
+        if cached_layer is not None:
+            return cached_layer
+
         components = spec.split(".")
         name = components[0]
         params = components[1:]
@@ -81,9 +91,15 @@ class LayerSpec(object):
             layer_cls = registry[name]
         except KeyError as e:
             raise ObsoleteSpec(e)
-        return layer_cls(*args, **kwargs)
+
+        layer = layer_cls(*args, **kwargs)
+        _layer_cache[spec] = layer
+        return layer
 
     def __str__(self):
+        return self._str
+
+    def to_str(self):
         size = f".{self._size}" if self._size is not None else ""
         activation = (
             f".{self._activation}" if self._activation is not None else ""
@@ -108,7 +124,12 @@ class LayerSpec(object):
                 copy._activation = value
             else:
                 raise KeyError
-        return copy
+        copy._str = copy.to_str()
+        if copy._str in _layer_cache:
+            return _layer_cache[copy._str]
+        else:
+            _layer_cache[copy._str] = copy
+            return copy
 
     def all_neighbors(self, input_shape):
         for neighbor in self.neighbors_size():
@@ -124,35 +145,11 @@ class LayerSpec(object):
             for neighbor in self.neighbors_suffix_type():
                 yield neighbor, "attn"
 
-    def neighbors(self, vary, input_shape):
-        if "size" in vary:
-            for neighbor in self.neighbors_size():
-                yield neighbor
-        if "activation" in vary or "act" in vary:
-            for neighbor in self.neighbors_activation():
-                yield neighbor
-        if (
-            "struct" in vary
-            and self.has_weights
-            or "suffix" in vary
-            and self.name in ("suffix", "attention")
-        ):
-            for neighbor in self.neighbors_struct(input_shape):
-                yield neighbor
-
     def neighbors_size(self):
         if self._size is not None:
             if self._size > 1:
                 yield self.replace(size=self._size // 2)
             yield self.replace(size=self._size * 2)
-
-    def neighbors_activation(self):
-        if self._activation is None:
-            return
-        if self._activation != "tanh":
-            yield self.replace(activation="tanh")
-        if self._activation != "relu":
-            yield self.replace(activation="relu")
 
     def neighbors_struct(self, input_shape):
         for layer_cls in registry.values():
@@ -383,23 +380,36 @@ class LstmSpec(LayerSpec):
         )
 
 
-neighbors_cache = {}
+models_cache = {}
 
 
 class ModelSpec(object):
     def __init__(self, layer_specs):
         self._layers = list(layer_specs)
+        self._str = self.to_str()
+        self._hash = hash(self._str)
+        self._neighbors = None
 
     @staticmethod
     def parse(spec: str):
+        cached_model = models_cache.get(spec)
+        if cached_model is not None:
+            return cached_model
+
         components = spec.split("-")
         layers = []
         for component in components:
             layer = LayerSpec.parse(component)
             layers.append(layer)
-        return ModelSpec(layers)
+        model = ModelSpec(layers)
+
+        models_cache[spec] = model
+        return model
 
     def __str__(self):
+        return self._str
+
+    def to_str(self):
         return "-".join(map(str, self._layers))
 
     def __repr__(self):
@@ -416,7 +426,7 @@ class ModelSpec(object):
         return str(self) < str(other)
 
     def __hash__(self):
-        return hash(str(self))
+        return self._hash
 
     def weights(self):
         total = 0
@@ -471,7 +481,7 @@ class ModelSpec(object):
                 assert neighbor.is_valid()
                 yield neighbor, vary
 
-            if layer in (SuffixSpec(2),):
+            if layer in (LayerSpec.parse("suffix.2"),):
                 neighbor = ModelSpec(self._layers[:i] + self._layers[i + 1 :])
                 assert neighbor.is_valid()
                 yield neighbor, "suffix"
@@ -481,7 +491,7 @@ class ModelSpec(object):
                 or self._layers[i - 1].name
                 not in ("suffix", "attention", "attn")
             ) and layer.name not in ("suffix", "attention", "attn"):
-                for layer in (SuffixSpec(2),):
+                for layer in (LayerSpec.parse("suffix.2"),):
                     neighbor = ModelSpec(
                         self._layers[:i] + [layer] + self._layers[i:]
                     )
@@ -493,7 +503,7 @@ class ModelSpec(object):
             shape = layer.output_shape(shape)
 
         if self._layers[-1].name not in ("suffix", "attention", "attn"):
-            neighbor = ModelSpec(self._layers + [SuffixSpec(2)])
+            neighbor = ModelSpec(self._layers + [LayerSpec.parse("suffix.2")])
             assert neighbor.is_valid()
             yield neighbor, "suffix"
 
@@ -505,25 +515,23 @@ class ModelSpec(object):
             yield neighbor, "layer"
 
     def all_neighbors(self):
-        neighbors = neighbors_cache.get(self)
-        if neighbors is not None:
-            return neighbors
-        neighbors = list(self._all_neighbors())
-        neighbors_cache[self] = neighbors
-        return neighbors
+        if self._neighbors is None:
+            self._neighbors = list(self._all_neighbors())
+        return self._neighbors
 
     def neighbors_add_layer(self):
         end_size = min(total_size(self.output_shape()), NCHAR // 2)
         for size in (end_size, end_size * 2):
-            for layer in (
-                DenseSpec(size, relu=True),
-                DenseSpec(size, tanh=True),
-                RecSpec(size, relu=True),
-                RecSpec(size, tanh=True),
-                GruSpec(size, tanh=True),
-                LstmSpec(size),
-                MgruSpec(size),
+            for layer_str in (
+                f"dense.{size}.relu",
+                f"dense.{size}.tanh",
+                f"rec.{size}.relu",
+                f"rec.{size}.tanh",
+                f"gru.{size}.tanh",
+                f"mgru.{size}",
+                f"lstm.{size}",
             ):
+                layer = LayerSpec.parse(layer_str)
                 neighbor = ModelSpec(self._layers + [layer])
                 assert neighbor.is_valid()
                 yield neighbor

@@ -133,26 +133,6 @@ class ResultSetTest(TestCase):
         results.update_all_scores()
         results.update_all_neighbors()
 
-        conf_id = results.find_conf_id(
-            INIT_CONF._replace(spec=ModelSpec.parse("dense.2.relu"))
-        )
-
-        cur = results._db.execute(
-            "SELECT spec, batch FROM conf, neighbor "
-            + "WHERE conf1_id = ? AND conf2_id = id",
-            (conf_id,),
-        )
-
-        self.assertEqual(
-            set(map(tuple, cur)),
-            {
-                ("dense.1.relu", 256),
-                ("dense.2.relu", 128),
-                ("dense.2.relu", 512),
-                ("dense.4.relu", 256),
-            },
-        )
-
         cur = results._db.execute(
             "SELECT conf2_id FROM conf, neighbor " +
             "WHERE spec = 'dense.4.relu' AND conf.id = conf1_id"

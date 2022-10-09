@@ -28,6 +28,7 @@ CREATE TABLE neighbor (
 );
 
 CREATE INDEX neighbor_conf1_id ON neighbor(conf1_id);
+CREATE INDEX neighbor_conf2_id ON neighbor(conf2_id);
 
 CREATE TABLE run (
     conf_id INTEGER NOT NULL,

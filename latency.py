@@ -29,8 +29,13 @@ def timer(name):
 
 def report():
     for name, measures in sorted(_measures.items()):
-        percentiles = quantiles(measures, n=100)
-        p50th = percentiles[48] / 1E6
-        p90th = percentiles[88] / 1E6
-        p99th = percentiles[98] / 1E6
-        print(f"{name}  {p50th:.3f} ms  {p90th:.3f} ms  {p99th:.3f} ms")
+        if len(measures) == 1:
+            val = measures[0] / 1E9
+            print(f"{name}(1)  {val:.3f} s")
+        else:
+            percentiles = quantiles(measures, n=100)
+            p50th = percentiles[48] / 1E6
+            p90th = percentiles[88] / 1E6
+            p99th = percentiles[98] / 1E6
+            total = len(measures)
+            print(f"{name}({total})  {p50th:.3f} ms  {p90th:.3f} ms  {p99th:.3f} ms")

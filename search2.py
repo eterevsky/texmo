@@ -1,4 +1,5 @@
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from itertools import islice
 import math
 import random
@@ -6,7 +7,7 @@ from resultdb import ResultDB
 
 import results
 from results import ResultSet, Configuration
-from dataset import DataSet
+from dataset import DataSet, build_dataset
 import latency
 from layered import LayeredModel2
 from manager import Manager
@@ -89,17 +90,22 @@ def print_top_confs(result_set, t, max_weights):
         print()
 
 
-def select_conf_prev_time(result_set, t, max_weights):
+def select_conf_prev_time(result_set, t, max_weights, fixed_weights):
     with latency.timer("select_conf_prev_time"):
         t2 = t // 2
         with latency.timer("select_conf_prev_time-confs_count"):
             nconfs = result_set.confs_count(t2)
-        actual_max_weights = max_weights
-        for top_conf, _ in result_set.top_cluster_confs(
-            t, max_weights, limit=1
-        ):
-            actual_max_weights = top_conf.spec.weights()
-        n_top_confs = round(nconfs / (8 * (math.log2(actual_max_weights) - 9)))
+
+        if fixed_weights:
+            n_top_confs = nconfs // 8
+        else:
+            actual_max_weights = max_weights
+            for top_conf, _ in result_set.top_cluster_confs(
+                t, max_weights, limit=1
+            ):
+                actual_max_weights = top_conf.spec.weights()
+            n_top_confs = round(nconfs / (8 * (math.log2(actual_max_weights) - 9)))
+
         print(
             f"Checking {n_top_confs} out of {nconfs} confs for "
             + f"T = {t2}, W ≤ {max_weights}"
@@ -156,16 +162,18 @@ def select_conf_neighbors(result_set, t, max_weights):
 
 def select_conf(result_set, max_time, t, max_weights, init_conf):
     with latency.timer("select_conf"):
+        fixed_weights = max_weights is not None
+
         fixed_time = t is not None
         if t is None:
             t = select_time(result_set, max_time)
-        if max_weights is None:
+        if not fixed_weights:
             max_weights = select_max_weights(result_set, t)
 
         print_top_confs(result_set, t, max_weights)
 
         if t > 1 and not fixed_time:
-            conf = select_conf_prev_time(result_set, t, max_weights)
+            conf = select_conf_prev_time(result_set, t, max_weights, fixed_weights)
             if conf is not None:
                 return conf
 
@@ -207,15 +215,16 @@ def main(
     print("Variables:", vary)
     t = None if "time" in vary else time
 
-    print(f"Loading dataset from {data}")
-    dataset = DataSet(data)
-    dataset.warmup()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        dataset_future = executor.submit(build_dataset, data)
 
-    print(f"Creating ResultDB from {db}")
-    result_db = ResultDB(db)
+        print(f"Creating ResultDB from {db}")
+        result_db = ResultDB(db)
 
-    print(f"Creaing ResultSet.")
-    result_set = ResultSet(result_db, init_conf, vary)
+        print(f"Creaing ResultSet.")
+        result_set = ResultSet(result_db, init_conf, vary)
+
+        dataset = dataset_future.result()
 
     print("Starting search")
 
@@ -251,6 +260,11 @@ def main(
             quiet=True,
         )
 
+        if record.time_round is None:
+            print("Bad training time, skipping")
+            record.time_round = conf.t
+            record.loss = INF
+
         if first:
             first = False
         else:
@@ -277,9 +291,10 @@ def parse_args():
         "-v",
         "--vary",
         type=str,
-        default="layer,type,size,suffix,batch,lr,time",
+        default="layer,type,size,suffix,attn,batch,lr,time",
         help="model parameters that can be varied with search. "
-        + "A comma-separated list of struct, size, act, lr, batch, len.",
+        + "A comma-separated list of layer, type, size, suffix, attn, batch, len, lr, reg, init, time. "
+        + "(Default: layer,type,size,suffix,attn,batch,lr,time)",
     )
     parser.add_argument(
         "-s", "--spec", type=str, default="dense.1.relu", help="initial spec"

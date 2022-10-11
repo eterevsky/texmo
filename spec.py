@@ -1,4 +1,5 @@
 from copy import deepcopy
+from functools import cache
 from mimetypes import init
 from unittest import result
 
@@ -23,6 +24,13 @@ def total_size(shape):
     for dim in shape:
         prod *= dim
     return prod
+
+
+def is_power2(x):
+    return type(x) is int and x >= 1 and x & (x - 1) == 0
+
+
+_layer_cache = {}
 
 
 class LayerSpec(object):
@@ -63,8 +71,14 @@ class LayerSpec(object):
             and self._activation is None
         )
 
+        self._str = self.to_str()
+
     @staticmethod
     def parse(spec: str):
+        cached_layer = _layer_cache.get(spec)
+        if cached_layer is not None:
+            return cached_layer
+
         components = spec.split(".")
         name = components[0]
         params = components[1:]
@@ -81,9 +95,15 @@ class LayerSpec(object):
             layer_cls = registry[name]
         except KeyError as e:
             raise ObsoleteSpec(e)
-        return layer_cls(*args, **kwargs)
+
+        layer = layer_cls(*args, **kwargs)
+        _layer_cache[spec] = layer
+        return layer
 
     def __str__(self):
+        return self._str
+
+    def to_str(self):
         size = f".{self._size}" if self._size is not None else ""
         activation = (
             f".{self._activation}" if self._activation is not None else ""
@@ -108,7 +128,12 @@ class LayerSpec(object):
                 copy._activation = value
             else:
                 raise KeyError
-        return copy
+        copy._str = copy.to_str()
+        if copy._str in _layer_cache:
+            return _layer_cache[copy._str]
+        else:
+            _layer_cache[copy._str] = copy
+            return copy
 
     def all_neighbors(self, input_shape):
         for neighbor in self.neighbors_size():
@@ -124,35 +149,13 @@ class LayerSpec(object):
             for neighbor in self.neighbors_suffix_type():
                 yield neighbor, "attn"
 
-    def neighbors(self, vary, input_shape):
-        if "size" in vary:
-            for neighbor in self.neighbors_size():
-                yield neighbor
-        if "activation" in vary or "act" in vary:
-            for neighbor in self.neighbors_activation():
-                yield neighbor
-        if (
-            "struct" in vary
-            and self.has_weights
-            or "suffix" in vary
-            and self.name in ("suffix", "attention")
-        ):
-            for neighbor in self.neighbors_struct(input_shape):
-                yield neighbor
-
     def neighbors_size(self):
-        if self._size is not None:
+        assert self._size is None or self.has_size or self.name == "attn"
+        if self.has_size:
+            assert self._size is not None
             if self._size > 1:
                 yield self.replace(size=self._size // 2)
             yield self.replace(size=self._size * 2)
-
-    def neighbors_activation(self):
-        if self._activation is None:
-            return
-        if self._activation != "tanh":
-            yield self.replace(activation="tanh")
-        if self._activation != "relu":
-            yield self.replace(activation="relu")
 
     def neighbors_struct(self, input_shape):
         for layer_cls in registry.values():
@@ -203,7 +206,7 @@ class LayerSpec(object):
                 ):
                     yield layer_cls(size=self._size // 2, relu=relu, tanh=tanh)
 
-    def is_valid(self, prev_layer):
+    def is_valid(self):
         return (
             self._size is None or (type(self._size) is int and self._size >= 1)
         ) and self._activation in (None, "tanh", "relu")
@@ -225,20 +228,8 @@ class SuffixSpec(LayerSpec):
     def weights(self, input_shape):
         return 0
 
-    def is_valid(self, prev_layer):
-        return (
-            super().is_valid(prev_layer)
-            and self._size >= 2
-            and self._size in (2, 4, 8, 16, 32, 64, 128, 256, 512, 1024)
-            and (
-                prev_layer is None
-                or prev_layer.name not in ("suffix", "attention")
-            )
-        )
-
-    def neighbors_struct(self, input_shape):
-        yield AttentionSpec(self._size, True)
-        yield AttentionSpec(self._size, False)
+    def is_valid(self):
+        return super().is_valid() and self._size >= 2 and is_power2(self._size)
 
     def neighbors_size(self):
         return ()
@@ -247,7 +238,8 @@ class SuffixSpec(LayerSpec):
         return ()
 
     def neighbors_suffix_type(self):
-        return ()
+        if self._size >= 2:
+            yield AttnSpec(self._size, 4, self._size * 2)
 
     def neighbors_suffix_size(self):
         if self._size >= 4:
@@ -255,40 +247,94 @@ class SuffixSpec(LayerSpec):
         yield SuffixSpec(self._size * 2)
 
 
+# @layer_spec
+# class AttentionSpec(LayerSpec):
+#     name = "attention"
+#     has_weights = False
+#     has_size = True
+#     has_activation = False
+
+#     def __init__(self, size, pos=False):
+#         super().__init__(size=size)
+#         self._pos = pos
+
+#     def __str__(self):
+#         if self._pos:
+#             return f"attention.{self._size}.pos"
+#         else:
+#             return f"attention.{self._size}"
+
+#     def output_shape(self, input_shape):
+#         return input_shape
+
+#     def weights(self, input_shape):
+#         return input_shape[0] * self._size if self._pos else 0
+
+#     def is_valid(self):
+#         return False
+
+
 @layer_spec
-class AttentionSpec(LayerSpec):
-    name = "attention"
+class AttnSpec(LayerSpec):
+    name = "attn"
     has_weights = False
-    has_size = True
+    has_size = False
     has_activation = False
 
-    def __init__(self, size, pos=False):
-        super().__init__(size=size)
-        self._pos = pos
+    def __init__(self, length, heads, size):
+        super().__init__()
+        self._length = length
+        self._heads = heads
+        self._size = size
 
     def __str__(self):
-        if self._pos:
-            return f"attention.{self._size}.pos"
-        else:
-            return f"attention.{self._size}"
+        return f"attn.{self._length}.{self._heads}.{self._size}"
+
+    @property
+    def comp_size(self):
+        return self._size // self._heads
 
     def output_shape(self, input_shape):
-        return input_shape
+        return (self._size,)
 
     def weights(self, input_shape):
-        return input_shape[0] * self._size if self._pos else 0
+        input_size = total_size(input_shape)
+        return (
+            3 * self._heads * self.comp_size * input_size
+            + self._length * self._heads * self.comp_size
+            + self._heads * self.comp_size
+        )
 
-    def is_valid(self, prev_layer):
-        return False
-        # return (
-        #     super().is_valid(prev_layer)
-        #     and self._size >= 2
-        #     and (prev_layer is None or prev_layer.name not in ("suffix", "attention"))
-        # )
+    def is_valid(self):
+        return (
+            self._length >= 2
+            and is_power2(self._length)
+            and is_power2(self._heads)
+            and is_power2(self._size)
+            and self._size % self._heads == 0
+        )
 
-    def neighbors_struct(self, input_shape):
-        yield SuffixSpec(self._size)
-        yield AttentionSpec(self._size, not self._pos)
+    def neighbors_suffix_type(self):
+        if self._heads == 4 and self._size == 2 * self._length:
+            yield SuffixSpec(self._length)
+
+    def neighbors_suffix_size(self):
+        if self._length >= 4:
+            yield AttnSpec(self._length // 2, self._heads, self._size)
+        yield AttnSpec(self._length * 2, self._heads, self._size)
+
+        if self._heads > 1:
+            yield AttnSpec(self._length, self._heads // 2, self._size)
+        if self._heads < self._size and self._size % (2 * self._heads) == 0:
+            yield AttnSpec(self._length, self._heads * 2, self._size)
+
+        if (
+            self._heads < self._size
+            and self._size >= 2
+            and (self._size // 2) % self._heads == 0
+        ):
+            yield AttnSpec(self._length, self._heads, self._size // 2)
+        yield AttnSpec(self._length, self._heads, self._size * 2)
 
 
 @layer_spec
@@ -383,20 +429,36 @@ class LstmSpec(LayerSpec):
         )
 
 
+models_cache = {}
+
+
 class ModelSpec(object):
     def __init__(self, layer_specs):
         self._layers = list(layer_specs)
+        self._str = self.to_str()
+        self._hash = hash(self._str)
+        self._neighbors = None
 
     @staticmethod
     def parse(spec: str):
+        cached_model = models_cache.get(spec)
+        if cached_model is not None:
+            return cached_model
+
         components = spec.split("-")
         layers = []
         for component in components:
             layer = LayerSpec.parse(component)
             layers.append(layer)
-        return ModelSpec(layers)
+        model = ModelSpec(layers)
+
+        models_cache[spec] = model
+        return model
 
     def __str__(self):
+        return self._str
+
+    def to_str(self):
         return "-".join(map(str, self._layers))
 
     def __repr__(self):
@@ -413,7 +475,7 @@ class ModelSpec(object):
         return str(self) < str(other)
 
     def __hash__(self):
-        return hash(str(self))
+        return self._hash
 
     def weights(self):
         total = 0
@@ -426,16 +488,14 @@ class ModelSpec(object):
         return total
 
     def is_valid(self):
-        prev_layer = None
         if len(self._layers) == 0:
             return False
         has_non_suffix_layer = False
         for layer in self._layers:
-            if not layer.is_valid(prev_layer):
+            if not layer.is_valid():
                 return False
             if layer.name in ("dense", "rec", "gru", "mgru", "lstm"):
                 has_non_suffix_layer = True
-            prev_layer = layer
         return has_non_suffix_layer
 
     def simplify(self):
@@ -457,40 +517,59 @@ class ModelSpec(object):
             shape = layer.output_shape(shape)
         return shape
 
-    def all_neighbors(self):
+    def _all_neighbors(self):
         assert self.is_valid()
         shape = (NCHAR,)
+
+        suffix2 = LayerSpec.parse("suffix.2")
+
         for i, layer in enumerate(self._layers):
             for mod_layer, vary in layer.all_neighbors(shape):
                 neighbor = ModelSpec(
                     self._layers[:i] + [mod_layer] + self._layers[i + 1 :]
                 )
-                assert neighbor.is_valid()
+                assert neighbor.is_valid(), f"Invalid neighbor: {self} {layer} {vary} {mod_layer} {neighbor}"
                 yield neighbor, vary
 
-            if layer in (SuffixSpec(2),):
+            attn_output_size = max(2, total_size(shape))
+            attn_layer = AttnSpec(4, 2, attn_output_size)
+
+            if layer == suffix2:
                 neighbor = ModelSpec(self._layers[:i] + self._layers[i + 1 :])
                 assert neighbor.is_valid()
                 yield neighbor, "suffix"
+            elif layer == attn_layer:
+                neighbor = ModelSpec(self._layers[:i] + self._layers[i + 1 :])
+                assert neighbor.is_valid()
+                yield neighbor, "attn"
 
             if (
                 i == 0
                 or self._layers[i - 1].name
                 not in ("suffix", "attention", "attn")
             ) and layer.name not in ("suffix", "attention", "attn"):
-                for layer in (SuffixSpec(2),):
-                    neighbor = ModelSpec(
-                        self._layers[:i] + [layer] + self._layers[i:]
-                    )
-                    if not neighbor.is_valid():
-                        print(neighbor)
-                    assert neighbor.is_valid()
-                    yield neighbor, "suffix"
+                neighbor = ModelSpec(
+                    self._layers[:i] + [suffix2] + self._layers[i:]
+                )
+                assert neighbor.is_valid()
+                yield neighbor, "suffix"
+
+                neighbor = ModelSpec(
+                    self._layers[:i] + [attn_layer] + self._layers[i:]
+                )
+                assert neighbor.is_valid()
+                yield neighbor, "attn"
 
             shape = layer.output_shape(shape)
 
         if self._layers[-1].name not in ("suffix", "attention", "attn"):
-            neighbor = ModelSpec(self._layers + [SuffixSpec(2)])
+            neighbor = ModelSpec(self._layers + [suffix2])
+            assert neighbor.is_valid()
+            yield neighbor, "suffix"
+
+            output_size = max(2, total_size(shape))
+
+            neighbor = ModelSpec(self._layers + [AttnSpec(4, 2, output_size)])
             assert neighbor.is_valid()
             yield neighbor, "suffix"
 
@@ -501,18 +580,24 @@ class ModelSpec(object):
         if neighbor is not None:
             yield neighbor, "layer"
 
+    def all_neighbors(self):
+        if self._neighbors is None:
+            self._neighbors = list(self._all_neighbors())
+        return self._neighbors
+
     def neighbors_add_layer(self):
         end_size = min(total_size(self.output_shape()), NCHAR // 2)
         for size in (end_size, end_size * 2):
-            for layer in (
-                DenseSpec(size, relu=True),
-                DenseSpec(size, tanh=True),
-                RecSpec(size, relu=True),
-                RecSpec(size, tanh=True),
-                GruSpec(size, tanh=True),
-                LstmSpec(size),
-                MgruSpec(size),
+            for layer_str in (
+                f"dense.{size}.relu",
+                f"dense.{size}.tanh",
+                f"rec.{size}.relu",
+                f"rec.{size}.tanh",
+                f"gru.{size}.tanh",
+                f"mgru.{size}",
+                f"lstm.{size}",
             ):
+                layer = LayerSpec.parse(layer_str)
                 neighbor = ModelSpec(self._layers + [layer])
                 assert neighbor.is_valid()
                 yield neighbor
@@ -545,70 +630,6 @@ class ModelSpec(object):
         neighbor = ModelSpec(self._layers[:-1])
         assert neighbor.is_valid()
         return neighbor
-
-    def neighbors(self, vary):
-        assert self.is_valid()
-        shape = (NCHAR,)
-        for i, layer in enumerate(self._layers):
-            for mod_layer in layer.neighbors(vary, shape):
-                neighbor = ModelSpec(
-                    self._layers[:i] + [mod_layer] + self._layers[i + 1 :]
-                )
-                neighbor.simplify()
-                if not neighbor.is_valid():
-                    continue
-                assert neighbor.is_valid()
-                yield neighbor
-
-            if (
-                "suffix" in vary
-                and (
-                    i == 0
-                    or self._layers[i - 1].name not in ("suffix", "attention")
-                )
-                and self._layers[i].name not in ("suffix", "attention")
-            ):
-                for layer in (
-                    SuffixSpec(2),
-                    AttentionSpec(2, False),
-                    AttentionSpec(2, True),
-                ):
-                    neighbor = ModelSpec(
-                        self._layers[:i] + [layer] + self._layers[i:]
-                    )
-                    if not neighbor.is_valid():
-                        print(neighbor)
-                    assert neighbor.is_valid()
-                    yield neighbor
-
-            shape = layer.output_shape(shape)
-
-        if "suffix" in vary and self._layers[-1].name not in (
-            "suffix",
-            "attention",
-        ):
-            for layer in (
-                SuffixSpec(2),
-                AttentionSpec(2, False),
-                AttentionSpec(2, True),
-            ):
-                neighbor = ModelSpec(self._layers + [layer])
-                if not neighbor.is_valid():
-                    print(self._layers[-1].name)
-                    print(neighbor)
-                assert neighbor.is_valid()
-                yield neighbor
-
-        if "struct" in vary:
-            size = min(total_size(self.output_shape()), NCHAR // 2)
-            neighbor = ModelSpec(self._layers + [DenseSpec(size, relu=True)])
-            assert neighbor.is_valid()
-            yield neighbor
-
-            if len(self._layers) > 1 and self._layers[-1].has_weights:
-                neighbor = ModelSpec(self._layers[:-1])
-                assert neighbor.is_valid()
-                yield neighbor
 
 
 def is_reachable_spec(init_spec: ModelSpec, spec: ModelSpec, vary):

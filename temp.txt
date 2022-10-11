@@ -1,1 +1,0 @@
-python train.py -d data -c suffix.2-dense.1024.relu-gru.256.tanh-dense.1024.relu -o models -t 128 -l 0.1 -b512

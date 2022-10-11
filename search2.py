@@ -17,6 +17,7 @@ from train import train_and_eval
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
 # with t = 2^k
 RUNS_EXP = 0.6
+INF = float("inf")
 
 
 def select_time(result_set, max_time):
@@ -252,9 +253,11 @@ def main(
 
         if first:
             first = False
-        elif record.time_round is None:
-            print("Bad training time, skipping")
         else:
+            if record.time_round is None:
+                print("Bad training time")
+                record.train_time_s = conf.t
+                record.loss = INF
             with latency.timer("add_record"):
                 result_set.add_record(record)
         print()

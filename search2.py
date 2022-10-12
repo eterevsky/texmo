@@ -339,7 +339,7 @@ def parse_args():
     parser.add_argument(
         "--max-time",
         type=int,
-        default=None,
+        default=256,
         metavar="SECONDS",
         help="maximum time limit for training",
     )

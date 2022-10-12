@@ -155,6 +155,7 @@ class ResultSet(object):
             cur = self._db.execute(
                 f"SELECT {CONF_FIELDS} FROM conf " + "WHERE score IS NOT NULL"
             )
+            i = 0
             for i, row in enumerate(cur):
                 conf = conf_from_row(row)
                 self._update_neighbors(conf)

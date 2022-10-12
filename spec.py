@@ -143,9 +143,13 @@ class LayerSpec(object):
 
         if self.name in ("suffix", "attn"):
             for neighbor in self.neighbors_suffix_size():
-                yield neighbor, "suffix"
+                yield neighbor, "ssize"
+        if self.name == "suffix":
             for neighbor in self.neighbors_suffix_type():
                 yield neighbor, "attn"
+        if self.name == "attn":
+            for neighbor in self.neighbors_suffix_type():
+                yield neighbor, "suffix"
 
     def neighbors_size(self):
         assert self._size is None or self.has_size or self.name == "attn"

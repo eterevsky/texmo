@@ -160,3 +160,8 @@ def import_from_csv(result_db, filename):
             record = TrainingRecord.from_csv_tuple(row)
             result_db.add_record(record, commit=False, skip_invalid=True)
     result_db._db.commit()
+
+
+if __name__ == "__main__":
+    record_db = ResultDB("results/results-3090.sqlite")
+    import_from_csv(record_db, "log-3090.csv")

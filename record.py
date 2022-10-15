@@ -20,7 +20,7 @@ class TrainingRecord(object):
         test_sample_len: Union[int, str],
         test_batch: Union[int, str],
         test_poisoned: Union[bool, str],
-        init_scale: Union[float, str, None],
+        init_scale: Union[float, str, None] = 1.0,
     ):
         if not isinstance(timestamp, datetime):
             timestamp = datetime.fromisoformat(timestamp)

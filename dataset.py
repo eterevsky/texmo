@@ -24,17 +24,20 @@ class DataSet(object):
 
             print(f"Dataset loaded: {count} texts, {total:.2f} GB")
         else:
-            self.file = open(file_or_dir, "rb")
-            self.all = mmap.mmap(
-                self.file.fileno(),
-                0,
-                flags=mmap.MAP_PRIVATE,
-                prot=mmap.PROT_READ,
-            )
+            with open(file_or_dir, "rb") as f:
+                self.all = f.read()
+            # self.file = open(file_or_dir, "rb")
+            # self.all = mmap.mmap(
+            #     self.file.fileno(),
+            #     0,
+            #     flags=mmap.MAP_PRIVATE,
+            #     prot=mmap.PROT_READ,
+            # )
 
             total = len(self.all) / 1E9
 
-            print(f"Dataset mmap'ed: {total:.2f} GB")
+            # print(f"Dataset mmap'ed: {total:.2f} GB")
+            print(f"Dataset read: {total:.2f} GB")
 
     def sample(self, length, batch_size):
         with latency.timer(f"dataset-sample-{length}"):

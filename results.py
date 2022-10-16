@@ -1,5 +1,6 @@
 import argparse
 import csv
+from collections import namedtuple
 from itertools import chain
 import math
 import os
@@ -14,44 +15,49 @@ from configuration import (
     Configuration,
     conf_from_record,
     conf_is_valid,
-    Results,
 )
 import latency
 from record import TrainingRecord
 from spec import ModelSpec, ObsoleteSpec, is_reachable_spec
 
 
+Results = namedtuple(
+    "Results",
+    [
+        "score",
+        "cluster_score",
+        "num_runs",
+    ],
+)
+
+
 class ResultSet(object):
-    def __init__(self, result_db, init_conf, vary, populate_neighbors=True):
+    def __init__(self, result_db, template, populate_neighbors=True):
         self._result_db = result_db
-        self._vary = vary
+        self._template = template
         self._db = sqlite3.connect(":memory:")
         with open("runtime-db.sql") as schema:
             self._db.executescript(schema.read())
 
         if self._result_db is not None:
-            self._import_from_result_db(init_conf, vary, populate_neighbors)
+            self._import_from_result_db(populate_neighbors)
 
-    def _import_from_result_db(self, init_conf, vary, populate_neighbors):
+    def _import_from_result_db(self, populate_neighbors):
         """Import from the persistent DB all matching confs.
 
-        The confs are selected using init_conf and vary. Only the confs are
-        selected that can be reached via neighbor links from the init_conf
-        by varying the `vary` parameters.
+        Only the confs that are matching `self._template` are being selected.
         """
         with latency.timer("_import_from_result_db"):
             print("Importing relevant configurations and results from ResultDB")
             n = 0
-            for conf, loss in self._result_db.get_confs_runs(init_conf, vary):
-                if not is_reachable_spec(init_conf.spec, conf.spec, vary):
-                    continue
-
+            for conf, loss in self._result_db.get_confs_runs(self._template):
                 conf = conf._replace(id=None)
                 conf = self._find_or_add_conf(conf)
 
                 n += 1
                 self._db.execute(
-                    "INSERT INTO run(conf_id, loss) VALUES(?, ?)", (conf.id, loss)
+                    "INSERT INTO run(conf_id, loss) VALUES(?, ?)",
+                    (conf.id, loss),
                 )
 
             print(f"Imported {n} runs")
@@ -141,7 +147,7 @@ class ResultSet(object):
                 assert conf is not None
                 assert conf.id == conf_id
 
-            for neighbor in conf_neighbors(conf, self._vary):
+            for neighbor in conf_neighbors(conf, self._template):
                 neighbor = neighbor._replace(id=None)
                 neighbor = self._find_or_add_conf(neighbor)
                 self._db.execute(

@@ -46,5 +46,5 @@ class Layers2Test(TestCase):
         out0 = out[0:4]
 
         self.assertEqual(out0[1], 0)
-        self.assertGt(out0[2], out0[0])
-        self.assertGt(out0[2], out0[3])
+        self.assertGreater(out0[2], out0[0])
+        self.assertGreater(out0[2], out0[3])

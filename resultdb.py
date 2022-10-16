@@ -85,7 +85,8 @@ class ResultDB(object):
                 assert conf_is_valid(conf)
             except AssertionError:
                 import sys
-                print('conf:', conf, file=sys.stderr)
+
+                print("conf:", conf, file=sys.stderr)
                 raise
 
         conf = self._find_or_add_conf(conf)
@@ -109,49 +110,46 @@ class ResultDB(object):
             with latency.timer("add_record-commit"):
                 self._db.commit()
 
-    def get_confs_runs(self, init_conf, vary):
-        """Iterates through all confs that match init_conf+vary."""
+    def get_confs_runs(self, template):
+        """Iterates through all confs that match template."""
         conditions = []
         bindings = []
 
-        if "lr" not in vary:
-            conditions.append("lr = ?")
-            bindings.append(init_conf.lr)
+        def _add_constraint(name, bounds):
+            if bounds is None:
+                return
+            lo, hi = bounds
+            if lo == hi:
+                conditions.append(f"{name} = ?")
+                bindings.append(lo)
+            else:
+                assert lo < hi
+                conditions.append(f"{name} >= ?")
+                conditions.append(f"{name} <= ?")
+                bindings.append(lo)
+                bindings.append(hi)
 
-        if "len" not in vary:
-            conditions.append("sample_len = ?")
-            bindings.append(init_conf.sample_len)
-
-        if "batch" not in vary:
-            conditions.append("batch = ?")
-            bindings.append(init_conf.batch)
-
-        if "reg" not in vary:
-            conditions.append("regularization = ?")
-            bindings.append(init_conf.regularization)
-
-        if "init" not in vary:
-            conditions.append("init_scale = ?")
-            bindings.append(init_conf.init_scale)
-
-        if "time" not in vary:
-            conditions.append("t = ?")
-            bindings.append(init_conf.t)
+        _add_constraint("lr", template.lr)
+        _add_constraint("sample_len", template.sample_len)
+        _add_constraint("batch", template.batch)
+        _add_constraint("regularization", template.regularization)
+        _add_constraint("init_scale", template.init_scale)
+        _add_constraint("t", template.t)
 
         condition = " AND ".join(conditions)
         if condition != "":
             condition = "AND " + condition
 
-        cur = self._db.execute(
-            f"""SELECT {CONF_FIELDS}, run.loss FROM conf, run
-                WHERE conf.id = run.conf_id
-                      {condition}
-            """,
-            bindings,
+        query = (
+            f"SELECT {CONF_FIELDS}, run.loss FROM conf, run "
+            + f"WHERE conf.id = run.conf_id {condition}"
         )
 
+        cur = self._db.execute(query, bindings)
+
         for row in cur:
-            yield conf_from_row(row[:8]), row[8]
+            if template.match_spec(row[1]):
+                yield conf_from_row(row[:8]), row[8]
 
 
 def import_from_csv(result_db, filename):
@@ -163,5 +161,5 @@ def import_from_csv(result_db, filename):
 
 
 if __name__ == "__main__":
-    record_db = ResultDB("results/results-3090.sqlite")
-    import_from_csv(record_db, "log-3090.csv")
+    record_db = ResultDB("results/db-mac.sqlite")
+    import_from_csv(record_db, "log-mac.csv")

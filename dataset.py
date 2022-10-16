@@ -12,7 +12,7 @@ def _worker(all, request_queue, data_queues):
         length, batch_size = request_queue.get()
         if length is None or batch_size is None:
             break
-        with latency.timer(f"dataset-worker-{length}-{batch_size}"):
+        with latency.timer(f"dataset-worker"):
             batch = []
             for _ in range(batch_size):
                 start = random.randrange(len(all) - length)
@@ -65,7 +65,7 @@ class DataSet(object):
             self._data_queues[key] = Queue()
             self._request_queue.put(key)
 
-        with latency.timer(f"dataset-blocking-{length}-{batch_size}"):
+        with latency.timer(f"dataset-sample"):
             self._request_queue.put(key)
             return self._data_queues[key].get()
 

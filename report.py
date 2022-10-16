@@ -73,7 +73,7 @@ def print_top_confs(top_confs, run_count, filename):
         for log_weights in range(10, 25):
             weights = 2**log_weights
             first_weight_line = True
-            for log_t in range(0, 16):
+            for log_t in range(0, 9):
                 t = 2**log_t
                 if (weights, t) not in top_confs:
                     continue

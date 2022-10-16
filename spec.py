@@ -492,26 +492,13 @@ class ModelSpec(object):
     def is_valid(self):
         if len(self._layers) == 0:
             return False
-        has_non_suffix_layer = False
+        # has_non_suffix_layer = False
         for layer in self._layers:
             if not layer.is_valid():
                 return False
-            if layer.name in ("dense", "rec", "gru", "mgru", "lstm"):
-                has_non_suffix_layer = True
-        return has_non_suffix_layer
-
-    def simplify(self):
-        i = 0
-        while i < len(self._layers):
-            if str(self._layers[i]) in (
-                "suffix.1",
-                "attention.1",
-                "attention.1.pos",
-            ):
-                self._layers.pop(i)
-            else:
-                i += 1
-        return self
+            # if layer.name in ("dense", "rec", "gru", "mgru", "lstm"):
+            #     has_non_suffix_layer = True
+        return True
 
     def output_shape(self):
         shape = (NCHAR,)
@@ -536,14 +523,15 @@ class ModelSpec(object):
             attn_output_size = max(2, total_size(shape))
             attn_layer = AttnSpec(4, 2, attn_output_size)
 
-            if layer == suffix2:
-                neighbor = ModelSpec(self._layers[:i] + self._layers[i + 1 :])
-                assert neighbor.is_valid()
-                yield neighbor, "suffix"
-            elif layer == attn_layer:
-                neighbor = ModelSpec(self._layers[:i] + self._layers[i + 1 :])
-                assert neighbor.is_valid()
-                yield neighbor, "attn"
+            if len(self._layers) > 1:
+                if layer == suffix2:
+                    neighbor = ModelSpec(self._layers[:i] + self._layers[i + 1 :])
+                    assert neighbor.is_valid()
+                    yield neighbor, "suffix"
+                elif layer == attn_layer:
+                    neighbor = ModelSpec(self._layers[:i] + self._layers[i + 1 :])
+                    assert neighbor.is_valid()
+                    yield neighbor, "attn"
 
             if (
                 i == 0

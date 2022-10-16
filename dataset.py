@@ -53,6 +53,9 @@ class DataSet(object):
         self._worker_thread.start()
 
     def __del__(self):
+        self.join()
+
+    def join(self):
         self._request_queue.put((None, None))
         self._worker_thread.join()
 

@@ -1,6 +1,7 @@
 from unittest import main, TestCase
 
-from configuration import Configuration
+import configuration
+from configuration import Configuration, Template
 from resultdb import ResultDB
 from results import ResultSet
 from spec import ModelSpec
@@ -18,11 +19,23 @@ INIT_CONF = Configuration(
 )
 
 
+TEMPLATE = Template(
+    spec_regex=r"dense\.\d+\.relu",
+    lr=0.2,
+    sample_len=128,
+    batch=None,
+    regularization=0.1,
+    init_scale=1.0,
+    t=1,
+)
+
+
 class ResultSetTest(TestCase):
+    def setUp(self):
+        configuration._spec_neighbors = {}
+
     def test_add_run(self):
-        results = ResultSet(
-            result_db=None, init_conf=INIT_CONF, vary=("size", "batch")
-        )
+        results = ResultSet(result_db=None, template=TEMPLATE)
         results.add_run(INIT_CONF, 1.5)
 
         conf_id = results.find_conf_id(INIT_CONF)
@@ -73,7 +86,8 @@ class ResultSetTest(TestCase):
 
     def test_add_run2(self):
         results = ResultSet(
-            result_db=None, init_conf=INIT_CONF, vary=("size", "batch")
+            result_db=None,
+            template=TEMPLATE,
         )
         results.add_run(INIT_CONF, 1)
         results.add_run(
@@ -89,9 +103,7 @@ class ResultSetTest(TestCase):
         )
 
     def test_add_run3(self):
-        results = ResultSet(
-            result_db=None, init_conf=INIT_CONF, vary=("size", "batch")
-        )
+        results = ResultSet(result_db=None, template=TEMPLATE)
         results.add_run(INIT_CONF, 1)
         results.add_run(INIT_CONF, 1)
         results.add_run(
@@ -110,9 +122,7 @@ class ResultSetTest(TestCase):
         )
 
     def test_update_all_scores(self):
-        results = ResultSet(
-            result_db=None, init_conf=INIT_CONF, vary=("size", "batch")
-        )
+        results = ResultSet(result_db=None, template=TEMPLATE)
         results.add_run(INIT_CONF, 1, False)
         results.add_run(INIT_CONF, 1.5, False)
         results.add_run(INIT_CONF, 2, False)
@@ -126,23 +136,19 @@ class ResultSetTest(TestCase):
         self.assertEqual(set(map(tuple, cur)), {(256, 1.5), (512, 3)})
 
     def test_update_all_neighbors(self):
-        results = ResultSet(
-            result_db=None, init_conf=INIT_CONF, vary=("size", "batch")
-        )
+        results = ResultSet(result_db=None, template=TEMPLATE)
         results.add_run(INIT_CONF, 1, False)
         results.update_all_scores()
         results.update_all_neighbors()
 
         cur = results._db.execute(
-            "SELECT conf2_id FROM conf, neighbor " +
-            "WHERE spec = 'dense.4.relu' AND conf.id = conf1_id"
+            "SELECT conf2_id FROM conf, neighbor "
+            + "WHERE spec = 'dense.4.relu' AND conf.id = conf1_id"
         )
         self.assertIsNone(cur.fetchone())
 
     def test_update_all_cluster_scores(self):
-        results = ResultSet(
-            result_db=None, init_conf=INIT_CONF, vary=("size", "batch")
-        )
+        results = ResultSet(result_db=None, template=TEMPLATE)
         results.add_run(INIT_CONF, 1, False)
         results.add_run(INIT_CONF, 1, False)
         results.add_run(

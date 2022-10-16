@@ -1,3 +1,5 @@
+import re
+
 from collections import namedtuple
 import latency
 from spec import ModelSpec
@@ -32,6 +34,23 @@ LRS = [
 ]
 
 
+def neighbor_numbers(x):
+    """Produce neighbor numbers from a close to exponent but readable table."""
+    i = LRS.index(x)
+    if i > 0:
+        yield LRS[i - 1]
+    if i < len(LRS) - 1:
+        yield LRS[i + 1]
+
+
+def neighbor_power2(x):
+    """Produce neighbor powers of 2."""
+    if x > 1:
+        return (x // 2, x * 2)
+    else:
+        return (x * 2,)
+
+
 Configuration = namedtuple(
     "Configuration",
     [
@@ -50,52 +69,6 @@ Configuration = namedtuple(
 # Database fields required to create a Configuration instance using
 # conf_from_row
 CONF_FIELDS = "id, spec, lr, sample_len, batch, regularization, init_scale, t"
-
-
-Results = namedtuple(
-    "Results",
-    [
-        "score",
-        "cluster_score",
-        "num_runs",
-    ],
-)
-
-
-VARY = {
-    # Add an extra layer (implies "type")
-    "layer": 1,
-    # Change the type of a layer (dense, rec, gru, lstm), (implies "size")
-    "type": 2,
-    # Change the size of a layer (dense, rec, gru, lstm)
-    "size": 3,
-    # Introduce a suffix.2 layer or change the size of a suffix
-    # or attention layer
-    "suffix": 4,
-    # Change layer type between suffix and attn
-    "attn": 5,
-    # Change batch size
-    "batch": 6,
-    # Learning rate
-    "lr": 7,
-    # Regualarization
-    "reg": 8,
-    # init_scale
-    "init": 9,
-    # Sample length
-    "len": 10,
-    # Training time
-    "time": 11,
-}
-
-
-def neighbor_numbers(x):
-    """Produce neighbor numbers from a close to exponent but readable table."""
-    i = LRS.index(x)
-    if i > 0:
-        yield LRS[i - 1]
-    if i < len(LRS) - 1:
-        yield LRS[i + 1]
 
 
 def conf_from_record(record):
@@ -120,90 +93,6 @@ def conf_from_row(row):
     return Configuration(row[0], spec, *row[2:])
 
 
-_spec_neighbors = {}
-
-
-def all_conf_neighbors(conf):
-    """Generate all possible conf neighbors.
-
-    Returns: iterator over pairs (neighbor conf, type of neighbor)
-    """
-    if conf.spec in _spec_neighbors:
-        for neighbor_spec, vary in _spec_neighbors[conf.spec]:
-            yield conf._replace(spec=neighbor_spec), vary
-    else:
-        cache = []
-        _spec_neighbors[conf.spec] = cache
-        for neighbor_spec, vary in conf.spec.all_neighbors():
-            cache.append((neighbor_spec, VARY[vary]))
-            yield conf._replace(spec=neighbor_spec), VARY[vary]
-
-    yield conf._replace(batch=conf.batch * 2), VARY["batch"]
-    if conf.batch > 1:
-        yield conf._replace(batch=conf.batch // 2), VARY["batch"]
-
-    for x in neighbor_numbers(conf.lr):
-        yield conf._replace(lr=x), VARY["lr"]
-
-    if conf.sample_len >= 4:
-        yield conf._replace(sample_len=conf.sample_len // 2), VARY["len"]
-    yield conf._replace(sample_len=conf.sample_len * 2), VARY["len"]
-
-    for x in neighbor_numbers(conf.regularization):
-        yield conf._replace(regularization=x), VARY["reg"]
-
-    for x in neighbor_numbers(conf.init_scale):
-        yield conf._replace(init_scale=x), VARY["init"]
-
-    if conf.t > 1:
-        yield conf._replace(t=conf.t // 2), VARY["time"]
-    yield conf._replace(t=conf.t * 2), VARY["time"]
-
-
-def conf_neighbors(conf, vary):
-    """Generate all possible conf neighbors.
-
-    Returns: iterator over pairs (neighbor conf, type of neighbor)
-    """
-    if conf.spec in _spec_neighbors:
-        for neighbor_spec in _spec_neighbors[conf.spec]:
-            yield conf._replace(spec=neighbor_spec)
-    else:
-        cache = []
-        _spec_neighbors[conf.spec] = cache
-        for neighbor_spec, v in conf.spec.all_neighbors():
-            if v in vary:
-                cache.append(neighbor_spec)
-                yield conf._replace(spec=neighbor_spec)
-
-    if "batch" in vary:
-        yield conf._replace(batch=conf.batch * 2)
-        if conf.batch > 1:
-            yield conf._replace(batch=conf.batch // 2)
-
-    if "lr" in vary:
-        for x in neighbor_numbers(conf.lr):
-            yield conf._replace(lr=x)
-
-    if "len" in vary:
-        if conf.sample_len >= 4:
-            yield conf._replace(sample_len=conf.sample_len // 2)
-        yield conf._replace(sample_len=conf.sample_len * 2)
-
-    if "reg" in vary:
-        for x in neighbor_numbers(conf.regularization):
-            yield conf._replace(regularization=x)
-
-    if "init" in vary:
-        for x in neighbor_numbers(conf.init_scale):
-            yield conf._replace(init_scale=x)
-
-    if "time" in vary:
-        if conf.t > 1:
-            yield conf._replace(t=conf.t // 2)
-        yield conf._replace(t=conf.t * 2)
-
-
 def is_power2(x):
     return type(x) is int and x >= 1 and x & (x - 1) == 0
 
@@ -218,3 +107,95 @@ def conf_is_valid(conf):
         and conf.init_scale in LRS
         and is_power2(conf.t)
     )
+
+
+def match_bounds(bounds, value):
+    return bounds is None or bounds[0] <= value <= bounds[1]
+
+
+def make_bounds(v):
+    if v is None:
+        return None
+    try:
+        return tuple(v)
+    except TypeError:
+        return (v, v)
+
+
+class Template(object):
+    def __init__(
+        self,
+        spec_regex=None,
+        lr=None,
+        sample_len=None,
+        batch=None,
+        regularization=None,
+        init_scale=None,
+        t=None,
+    ):
+        self.regex = re.compile(spec_regex) if spec_regex is not None else None
+        self.lr = make_bounds(lr)
+        self.sample_len = make_bounds(sample_len)
+        self.batch = make_bounds(batch)
+        self.regularization = make_bounds(regularization)
+        self.init_scale = make_bounds(init_scale)
+        self.t = make_bounds(t)
+
+    def match_conf(self, conf):
+        return (
+            match_bounds(self.lr, conf.lr)
+            and match_bounds(self.sample_len, conf.sample_len)
+            and match_bounds(self.batch, conf.batch)
+            and match_bounds(self.regularization, conf.regularization)
+            and match_bounds(self.init_scale, conf.init_scale)
+            and match_bounds(self.t, conf.t)
+            and self.match_spec(conf.spec)
+        )
+
+    def match_spec(self, spec):
+        return self.regex is None or self.regex.fullmatch(str(spec))
+
+
+_spec_neighbors = {}
+
+
+def conf_neighbors(conf, template):
+    """Generate all possible conf neighbors.
+
+    Returns: iterator over pairs (neighbor conf, type of neighbor)
+    """
+    if conf.spec in _spec_neighbors:
+        for neighbor_spec in _spec_neighbors[conf.spec]:
+            yield conf._replace(id=None, spec=neighbor_spec)
+    else:
+        cache = []
+        _spec_neighbors[conf.spec] = cache
+        for neighbor_spec, _ in conf.spec.all_neighbors():
+            if template.match_spec(neighbor_spec):
+                cache.append(neighbor_spec)
+                yield conf._replace(spec=neighbor_spec)
+
+    for x in neighbor_numbers(conf.lr):
+        if match_bounds(template.lr, x):
+            yield conf._replace(id=None, lr=x)
+
+    for x in neighbor_power2(conf.sample_len):
+        if match_bounds(template.sample_len, x):
+            yield conf._replace(id=None, sample_len=x)
+
+    for x in neighbor_power2(conf.batch):
+        if match_bounds(template.batch, x):
+            yield conf._replace(id=None, batch=x)
+
+    for x in neighbor_numbers(conf.regularization):
+        if match_bounds(template.regularization, x):
+            yield conf._replace(id=None, regularization=x)
+
+    for x in neighbor_numbers(conf.init_scale):
+        if match_bounds(template.init_scale, x):
+            yield conf._replace(id=None, init_scale=x)
+
+    for x in neighbor_power2(conf.t):
+        if match_bounds(template.t, x):
+            yield conf._replace(id=None, t=x)
+

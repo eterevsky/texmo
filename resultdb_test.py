@@ -1,6 +1,6 @@
 from unittest import main, TestCase
 
-from configuration import Configuration
+from configuration import Configuration, Template
 from record import TrainingRecord
 from resultdb import ResultDB
 from spec import ModelSpec
@@ -75,19 +75,7 @@ class ResultDBTest(TestCase):
             create_record("dense.16.relu", 3.321, batch=64, reg=0.001)
         )
 
-        init_conf = Configuration(
-            None,
-            "dense.1.relu",
-            lr=0.2,
-            sample_len=128,
-            batch=256,
-            regularization=0.1,
-            init_scale=1.0,
-            t=1,
-        )
-        confs = self.db.get_confs_runs(
-            init_conf, vary=("layer", "size", "batch", "lr", "reg", "time")
-        )
+        confs = self.db.get_confs_runs(Template(sample_len=128, init_scale=1.0))
         all = set((conf._replace(id=None), loss) for conf, loss in confs)
 
         spec_tanh = ModelSpec.parse("dense.16.tanh")
@@ -115,9 +103,7 @@ class ResultDBTest(TestCase):
             },
         )
 
-        confs = self.db.get_confs_runs(
-            init_conf, vary=("layer", "size", "batch", "lr", "time")
-        )
+        confs = self.db.get_confs_runs(Template(sample_len=128, init_scale=1.0, regularization=0.1))
         subset1 = set((conf._replace(id=None), loss) for conf, loss in confs)
 
         self.assertEqual(
@@ -130,9 +116,7 @@ class ResultDBTest(TestCase):
             },
         )
 
-        confs = self.db.get_confs_runs(
-            init_conf, vary=("layer", "size", "lr", "reg", "time")
-        )
+        confs = self.db.get_confs_runs(Template(sample_len=128, init_scale=1.0, batch=256))
         subset2 = set((conf._replace(id=None), loss) for conf, loss in confs)
 
         self.assertEqual(

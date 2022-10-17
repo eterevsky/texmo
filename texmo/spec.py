@@ -144,10 +144,10 @@ class LayerSpec(object):
             for neighbor in self.neighbors_suffix_size():
                 yield neighbor, "ssize"
         if self.name == "suffix":
-            for neighbor in self.neighbors_suffix_type():
+            for neighbor in self.neighbors_suffix_type(input_shape):
                 yield neighbor, "attn"
         if self.name == "attn":
-            for neighbor in self.neighbors_suffix_type():
+            for neighbor in self.neighbors_suffix_type(input_shape):
                 yield neighbor, "suffix"
 
     def neighbors_size(self):
@@ -238,9 +238,9 @@ class SuffixSpec(LayerSpec):
     def neighbors_type(self, input_shape):
         return ()
 
-    def neighbors_suffix_type(self):
+    def neighbors_suffix_type(self, input_shape):
         if self._size >= 2:
-            yield AttnSpec(self._size, 4, self._size * 2)
+            yield AttnSpec(self._size, 4, max(total_size(input_shape), 8))
 
     def neighbors_suffix_size(self):
         if self._size >= 4:
@@ -315,8 +315,8 @@ class AttnSpec(LayerSpec):
             and self._size % self._heads == 0
         )
 
-    def neighbors_suffix_type(self):
-        if self._heads == 4 and self._size == 2 * self._length:
+    def neighbors_suffix_type(self, input_shape):
+        if self._heads == 4 and self._size == max(total_size(input_shape), 8):
             yield SuffixSpec(self._length)
 
     def neighbors_suffix_size(self):

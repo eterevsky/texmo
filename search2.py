@@ -63,13 +63,15 @@ def select_time(result_set, time_bounds):
         return best_t
 
 
-def select_max_weights(result_set, t):
+def select_max_weights(result_set, t, min_max_weights):
     with latency.timer("select_max_weights"):
         top_conf = result_set.top_conf(t)
         if top_conf is None:
-            return 1024
+            return min_max_weights
         maxw = top_conf.spec.weights()
-        l = random.uniform(10, math.log2(maxw) + 2)
+        if min_max_weights >= maxw + 2:
+            return min_max_weights
+        l = random.uniform(math.log2(min_max_weights), math.log2(maxw) + 2)
         return int(2**l)
 
 
@@ -163,13 +165,13 @@ def select_conf_neighbors(result_set, t, max_weights):
         return best_conf
 
 
-def select_conf(result_set, template, max_weights, init_conf):
+def select_conf(result_set, template, max_weights, init_conf, min_max_weights):
     with latency.timer("select_conf"):
         fixed_weights = max_weights is not None
 
         t = select_time(result_set, template.t)
         if not fixed_weights:
-            max_weights = select_max_weights(result_set, t)
+            max_weights = select_max_weights(result_set, t, min_max_weights)
 
         print_top_confs(result_set, t, max_weights)
 
@@ -260,6 +262,7 @@ def main(
     init_scale_default,
     time,
     max_weights,
+    min_max_weights,
 ):
     template = Template(
         spec_regex=spec_regex,
@@ -294,7 +297,7 @@ def main(
     print("Starting search")
 
     while True:
-        conf = select_conf(result_set, template, max_weights, init_conf)
+        conf = select_conf(result_set, template, max_weights, init_conf, min_max_weights)
         weights = conf.spec.weights()
         print(
             f"\nT = {conf.t}  {conf.spec} ({weights})  LR {conf.lr}  "
@@ -440,6 +443,12 @@ def parse_args():
         type=str,
         default="1-256",
         help="range of training time (default: 1-256)",
+    )
+    parser.add_argument(
+        "--min-max-weights",
+        type=int,
+        default=1024,
+        help="minimum max-weights value in search",
     )
     parser.add_argument(
         "--max-weights",

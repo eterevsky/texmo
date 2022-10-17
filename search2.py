@@ -25,40 +25,28 @@ def select_time(result_set, time_bounds):
         if lo == hi: return lo
 
         runs_count = result_set.runs_count_per_t()
-        total_runs = 0
-        t = lo
-        i = 0
-        while t <= hi and t in runs_count:
-            total_runs += runs_count.get(t, 0)
-            i += 1
-            t *= 2
+        runs = runs_count.get(lo, 0)
+        print(f"t = {lo:3}  complete = {runs:5}")
 
-        if total_runs == 0:
-            return 1
+        if runs == 0:
+            return lo
 
-        # total = x + x * re + x * re^2 + ... + x * re^(i-1) = x * (1 - re^i) / (1 - re)
+        min_ratio = RUNS_EXP
+        best_t = lo
+        prev_runs = runs
 
-        # Number of expected runs for t
-        t = lo
-        expected_runs = total_runs * (1 - RUNS_EXP) / (1 - RUNS_EXP**i)
-
-        best_t = 1
-        most_lacking_runs = -100
-
-        print(f"Total runs: {total_runs}")
-
-        while expected_runs >= 1 and t <= hi:
-            complete_runs = runs_count.get(t, 0)
-            gap = expected_runs - complete_runs
-            print(
-                f"t = {t}  complete = {complete_runs}  "
-                + f"expected = {expected_runs:.2f}  gap = {gap:.2f}"
-            )
-            if expected_runs - complete_runs > most_lacking_runs:
-                most_lacking_runs = expected_runs - complete_runs
+        t = 2 * lo
+        while t <= hi:
+            runs = runs_count.get(t, 0)
+            ratio = runs / prev_runs
+            print(f"t = {t:3}  complete = {runs:5}  ratio = {ratio:.2f}")
+            if runs == 0:
+                return t
+            if ratio < min_ratio:
+                min_ratio = ratio
                 best_t = t
+            prev_runs = runs
             t *= 2
-            expected_runs *= RUNS_EXP
 
         return best_t
 
@@ -100,7 +88,7 @@ def select_conf_prev_time(result_set, t, max_weights, fixed_weights):
             nconfs = result_set.confs_count(t2)
 
         if fixed_weights:
-            n_top_confs = nconfs // 8
+            n_top_confs = nconfs // 12
         else:
             actual_max_weights = max_weights
             for top_conf, _ in result_set.top_cluster_confs(
@@ -108,7 +96,7 @@ def select_conf_prev_time(result_set, t, max_weights, fixed_weights):
             ):
                 actual_max_weights = top_conf.spec.weights()
             n_top_confs = round(
-                nconfs / (8 * (math.log2(actual_max_weights) - 9))
+                nconfs / (12 * (math.log2(actual_max_weights) - 9))
             )
 
         print(

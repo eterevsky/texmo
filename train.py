@@ -7,11 +7,11 @@ import matplotlib.pyplot as plt
 import os
 import time
 
-from dataset import DataSet
+from texmo.dataset import DataSet
 import eval
-import layered
-from manager import Manager
-from record import TrainingRecord
+from texmo import layered
+from texmo.manager import Manager
+from texmo.record import TrainingRecord
 
 
 def train(

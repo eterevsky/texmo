@@ -1,15 +1,15 @@
 import argparse
 import math
 import random
-from resultdb import ResultDB
 
-from configuration import Configuration, Template
-from results import ResultSet
-from dataset import DataSet, build_dataset
-import latency
-from layered import LayeredModel2
-from manager import Manager
-from spec import ModelSpec
+from texmo.resultdb import ResultDB
+from texmo.configuration import Configuration, Template
+from texmo.results import ResultSet
+from texmo.dataset import DataSet, build_dataset
+from texmo import latency
+from texmo.layered import LayeredModel2
+from texmo.manager import Manager
+from texmo.spec import ModelSpec
 from train import train_and_eval
 
 

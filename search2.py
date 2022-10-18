@@ -1,17 +1,15 @@
 import argparse
-from concurrent.futures import ThreadPoolExecutor
-from itertools import islice
 import math
 import random
-from resultdb import ResultDB
 
-import results
-from results import ResultSet, Configuration
-from dataset import DataSet, build_dataset
-import latency
-from layered import LayeredModel2
-from manager import Manager
-from spec import ModelSpec
+from texmo.resultdb import ResultDB
+from texmo.configuration import Configuration, Template
+from texmo.results import ResultSet
+from texmo.dataset import DataSet, build_dataset
+from texmo import latency
+from texmo.layered import LayeredModel2
+from texmo.manager import Manager
+from texmo.spec import ModelSpec
 from train import train_and_eval
 
 
@@ -21,54 +19,47 @@ RUNS_EXP = 0.6
 INF = float("inf")
 
 
-def select_time(result_set, max_time):
+def select_time(result_set, time_bounds):
     with latency.timer("select_time"):
+        lo, hi = time_bounds
+        if lo == hi: return lo
+
         runs_count = result_set.runs_count_per_t()
-        total_runs = 0
-        t = 1
-        i = 0
-        while t <= max_time and t in runs_count:
-            total_runs += runs_count.get(t, 0)
-            i += 1
-            t *= 2
+        runs = runs_count.get(lo, 0)
+        print(f"t = {lo:3}  complete = {runs:5}")
 
-        if total_runs == 0:
-            return 1
+        if runs == 0:
+            return lo
 
-        # total = x + x * re + x * re^2 + ... + x * re^(i-1) = x * (1 - re^i) / (1 - re)
+        min_ratio = RUNS_EXP
+        best_t = lo
+        prev_runs = runs
 
-        # Number of expected runs for t
-        t = 1
-        expected_runs = total_runs * (1 - RUNS_EXP) / (1 - RUNS_EXP**i)
-
-        best_t = 1
-        most_lacking_runs = -100
-
-        print(f"Total runs: {total_runs}")
-
-        while expected_runs >= 1 and (max_time is None or t <= max_time):
-            complete_runs = runs_count.get(t, 0)
-            gap = expected_runs - complete_runs
-            print(
-                f"t = {t}  complete = {complete_runs}  "
-                + f"expected = {expected_runs:.2f}  gap = {gap:.2f}"
-            )
-            if expected_runs - complete_runs > most_lacking_runs:
-                most_lacking_runs = expected_runs - complete_runs
+        t = 2 * lo
+        while t <= hi:
+            runs = runs_count.get(t, 0)
+            ratio = runs / prev_runs
+            print(f"t = {t:3}  complete = {runs:5}  ratio = {ratio:.2f}")
+            if runs == 0:
+                return t
+            if ratio < min_ratio:
+                min_ratio = ratio
                 best_t = t
+            prev_runs = runs
             t *= 2
-            expected_runs *= RUNS_EXP
 
         return best_t
 
 
-def select_max_weights(result_set, t):
+def select_max_weights(result_set, t, min_max_weights):
     with latency.timer("select_max_weights"):
         top_conf = result_set.top_conf(t)
         if top_conf is None:
-            return 1024
+            return min_max_weights
         maxw = top_conf.spec.weights()
-        l = random.uniform(10, math.log2(maxw) + 2)
+        if min_max_weights >= maxw + 2:
+            return min_max_weights
+        l = random.uniform(math.log2(min_max_weights), math.log2(maxw) + 2)
         return int(2**l)
 
 
@@ -97,14 +88,16 @@ def select_conf_prev_time(result_set, t, max_weights, fixed_weights):
             nconfs = result_set.confs_count(t2)
 
         if fixed_weights:
-            n_top_confs = nconfs // 8
+            n_top_confs = nconfs // 12
         else:
             actual_max_weights = max_weights
             for top_conf, _ in result_set.top_cluster_confs(
                 t, max_weights, limit=1
             ):
                 actual_max_weights = top_conf.spec.weights()
-            n_top_confs = round(nconfs / (8 * (math.log2(actual_max_weights) - 9)))
+            n_top_confs = round(
+                nconfs / (12 * (math.log2(actual_max_weights) - 9))
+            )
 
         print(
             f"Checking {n_top_confs} out of {nconfs} confs for "
@@ -160,20 +153,20 @@ def select_conf_neighbors(result_set, t, max_weights):
         return best_conf
 
 
-def select_conf(result_set, max_time, t, max_weights, init_conf):
+def select_conf(result_set, template, max_weights, init_conf, min_max_weights):
     with latency.timer("select_conf"):
         fixed_weights = max_weights is not None
 
-        fixed_time = t is not None
-        if t is None:
-            t = select_time(result_set, max_time)
+        t = select_time(result_set, template.t)
         if not fixed_weights:
-            max_weights = select_max_weights(result_set, t)
+            max_weights = select_max_weights(result_set, t, min_max_weights)
 
         print_top_confs(result_set, t, max_weights)
 
-        if t > 1 and not fixed_time:
-            conf = select_conf_prev_time(result_set, t, max_weights, fixed_weights)
+        if t > template.t[0]:
+            conf = select_conf_prev_time(
+                result_set, t, max_weights, fixed_weights
+            )
             if conf is not None:
                 return conf
 
@@ -184,53 +177,115 @@ def select_conf(result_set, max_time, t, max_weights, init_conf):
         return init_conf._replace(t=t)
 
 
+def parse_interval_int(arg: str):
+    if arg is None: return None
+    comps = arg.split("-")
+    assert len(comps) in (1, 2)
+    if len(comps) == 1:
+        v = int(comps[0])
+        return (v, v)
+    else:
+        return int(comps[0]), int(comps[1])
+
+
+def parse_interval_float(arg: str):
+    if arg is None: return None
+    comps = arg.split("-")
+    assert len(comps) in (1, 2)
+    if len(comps) == 1:
+        v = float(comps[0])
+        return (v, v)
+    else:
+        return float(comps[0]), float(comps[1])
+
+
+def pick_default_value(default, range):
+    if default is not None:
+        assert range is None or range[0] <= default <= range[1]
+        return default
+    assert range is not None
+    return range[0]
+
+
+def warmup(dataset):
+        model = LayeredModel2.parse("suffix.4-rec.32.relu")
+        manager = Manager(
+            model,
+            0.2,
+            regularization=0.1,
+            init_scale=1.0,
+        )
+        manager.init(quiet=True)
+        record = train_and_eval(
+            manager,
+            steps=None,
+            time_limit=4,
+            train_set=dataset,
+            sample_len=128,
+            batch_size=64,
+            temp_steps=None,
+            temp_dir=None,
+            output_dir=None,
+            log=None,
+            quiet=True,
+        )
+
+
 def main(
     data,
-    db,
+    dataset,
     log,
-    max_time,
-    vary,
-    spec,
+    db,
+    spec_regex,
+    spec_default,
     batch,
+    batch_default,
     lr,
+    lr_default,
     sample_len,
+    sample_len_default,
     regularization,
+    regularization_default,
     init_scale,
+    init_scale_default,
     time,
     max_weights,
+    min_max_weights,
 ):
+    template = Template(
+        spec_regex=spec_regex,
+        batch=parse_interval_int(batch),
+        lr=parse_interval_float(lr),
+        sample_len=parse_interval_int(sample_len),
+        regularization=parse_interval_float(regularization),
+        init_scale=parse_interval_float(init_scale),
+        t=parse_interval_int(time),
+    )
     init_conf = Configuration(
         None,
-        ModelSpec.parse(spec),
-        lr=lr,
-        sample_len=sample_len,
-        batch=batch,
-        regularization=regularization,
-        init_scale=init_scale,
-        t=time,
+        ModelSpec.parse(spec_default),
+        lr=pick_default_value(lr_default, template.lr),
+        sample_len=pick_default_value(sample_len_default, template.sample_len),
+        batch=pick_default_value(batch_default, template.batch),
+        regularization=pick_default_value(regularization_default, template.regularization),
+        init_scale=pick_default_value(init_scale_default, template.init_scale),
+        t=template.t[0],
     )
-
     print("Initial configuration:", init_conf)
-    vary = vary.split(",")
-    print("Variables:", vary)
-    t = None if "time" in vary else time
 
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        dataset_future = executor.submit(build_dataset, data)
+    print(f"Creating ResultDB from {db}")
+    result_db = ResultDB(db)
 
-        print(f"Creating ResultDB from {db}")
-        result_db = ResultDB(db)
+    print(f"Creaing ResultSet.")
+    result_set = ResultSet(result_db, template)
 
-        print(f"Creaing ResultSet.")
-        result_set = ResultSet(result_db, init_conf, vary)
-
-        dataset = dataset_future.result()
+    print("Warming up training")
+    warmup(dataset)
 
     print("Starting search")
 
-    first = True
     while True:
-        conf = select_conf(result_set, max_time, t, max_weights, init_conf)
+        conf = select_conf(result_set, template, max_weights, init_conf, min_max_weights)
         weights = conf.spec.weights()
         print(
             f"\nT = {conf.t}  {conf.spec} ({weights})  LR {conf.lr}  "
@@ -265,15 +320,8 @@ def main(
             record.time_round = conf.t
             record.loss = INF
 
-        if first:
-            first = False
-        else:
-            if record.time_round is None:
-                print("Bad training time")
-                record.train_time_s = conf.t
-                record.loss = INF
-            with latency.timer("add_record"):
-                result_set.add_record(record)
+        with latency.timer("add_record"):
+            result_set.add_record(record)
         print()
 
 
@@ -288,72 +336,6 @@ def parse_args():
         help="directory with training data",
     )
     parser.add_argument(
-        "-v",
-        "--vary",
-        type=str,
-        default="layer,type,size,suffix,attn,batch,lr,time",
-        help="model parameters that can be varied with search. "
-        + "A comma-separated list of layer, type, size, suffix, attn, batch, len, lr, reg, init, time. "
-        + "(Default: layer,type,size,suffix,attn,batch,lr,time)",
-    )
-    parser.add_argument(
-        "-s", "--spec", type=str, default="dense.1.relu", help="initial spec"
-    )
-    parser.add_argument(
-        "-b",
-        "--batch",
-        type=int,
-        default=256,
-        help="batch size, has to be a power of two",
-    )
-    parser.add_argument(
-        "-l",
-        "--lr",
-        type=float,
-        default=0.5,
-        help="initial learning rate, has to be 0.1, 0.2 or 0.5 multiplied by a power of 10",
-    )
-    parser.add_argument(
-        "--sample-len",
-        type=int,
-        default=128,
-        help="length of the training samples, power of two",
-    )
-    parser.add_argument(
-        "-r",
-        "--regularization",
-        type=float,
-        default=0.1,
-        help="regularization coefficient, has to be 0.1, 0.2 or 0.5 multiplied by a power of 10",
-    )
-    parser.add_argument(
-        "-i",
-        "--init-scale",
-        type=float,
-        default=1.0,
-        help="coefficient for the initial weights, has to be 0.1, 0.2 or 0.5 multiplied by a power of 10",
-    )
-    parser.add_argument(
-        "-t",
-        "--time",
-        type=int,
-        default=None,
-        help="training time (power of 2)",
-    )
-    parser.add_argument(
-        "--max-time",
-        type=int,
-        default=None,
-        metavar="SECONDS",
-        help="maximum time limit for training",
-    )
-    parser.add_argument(
-        "--max-weights",
-        type=int,
-        default=None,
-        help="max weights. Will vary if left undefined",
-    )
-    parser.add_argument(
         "--log",
         default=None,
         metavar="LOG",
@@ -366,6 +348,103 @@ def parse_args():
         help="path to the SQLite database with the results",
     )
 
+    parser.add_argument(
+        "-s",
+        "--spec-regex",
+        type=str,
+        default=None,
+        help="regex convering the acceptable specs (default: unrestricted)",
+    )
+    parser.add_argument(
+        "--spec-default",
+        type=str,
+        default="dense.1.relu",
+        help="initial spec (default: dense.1.relu)",
+    )
+    parser.add_argument(
+        "-b",
+        "--batch",
+        type=str,
+        default=None,
+        help='range of acceptable batch sizes, for example "1-256" (default: unrestricted)',
+    )
+    parser.add_argument(
+        "--batch-default",
+        type=int,
+        default=64,
+        help="default batch size. Should agree with limits from -b and be a power of 2. (default: 64)",
+    )
+    parser.add_argument(
+        "-l",
+        "--lr",
+        type=str,
+        default=None,
+        help="range of acceptable learning rates (default: unrestricted)",
+    )
+    parser.add_argument(
+        "--lr-default",
+        type=int,
+        default=0.1,
+        help="default learning rate. (default: 0.1)",
+    )
+    parser.add_argument(
+        "--sample-len",
+        type=str,
+        default="128",
+        help="range of acceptable sample lens (default: 128-128)",
+    )
+    parser.add_argument(
+        "--sample-len-default",
+        type=int,
+        default=None,
+        help="default sample length (default: taken from --sample-len)",
+    )
+    parser.add_argument(
+        "-r",
+        "--regularization",
+        type=str,
+        default="0.1",
+        help="range of values for regularization coefficient (default: 0.1-0.1)",
+    )
+    parser.add_argument(
+        "--regularization-default",
+        type=float,
+        default=None,
+        help="default value for regularization coefficient (default: taken from -r)",
+    )
+    parser.add_argument(
+        "-i",
+        "--init-scale",
+        type=str,
+        default="1.0",
+        help="range of values of the coefficient for the initial weights (default: 0.1-0.1)",
+    )
+    parser.add_argument(
+        "--init-scale-default",
+        type=float,
+        default=None,
+        help="default value for init scaling coefficient (default: taken from --init-scale)",
+    )
+    parser.add_argument(
+        "-t",
+        "--time",
+        type=str,
+        default="1-256",
+        help="range of training time (default: 1-256)",
+    )
+    parser.add_argument(
+        "--min-max-weights",
+        type=int,
+        default=1024,
+        help="minimum max-weights value in search",
+    )
+    parser.add_argument(
+        "--max-weights",
+        type=int,
+        default=None,
+        help="max weights. Will vary if left undefined",
+    )
+
     return parser.parse_args()
 
 
@@ -373,7 +452,10 @@ if __name__ == "__main__":
     print("TexMo parameter search")
     args = parse_args()
     try:
-        main(**vars(args))
+        dataset = build_dataset(args.data)
+        main(dataset=dataset, **vars(args))
     except KeyboardInterrupt:
         print("\nInterrupted\n")
         latency.report()
+    finally:
+        dataset.join()

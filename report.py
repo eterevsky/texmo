@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import sqlite3
 
 from results import ResultSet
-from configuration import Configuration
+from configuration import Configuration, Template
 from spec import ModelSpec
 from resultdb import ResultDB
 
@@ -73,7 +73,7 @@ def print_top_confs(top_confs, run_count, filename):
         for log_weights in range(10, 25):
             weights = 2**log_weights
             first_weight_line = True
-            for log_t in range(0, 16):
+            for log_t in range(0, 9):
                 t = 2**log_t
                 if (weights, t) not in top_confs:
                     continue
@@ -116,10 +116,30 @@ def print_top_confs(top_confs, run_count, filename):
                 print(" |", file=out)
 
 
+def parse_interval_int(arg: str):
+    if arg is None: return None
+    comps = arg.split("-")
+    assert len(comps) in (1, 2)
+    if len(comps) == 1:
+        v = int(comps[0])
+        return (v, v)
+    else:
+        return int(comps[0]), int(comps[1])
+
+
+def parse_interval_float(arg: str):
+    if arg is None: return None
+    comps = arg.split("-")
+    assert len(comps) in (1, 2)
+    if len(comps) == 1:
+        v = float(comps[0])
+        return (v, v)
+    else:
+        return float(comps[0]), float(comps[1])
+
 def main(
     db,
-    vary,
-    spec,
+    spec_regex,
     batch,
     lr,
     sample_len,
@@ -127,27 +147,21 @@ def main(
     init_scale,
     time,
 ):
-    init_conf = Configuration(
-        None,
-        ModelSpec.parse(spec),
-        lr=lr,
-        sample_len=sample_len,
-        batch=batch,
-        regularization=regularization,
-        init_scale=init_scale,
-        t=time,
+    template = Template(
+        spec_regex=spec_regex,
+        batch=parse_interval_int(batch),
+        lr=parse_interval_float(lr),
+        sample_len=parse_interval_int(sample_len),
+        regularization=parse_interval_float(regularization),
+        init_scale=parse_interval_float(init_scale),
+        t=parse_interval_int(time),
     )
-
-    print("Initial configuration:", init_conf)
-    vary = vary.split(",")
-    print("Variables:", vary)
-    t = None if "time" in vary else time
 
     print(f"Creating ResultDB from {db}")
     result_db = ResultDB(db)
 
     print(f"Creaing ResultSet.")
-    result_set = ResultSet(result_db, init_conf, vary, populate_neighbors=False)
+    result_set = ResultSet(result_db, template, populate_neighbors=False)
 
     top_confs, run_count = get_top_confs(result_set)
     print("prepared data for report.txt")
@@ -169,62 +183,58 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "-v",
-        "--vary",
-        type=str,
-        default="layer,type,size,suffix,batch,lr,time",
-        help="model parameters that can be varied with search. "
-        + "A comma-separated list of struct, size, act, lr, batch, len.",
-    )
-    parser.add_argument(
-        "-s", "--spec", type=str, default="dense.1.relu", help="initial spec"
-    )
-    parser.add_argument(
-        "-b",
-        "--batch",
-        type=int,
-        default=256,
-        help="batch size, has to be a power of two",
-    )
-    parser.add_argument(
-        "-l",
-        "--lr",
-        type=float,
-        default=0.5,
-        help="initial learning rate, has to be 0.1, 0.2 or 0.5 multiplied by a power of 10",
-    )
-    parser.add_argument(
-        "--sample-len",
-        type=int,
-        default=128,
-        help="length of the training samples, power of two",
-    )
-    parser.add_argument(
-        "-r",
-        "--regularization",
-        type=float,
-        default=0.1,
-        help="regularization coefficient, has to be 0.1, 0.2 or 0.5 multiplied by a power of 10",
-    )
-    parser.add_argument(
-        "-i",
-        "--init-scale",
-        type=float,
-        default=1.0,
-        help="coefficient for the initial weights, has to be 0.1, 0.2 or 0.5 multiplied by a power of 10",
-    )
-    parser.add_argument(
-        "-t",
-        "--time",
-        type=int,
-        default=None,
-        help="training time (power of 2)",
-    )
-    parser.add_argument(
         "--db",
         type=str,
         required=True,
         help="path to the SQLite database with the results",
+    )
+    parser.add_argument(
+        "-s",
+        "--spec-regex",
+        type=str,
+        default=None,
+        help="regex convering the acceptable specs (default: unrestricted)",
+    )
+    parser.add_argument(
+        "-b",
+        "--batch",
+        type=str,
+        default=None,
+        help='range of acceptable batch sizes, for example "1-256" (default: unrestricted)',
+    )
+    parser.add_argument(
+        "-l",
+        "--lr",
+        type=str,
+        default=None,
+        help="range of acceptable learning rates (default: unrestricted)",
+    )
+    parser.add_argument(
+        "--sample-len",
+        type=str,
+        default="128",
+        help="range of acceptable sample lens (default: 128-128)",
+    )
+    parser.add_argument(
+        "-r",
+        "--regularization",
+        type=str,
+        default="0.1",
+        help="range of values for regularization coefficient (default: 0.1-0.1)",
+    )
+    parser.add_argument(
+        "-i",
+        "--init-scale",
+        type=str,
+        default="1.0",
+        help="range of values of the coefficient for the initial weights (default: 0.1-0.1)",
+    )
+    parser.add_argument(
+        "-t",
+        "--time",
+        type=str,
+        default="1-256",
+        help="range of training time (default: 1-256)",
     )
 
     return parser.parse_args()

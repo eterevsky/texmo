@@ -3,8 +3,8 @@ import json
 import sys
 import time
 
-from dataset import DataSet
-from manager import Manager
+from texmo.dataset import DataSet
+from texmo.manager import Manager
 
 def continue_prefix(manager, prefix, length):
     prefix = prefix.encode()

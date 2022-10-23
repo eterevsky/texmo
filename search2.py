@@ -4,11 +4,11 @@ import random
 
 from texmo.resultdb import ResultDB
 from texmo.configuration import Configuration, Template
-from texmo.results import ResultSet
-from texmo.dataset import DataSet, build_dataset
+from texmo.dataset import build_dataset
 from texmo import latency
 from texmo.layered import LayeredModel2
 from texmo.manager import Manager
+from texmo.search import Search
 from texmo.spec import ModelSpec
 from train import train_and_eval
 
@@ -22,7 +22,8 @@ INF = float("inf")
 def select_time(result_set, time_bounds):
     with latency.timer("select_time"):
         lo, hi = time_bounds
-        if lo == hi: return lo
+        if lo == hi:
+            return lo
 
         runs_count = result_set.runs_count_per_t()
         runs = runs_count.get(lo, 0)
@@ -178,7 +179,8 @@ def select_conf(result_set, template, max_weights, init_conf, min_max_weights):
 
 
 def parse_interval_int(arg: str):
-    if arg is None: return None
+    if arg is None:
+        return None
     comps = arg.split("-")
     assert len(comps) in (1, 2)
     if len(comps) == 1:
@@ -189,7 +191,8 @@ def parse_interval_int(arg: str):
 
 
 def parse_interval_float(arg: str):
-    if arg is None: return None
+    if arg is None:
+        return None
     comps = arg.split("-")
     assert len(comps) in (1, 2)
     if len(comps) == 1:
@@ -208,27 +211,27 @@ def pick_default_value(default, range):
 
 
 def warmup(dataset):
-        model = LayeredModel2.parse("suffix.4-rec.32.relu")
-        manager = Manager(
-            model,
-            0.2,
-            regularization=0.1,
-            init_scale=1.0,
-        )
-        manager.init(quiet=True)
-        record = train_and_eval(
-            manager,
-            steps=None,
-            time_limit=4,
-            train_set=dataset,
-            sample_len=128,
-            batch_size=64,
-            temp_steps=None,
-            temp_dir=None,
-            output_dir=None,
-            log=None,
-            quiet=True,
-        )
+    model = LayeredModel2.parse("suffix.4-rec.32.relu")
+    manager = Manager(
+        model,
+        0.2,
+        regularization=0.1,
+        init_scale=1.0,
+    )
+    manager.init(quiet=True)
+    train_and_eval(
+        manager,
+        steps=None,
+        time_limit=8,
+        train_set=dataset,
+        sample_len=128,
+        batch_size=64,
+        temp_steps=None,
+        temp_dir=None,
+        output_dir=None,
+        log=None,
+        quiet=True,
+    )
 
 
 def main(
@@ -267,7 +270,9 @@ def main(
         lr=pick_default_value(lr_default, template.lr),
         sample_len=pick_default_value(sample_len_default, template.sample_len),
         batch=pick_default_value(batch_default, template.batch),
-        regularization=pick_default_value(regularization_default, template.regularization),
+        regularization=pick_default_value(
+            regularization_default, template.regularization
+        ),
         init_scale=pick_default_value(init_scale_default, template.init_scale),
         t=template.t[0],
     )
@@ -275,17 +280,15 @@ def main(
 
     print(f"Creating ResultDB from {db}")
     result_db = ResultDB(db)
-
-    print(f"Creaing ResultSet.")
-    result_set = ResultSet(result_db, template)
+    search = Search(result_db, template, init_conf, max_weights, min_max_weights)
 
     print("Warming up training")
     warmup(dataset)
 
     print("Starting search")
-
     while True:
-        conf = select_conf(result_set, template, max_weights, init_conf, min_max_weights)
+        conf = search.select_conf()
+
         weights = conf.spec.weights()
         print(
             f"\nT = {conf.t}  {conf.spec} ({weights})  LR {conf.lr}  "
@@ -320,8 +323,7 @@ def main(
             record.time_round = conf.t
             record.loss = INF
 
-        with latency.timer("add_record"):
-            result_set.add_record(record)
+        search.add_record(record)
         print()
 
 
@@ -383,7 +385,7 @@ def parse_args():
     )
     parser.add_argument(
         "--lr-default",
-        type=int,
+        type=float,
         default=0.1,
         help="default learning rate. (default: 0.1)",
     )

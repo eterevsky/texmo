@@ -34,6 +34,16 @@ LRS = [
 ]
 
 
+def next_number(x):
+    i = LRS.index(x)
+    return LRS[i + 1]
+
+
+def prev_number(x):
+    i = LRS.index(x)
+    return LRS[i - 1]
+
+
 def neighbor_numbers(x):
     """Produce neighbor numbers from a close to exponent but readable table."""
     i = LRS.index(x)
@@ -159,7 +169,7 @@ class Template(object):
 _spec_neighbors = {}
 
 
-def conf_neighbors(conf, template):
+def conf_neighbors(conf: Configuration, template: Template):
     """Generate all possible conf neighbors.
 
     Returns: iterator over pairs (neighbor conf, type of neighbor)

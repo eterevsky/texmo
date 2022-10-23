@@ -12,13 +12,13 @@ CREATE TABLE conf (
 
     -- Cached self-score (median of run scores for this conf)
     score REAL,
-    -- Cached, should be invalidated for a new run with different `vary`.
-    cluster_score REAL
+    -- Predicted score from the Predictor model
+    pred_score REAL
 );
 
 CREATE INDEX conf_spec ON conf(spec);
 CREATE INDEX conf_score ON conf(score);
-CREATE INDEX conf_cluster_score ON conf(cluster_score);
+CREATE INDEX conf_pred_score ON conf(pred_score);
 
 CREATE TABLE neighbor (
     conf1_id INTEGER NOT NULL,

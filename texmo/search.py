@@ -57,7 +57,7 @@ class Search(object):
             affected_confs = list(affected_confs)
 
             if self._result_set.total_runs_count() >= max(
-                1, 0.01 * self._last_predictor_runs
+                1, 1.01 * self._last_predictor_runs
             ):
                 self.train_predictor()
 

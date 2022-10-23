@@ -9,6 +9,7 @@ from .configuration import (
     conf_from_row,
     conf_is_valid,
     INF,
+    Template,
 )
 from . import latency
 from .record import TrainingRecord
@@ -110,8 +111,11 @@ class ResultDB(object):
             with latency.timer("add_record-commit"):
                 self._db.commit()
 
-    def get_confs_runs(self, template):
+    def get_confs_runs(self, template=None):
         """Iterates through all confs that match template."""
+        if template is None:
+            template = Template()
+
         conditions = []
         bindings = []
 

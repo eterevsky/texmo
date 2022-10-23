@@ -67,8 +67,8 @@ class ResultSet(object):
             if populate_neighbors:
                 print("Populating neighbors")
                 self.update_all_neighbors()
-                print("Populating cluster scores")
-                self.update_all_cluster_scores()
+                # print("Populating cluster scores")
+                # self.update_all_cluster_scores()
 
     def find_conf_id(self, conf):
         cur = self._db.execute(
@@ -159,12 +159,19 @@ class ResultSet(object):
         self._db.execute("DELETE FROM neighbor")
         with latency.timer("update_all_neighbors.1"):
             cur = self._db.execute(
-                f"SELECT {CONF_FIELDS} FROM conf " + "WHERE score IS NOT NULL"
+                f"SELECT {CONF_FIELDS} FROM conf WHERE score IS NOT NULL"
             )
             i = 0
             for i, row in enumerate(cur):
                 conf = conf_from_row(row)
-                self._update_neighbors(conf)
+                conf_id = conf.id
+                conf = conf._replace(id=None)
+                for neighbor in conf_neighbors(conf, self._template):
+                    neighbor = self._find_or_add_conf(neighbor)
+                    self._db.execute(
+                        "INSERT INTO neighbor(conf1_id, conf2_id) VALUES (?, ?)",
+                        (conf_id, neighbor.id),
+                    )
             print(f"Updated neighbors for {i} confs")
 
         # with latency.timer("update_all_neighbors.2"):
@@ -293,15 +300,15 @@ class ResultSet(object):
             )
 
             self._update_neighbors(conf=conf)
-            self._update_cluster_score(conf.id)
+            # self._update_cluster_score(conf.id)
 
-            neighbors = self._db.execute(
-                "SELECT conf2_id FROM neighbor WHERE conf1_id = ?",
-                (conf.id,),
-            )
-            for (neighbor_id,) in neighbors:
-                self._update_neighbors(conf_id=neighbor_id)
-                self._update_cluster_score(neighbor_id)
+            # neighbors = self._db.execute(
+            #     "SELECT conf2_id FROM neighbor WHERE conf1_id = ?",
+            #     (conf.id,),
+            # )
+            # for (neighbor_id,) in neighbors:
+            #     self._update_neighbors(conf_id=neighbor_id)
+            #     self._update_cluster_score(neighbor_id)
 
     def add_run(self, conf: Configuration, loss: float, update_scores=True):
         conf = self._find_or_add_conf(conf)
@@ -325,6 +332,8 @@ class ResultSet(object):
         conf = self._find_or_add_conf(conf)
         self.add_run(conf, record.loss, update_scores)
 
+        return conf, record.loss
+
     def all_results_by_weights(self):
         cur = self._db.execute(
             "SELECT conf_id, COUNT(*) FROM run GROUP BY conf_id"
@@ -344,7 +353,12 @@ class ResultSet(object):
             results = Results(row[8], row[9], num_runs[row[0]])
             yield conf, results
 
-    def runs_count(self, t, max_weights=INF):
+    def total_runs_count(self):
+        with latency.timer("ResultSet.total_runs_count"):
+            cur = self._db.execute("SELECT COUNT(*) FROM run")
+            return cur.fetchone()[0]
+
+    def runs_count(self, t, max_weights=INF, min_weights=512):
         cur = self._db.execute(
             """
             SELECT COUNT(*)
@@ -352,8 +366,9 @@ class ResultSet(object):
             WHERE conf.id = run.conf_id
               AND conf.t = ?
               AND conf.weights <= ?
+              AND conf.weights >= ?
             """,
-            [t, max_weights],
+            (t, max_weights, min_weights),
         )
         return cur.fetchone()[0]
 
@@ -416,19 +431,19 @@ class ResultSet(object):
         )
         return conf_from_row(cur.fetchone())
 
-    def top_cluster_confs(self, t, max_weights, limit=None):
+    def top_pred_confs(self, t, max_weights, limit=None):
         limit_clause = f"LIMIT {limit}" if limit else ""
         cur = self._db.execute(
             f"""
             SELECT {CONF_FIELDS},
                    score,
-                   cluster_score,
+                   pred_score,
                    (SELECT COUNT(*) FROM run WHERE conf_id = conf.id)
             FROM conf
             WHERE t = ?
               AND weights <= ?
-              AND cluster_score IS NOT NULL
-            ORDER BY cluster_score
+              AND pred_score IS NOT NULL
+            ORDER BY pred_score
             """
             + limit_clause,
             (t, max_weights),
@@ -437,6 +452,28 @@ class ResultSet(object):
             conf = conf_from_row(row[:8])
             results = Results(*row[8:])
             yield conf, results
+
+    def all_confs(self):
+        cur = self._db.execute(f"SELECT {CONF_FIELDS} FROM conf")
+        for row in cur:
+            yield conf_from_row(row)
+
+    def update_pred_scores(self, confs, scores):
+        for conf, score in zip(confs, scores):
+            if conf.id is None:
+                conf = self._find_or_add_conf(conf)
+            self._db.execute(
+                "UPDATE conf SET pred_score = ? WHERE id = ?", (score, conf.id)
+            )
+
+    def all_conf_runs(self):
+        cur = self._db.execute(
+            f"SELECT {CONF_FIELDS}, loss FROM conf, run WHERE conf.id = run.conf_id"
+        )
+        for row in cur:
+            conf = conf_from_row(row[:8])
+            loss = row[8]
+            yield conf, loss
 
 
 def open_db(path):

@@ -57,7 +57,7 @@ def get_layer_stats(spec):
 
 
 # We don't care about precisely predicting loss above this value
-MAX_LOSS = 8
+MAX_LOSS = 16
 SCALE_LOSS = 1.2
 
 
@@ -66,10 +66,12 @@ def encode_loss(loss):
     return np.tanh(np.log2(loss) / SCALE_LOSS)
 
 
+ENC_MAX_LOSS = encode_loss(MAX_LOSS)
+
+
 def decode_loss(loss):
-    return np.where(
-        loss < 0.999999, np.exp2(SCALE_LOSS * np.arctanh(loss)), MAX_LOSS
-    )
+    loss = np.minimum(loss, ENC_MAX_LOSS)
+    return np.exp2(SCALE_LOSS * np.arctanh(loss))
 
 
 class FeatureProvider(object):
@@ -197,7 +199,7 @@ class HistPredictor(object):
             max_iter=10000,
             n_iter_no_change=20,
             learning_rate=0.1,
-            warm_start=True,
+            warm_start=False,
         )
 
     def _fit(self, xs, ys, sample_weight):
@@ -207,13 +209,11 @@ class HistPredictor(object):
         return self.pred.predict(xs)
 
     def fit(self, xs, ys, sample_weight):
-        l = len(xs)
-        with latency.timer(f"fit-{l}"):
+        with latency.timer(f"fit"):
             self._fit(xs, ys, sample_weight)
 
     def predict(self, xs):
-        l = len(xs)
-        with latency.timer(f"predict-{l}"):
+        with latency.timer(f"predict"):
             return self._predict(xs)
 
     def predict_one(self, x):
@@ -236,12 +236,20 @@ class HistPredictor(object):
 
 class Predictor(object):
     def __init__(self, conf_runs):
+        self._runs = {}
+        conf_runs = list(conf_runs)
+        for conf, loss in conf_runs:
+            conf = conf._replace(id=None)
+            if conf not in self._runs:
+                self._runs[conf] = []
+            self._runs[conf].append(loss)
         self._feature_provider = FeatureProvider(conf_runs)
         self._predictor = HistPredictor()
-        self._conf_runs = conf_runs
 
     def add_sample(self, conf, loss) -> List[Configuration]:
-        self._conf_runs.append((conf, loss))
+        if conf not in self._runs:
+            self._runs[conf] = []
+        self._runs[conf].append(loss)
         return self._feature_provider.add_sample(conf, loss)
 
     def train(self):
@@ -251,12 +259,13 @@ class Predictor(object):
             features = []
             sample_weight = []
             losses = []
-            for conf, loss in self._conf_runs:
-                features.append(
-                    self._feature_provider.get_sparse_features(conf)
-                )
-                sample_weight.append(conf.t)
-                losses.append(loss)
+            for conf, conf_losses in self._runs.items():
+                for loss in conf_losses:
+                    features.append(
+                        self._feature_provider.get_sparse_features(conf)
+                    )
+                    sample_weight.append(conf.t)
+                    losses.append(loss)
 
             features = np.array(features, dtype=np.float32)
             sample_weight = np.array(sample_weight, dtype=np.float32)
@@ -267,12 +276,14 @@ class Predictor(object):
             self._predictor.fit(features, losses, sample_weight)
 
             print("Evaluating")
-            loss = self.loss(features, losses, sample_weight)
+            loss = self._predictor.loss(features, losses, sample_weight)
 
             print("Loss on the training data:", loss)
 
     def predict(self, confs):
         with latency.timer("predictor.predict"):
+            if len(confs) > 10000:
+                print("Preparing features")
             features = []
             for conf in confs:
                 features.append(
@@ -280,4 +291,22 @@ class Predictor(object):
                 )
 
             features = np.array(features, dtype=np.float32)
-            return decode_loss(self._predictor(features))
+
+            if len(confs) > 10000:
+                print("Predicting")
+            pred_losses = decode_loss(self._predictor.predict(features))
+
+            if len(confs) > 10000:
+                print("Adjusting losses using existing runs")
+            losses = []
+            for conf, pred_loss in zip(confs, pred_losses):
+                conf = conf._replace(id=None)
+                runs = self._runs.get(conf)
+                if runs is not None:
+                    med_loss = median(runs)
+                    alt_loss = median(runs + [pred_loss])
+                    losses.append(min(pred_loss, alt_loss))
+                else:
+                    losses.append(pred_loss)
+
+            return losses

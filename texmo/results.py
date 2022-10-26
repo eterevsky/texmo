@@ -420,26 +420,27 @@ class ResultSet(object):
         return conf_from_row(cur.fetchone())
 
     def top_pred_confs(self, t, max_weights, limit=None):
-        limit_clause = f"LIMIT {limit}" if limit else ""
-        cur = self._db.execute(
-            f"""
-            SELECT {CONF_FIELDS},
-                   score,
-                   pred_score,
-                   (SELECT COUNT(*) FROM run WHERE conf_id = conf.id)
-            FROM conf
-            WHERE t = ?
-              AND weights <= ?
-              AND pred_score IS NOT NULL
-            ORDER BY pred_score
-            """
-            + limit_clause,
-            (t, max_weights),
-        )
-        for row in cur:
-            conf = conf_from_row(row[:8])
-            results = Results(*row[8:])
-            yield conf, results
+        with latency.timer("ResultSet.top_pred_confs"):
+            limit_clause = f"LIMIT {limit}" if limit else ""
+            cur = self._db.execute(
+                f"""
+                SELECT {CONF_FIELDS},
+                    score,
+                    pred_score,
+                    (SELECT COUNT(*) FROM run WHERE conf_id = conf.id)
+                FROM conf
+                WHERE t = ?
+                AND weights <= ?
+                AND pred_score IS NOT NULL
+                ORDER BY pred_score
+                """
+                + limit_clause,
+                (t, max_weights),
+            )
+            for row in cur:
+                conf = conf_from_row(row[:8])
+                results = Results(*row[8:])
+                yield conf, results
 
     def all_confs(self):
         cur = self._db.execute(f"SELECT {CONF_FIELDS} FROM conf")

@@ -305,7 +305,7 @@ class Predictor(object):
                 if runs is not None:
                     med_loss = median(runs)
                     alt_loss = median(runs + [pred_loss])
-                    losses.append(min(pred_loss, alt_loss))
+                    losses.append(min(med_loss, alt_loss))
                 else:
                     losses.append(pred_loss)
 

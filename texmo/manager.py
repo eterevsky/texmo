@@ -1,3 +1,5 @@
+import csv
+from datetime import datetime
 import jax
 import jax.numpy as jnp
 import json
@@ -5,9 +7,12 @@ import math
 import optax
 import os
 import random
+import time
 
+from .common import INF, NCHAR
+from . import latency
 from .layered import LayeredModel2
-from .model import NCHAR
+from .record import TrainingRecord
 
 
 LOG2 = 1 / math.log(2)
@@ -105,22 +110,12 @@ def deserialize_weights(spec):
     return weights
 
 
-class Manager(object):
-    @staticmethod
-    def from_spec(spec):
-        model_spec = spec["model"]
-        assert model_spec["name"] == "layered"
-        model = LayeredModel2.from_spec(model_spec)
-        weights = deserialize_weights(spec["weights"])
-        return Manager(
-            model,
-            spec["learning_rate"],
-            spec["regularization"],
-            spec["step"],
-            weights,
-            step_loss=spec.get("step_loss", None),
-        )
+class TrainingDiverged(Exception):
+    """Thrown if the loss turs inf or NaN."""
+    pass
 
+
+class Manager(object):
     def __init__(
         self,
         model,
@@ -147,6 +142,37 @@ class Manager(object):
             self.step_loss = []
         else:
             self.step_loss = step_loss
+
+    @staticmethod
+    def from_json_file(path, training=True):
+        with open(path) as f:
+            spec = json.load(f)
+        model_spec = spec["model"]
+        assert model_spec["name"] == "layered"
+        model = LayeredModel2.from_spec(model_spec)
+        weights = deserialize_weights(spec["weights"])
+        manager = Manager(
+            model,
+            learning_rate=spec["learning_rate"],
+            regularization=spec["regularization"],
+            step=spec["step"],
+            weights=weights,
+            step_loss=spec.get("step_loss", None),
+        )
+        manager.init(training=training)
+        return manager
+
+    @staticmethod
+    def from_spec(
+        model_spec: str,
+        learning_rate: float,
+        regularization: float,
+    ):
+        model = LayeredModel2.parse(model_spec)
+        manager = Manager(model, learning_rate, regularization)
+
+        manager.init()
+        return manager
 
     def init(self, quiet=False, training=True):
         if not quiet:
@@ -239,24 +265,150 @@ class Manager(object):
             out.append(c_selected)
         return bytes(out)
 
-    def train(self, xs):
+    def train_step(self, xs):
         xs = jax.nn.one_hot(xs, NCHAR)
         loss, grads = self._loss_grad(self.weights, xs)
 
-        # if loss > 100:
-        #     self.weights = self.prev_weights
-        #     print('Revert step')
-        # else:
         updates, self.opt_state = self.optimizer.update(
             grads, self.opt_state, self.weights
         )
         self.prev_weights = self.weights
         self.weights = optax.apply_updates(self.weights, updates)
 
+        loss = float(loss)
+
         self.step += 1
-        self.step_loss.append(float(loss))
+        self.step_loss.append(loss)
 
         return loss
+
+    def train(
+        self,
+        steps,
+        time_limit,
+        train_set,
+        sample_length,
+        batch_size,
+        temp_steps,
+        temp_dir,
+        quiet=False,
+    ):
+        start = time.time()
+        finish_time = start + time_limit if time_limit else INF
+        if steps is None:
+            steps = INF
+
+        last_report = 0
+
+        while time.time() < finish_time and self.step < steps:
+            batch = train_set.sample(length=sample_length, batch_size=batch_size)
+            loss = self.train_step(batch)
+            if math.isnan(loss) or math.isinf(loss):
+                raise TrainingDiverged
+            if not quiet and (
+                self.step < 10
+                or (self.step % 10 == 0 and time.time() - last_report > 3)
+                or time.time() - last_report > 10
+            ):
+                last_report = time.time()
+                recent_losses = self.step_loss[-10:]
+                avg_loss = sum(recent_losses) / len(recent_losses)
+                print(f"{self.step} {avg_loss:.4f} {self.step_loss[-1]:.4f}")
+
+            if (
+                temp_steps is not None
+                and temp_steps > 0
+                and self.step % temp_steps == 0
+                and temp_dir is not None
+            ):
+                self.save(temp_dir)
+
+        return time.time() - start
+
+    def eval(self, dataset) -> float:
+        """Evaluate a model on a random sample from the training data."""
+        with latency.timer("Manager.eval"):
+            batch = dataset.sample(1024, 1024)
+            return self.evaluate(batch)
+
+    def train_and_eval(
+        self,
+        steps,
+        time_limit,
+        train_set,
+        sample_len,
+        batch_size,
+        temp_steps,
+        temp_dir,
+        output_dir,
+        log,
+        quiet=False,
+    ) -> TrainingRecord:
+        try:
+            train_time = self.train(
+                steps,
+                time_limit,
+                train_set,
+                sample_len,
+                batch_size,
+                temp_steps,
+                temp_dir,
+                quiet=quiet,
+            )
+            if output_dir is not None:
+                self.save(output_dir)
+
+            batch_loss = self.eval(train_set)
+            if math.isnan(batch_loss):
+                batch_loss = INF
+        except TrainingDiverged:
+            print("Training stopped early.")
+            batch_loss = INF
+            train_time = time_limit  # This is a hack, but we need to record
+                                     # the loss with correct time.
+
+        report = TrainingRecord(
+            timestamp=datetime.now(),
+            model_spec=self.model.full_name,
+            weights=self.model.total_weights(self.weights),
+            steps=self.step,
+            train_time_s=train_time,
+            learning_rate=self.learning_rate,
+            regularization=self.regularization,
+            train_sample_len=sample_len,
+            train_batch=batch_size,
+            total_data=train_set.total_size,
+            loss=batch_loss,
+            test_sample_len=1024,
+            test_batch=1024,
+            test_poisoned=True,
+            init_scale=self.init_scale,
+        )
+
+        print(report)
+        if log is not None:
+            with open(log, "a", newline="") as logfile:
+                writer = csv.writer(logfile)
+                writer.writerow(report.csv_tuple())
+
+        if quiet:
+            # Clear all GPU memory
+            backend = jax.lib.xla_bridge.get_backend()
+            for buf in backend.live_buffers(): buf.delete()
+
+        return report
+
+    def continue_prefix(self, prefix, length):
+        prefix = prefix.encode()  # convert str to bytes (?)
+        out = self.sample(prefix, length)
+
+        try:
+            s = (prefix + out).decode("utf-8")
+        except UnicodeDecodeError:
+            s = repr(prefix + out)
+        print()
+        print(s)
+        print()
 
     def serialize_weights(self, weights):
         if weights is None:

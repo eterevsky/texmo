@@ -1,139 +1,9 @@
 import argparse
-import csv
-from datetime import datetime
-import jax
-import json
 import matplotlib.pyplot as plt
 import os
-import time
 
 from texmo.dataset import DataSet
-import eval
-from texmo import layered
 from texmo.manager import Manager
-from texmo.record import TrainingRecord
-
-
-def train(
-    manager,
-    steps,
-    time_limit,
-    train_set,
-    sample_length,
-    batch_size,
-    temp_steps,
-    temp_dir,
-    quiet=False,
-):
-    start = time.time()
-    finish_time = start + time_limit if time_limit else float("inf")
-    if steps is None:
-        steps = float("inf")
-
-    last_report = 0
-
-    while time.time() < finish_time and manager.step < steps:
-        batch = train_set.sample(length=sample_length, batch_size=batch_size)
-        manager.train(batch)
-        if not quiet and (
-            manager.step < 10
-            or (manager.step % 10 == 0 and time.time() - last_report > 3)
-            or time.time() - last_report > 10
-        ):
-            last_report = time.time()
-            recent_losses = manager.step_loss[-10:]
-            avg_loss = sum(recent_losses) / len(recent_losses)
-            print(f"{manager.step} {avg_loss:.4f} {manager.step_loss[-1]:.4f}")
-
-        if (
-            temp_steps is not None
-            and temp_steps > 0
-            and manager.step % temp_steps == 0
-            and temp_dir is not None
-        ):
-            manager.save(temp_dir)
-
-    return time.time() - start
-
-
-def train_and_eval(
-    manager,
-    steps,
-    time_limit,
-    train_set,
-    sample_len,
-    batch_size,
-    temp_steps,
-    temp_dir,
-    output_dir,
-    log,
-    quiet=False,
-) -> TrainingRecord:
-    train_time = train(
-        manager,
-        steps,
-        time_limit,
-        train_set,
-        sample_len,
-        batch_size,
-        temp_steps,
-        temp_dir,
-        quiet=quiet,
-    )
-    if output_dir is not None:
-        manager.save(output_dir)
-
-    batch_loss = eval.eval(train_set, manager)
-
-    report = TrainingRecord(
-        timestamp=datetime.now(),
-        model_spec=manager.model.full_name,
-        weights=manager.model.total_weights(manager.weights),
-        steps=manager.step,
-        train_time_s=train_time,
-        learning_rate=manager.learning_rate,
-        regularization=manager.regularization,
-        train_sample_len=sample_len,
-        train_batch=batch_size,
-        total_data=train_set.total_size,
-        loss=batch_loss,
-        test_sample_len=1024,
-        test_batch=1024,
-        test_poisoned=True,
-        init_scale=manager.init_scale,
-    )
-
-    print(report)
-    if log is not None:
-        with open(log, "a", newline="") as logfile:
-            writer = csv.writer(logfile)
-            writer.writerow(report.csv_tuple())
-
-    if quiet:
-        # Clear all GPU memory
-        backend = jax.lib.xla_bridge.get_backend()
-        for buf in backend.live_buffers(): buf.delete()
-
-    return report
-
-
-def create_manager(
-    model_spec: str,
-    model_path: str,
-    learning_rate: float,
-    regularization: float,
-):
-    if model_spec is not None:
-        model = layered.LayeredModel2.parse(model_spec)
-        manager = Manager(model, learning_rate, regularization)
-    else:
-        assert model_path is not None
-        with open(model_path) as f:
-            model_json = json.load(f)
-        manager = Manager.from_spec(model_json)
-
-    manager.init()
-    return manager
 
 
 def show_loss_graph(manager, output_dir):
@@ -165,12 +35,12 @@ def main(
     print(f"Training data: {data}")
     train_set = DataSet(data)
 
-    manager = create_manager(
-        model_spec, model_path, learning_rate, regularization
-    )
+    if model_path is not None:
+        manager = Manager.from_json_file(model_path)
+    else:
+        manager = Manager.from_spec(model_spec, learning_rate, regularization)
 
-    train_and_eval(
-        manager,
+    manager.train_and_eval(
         steps,
         time_limit,
         train_set,
@@ -183,7 +53,7 @@ def main(
     )
 
     if prefix is not None:
-        eval.continue_prefix(manager, prefix, 256)
+        manager.continue_prefix(prefix, 256)
 
     show_loss_graph(manager, output_dir)
 

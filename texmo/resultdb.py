@@ -108,7 +108,7 @@ class ResultDB(object):
             row,
         )
         if commit:
-            with latency.timer("add_record-commit"):
+            with latency.timer("ResultDB.add_record-commit"):
                 self._db.commit()
 
     def get_confs_runs(self, template=None):

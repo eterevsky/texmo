@@ -195,10 +195,10 @@ class HistPredictor(object):
         self.pred = HistGradientBoostingRegressor(
             loss="absolute_error",
             max_depth=None,
-            max_leaf_nodes=65,
-            max_iter=10000,
-            n_iter_no_change=20,
-            learning_rate=0.1,
+            max_leaf_nodes=63,
+            max_iter=1000,
+            n_iter_no_change=10,
+            # learning_rate=0.1,
             warm_start=False,
         )
 
@@ -209,11 +209,11 @@ class HistPredictor(object):
         return self.pred.predict(xs)
 
     def fit(self, xs, ys, sample_weight):
-        with latency.timer(f"fit"):
+        with latency.timer("HistPredictor.fit"):
             self._fit(xs, ys, sample_weight)
 
     def predict(self, xs):
-        with latency.timer(f"predict"):
+        with latency.timer("HistPredictor.predict"):
             return self._predict(xs)
 
     def predict_one(self, x):
@@ -253,7 +253,7 @@ class Predictor(object):
         return self._feature_provider.add_sample(conf, loss)
 
     def train(self):
-        with latency.timer("predictor.train"):
+        with latency.timer("Predictor.train"):
             print("Retraining loss prediction.")
 
             features = []
@@ -281,7 +281,7 @@ class Predictor(object):
             print("Loss on the training data:", loss)
 
     def predict(self, confs):
-        with latency.timer("predictor.predict"):
+        with latency.timer("Predictor.predict"):
             if len(confs) > 10000:
                 print("Preparing features")
             features = []

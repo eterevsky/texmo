@@ -1,11 +1,9 @@
 import argparse
 import math
 import matplotlib.pyplot as plt
-import sqlite3
 
 from texmo.results import ResultSet
 from texmo.configuration import Configuration, Template
-from texmo.spec import ModelSpec
 from texmo.resultdb import ResultDB
 
 def max_points(result_set, t, maxx):

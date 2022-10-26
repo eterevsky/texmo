@@ -66,7 +66,7 @@ class DataSet(object):
             self._data_queues[key] = Queue()
             self._request_queue.put(key)
 
-        with latency.timer(f"dataset-sample"):
+        with latency.timer(f"DataSet.sample"):
             self._request_queue.put(key)
             return self._data_queues[key].get()
 

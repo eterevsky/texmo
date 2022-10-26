@@ -16,7 +16,8 @@ from statistics import median
 from itertools import islice
 
 from texmo.predict import FeatureProvider, HistPredictor, encode_loss
-from texmo.model import NCHAR
+from texmo.common import NCHAR
+from texmo.predict import decode_loss, MAX_LOSS
 from texmo.resultdb import ResultDB
 from texmo import latency
 
@@ -218,7 +219,9 @@ if __name__ == "__main__":
         test_sample_weight,
         train_losses,
         test_losses,
-    ) = train_test_split(conf_features, sparse_features, sample_weight, losses, test_size=0.2)
+    ) = train_test_split(
+        conf_features, sparse_features, sample_weight, losses, test_size=0.2
+    )
 
     print(
         "Train data:",
@@ -238,7 +241,9 @@ if __name__ == "__main__":
     print()
 
     pred = HistPredictor()
-    pred.fit(train_sparse_features, train_losses, sample_weight=train_sample_weight)
+    pred.fit(
+        train_sparse_features, train_losses, sample_weight=train_sample_weight
+    )
     loss = pred.loss(test_sparse_features, test_losses, test_sample_weight)
     print("Loss:", loss)
 

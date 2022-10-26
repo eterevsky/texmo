@@ -47,7 +47,7 @@ class ResultSet(object):
 
         Only the confs that are matching `self._template` are being selected.
         """
-        with latency.timer("_import_from_result_db"):
+        with latency.timer("ResultSet._import_from_result_db"):
             print("Importing relevant configurations and results from ResultDB")
             n = 0
             for conf, loss in self._result_db.get_confs_runs(self._template):
@@ -124,7 +124,7 @@ class ResultSet(object):
         return conf._replace(id=id)
 
     def _update_neighbors(self, conf=None, conf_id=None):
-        with latency.timer("_update_neighbors"):
+        with latency.timer("ResultSet._update_neighbors"):
             if conf is not None:
                 if conf_id is not None:
                     assert conf.id == conf_id
@@ -156,8 +156,8 @@ class ResultSet(object):
                 )
 
     def update_all_neighbors(self):
-        self._db.execute("DELETE FROM neighbor")
-        with latency.timer("update_all_neighbors.1"):
+        with latency.timer("ResultSet.update_all_neighbors"):
+            self._db.execute("DELETE FROM neighbor")
             cur = self._db.execute(
                 f"SELECT {CONF_FIELDS} FROM conf WHERE score IS NOT NULL"
             )
@@ -174,22 +174,10 @@ class ResultSet(object):
                     )
             print(f"Updated neighbors for {i} confs")
 
-        # with latency.timer("update_all_neighbors.2"):
-        #     print("Populating neighbors of neighbors")
-        #     cur = self._db.execute(
-        #         f"SELECT {CONF_FIELDS} FROM conf, neighbor "
-        #         + "WHERE conf.id = neighbor.conf2_id "
-        #         + "GROUP BY conf2_id"
-        #     )
-        #     for i, row in enumerate(cur):
-        #         conf = conf_from_row(row)
-        #         self._update_neighbors(conf)
-        #     print(f"Updated neighbors for {i} confs")
-
-        self._db.commit()
+            self._db.commit()
 
     def update_all_scores(self):
-        with latency.timer("update_all_scores"):
+        with latency.timer("ResultSet.update_all_scores"):
             cur = self._db.execute("SELECT conf_id, loss FROM run")
             scores = {}
             for conf_id, loss in cur:
@@ -205,7 +193,7 @@ class ResultSet(object):
             self._db.commit()
 
     def _update_cluster_score(self, conf_id):
-        with latency.timer("update_cluster_score"):
+        with latency.timer("ResultSet._update_cluster_score"):
             self._update_neighbors(conf=None, conf_id=conf_id)
             cur_runs = self._db.execute(
                 "SELECT loss FROM run WHERE conf_id = ?", (conf_id,)
@@ -290,7 +278,7 @@ class ResultSet(object):
         self._db.commit()
 
     def _update_scores(self, conf):
-        with latency.timer("_update_scores"):
+        with latency.timer("ResultSet._update_scores"):
             cur = self._db.execute(
                 "SELECT loss FROM run WHERE conf_id = ?", (conf.id,)
             )
@@ -407,7 +395,7 @@ class ResultSet(object):
         return conf_from_row(cur.fetchone())
 
     def top_confs(self, t, max_weights):
-        with latency.timer("top_confs"):
+        with latency.timer("ResultSet.top_confs"):
             cur = self._db.execute(
                 f"SELECT {CONF_FIELDS} FROM conf "
                 + "WHERE t = ? AND weights <= ? AND score IS NOT NULL "
@@ -474,6 +462,15 @@ class ResultSet(object):
             conf = conf_from_row(row[:8])
             loss = row[8]
             yield conf, loss
+
+    def has_runs(self, conf):
+        id = self.find_conf_id(conf)
+        if id is None:
+            return False
+        cur = self._db.execute(
+            "SELECT 1 FROM run WHERE conf_id = ? LIMIT 1", (id,)
+        )
+        return cur.fetchone() is not None
 
 
 def open_db(path):

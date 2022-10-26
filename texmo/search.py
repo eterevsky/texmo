@@ -1,16 +1,16 @@
 import math
 import random
 
-from texmo import latency
-from texmo.configuration import conf_neighbors
-from texmo.results import ResultSet
-from texmo.predict import Predictor
+from . import latency
+from .common import INF
+from .configuration import conf_neighbors
+from .results import ResultSet
+from .predict import Predictor
 
 
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
 # with t = 2^k
 RUNS_EXP = 0.6
-INF = float("inf")
 
 
 class Search(object):
@@ -25,7 +25,7 @@ class Search(object):
 
         print(f"Creaing ResultSet.")
         self._result_set = ResultSet(db, template)
-        self._last_predictor_runs = 0
+        self._last_predictor_update = 0
 
         print("Creating Predictor")
         self._predictor = Predictor(self._result_set.all_conf_runs())
@@ -40,7 +40,7 @@ class Search(object):
         print("Populating predicted losses")
         self._result_set.update_pred_scores(all_confs, pred_losses)
         print("Pred scores ready")
-        self._last_predictor_runs = self._result_set.total_runs_count()
+        self._last_predictor_update = self._result_set.total_runs_count()
 
     def add_record(self, record):
         with latency.timer("Search.add_record"):
@@ -56,8 +56,12 @@ class Search(object):
 
             affected_confs = list(affected_confs)
 
-            if self._result_set.total_runs_count() >= max(
-                1, 0.01 * self._last_predictor_runs
+            total_runs = self._result_set.total_runs_count()
+            if (
+                total_runs > 0
+                and total_runs
+                > self._last_predictor_update
+                + math.sqrt(self._last_predictor_update)
             ):
                 self.train_predictor()
 
@@ -67,6 +71,7 @@ class Search(object):
     def _select_time(self):
         with latency.timer("Search._select_time"):
             lo, hi = self._template.t
+            assert 1 <= lo <= hi
             if lo == hi:
                 return lo
 
@@ -146,8 +151,16 @@ class Search(object):
 
             return best_conf
 
+    def _select_neighbor(self, t: int, max_weights: int):
+        """Select a neighbor of a top-scoring conf."""
+        with latency.timer("Search._select_neighbor"):
+            for conf in self._result_set.top_confs(t, max_weights):
+                for neighbor in conf_neighbors(conf, self._template):
+                    if not self._result_set.has_runs(neighbor):
+                        return neighbor
+
     def print_top_confs(self, t, max_weights):
-        with latency.timer("print_top_confs"):
+        with latency.timer("Search.print_top_confs"):
             print(f"\nT = {t}  W ≤ {max_weights}\n")
 
             for i, (conf, results) in enumerate(
@@ -164,7 +177,7 @@ class Search(object):
             print()
 
     def select_conf(self):
-        with latency.timer("select_conf"):
+        with latency.timer("Search.select_conf"):
             t = self._select_time()
             if self._max_weights is None:
                 max_weights = self._select_max_weights(t)
@@ -173,8 +186,11 @@ class Search(object):
 
             self.print_top_confs(t, max_weights)
 
-            conf = self._select_by_pred_score(t, max_weights)
-            if conf is not None:
-                return conf
+            if random.randrange(2):
+                conf = self._select_by_pred_score(t, max_weights)
+            else:
+                conf = self._select_neighbor(t, max_weights)
+            if conf is None:
+                conf = self._init_conf._replace(t=t)
 
-            return self._init_conf._replace(t=t)
+            return conf

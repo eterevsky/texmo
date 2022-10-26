@@ -2,8 +2,7 @@ import jax
 import jax.numpy as jnp
 import optax
 
-
-NCHAR = 256  # Considering characters with codes 0..NCHAR
+from .common import NCHAR
 
 
 class Model(object):
@@ -15,15 +14,15 @@ class Model(object):
     @property
     def full_name(self):
         """A name of the model, including its parameters (i.e. sizes of layers)"""
-        values = '-'.join(map(str, self._params.values()))
+        values = "-".join(map(str, self._params.values()))
         if values:
-            return f'{self.name}-{values}'
+            return f"{self.name}-{values}"
         else:
             return self.name
 
     def serialize(self):
         spec = self._params.copy()
-        spec['name'] = self.name
+        spec["name"] = self.name
         return spec
 
     def init_weights(self, key):
@@ -66,20 +65,27 @@ class Model(object):
         return state, out_softmax
 
     def loss(self, weights, x):
-        _, y = jax.lax.scan(lambda s, c: self.step(weights, s, c), self.init_state(weights), x)
+        _, y = jax.lax.scan(
+            lambda s, c: self.step(weights, s, c), self.init_state(weights), x
+        )
 
-        return optax.softmax_cross_entropy(y[:-1,:], x[1:,:])
+        return optax.softmax_cross_entropy(y[:-1, :], x[1:, :])
 
     def loss_batch(self, weights, xbatch):
         """Implements loss for a batch provided the model implements step_batch."""
         sbatch = jnp.zeros((xbatch.shape[0], self._hidden))
         xbatch = jnp.swapaxes(xbatch, 0, 1)  # (element, batch, one-hot)
-        _, ybatch = jax.lax.scan(lambda s, c: self._step_batch(weights, s, c), sbatch, xbatch)
-        entropy = optax.softmax_cross_entropy(ybatch[:-1,:,:], xbatch[1:,:,:])
+        _, ybatch = jax.lax.scan(
+            lambda s, c: self._step_batch(weights, s, c), sbatch, xbatch
+        )
+        entropy = optax.softmax_cross_entropy(
+            ybatch[:-1, :, :], xbatch[1:, :, :]
+        )
         return jnp.average(entropy)
 
     def weights_loss(self, weights):
-        if not weights: return 0
+        if not weights:
+            return 0
         s = 0
         for v in weights.values():
             s += jnp.average(v * v)
@@ -104,5 +110,3 @@ def init_suffix(suffix_len):
 
 def stack_suffix(prev_suffix, c):
     return jnp.vstack((prev_suffix, c.reshape((1, -1))))
-
-

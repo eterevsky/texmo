@@ -10,172 +10,12 @@ from texmo.layered import LayeredModel2
 from texmo.manager import Manager
 from texmo.search import Search
 from texmo.spec import ModelSpec
-from train import train_and_eval
+from texmo.common import INF
 
 
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
 # with t = 2^k
 RUNS_EXP = 0.6
-INF = float("inf")
-
-
-def select_time(result_set, time_bounds):
-    with latency.timer("select_time"):
-        lo, hi = time_bounds
-        if lo == hi:
-            return lo
-
-        runs_count = result_set.runs_count_per_t()
-        runs = runs_count.get(lo, 0)
-        print(f"t = {lo:3}  complete = {runs:5}")
-
-        if runs == 0:
-            return lo
-
-        min_ratio = RUNS_EXP
-        best_t = lo
-        prev_runs = runs
-
-        t = 2 * lo
-        while t <= hi:
-            runs = runs_count.get(t, 0)
-            ratio = runs / prev_runs
-            print(f"t = {t:3}  complete = {runs:5}  ratio = {ratio:.2f}")
-            if runs == 0:
-                return t
-            if ratio < min_ratio:
-                min_ratio = ratio
-                best_t = t
-            prev_runs = runs
-            t *= 2
-
-        return best_t
-
-
-def select_max_weights(result_set, t, min_max_weights):
-    with latency.timer("select_max_weights"):
-        top_conf = result_set.top_conf(t)
-        if top_conf is None:
-            return min_max_weights
-        maxw = top_conf.spec.weights()
-        if min_max_weights >= maxw + 2:
-            return min_max_weights
-        l = random.uniform(math.log2(min_max_weights), math.log2(maxw) + 2)
-        return int(2**l)
-
-
-def print_top_confs(result_set, t, max_weights):
-    with latency.timer("print_top_confs"):
-        print(f"\nT = {t}  W ≤ {max_weights}\n")
-
-        for i, (conf, results) in enumerate(
-            result_set.top_cluster_confs(t, max_weights, limit=20)
-        ):
-            if i >= 20:
-                break
-            score = f"{results.score:.4f}" if results.score else "      "
-            print(
-                f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  "
-                + f"B{conf.batch:4}  R{conf.regularization:4}  "
-                + f"I{conf.init_scale:4}  {score} ({results.num_runs})"
-            )
-        print()
-
-
-def select_conf_prev_time(result_set, t, max_weights, fixed_weights):
-    with latency.timer("select_conf_prev_time"):
-        t2 = t // 2
-        with latency.timer("select_conf_prev_time-confs_count"):
-            nconfs = result_set.confs_count(t2)
-
-        if fixed_weights:
-            n_top_confs = nconfs // 12
-        else:
-            actual_max_weights = max_weights
-            for top_conf, _ in result_set.top_cluster_confs(
-                t, max_weights, limit=1
-            ):
-                actual_max_weights = top_conf.spec.weights()
-            n_top_confs = round(
-                nconfs / (12 * (math.log2(actual_max_weights) - 9))
-            )
-
-        print(
-            f"Checking {n_top_confs} out of {nconfs} confs for "
-            + f"T = {t2}, W ≤ {max_weights}"
-        )
-        for i, conf in enumerate(result_set.top_confs(t2, max_weights)):
-            if i >= n_top_confs:
-                break
-            conf_t = conf._replace(id=None, t=t)
-            conf_t, score = result_set.find(conf_t)
-            if score is None:
-                print(f"Picked conf #{i}")
-                return conf_t
-        return None
-
-
-def select_conf_neighbors(result_set, t, max_weights):
-    with latency.timer("select_conf_neighbors"):
-        nruns = result_set.runs_count(t, max_weights)
-
-        actual_max_weights = max_weights
-        for top_conf, _ in result_set.top_cluster_confs(
-            t, max_weights, limit=1
-        ):
-            actual_max_weights = top_conf.spec.weights()
-
-        # Estimation for the number of runs with weights between
-        # max_weights // 2 and max_weights
-        effective_nruns = nruns / (math.log2(actual_max_weights) - 9)
-
-        # The number of runs per conf depends on the order by cluster score.
-        # The number of confs with >= n+1 runs is 1/3 of all the confs with
-        # >= n runs.
-        # This means that confs with the order <= 2 * enr / 3^k should have
-        # >= k runs.
-
-        best_conf = None
-        best_gap = -1
-
-        k = 16
-        for i, (conf, results) in enumerate(
-            result_set.top_cluster_confs(t, max_weights)
-        ):
-            while i + 1 > 2 * effective_nruns / 3 ** (k - 1) and k > 1:
-                k -= 1
-            gap = k - results.num_runs
-            if gap > best_gap:
-                best_conf = conf
-                best_gap = gap
-            if gap > k:
-                break
-
-        return best_conf
-
-
-def select_conf(result_set, template, max_weights, init_conf, min_max_weights):
-    with latency.timer("select_conf"):
-        fixed_weights = max_weights is not None
-
-        t = select_time(result_set, template.t)
-        if not fixed_weights:
-            max_weights = select_max_weights(result_set, t, min_max_weights)
-
-        print_top_confs(result_set, t, max_weights)
-
-        if t > template.t[0]:
-            conf = select_conf_prev_time(
-                result_set, t, max_weights, fixed_weights
-            )
-            if conf is not None:
-                return conf
-
-        conf = select_conf_neighbors(result_set, t, max_weights)
-        if conf is not None:
-            return conf
-
-        return init_conf._replace(t=t)
 
 
 def parse_interval_int(arg: str):
@@ -219,8 +59,7 @@ def warmup(dataset):
         init_scale=1.0,
     )
     manager.init(quiet=True)
-    train_and_eval(
-        manager,
+    manager.train_and_eval(
         steps=None,
         time_limit=8,
         train_set=dataset,
@@ -304,8 +143,7 @@ def main(
         )
         manager.init(quiet=True)
         assert model.total_weights(manager.weights) == weights
-        record = train_and_eval(
-            manager,
+        record = manager.train_and_eval(
             steps=None,
             time_limit=conf.t,
             train_set=dataset,
@@ -335,7 +173,7 @@ def parse_args():
         "--data",
         type=str,
         required=True,
-        help="directory with training data",
+        help="a file with training data",
     )
     parser.add_argument(
         "--log",

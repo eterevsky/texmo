@@ -214,7 +214,7 @@ class ResultSet(object):
                 "UPDATE conf SET score = ? WHERE id = ?", (score, conf.id)
             )
 
-            self._update_neighbors(conf=conf)
+            # self._update_neighbors(conf=conf)
             # self._update_cluster_score(conf.id)
 
             # neighbors = self._db.execute(
@@ -342,8 +342,8 @@ class ResultSet(object):
             + "ORDER BY score LIMIT 1",
             (t,),
         )
-        # return conf_from_row(cur.fetchone())
-        return self._confs[cur.fetchone()[0]]
+        row = cur.fetchone()
+        return None if row is None else self._confs[row[0]]
 
     def top_confs(self, t, max_weights):
         with latency.timer("ResultSet.top_confs"):

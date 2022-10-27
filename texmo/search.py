@@ -144,11 +144,18 @@ class Search(object):
             ):
                 if i >= 20:
                     break
-                score = f"{results.score:.4f}" if results.score else "      "
+                score = f"{results.score:.4f} ({results.num_runs})" if results.score else "          "
+                if results.num_runs < 10:
+                    score += " "
+                extras = ""
+                if conf.sample_len != 128:
+                    extras += f"  LEN {conf.sample_len}"
+                if conf.regularization != 0.1:
+                    extras += f"  R {conf.regularization}"
+                if conf.init_scale != 1.0:
+                    extras += f"  I {conf.init_scale}"
                 print(
-                    f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  "
-                    + f"B{conf.batch:4}  R{conf.regularization:4}  "
-                    + f"I{conf.init_scale:4}  {score} ({results.num_runs})"
+                    f"{score} LR{conf.lr:5}  B{conf.batch:4}  {conf.spec:60}{extras}"
                 )
             print()
 

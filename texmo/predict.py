@@ -7,6 +7,7 @@ from typing import List
 
 from texmo.configuration import (
     Configuration,
+    conf_is_valid,
     next_number,
     prev_number,
 )
@@ -131,6 +132,7 @@ class FeatureProvider(object):
 
     @staticmethod
     def _get_metaparameter_features(conf) -> list:
+        assert conf_is_valid(conf)
         return [math.log2(conf.lr), math.log2(conf.batch), math.log2(conf.t)]
 
     @staticmethod
@@ -152,14 +154,7 @@ class FeatureProvider(object):
         conf = conf._replace(id=None)
         neighbors = self._get_neighbors(conf)
         neighbor_scores = [self._scores.get(n) for n in neighbors]
-        if any(x is not None for x in neighbor_scores):
-            neighbor_median = median(
-                x for x in neighbor_scores if x is not None
-            )
-        else:
-            neighbor_median = None
-
-        return neighbor_scores + [neighbor_median]
+        return neighbor_scores
 
     def get_features(self, conf) -> np.array:
         return np.array(
@@ -187,7 +182,9 @@ class FeatureProvider(object):
         self._runs[conf].append(encode_loss(loss))
         self._scores[conf] = median(self._runs[conf])
 
-        return self._get_neighbors(conf)
+        for neighbor in self._get_neighbors(conf):
+            if conf_is_valid(neighbor):
+                yield neighbor
 
 
 class HistPredictor(object):

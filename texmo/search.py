@@ -116,40 +116,16 @@ class Search(object):
 
     def _select_by_pred_score(self, t: int, max_weights: int):
         with latency.timer("Search._select_by_pred_score"):
-            top_weights = max_weights
-            for top_conf, _ in self._result_set.top_pred_confs(
-                t, max_weights, limit=1
-            ):
-                top_weights = top_conf.spec.weights()
-
-            with latency.timer("Search._select_by_pred_score.runs_count"):
-                nruns = self._result_set.runs_count(
-                    t, max_weights, min_weights=top_weights // 2
-                )
-
-            # The number of runs per conf depends on the order by pred score.
-            # The number of confs with >= n+1 runs is 1/3 of all the confs with
-            # >= n runs.
-            # This means that confs with the order <= 2 * enr / 3^k should have
-            # >= k runs.
-
-            best_conf = None
-            best_gap = -1
-
-            k = 16
-            for i, (conf, results) in enumerate(
-                self._result_set.top_pred_confs(t, max_weights)
-            ):
-                while i + 1 > 2 * nruns / 3 ** (k - 1) and k > 1:
-                    k -= 1
-                gap = k - results.num_runs
-                if gap > best_gap:
-                    best_conf = conf
-                    best_gap = gap
-                if gap > k:
-                    break
-
-            return best_conf
+            confs = [(None, 0)]
+            for conf, results in self._result_set.top_pred_confs(t, max_weights):
+                i = len(confs)
+                confs.append((conf, results.num_runs))
+                expected_runs = 1
+                while i > 0:
+                    if confs[i][1] < expected_runs:
+                        return confs[i][0]
+                    i //= 3
+                    expected_runs += 1
 
     def _select_neighbor(self, t: int, max_weights: int):
         """Select a neighbor of a top-scoring conf."""
@@ -168,11 +144,18 @@ class Search(object):
             ):
                 if i >= 20:
                     break
-                score = f"{results.score:.4f}" if results.score else "      "
+                score = f"{results.score:.4f} ({results.num_runs})" if results.score else "          "
+                if results.num_runs < 10:
+                    score += " "
+                extras = ""
+                if conf.sample_len != 128:
+                    extras += f"  LEN {conf.sample_len}"
+                if conf.regularization != 0.1:
+                    extras += f"  R {conf.regularization}"
+                if conf.init_scale != 1.0:
+                    extras += f"  I {conf.init_scale}"
                 print(
-                    f"{conf.spec:60}  LR{conf.lr:6}  LEN{conf.sample_len:4}  "
-                    + f"B{conf.batch:4}  R{conf.regularization:4}  "
-                    + f"I{conf.init_scale:4}  {score} ({results.num_runs})"
+                    f"{score} LR{conf.lr:5}  B{conf.batch:4}  {conf.spec:60}{extras}"
                 )
             print()
 

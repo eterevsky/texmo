@@ -119,7 +119,9 @@ def main(
 
     print(f"Creating ResultDB from {db}")
     result_db = ResultDB(db)
-    search = Search(result_db, template, init_conf, max_weights, min_max_weights)
+    search = Search(
+        result_db, template, init_conf, max_weights, min_max_weights
+    )
 
     print("Warming up training")
     warmup(dataset)
@@ -129,11 +131,17 @@ def main(
         conf = search.select_conf()
 
         weights = conf.spec.weights()
+        extras = ""
+        if conf.sample_len != 128:
+            extras += f"  LEN {conf.sample_len}"
+        if conf.regularization != 0.1:
+            extras += f"  R {conf.regularization}"
+        if conf.init_scale != 1.0:
+            extras += f"  I {conf.init_scale}"
         print(
-            f"\nT = {conf.t}  {conf.spec} ({weights})  LR {conf.lr}  "
-            + f"LEN {conf.sample_len}  "
-            + f"B {conf.batch}  R {conf.regularization}  I {conf.init_scale}"
+            f"T = {conf.t:3}     LR{conf.lr:5}  B{conf.batch:4}  {conf.spec} ({weights}){extras}"
         )
+
         model = LayeredModel2.parse(str(conf.spec))
         manager = Manager(
             model,

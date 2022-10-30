@@ -42,10 +42,12 @@ class ResultSet(object):
             self._db.executescript(schema.read())
 
         if self._result_db is not None:
-            self._import_from_result_db(populate_neighbors)
-        self.update_all_neighbors()
+            self._import_from_result_db()
+        if populate_neighbors:
+            print("Generating all neighbors")
+            self.update_all_neighbors()
 
-    def _import_from_result_db(self, populate_neighbors):
+    def _import_from_result_db(self):
         """Import from the persistent DB all matching confs.
 
         Only the confs that are matching `self._template` are being selected.
@@ -63,18 +65,10 @@ class ResultSet(object):
                     conf_runs = []
                     self._runs[conf.id] = conf_runs
                 conf_runs.append(loss)
-                # self._db.execute(
-                #     "INSERT INTO run(conf_id, loss) VALUES(?, ?)",
-                #     (conf.id, loss),
-                # )
-
             print(f"Imported {n} runs")
 
             print("Populating scores from run results")
             self.update_all_scores()
-            # if populate_neighbors:
-            #     print("Populating neighbors")
-            #     self.update_all_neighbors()
 
     def find_conf_id(self, conf):
         cur = self._db.execute(
@@ -139,7 +133,6 @@ class ResultSet(object):
 
     def update_all_neighbors(self):
         with latency.timer("ResultSet.update_all_neighbors"):
-            self._db.execute("DELETE FROM neighbor")
             cur = self._db.execute(
                 "SELECT id FROM conf WHERE score IS NOT NULL"
             )
@@ -147,13 +140,8 @@ class ResultSet(object):
             for i, row in enumerate(cur):
                 conf_id = row[0]
                 conf = self._confs[conf_id]
-                conf = conf._replace(id=None)
                 for neighbor in conf_neighbors(conf, self._template):
-                    neighbor = self._find_or_add_conf(neighbor)
-                    # self._db.execute(
-                    #     "INSERT INTO neighbor(conf1_id, conf2_id) VALUES (?, ?)",
-                    #     (conf_id, neighbor.id),
-                    # )
+                    self._find_or_add_conf(neighbor)
             print(f"Generated neighbors for {i} confs")
 
             self._db.commit()
@@ -165,18 +153,6 @@ class ResultSet(object):
                 self._db.execute(
                     "UPDATE conf SET score = ? WHERE id = ?", [score, conf_id]
                 )
-            # cur = self._db.execute("SELECT conf_id, loss FROM run")
-            # scores = {}
-            # for conf_id, loss in cur:
-            #     if conf_id not in scores:
-            #         scores[conf_id] = []
-            #     scores[conf_id].append(loss)
-
-            # for conf_id, conf_scores in scores.items():
-            #     score = median(conf_scores)
-            #     self._db.execute(
-            #         "UPDATE conf SET score = ? WHERE id = ?", [score, conf_id]
-            #     )
             self._db.commit()
 
     def _update_scores(self, conf):

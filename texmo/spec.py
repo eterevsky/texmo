@@ -379,7 +379,7 @@ class GruSpec(LayerSpec):
         )
     
     def is_valid(self):
-        super().is_valid() and self._activation == "tanh"
+        return super().is_valid() and self._activation == "tanh"
 
 
 @layer_spec
@@ -627,50 +627,7 @@ class ModelSpec(object):
         return neighbor
 
 
-def is_reachable_spec(init_spec: ModelSpec, spec: ModelSpec, vary):
-    if "suffix" not in vary:
-        for layer in spec._layers:
-            if layer.name == "suffix":
-                return False
-
-    if "attn" not in vary:
-        for layer in spec._layers:
-            if layer.name == "attn":
-                return False
-
-    init_non_suffix_layers = []
-    for layer in init_spec._layers:
-        if layer.name not in ("suffix", "attention", "attn"):
-            init_non_suffix_layers.append(layer)
-
-    spec_non_suffix_layers = []
-    for layer in spec._layers:
-        if layer.name not in ("suffix", "attention", "attn"):
-            spec_non_suffix_layers.append(layer)
-
-    if "layer" not in vary and len(init_non_suffix_layers) != len(
-        spec_non_suffix_layers
-    ):
-        return False
-
-    if "type" not in vary:
-        for l1, l2 in zip(init_non_suffix_layers, spec_non_suffix_layers):
-            if (
-                l1.name != l2.name
-                or l1.has_activation
-                and l1._activation != l2._activation
-            ):
-                return False
-
-    if "size" not in vary:
-        for l1, l2 in zip(init_non_suffix_layers, spec_non_suffix_layers):
-            if l1._size != l2._size:
-                return False
-
-    return True
-
-
 if __name__ == "__main__":
-    spec = ModelSpec.parse("rec.8.tanh-suffix.32-dense.256.tanh")
+    spec = ModelSpec.parse("rec.8.tanh-suffix.32-dense.256.tanh-gru.32.tanh")
     for neighbor, vary in spec.all_neighbors():
         print(str(neighbor), vary)

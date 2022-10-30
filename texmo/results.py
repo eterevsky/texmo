@@ -18,7 +18,7 @@ from .configuration import (
 )
 from . import latency
 from .record import TrainingRecord
-from .spec import ModelSpec, ObsoleteSpec, is_reachable_spec
+from .spec import ModelSpec, ObsoleteSpec
 
 
 Results = namedtuple(
@@ -42,9 +42,12 @@ class ResultSet(object):
             self._db.executescript(schema.read())
 
         if self._result_db is not None:
-            self._import_from_result_db(populate_neighbors)
+            self._import_from_result_db()
+        if populate_neighbors:
+            print("Generating all neighbors")
+            self.update_all_neighbors()
 
-    def _import_from_result_db(self, populate_neighbors):
+    def _import_from_result_db(self):
         """Import from the persistent DB all matching confs.
 
         Only the confs that are matching `self._template` are being selected.
@@ -62,18 +65,10 @@ class ResultSet(object):
                     conf_runs = []
                     self._runs[conf.id] = conf_runs
                 conf_runs.append(loss)
-                # self._db.execute(
-                #     "INSERT INTO run(conf_id, loss) VALUES(?, ?)",
-                #     (conf.id, loss),
-                # )
-
             print(f"Imported {n} runs")
 
             print("Populating scores from run results")
             self.update_all_scores()
-            # if populate_neighbors:
-            #     print("Populating neighbors")
-            #     self.update_all_neighbors()
 
     def find_conf_id(self, conf):
         cur = self._db.execute(
@@ -130,57 +125,26 @@ class ResultSet(object):
         self._confs[id] = conf
         return conf
 
-    # def _update_neighbors(self, conf=None, conf_id=None):
-    #     with latency.timer("ResultSet._update_neighbors"):
-    #         if conf is not None:
-    #             if conf_id is not None:
-    #                 assert conf.id == conf_id
-    #             else:
-    #                 conf_id = conf.id
+    def _update_neighbors(self, conf=None):
+        with latency.timer("ResultSet._update_neighbors"):
+            for neighbor in conf_neighbors(conf, self._template):
+                neighbor = neighbor._replace(id=None)
+                neighbor = self._find_or_add_conf(neighbor)
 
-    #         cur = self._db.execute(
-    #             f"""
-    #             SELECT 1 FROM neighbor
-    #             WHERE conf1_id = :id
-    #             LIMIT 1
-    #             """,
-    #             {"id": conf_id},
-    #         )
-    #         if cur.fetchone():
-    #             return
+    def update_all_neighbors(self):
+        with latency.timer("ResultSet.update_all_neighbors"):
+            cur = self._db.execute(
+                "SELECT id FROM conf WHERE score IS NOT NULL"
+            )
+            i = 0
+            for i, row in enumerate(cur):
+                conf_id = row[0]
+                conf = self._confs[conf_id]
+                for neighbor in conf_neighbors(conf, self._template):
+                    self._find_or_add_conf(neighbor)
+            print(f"Generated neighbors for {i} confs")
 
-    #         if conf is None:
-    #             conf = self._confs.get(conf_id)
-    #             assert conf is not None
-
-    #         for neighbor in conf_neighbors(conf, self._template):
-    #             neighbor = neighbor._replace(id=None)
-    #             neighbor = self._find_or_add_conf(neighbor)
-    #             self._db.execute(
-    #                 "INSERT INTO neighbor(conf1_id, conf2_id) VALUES (?, ?)",
-    #                 (conf.id, neighbor.id),
-    #             )
-
-    # def update_all_neighbors(self):
-    #     with latency.timer("ResultSet.update_all_neighbors"):
-    #         self._db.execute("DELETE FROM neighbor")
-    #         cur = self._db.execute(
-    #             "SELECT id FROM conf WHERE score IS NOT NULL"
-    #         )
-    #         i = 0
-    #         for i, row in enumerate(cur):
-    #             conf_id = row[0]
-    #             conf = self._confs[conf_id]
-    #             conf = conf._replace(id=None)
-    #             for neighbor in conf_neighbors(conf, self._template):
-    #                 neighbor = self._find_or_add_conf(neighbor)
-    #                 self._db.execute(
-    #                     "INSERT INTO neighbor(conf1_id, conf2_id) VALUES (?, ?)",
-    #                     (conf_id, neighbor.id),
-    #                 )
-    #         print(f"Updated neighbors for {i} confs")
-
-    #         self._db.commit()
+            self._db.commit()
 
     def update_all_scores(self):
         with latency.timer("ResultSet.update_all_scores"):
@@ -189,18 +153,6 @@ class ResultSet(object):
                 self._db.execute(
                     "UPDATE conf SET score = ? WHERE id = ?", [score, conf_id]
                 )
-            # cur = self._db.execute("SELECT conf_id, loss FROM run")
-            # scores = {}
-            # for conf_id, loss in cur:
-            #     if conf_id not in scores:
-            #         scores[conf_id] = []
-            #     scores[conf_id].append(loss)
-
-            # for conf_id, conf_scores in scores.items():
-            #     score = median(conf_scores)
-            #     self._db.execute(
-            #         "UPDATE conf SET score = ? WHERE id = ?", [score, conf_id]
-            #     )
             self._db.commit()
 
     def _update_scores(self, conf):
@@ -241,6 +193,7 @@ class ResultSet(object):
 
         if update_scores:
             self._update_scores(conf)
+            self._update_neighbors(conf)
 
     def add_record(self, record, update_scores=True):
         conf = conf_from_record(record)

@@ -174,9 +174,10 @@ def conf_neighbors(conf: Configuration, template: Template):
 
     Returns: iterator over pairs (neighbor conf, type of neighbor)
     """
+    conf = conf._replace(id=None)
     if conf.spec in _spec_neighbors:
         for neighbor_spec in _spec_neighbors[conf.spec]:
-            yield conf._replace(id=None, spec=neighbor_spec)
+            yield conf._replace(spec=neighbor_spec)
     else:
         cache = []
         _spec_neighbors[conf.spec] = cache
@@ -187,25 +188,25 @@ def conf_neighbors(conf: Configuration, template: Template):
 
     for x in neighbor_numbers(conf.lr):
         if match_bounds(template.lr, x):
-            yield conf._replace(id=None, lr=x)
+            yield conf._replace(lr=x)
 
     for x in neighbor_power2(conf.sample_len):
         if match_bounds(template.sample_len, x):
-            yield conf._replace(id=None, sample_len=x)
+            yield conf._replace(sample_len=x)
 
     for x in neighbor_power2(conf.batch):
         if match_bounds(template.batch, x):
-            yield conf._replace(id=None, batch=x)
+            yield conf._replace(batch=x)
 
     for x in neighbor_numbers(conf.regularization):
         if match_bounds(template.regularization, x):
-            yield conf._replace(id=None, regularization=x)
+            yield conf._replace(regularization=x)
 
     for x in neighbor_numbers(conf.init_scale):
         if match_bounds(template.init_scale, x):
-            yield conf._replace(id=None, init_scale=x)
+            yield conf._replace(init_scale=x)
 
     for x in neighbor_power2(conf.t):
         if match_bounds(template.t, x):
-            yield conf._replace(id=None, t=x)
+            yield conf._replace(t=x)
 

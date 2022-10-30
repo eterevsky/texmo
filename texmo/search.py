@@ -155,7 +155,7 @@ class Search(object):
                 if conf.init_scale != 1.0:
                     extras += f"  I {conf.init_scale}"
                 print(
-                    f"{score} LR{conf.lr:5}  B{conf.batch:4}  {conf.spec:60}{extras}"
+                    f"{score} LR{conf.lr:5}  B{conf.batch:4}  {conf.spec}{extras}"
                 )
             print()
 

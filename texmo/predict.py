@@ -36,12 +36,12 @@ def get_layer_stats(spec):
     for layer in spec._layers:
         name = layer.name
         input = total_size(shape)
-        if name in ("gru", "mgru"):
+        if name in ("gru", "mgru", "rec"):
             state = layer._size
         elif name == "lstm":
             state = 2 * layer._size
         else:
-            state = 0
+            state = None
         weights = layer.weights(shape)
         shape = layer.output_shape(shape)
         output = total_size(shape)
@@ -49,8 +49,12 @@ def get_layer_stats(spec):
             suffix = layer._size
         elif name == "attn":
             suffix = layer._length
-        else:
+        elif name == "dense":
             suffix = 1
+        else:
+            suffix = None
+        if name in ("dense", "rec"):
+            name += "." + layer._activation
 
         layers.append(LayerStat(name, input, state, output, weights, suffix))
 
@@ -58,7 +62,7 @@ def get_layer_stats(spec):
 
 
 # We don't care about precisely predicting loss above this value
-MAX_LOSS = 16
+MAX_LOSS = 10
 SCALE_LOSS = 1.2
 
 
@@ -102,29 +106,53 @@ class FeatureProvider(object):
         return count
 
     def _get_spec_features(self, spec: ModelSpec) -> list:
+        # return []
         res = self._spec_features_cache.get(spec)
         if res is not None:
             return res
 
         features = []
-        features.append(math.log2(spec.weights()))
-        features.append(len(spec._layers))
-        features.append(self._count_layer(spec, "dense"))
-        features.append(self._count_layer(spec, "rec"))
-        features.append(self._count_layer(spec, "gru"))
-        features.append(self._count_layer(spec, "mgru"))
-        features.append(self._count_layer(spec, "lstm"))
-        features.append(self._count_layer(spec, "suffix"))
-        features.append(self._count_layer(spec, "attn"))
+        # features.append(math.log2(spec.weights()))
+        # features.append(self._count_layer(spec, "dense"))
+        # features.append(self._count_layer(spec, "rec"))
+        # features.append(self._count_layer(spec, "gru"))
+        # features.append(self._count_layer(spec, "mgru"))
+        # features.append(self._count_layer(spec, "lstm"))
+        # features.append(self._count_layer(spec, "suffix"))
+        # features.append(self._count_layer(spec, "attn"))
 
         stats = get_layer_stats(spec)
 
-        features.append(math.log2(stats[0].input))
-        features.append(math.log2(stats[-1].output))
-        features.append(math.log2(min(s.input for s in stats)))
-        features.append(math.log2(min(s.input + s.state for s in stats)))
-        features.append(math.log2(1 + sum(s.state for s in stats)))
-        features.append(math.log2(1 + sum(s.suffix - 1 for s in stats)))
+        # features.append(math.log2(stats[0].input))
+        # features.append(math.log2(stats[-1].output))
+        # features.append(math.log2(min(s.input for s in stats)))
+        # features.append(math.log2(min(s.input + s.state for s in stats)))
+        # features.append(math.log2(1 + sum(s.state for s in stats)))
+        # features.append(math.log2(1 + sum(s.suffix - 1 for s in stats)))
+
+        layer_type_enc = {
+            "dense.tanh": 1,
+            "dense.relu": 2,
+            "rec.tanh": 3,
+            "rec.relu": 4,
+            "gru": 5,
+            "mgru": 6,
+            "lstm": 7,
+            "suffix": 8,
+            "attn": 9,
+        }
+        for i in range(4):
+            if i >= len(stats):
+                features.extend([0, None, None, None])
+                continue
+            stat = stats[i]
+            layer_type = layer_type_enc[stat.name]
+            state = None if stat.state is None else math.log2(stat.state)
+            output = math.log2(stat.output)
+            suffix = None if stat.suffix is None else math.log2(stat.suffix)
+            features.extend([layer_type, state, output, suffix])                        
+
+        features.append(len(spec._layers))
 
         self._spec_features_cache[spec] = features
 
@@ -133,7 +161,12 @@ class FeatureProvider(object):
     @staticmethod
     def _get_metaparameter_features(conf) -> list:
         assert conf_is_valid(conf)
-        return [math.log2(conf.lr), math.log2(conf.batch), math.log2(conf.t)]
+        return [
+            math.log2(conf.lr),
+            math.log2(conf.sample_len),
+            math.log2(conf.batch),
+            math.log2(conf.t),
+        ]
 
     @staticmethod
     def _get_neighbors(conf):
@@ -151,6 +184,7 @@ class FeatureProvider(object):
         ]
 
     def _get_neighbor_features(self, conf) -> list:
+        # return []
         conf = conf._replace(id=None)
         neighbors = self._get_neighbors(conf)
         neighbor_scores = [self._scores.get(n) for n in neighbors]
@@ -158,18 +192,20 @@ class FeatureProvider(object):
 
     def get_features(self, conf) -> np.array:
         return np.array(
-            self._get_metaparameter_features(conf)
-            + self._get_spec_features(conf.spec),
+            self._get_metaparameter_features(conf) + self._get_spec_features(conf.spec),
             dtype=np.float32,
         )
 
     def get_sparse_features(self, conf) -> np.array:
         return np.array(
-            self._get_metaparameter_features(conf)
-            + self._get_spec_features(conf.spec)
-            + self._get_neighbor_features(conf),
+            self._get_spec_features(conf.spec)
+            + self._get_neighbor_features(conf)
+            + self._get_metaparameter_features(conf),
             dtype=np.float32,
         )
+
+    def categorical(self) -> list:
+        return [True, False, False, False] * 4 + [False] * 15
 
     def add_sample(self, conf, loss) -> list:
         """Add a new run.
@@ -188,15 +224,17 @@ class FeatureProvider(object):
 
 
 class HistPredictor(object):
-    def __init__(self):
+    def __init__(self, feature_provider):
         self.pred = HistGradientBoostingRegressor(
             loss="absolute_error",
             max_depth=None,
             max_leaf_nodes=63,
-            max_iter=1000,
-            n_iter_no_change=10,
+            max_iter=100,
+            # n_iter_no_change=20,
             # learning_rate=0.1,
             warm_start=False,
+            early_stopping=False,
+            categorical_features=feature_provider.categorical(),
         )
 
     def _fit(self, xs, ys, sample_weight):
@@ -241,7 +279,7 @@ class Predictor(object):
                 self._runs[conf] = []
             self._runs[conf].append(loss)
         self._feature_provider = FeatureProvider(conf_runs)
-        self._predictor = HistPredictor()
+        self._predictor = HistPredictor(self._feature_provider)
 
     def add_sample(self, conf, loss) -> List[Configuration]:
         if conf not in self._runs:
@@ -258,9 +296,7 @@ class Predictor(object):
             losses = []
             for conf, conf_losses in self._runs.items():
                 for loss in conf_losses:
-                    features.append(
-                        self._feature_provider.get_sparse_features(conf)
-                    )
+                    features.append(self._feature_provider.get_sparse_features(conf))
                     sample_weight.append(conf.t)
                     losses.append(loss)
 
@@ -283,9 +319,7 @@ class Predictor(object):
                 print("Preparing features")
             features = []
             for conf in confs:
-                features.append(
-                    self._feature_provider.get_sparse_features(conf)
-                )
+                features.append(self._feature_provider.get_sparse_features(conf))
 
             features = np.array(features, dtype=np.float32)
 

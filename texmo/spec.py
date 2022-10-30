@@ -377,6 +377,9 @@ class GruSpec(LayerSpec):
             + self._size * self._size
             + self._size
         )
+    
+    def is_valid(self):
+        super().is_valid() and self._activation == "tanh"
 
 
 @layer_spec
@@ -404,6 +407,9 @@ class CaruSpec(LayerSpec):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         assert self._activation is None
+
+    def is_valid(self):
+        return False
 
     def weights(self, input_shape):
         return (

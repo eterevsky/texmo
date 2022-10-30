@@ -153,7 +153,9 @@ class ResultDB(object):
 
         for row in cur:
             if template.match_spec(row[1]):
-                yield conf_from_row(row[:8]), row[8]
+                conf = conf_from_row(row[:8])
+                if conf_is_valid(conf): 
+                    yield conf, row[8]
 
 
 def import_from_csv(result_db, filename):

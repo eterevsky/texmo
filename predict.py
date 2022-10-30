@@ -15,9 +15,8 @@ from sklearn.model_selection import train_test_split
 from statistics import median
 from itertools import islice
 
-from texmo.predict import FeatureProvider, HistPredictor, encode_loss
+from texmo.predict import FeatureProvider, HistPredictor, encode_loss, decode_loss, MAX_LOSS
 from texmo.common import NCHAR
-from texmo.predict import decode_loss, MAX_LOSS
 from texmo.resultdb import ResultDB
 from texmo import latency
 
@@ -153,24 +152,24 @@ class Forest(BasePredictor):
         return self.pred.predict(xs)
 
 
-class HistGradient(BasePredictor):
-    supports_sparse = True
+# class HistGradient(BasePredictor):
+#     supports_sparse = True
 
-    def __init__(self):
-        self.pred = HistGradientBoostingRegressor(
-            loss="absolute_error",
-            max_depth=None,
-            max_leaf_nodes=65,
-            max_iter=10000,
-            n_iter_no_change=20,
-            learning_rate=0.1,
-        )
+#     def __init__(self):
+#         self.pred = HistGradientBoostingRegressor(
+#             loss="absolute_error",
+#             max_depth=None,
+#             max_leaf_nodes=65,
+#             max_iter=10000,
+#             n_iter_no_change=20,
+#             learning_rate=0.1,
+#         )
 
-    def _fit(self, xs, ys, sample_weight):
-        self.pred.fit(xs, ys, sample_weight)
+#     def _fit(self, xs, ys, sample_weight):
+#         self.pred.fit(xs, ys, sample_weight)
 
-    def _predict(self, xs):
-        return self.pred.predict(xs)
+#     def _predict(self, xs):
+#         return self.pred.predict(xs)
 
 
 def parse_args():
@@ -186,9 +185,12 @@ def parse_args():
 
 
 if __name__ == "__main__":
+    np.set_printoptions(linewidth=100, edgeitems=6, precision=3)
     args = parse_args()
+    print(f"Initializing the DB {args.db}")
     record_db = ResultDB(args.db)
 
+    print("Loading all runs")
     conf_runs = list(record_db.get_confs_runs())
 
     feature_provider = FeatureProvider(conf_runs)
@@ -202,7 +204,7 @@ if __name__ == "__main__":
         sample_weight.append(conf.t)
         losses.append(loss)
 
-    print("Read", len(conf_features), "runs from the DB")
+    print("Read", len(sparse_features), "runs from the DB")
 
     conf_features = np.array(conf_features, dtype=np.float32)
     sparse_features = np.array(sparse_features, dtype=np.float32)
@@ -229,45 +231,38 @@ if __name__ == "__main__":
         train_sparse_features.shape,
         train_losses.shape,
     )
-    print(train_features)
+    # print(train_features)
     print(train_sparse_features)
     print(train_losses)
     print()
 
-    print("Test data:", test_features.shape, test_losses.shape)
-    print(test_features)
+    print("Test data:", test_sparse_features.shape, test_losses.shape)
+    # print(test_features)
     print(test_sparse_features)
     print(test_losses)
     print()
 
-    pred = HistPredictor()
+    for pred_cls in (
+        Const,
+        # Linear,
+        # LinearReg,
+        # Svm,
+        # Neighbors,
+        # Decision,
+        # AdaBoost,
+        # HistGradient,
+    ):
+        pred = pred_cls()
+        pred.fit(train_features, train_losses, sample_weight=train_sample_weight)
+        loss = pred.loss(test_features, test_losses, test_sample_weight)
+        print(pred_cls.__name__, "loss:", loss)
+
+    pred = HistPredictor(feature_provider)
     pred.fit(
         train_sparse_features, train_losses, sample_weight=train_sample_weight
     )
     loss = pred.loss(test_sparse_features, test_losses, test_sample_weight)
-    print("Loss:", loss)
+    print("Hist loss:", loss)
 
-    # for pred_cls in (
-    #     Const,
-    #     Linear,
-    #     LinearReg,
-    #     # Svm,
-    #     Neighbors,
-    #     # Decision,
-    #     # AdaBoost,
-    #     HistGradient,
-    # ):
-    #     pred = pred_cls()
-    #     if pred.supports_sparse:
-    #         pred.fit(train_sparse_features, train_losses, sample_weight=train_sample_weight)
-    #         loss = pred.loss(test_sparse_features, test_losses, test_sample_weight)
-    #         # if loss < 0.1:
-    #         #     for features, loss in islice(zip(test_sparse_features, test_losses), 10):
-    #         #         pred_loss = pred.predict_one(features)
-    #         #         print(features, decode_loss(loss), decode_loss(pred_loss))
-    #     else:
-    #         pred.fit(train_features, train_losses, sample_weight=train_sample_weight)
-    #         loss = pred.loss(test_features, test_losses, test_sample_weight)
-    #     print(pred_cls.__name__, "loss:", loss)
-
+    print()
     latency.report()

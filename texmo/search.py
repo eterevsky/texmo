@@ -61,7 +61,7 @@ class Search(object):
                 total_runs > 0
                 and total_runs
                 > self._last_predictor_update
-                + math.sqrt(self._last_predictor_update)
+                + self._last_predictor_update ** (1 / 3)
             ):
                 self.train_predictor()
 
@@ -117,7 +117,9 @@ class Search(object):
     def _select_by_pred_score(self, t: int, max_weights: int):
         with latency.timer("Search._select_by_pred_score"):
             confs = [(None, 0)]
-            for conf, results in self._result_set.top_pred_confs(t, max_weights):
+            for conf, results in self._result_set.top_pred_confs(
+                t, max_weights
+            ):
                 i = len(confs)
                 confs.append((conf, results.num_runs))
                 expected_runs = 1
@@ -131,9 +133,12 @@ class Search(object):
         """Select a neighbor of a top-scoring conf."""
         with latency.timer("Search._select_neighbor"):
             for conf in self._result_set.top_confs(t, max_weights):
-                for neighbor in conf_neighbors(conf, self._template):
-                    if not self._result_set.has_runs(neighbor):
-                        return neighbor
+                neighbors = list(conf_neighbors(conf, self._template))
+                if neighbors is not None:
+                    random.shuffle(neighbors)
+                    for neighbor in neighbors:
+                        if not self._result_set.has_runs(neighbor):
+                            return neighbor
 
     def print_top_confs(self, t, max_weights):
         with latency.timer("Search.print_top_confs"):
@@ -144,7 +149,11 @@ class Search(object):
             ):
                 if i >= 20:
                     break
-                score = f"{results.score:.4f} ({results.num_runs})" if results.score else "          "
+                score = (
+                    f"{results.score:.4f} ({results.num_runs})"
+                    if results.score
+                    else "          "
+                )
                 if results.num_runs < 10:
                     score += " "
                 extras = ""

@@ -71,7 +71,7 @@ def print_top_confs(top_confs, run_count, filename):
         for log_weights in range(10, 25):
             weights = 2**log_weights
             first_weight_line = True
-            for log_t in range(0, 9):
+            for log_t in range(0, 10):
                 t = 2**log_t
                 if (weights, t) not in top_confs:
                     continue
@@ -169,7 +169,7 @@ def main(
     plt.xscale("log")
     plt.yscale("log")
 
-    for t in (1, 2, 4, 8, 16, 32, 64, 128, 256):
+    for t in (1, 2, 4, 8, 16, 32, 64, 128, 256, 512):
         x, y = max_points(result_set, t, 1e8)
         plt.plot(x, y, label=str(t))
 

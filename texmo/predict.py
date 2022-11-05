@@ -141,7 +141,7 @@ class FeatureProvider(object):
             "suffix": 8,
             "attn": 9,
         }
-        for i in range(4):
+        for i in (0, 1, 2, -1):
             if i >= len(stats):
                 features.extend([0, None, None, None])
                 continue
@@ -150,7 +150,7 @@ class FeatureProvider(object):
             state = None if stat.state is None else math.log2(stat.state)
             output = math.log2(stat.output)
             suffix = None if stat.suffix is None else math.log2(stat.suffix)
-            features.extend([layer_type, state, output, suffix])                        
+            features.extend([layer_type, state, output, suffix])
 
         features.append(len(spec._layers))
 
@@ -181,6 +181,11 @@ class FeatureProvider(object):
             conf._replace(t=conf.t * 2, lr=prev_number(conf.lr)),
             conf._replace(t=conf.t // 2, batch=conf.batch // 2),
             conf._replace(t=conf.t * 2, batch=conf.batch * 2),
+            conf._replace(spec=conf.spec.remove_last_layer()),
+            conf._replace(t=conf.t // 2, spec=conf.spec.remove_last_layer()),
+            conf._replace(
+                t=conf.t // 2, lr=next_number(conf.lr), spec=conf.spec.remove_last_layer()
+            ),
         ]
 
     def _get_neighbor_features(self, conf) -> list:
@@ -205,7 +210,7 @@ class FeatureProvider(object):
         )
 
     def categorical(self) -> list:
-        return [True, False, False, False] * 4 + [False] * 15
+        return [True, False, False, False] * 4 + [False] * 18
 
     def add_sample(self, conf, loss) -> list:
         """Add a new run.

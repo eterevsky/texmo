@@ -626,6 +626,11 @@ class ModelSpec(object):
         assert neighbor.is_valid()
         return neighbor
 
+    def remove_last_layer(self):
+        if len(self._layers) == 1:
+            return None
+        return ModelSpec(self._layers[:-1])
+
 
 if __name__ == "__main__":
     spec = ModelSpec.parse("rec.8.tanh-suffix.32-dense.256.tanh-gru.32.tanh")

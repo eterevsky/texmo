@@ -109,7 +109,8 @@ def is_power2(x):
 
 def conf_is_valid(conf):
     return (
-        conf.spec.is_valid()
+        conf.spec is not None
+        and conf.spec.is_valid()
         and conf.lr in LRS
         and is_power2(conf.sample_len)
         and is_power2(conf.batch)

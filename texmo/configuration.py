@@ -143,6 +143,7 @@ class Template(object):
         regularization=None,
         init_scale=None,
         t=None,
+        max_weights=None,
     ):
         self.regex = re.compile(spec_regex) if spec_regex is not None else None
         self.lr = make_bounds(lr)
@@ -151,6 +152,7 @@ class Template(object):
         self.regularization = make_bounds(regularization)
         self.init_scale = make_bounds(init_scale)
         self.t = make_bounds(t)
+        self.max_weights = max_weights
 
     def match_conf(self, conf):
         return (
@@ -164,7 +166,9 @@ class Template(object):
         )
 
     def match_spec(self, spec):
-        return self.regex is None or self.regex.fullmatch(str(spec))
+        return (self.max_weights is None or spec.weights() <= self.max_weights) and (
+            self.regex is None or self.regex.fullmatch(str(spec))
+        )
 
 
 _spec_neighbors = {}
@@ -210,4 +214,3 @@ def conf_neighbors(conf: Configuration, template: Template):
     for x in neighbor_power2(conf.t):
         if match_bounds(template.t, x):
             yield conf._replace(t=x)
-

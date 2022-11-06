@@ -2,10 +2,10 @@ import re
 
 from collections import namedtuple
 
+from .common import INF, is_power2
 from .spec import ModelSpec
 
 
-INF = float("inf")
 LRS = [
     0.00001,
     0.00002,
@@ -54,7 +54,7 @@ def neighbor_numbers(x):
 
 
 def neighbor_power2(x):
-    """Produce neighbor powers of 2."""
+    """Produce neighbor integer powers of 2."""
     if x > 1:
         return (x // 2, x * 2)
     else:
@@ -101,10 +101,6 @@ def conf_from_row(row):
         return None
     spec = ModelSpec.parse(row[1])
     return Configuration(row[0], spec, *row[2:])
-
-
-def is_power2(x):
-    return type(x) is int and x >= 1 and x & (x - 1) == 0
 
 
 def conf_is_valid(conf):

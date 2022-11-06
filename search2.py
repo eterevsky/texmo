@@ -1,6 +1,5 @@
 import argparse
-import math
-import random
+import logging
 
 from texmo.resultdb import ResultDB
 from texmo.configuration import Configuration, Template
@@ -297,7 +296,7 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    print("TexMo parameter search")
+    logging.getLogger().setLevel(logging.INFO)
     args = parse_args()
     try:
         dataset = build_dataset(args.data)

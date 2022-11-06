@@ -1,11 +1,9 @@
-import argparse
-import csv
 from collections import namedtuple
-from itertools import chain
+import logging
 import math
 import os
 import sqlite3
-from statistics import median, StatisticsError
+from statistics import median
 
 from .configuration import (
     CONF_FIELDS,
@@ -44,7 +42,7 @@ class ResultSet(object):
         if self._result_db is not None:
             self._import_from_result_db()
         if populate_neighbors:
-            print("Generating all neighbors")
+            logging.info("Generating all neighbors")
             self.update_all_neighbors()
 
     def _import_from_result_db(self):
@@ -142,7 +140,7 @@ class ResultSet(object):
                 conf = self._confs[conf_id]
                 for neighbor in conf_neighbors(conf, self._template):
                     self._find_or_add_conf(neighbor)
-            print(f"Generated neighbors for {i} confs")
+            logging.info(f"Generated neighbors for {i} confs")
 
             self._db.commit()
 
@@ -157,34 +155,17 @@ class ResultSet(object):
 
     def _update_scores(self, conf):
         with latency.timer("ResultSet._update_scores"):
-            # cur = self._db.execute(
-            #     "SELECT loss FROM run WHERE conf_id = ?", (conf.id,)
-            # )
-            # score = median(row[0] for row in cur)
             score = median(self._runs[conf.id])
             self._db.execute(
                 "UPDATE conf SET score = ? WHERE id = ?", (score, conf.id)
             )
 
-            # self._update_neighbors(conf=conf)
-            # self._update_cluster_score(conf.id)
-
-            # neighbors = self._db.execute(
-            #     "SELECT conf2_id FROM neighbor WHERE conf1_id = ?",
-            #     (conf.id,),
-            # )
-            # for (neighbor_id,) in neighbors:
-            #     self._update_neighbors(conf_id=neighbor_id)
-            #     self._update_cluster_score(neighbor_id)
 
     def add_run(self, conf: Configuration, loss: float, update_scores=True):
         conf = self._find_or_add_conf(conf)
         if math.isnan(loss) or loss is None:
             loss = INF
 
-        # self._db.execute(
-        #     "INSERT INTO run (conf_id, loss) VALUES (?, ?)", (conf.id, loss)
-        # )
         conf_runs = self._runs.get(conf.id)
         if conf_runs is None:
             conf_runs = []

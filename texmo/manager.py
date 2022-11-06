@@ -2,7 +2,9 @@ import csv
 from datetime import datetime
 import jax
 import jax.numpy as jnp
+from jaxlib.xla_extension import XlaRuntimeError
 import json
+import logging
 import math
 import optax
 import os
@@ -125,6 +127,8 @@ class Manager(object):
         weights=None,
         step_loss=None,
         init_scale=1,
+        test_sample_len=1024,
+        test_batch=1024,
     ):
         self._key = jax.random.PRNGKey(random.randrange(2**32))
         self.model = model
@@ -142,6 +146,8 @@ class Manager(object):
             self.step_loss = []
         else:
             self.step_loss = step_loss
+        self.test_sample_len = test_sample_len
+        self.test_batch = test_batch
 
     @staticmethod
     def from_json_file(path, training=True):
@@ -176,23 +182,23 @@ class Manager(object):
 
     def init(self, quiet=False, training=True):
         if not quiet:
-            print("Total parameters:", self.model.total_weights(self.weights))
-            print("Creating batch loss")
+            logging.info("Total parameters:", self.model.total_weights(self.weights))
+            logging.info("Creating batch loss")
         self._loss_batch = jax.vmap(
             self.model.loss, in_axes=(None, 0), out_axes=0
         )
         if not quiet:
-            print("Creating loss_avg")
+            logging.info("Creating loss_avg")
         self._loss_avg = (
             lambda weights, xs: jnp.average(self._loss_batch(weights, xs))
             * LOG2
         )
         if training:
             if not quiet:
-                print("Creating loss_grad")
+                logging.info("Creating loss_grad")
             self._loss_grad = jax.jit(jax.value_and_grad(self._loss_avg))
             if not quiet:
-                print("Creating optimizer")
+                logging.info("Creating optimizer")
             self.optimizer = optax.chain(
                 clip_by_global_norm(1),
                 optax.scale_by_adam(),
@@ -302,7 +308,12 @@ class Manager(object):
 
         while time.time() < finish_time and self.step < steps:
             batch = train_set.sample(length=sample_length, batch_size=batch_size)
-            loss = self.train_step(batch)
+            try:
+                loss = self.train_step(batch)
+            except XlaRuntimeError:
+                logging.warn("Internal XLA error, probabl OOM. Returning +inf loss.")
+                raise TrainingDiverged
+
             if math.isnan(loss) or math.isinf(loss):
                 raise TrainingDiverged
             if not quiet and (
@@ -328,7 +339,7 @@ class Manager(object):
     def eval(self, dataset) -> float:
         """Evaluate a model on a random sample from the training data."""
         with latency.timer("Manager.eval"):
-            batch = dataset.sample(1024, 1024)
+            batch = dataset.sample(self.test_sample_len, self.test_batch)
             return self.evaluate(batch)
 
     def train_and_eval(
@@ -379,8 +390,8 @@ class Manager(object):
             train_batch=batch_size,
             total_data=train_set.total_size,
             loss=batch_loss,
-            test_sample_len=1024,
-            test_batch=1024,
+            test_sample_len=self.test_sample_len,
+            test_batch=self.test_batch,
             test_poisoned=True,
             init_scale=self.init_scale,
         )

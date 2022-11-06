@@ -40,48 +40,9 @@ class ResultSetTest(TestCase):
         conf_id = results.find_conf_id(INIT_CONF)
 
         cur = results._db.execute(
-            "SELECT id, score, cluster_score FROM conf WHERE score IS NOT NULL"
+            "SELECT id, score FROM conf WHERE score IS NOT NULL"
         )
-        self.assertEqual(set(map(tuple, cur)), {(conf_id, 1.5, 1.5)})
-
-        cur = results._db.execute(
-            "SELECT spec, batch FROM conf, neighbor WHERE conf1_id = ? AND conf2_id = conf.id",
-            (conf_id,),
-        )
-        self.assertEqual(
-            set(map(tuple, cur)),
-            {
-                ("dense.2.relu", 256),
-                ("dense.1.relu", 128),
-                ("dense.1.relu", 512),
-            },
-        )
-
-        cur = results._db.execute(
-            "SELECT spec, batch FROM conf, neighbor WHERE conf2_id = ? AND conf1_id = conf.id",
-            (conf_id,),
-        )
-        self.assertEqual(
-            set(map(tuple, cur)),
-            {
-                ("dense.2.relu", 256),
-                ("dense.1.relu", 128),
-                ("dense.1.relu", 512),
-            },
-        )
-
-        cur = results._db.execute(
-            "SELECT spec, batch, cluster_score FROM conf WHERE cluster_score IS NOT NULL"
-        )
-        self.assertEqual(
-            set(map(tuple, cur)),
-            {
-                ("dense.1.relu", 256, 1.5),
-                ("dense.2.relu", 256, 1.5),
-                ("dense.1.relu", 128, 1.5),
-                ("dense.1.relu", 512, 1.5),
-            },
-        )
+        self.assertEqual(set(map(tuple, cur)), {(conf_id, 1.5)})
 
     def test_add_run2(self):
         results = ResultSet(
@@ -94,11 +55,11 @@ class ResultSetTest(TestCase):
         )
 
         cur = results._db.execute(
-            "SELECT spec, score, cluster_score FROM conf WHERE score IS NOT NULL"
+            "SELECT spec, score FROM conf WHERE score IS NOT NULL"
         )
         self.assertEqual(
             set(map(tuple, cur)),
-            {("dense.1.relu", 1, 1.0), ("dense.2.relu", 2, 1.5)},
+            {("dense.1.relu", 1), ("dense.2.relu", 2)},
         )
 
     def test_add_run3(self):
@@ -113,11 +74,11 @@ class ResultSetTest(TestCase):
         )
 
         cur = results._db.execute(
-            "SELECT spec, score, cluster_score FROM conf WHERE score IS NOT NULL"
+            "SELECT spec, score FROM conf WHERE score IS NOT NULL"
         )
         self.assertEqual(
             set(map(tuple, cur)),
-            {("dense.1.relu", 1, 1), ("dense.2.relu", 2, 2)},
+            {("dense.1.relu", 1), ("dense.2.relu", 2)},
         )
 
     def test_update_all_scores(self):
@@ -145,29 +106,6 @@ class ResultSetTest(TestCase):
             + "WHERE spec = 'dense.4.relu' AND conf.id = conf1_id"
         )
         self.assertIsNone(cur.fetchone())
-
-    def test_update_all_cluster_scores(self):
-        results = ResultSet(result_db=None, template=TEMPLATE)
-        results.add_run(INIT_CONF, 1, False)
-        results.add_run(INIT_CONF, 1, False)
-        results.add_run(
-            INIT_CONF._replace(spec=ModelSpec.parse("dense.2.relu")), 2, False
-        )
-        results.add_run(
-            INIT_CONF._replace(spec=ModelSpec.parse("dense.2.relu")), 2, False
-        )
-
-        results.update_all_scores()
-        results.update_all_neighbors()
-        results.update_all_cluster_scores()
-
-        cur = results._db.execute(
-            "SELECT spec, score, cluster_score FROM conf WHERE score IS NOT NULL"
-        )
-        self.assertEqual(
-            set(map(tuple, cur)),
-            {("dense.1.relu", 1, 1), ("dense.2.relu", 2, 2)},
-        )
 
 
 if __name__ == "__main__":

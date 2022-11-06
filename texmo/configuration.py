@@ -2,59 +2,12 @@ import re
 
 from collections import namedtuple
 
+from .common import INF, is_power2
 from .spec import ModelSpec
 
 
-INF = float("inf")
-LRS = [
-    0.00001,
-    0.00002,
-    0.00005,
-    0.0001,
-    0.0002,
-    0.0005,
-    0.001,
-    0.002,
-    0.005,
-    0.01,
-    0.02,
-    0.05,
-    0.1,
-    0.2,
-    0.5,
-    1,
-    2,
-    5,
-    10,
-    20,
-    50,
-    100,
-    200,
-    500,
-]
-
-
-def next_number(x):
-    i = LRS.index(x)
-    return LRS[i + 1]
-
-
-def prev_number(x):
-    i = LRS.index(x)
-    return LRS[i - 1]
-
-
-def neighbor_numbers(x):
-    """Produce neighbor numbers from a close to exponent but readable table."""
-    i = LRS.index(x)
-    if i > 0:
-        yield LRS[i - 1]
-    if i < len(LRS) - 1:
-        yield LRS[i + 1]
-
-
 def neighbor_power2(x):
-    """Produce neighbor powers of 2."""
+    """Produce neighbor integer powers of 2."""
     if x > 1:
         return (x // 2, x * 2)
     else:
@@ -103,19 +56,15 @@ def conf_from_row(row):
     return Configuration(row[0], spec, *row[2:])
 
 
-def is_power2(x):
-    return type(x) is int and x >= 1 and x & (x - 1) == 0
-
-
 def conf_is_valid(conf):
     return (
         conf.spec is not None
         and conf.spec.is_valid()
-        and conf.lr in LRS
+        and is_power2(conf.lr)
         and is_power2(conf.sample_len)
         and is_power2(conf.batch)
-        and conf.regularization in LRS
-        and conf.init_scale in LRS
+        and is_power2(conf.regularization)
+        and is_power2(conf.init_scale)
         and is_power2(conf.t)
     )
 
@@ -166,12 +115,18 @@ class Template(object):
         )
 
     def match_spec(self, spec):
+<<<<<<< HEAD
         if self.max_weights is not None:
             if type(spec) is str:
                 spec = ModelSpec.parse(spec)
             if spec.weights() > self.max_weights:
                 return False
         return self.regex is None or self.regex.fullmatch(str(spec))
+=======
+        return (
+            self.max_weights is None or spec.weights() <= self.max_weights
+        ) and (self.regex is None or self.regex.fullmatch(str(spec)))
+>>>>>>> 29cd8ae7214c816cbbdadbfa6f6f68c071f14935
 
 
 _spec_neighbors = {}
@@ -183,18 +138,38 @@ def conf_neighbors(conf: Configuration, template: Template):
     Returns: iterator over pairs (neighbor conf, type of neighbor)
     """
     conf = conf._replace(id=None)
-    if conf.spec in _spec_neighbors:
-        for neighbor_spec in _spec_neighbors[conf.spec]:
-            yield conf._replace(spec=neighbor_spec)
-    else:
+    cache = _spec_neighbors.get(conf.spec)
+    if cache is None:
         cache = []
         _spec_neighbors[conf.spec] = cache
         for neighbor_spec, _ in conf.spec.all_neighbors():
             if template.match_spec(neighbor_spec):
                 cache.append(neighbor_spec)
-                yield conf._replace(spec=neighbor_spec)
 
-    for x in neighbor_numbers(conf.lr):
+    for neighbor_spec in cache:
+        yield conf._replace(spec=neighbor_spec)
+
+        # For neighbor specs that add or remove layers we'll also add
+        # configurations with increased/decreased time limit.
+
+        if len(neighbor_spec._layers) > len(conf.spec._layers) and match_bounds(
+            template.t, conf.t * 2
+        ):
+            yield conf._replace(spec=neighbor_spec, t=conf.t * 2)
+            if match_bounds(template.lr, conf.lr / 2):
+                yield conf._replace(
+                    spec=neighbor_spec, t=conf.t * 2, lr=conf.lr / 2
+                )
+        elif len(neighbor_spec._layers) < len(
+            conf.spec._layers
+        ) and match_bounds(template.t, conf.t // 2):
+            yield conf._replace(spec=neighbor_spec, t=conf.t // 2)
+            if match_bounds(template.lr, conf.lr * 2):
+                yield conf._replace(
+                    spec=neighbor_spec, t=conf.t // 2, lr=conf.lr * 2
+                )
+
+    for x in (conf.lr / 2, conf.lr * 2):
         if match_bounds(template.lr, x):
             yield conf._replace(lr=x)
 
@@ -206,11 +181,11 @@ def conf_neighbors(conf: Configuration, template: Template):
         if match_bounds(template.batch, x):
             yield conf._replace(batch=x)
 
-    for x in neighbor_numbers(conf.regularization):
+    for x in (conf.regularization / 2, conf.regularization * 2):
         if match_bounds(template.regularization, x):
             yield conf._replace(regularization=x)
 
-    for x in neighbor_numbers(conf.init_scale):
+    for x in (conf.init_scale / 2, conf.init_scale * 2):
         if match_bounds(template.init_scale, x):
             yield conf._replace(init_scale=x)
 

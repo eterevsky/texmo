@@ -248,33 +248,6 @@ class SuffixSpec(LayerSpec):
         yield SuffixSpec(self._size * 2)
 
 
-# @layer_spec
-# class AttentionSpec(LayerSpec):
-#     name = "attention"
-#     has_weights = False
-#     has_size = True
-#     has_activation = False
-
-#     def __init__(self, size, pos=False):
-#         super().__init__(size=size)
-#         self._pos = pos
-
-#     def __str__(self):
-#         if self._pos:
-#             return f"attention.{self._size}.pos"
-#         else:
-#             return f"attention.{self._size}"
-
-#     def output_shape(self, input_shape):
-#         return input_shape
-
-#     def weights(self, input_shape):
-#         return input_shape[0] * self._size if self._pos else 0
-
-#     def is_valid(self):
-#         return False
-
-
 @layer_spec
 class AttnSpec(LayerSpec):
     name = "attn"
@@ -377,7 +350,7 @@ class GruSpec(LayerSpec):
             + self._size * self._size
             + self._size
         )
-    
+
     def is_valid(self):
         return super().is_valid() and self._activation == "tanh"
 

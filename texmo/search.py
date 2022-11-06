@@ -159,12 +159,12 @@ class Search(object):
                 extras = ""
                 if conf.sample_len != 128:
                     extras += f"  LEN {conf.sample_len}"
-                if conf.regularization != 0.1:
+                if conf.regularization != 0.125:
                     extras += f"  R {conf.regularization}"
                 if conf.init_scale != 1.0:
                     extras += f"  I {conf.init_scale}"
                 print(
-                    f"{score} LR{conf.lr:5}  B{conf.batch:4}  {conf.spec}{extras}"
+                    f"{score} LR{conf.lr:6.3f}  B{conf.batch:4}  {conf.spec}{extras}"
                 )
             print()
 

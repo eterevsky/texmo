@@ -133,12 +133,12 @@ def main(
         extras = ""
         if conf.sample_len != 128:
             extras += f"  LEN {conf.sample_len}"
-        if conf.regularization != 0.1:
+        if conf.regularization != 0.125:
             extras += f"  R {conf.regularization}"
         if conf.init_scale != 1.0:
             extras += f"  I {conf.init_scale}"
         print(
-            f"T = {conf.t:3}     LR{conf.lr:5}  B{conf.batch:4}  {conf.spec} ({weights}){extras}"
+            f"T = {conf.t:3}     LR{conf.lr:6.3f}  B{conf.batch:4}  {conf.spec} ({weights}){extras}"
         )
 
         model = LayeredModel2.parse(str(conf.spec))
@@ -231,14 +231,14 @@ def parse_args():
     parser.add_argument(
         "--lr-default",
         type=float,
-        default=0.1,
-        help="default learning rate. (default: 0.1)",
+        default=0.125,
+        help="default learning rate. (default: 0.125)",
     )
     parser.add_argument(
         "--sample-len",
         type=str,
         default="128",
-        help="range of acceptable sample lens (default: 128-128)",
+        help="range of acceptable sample lens (default: 128)",
     )
     parser.add_argument(
         "--sample-len-default",
@@ -250,8 +250,8 @@ def parse_args():
         "-r",
         "--regularization",
         type=str,
-        default="0.1",
-        help="range of values for regularization coefficient (default: 0.1-0.1)",
+        default="0.125",
+        help="range of values for regularization coefficient (default: 0.125)",
     )
     parser.add_argument(
         "--regularization-default",
@@ -264,7 +264,7 @@ def parse_args():
         "--init-scale",
         type=str,
         default="1.0",
-        help="range of values of the coefficient for the initial weights (default: 0.1-0.1)",
+        help="range of values of the coefficient for the initial weights (default: 1.0)",
     )
     parser.add_argument(
         "--init-scale-default",

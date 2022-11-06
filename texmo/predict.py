@@ -5,12 +5,7 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from statistics import median
 from typing import List
 
-from texmo.configuration import (
-    Configuration,
-    conf_is_valid,
-    next_number,
-    prev_number,
-)
+from texmo.configuration import Configuration, conf_is_valid
 from texmo.model import NCHAR
 from texmo.spec import ModelSpec
 from texmo import latency
@@ -173,23 +168,24 @@ class FeatureProvider(object):
         return [
             conf._replace(t=conf.t // 2),
             conf._replace(t=conf.t * 2),
-            conf._replace(lr=next_number(conf.lr)),
-            conf._replace(lr=prev_number(conf.lr)),
+            conf._replace(lr=conf.lr / 2),
+            conf._replace(lr=conf.lr * 2),
             conf._replace(batch=conf.batch // 2),
             conf._replace(batch=conf.batch * 2),
-            conf._replace(t=conf.t // 2, lr=next_number(conf.lr)),
-            conf._replace(t=conf.t * 2, lr=prev_number(conf.lr)),
+            conf._replace(t=conf.t // 2, lr=conf.lr * 2),
+            conf._replace(t=conf.t * 2, lr=conf.lr / 2),
             conf._replace(t=conf.t // 2, batch=conf.batch // 2),
             conf._replace(t=conf.t * 2, batch=conf.batch * 2),
             conf._replace(spec=conf.spec.remove_last_layer()),
             conf._replace(t=conf.t // 2, spec=conf.spec.remove_last_layer()),
             conf._replace(
-                t=conf.t // 2, lr=next_number(conf.lr), spec=conf.spec.remove_last_layer()
+                t=conf.t // 2,
+                lr=conf.lr * 2,
+                spec=conf.spec.remove_last_layer(),
             ),
         ]
 
     def _get_neighbor_features(self, conf) -> list:
-        # return []
         conf = conf._replace(id=None)
         neighbors = self._get_neighbors(conf)
         neighbor_scores = [self._scores.get(n) for n in neighbors]
@@ -197,7 +193,8 @@ class FeatureProvider(object):
 
     def get_features(self, conf) -> np.array:
         return np.array(
-            self._get_metaparameter_features(conf) + self._get_spec_features(conf.spec),
+            self._get_metaparameter_features(conf)
+            + self._get_spec_features(conf.spec),
             dtype=np.float32,
         )
 
@@ -301,7 +298,9 @@ class Predictor(object):
             losses = []
             for conf, conf_losses in self._runs.items():
                 for loss in conf_losses:
-                    features.append(self._feature_provider.get_sparse_features(conf))
+                    features.append(
+                        self._feature_provider.get_sparse_features(conf)
+                    )
                     sample_weight.append(conf.t)
                     losses.append(loss)
 
@@ -324,7 +323,9 @@ class Predictor(object):
                 print("Preparing features")
             features = []
             for conf in confs:
-                features.append(self._feature_provider.get_sparse_features(conf))
+                features.append(
+                    self._feature_provider.get_sparse_features(conf)
+                )
 
             features = np.array(features, dtype=np.float32)
 

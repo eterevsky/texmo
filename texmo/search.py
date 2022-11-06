@@ -16,11 +16,10 @@ RUNS_EXP = 0.6
 class Search(object):
     """Keep track of the configurations and selects what to try next."""
 
-    def __init__(self, db, template, init_conf, max_weights, min_max_weights):
+    def __init__(self, db, template, init_conf, min_max_weights):
         self._db = db
         self._template = template
         self._init_conf = init_conf
-        self._max_weights = max_weights
         self._min_max_weights = min_max_weights
 
         print(f"Creaing ResultSet.")
@@ -171,10 +170,10 @@ class Search(object):
     def select_conf(self):
         with latency.timer("Search.select_conf"):
             t = self._select_time()
-            if self._max_weights is None:
+            if self._template.max_weights is None:
                 max_weights = self._select_max_weights(t)
             else:
-                max_weights = self._max_weights
+                max_weights = self._template.max_weights
 
             self.print_top_confs(t, max_weights)
 

@@ -166,9 +166,12 @@ class Template(object):
         )
 
     def match_spec(self, spec):
-        return (self.max_weights is None or spec.weights() <= self.max_weights) and (
-            self.regex is None or self.regex.fullmatch(str(spec))
-        )
+        if self.max_weights is not None:
+            if type(spec) is str:
+                spec = ModelSpec.parse(spec)
+            if spec.weights() > self.max_weights:
+                return False
+        return self.regex is None or self.regex.fullmatch(str(spec))
 
 
 _spec_neighbors = {}

@@ -102,6 +102,7 @@ def main(
         regularization=parse_interval_float(regularization),
         init_scale=parse_interval_float(init_scale),
         t=parse_interval_int(time),
+        max_weights=max_weights,
     )
     init_conf = Configuration(
         None,
@@ -119,9 +120,7 @@ def main(
 
     print(f"Creating ResultDB from {db}")
     result_db = ResultDB(db)
-    search = Search(
-        result_db, template, init_conf, max_weights, min_max_weights
-    )
+    search = Search(result_db, template, init_conf, min_max_weights)
 
     print("Warming up training")
     warmup(dataset)

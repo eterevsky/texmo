@@ -1,5 +1,6 @@
 from copy import deepcopy
 
+from .common import total_size
 from .model import NCHAR
 
 
@@ -14,13 +15,6 @@ def layer_spec(cls):
     assert cls.name not in registry
     registry[cls.name] = cls
     return cls
-
-
-def total_size(shape):
-    prod = 1
-    for dim in shape:
-        prod *= dim
-    return prod
 
 
 def is_power2(x):

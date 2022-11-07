@@ -14,6 +14,8 @@ import time
 from .common import INF, NCHAR
 from . import latency
 from .layered import LayeredModel2
+from .model2 import Model2
+from .prng import Rng
 from .record import TrainingRecord
 
 
@@ -114,6 +116,7 @@ def deserialize_weights(spec):
 
 class TrainingDiverged(Exception):
     """Thrown if the loss turs inf or NaN."""
+
     pass
 
 
@@ -129,8 +132,9 @@ class Manager(object):
         init_scale=1,
         test_sample_len=1024,
         test_batch=1024,
+        use_model2=True,
     ):
-        self._key = jax.random.PRNGKey(random.randrange(2**32))
+        self._rng = Rng()
         self.model = model
         self.learning_rate = learning_rate
         self.regularization = regularization
@@ -139,8 +143,10 @@ class Manager(object):
         self.init_scale = init_scale
         if weights is not None:
             self.weights = weights
+        elif use_model2:
+            self.weights = self.model.init_weights(self._rng, self.init_scale)
         else:
-            self.weights = self.model.init_weights(self.key(), self.init_scale)
+            self.weights = self.model.init_weights(self._rng.gen(), self.init_scale)
         self.loss = None
         if step_loss is None:
             self.step_loss = []
@@ -148,6 +154,7 @@ class Manager(object):
             self.step_loss = step_loss
         self.test_sample_len = test_sample_len
         self.test_batch = test_batch
+        self.use_model2 = use_model2
 
     @staticmethod
     def from_json_file(path, training=True):
@@ -173,26 +180,41 @@ class Manager(object):
         model_spec: str,
         learning_rate: float,
         regularization: float,
+        use_model2: bool = True,
     ):
-        model = LayeredModel2.parse(model_spec)
-        manager = Manager(model, learning_rate, regularization)
+        if use_model2:
+            model = Model2(model_spec)
+        else:
+            model = LayeredModel2.parse(model_spec)
+        manager = Manager(model, learning_rate, regularization, use_model2=use_model2)
 
         manager.init()
         return manager
 
     def init(self, quiet=False, training=True):
         if not quiet:
-            logging.info("Total parameters:", self.model.total_weights(self.weights))
-            logging.info("Creating batch loss")
-        self._loss_batch = jax.vmap(
-            self.model.loss, in_axes=(None, 0), out_axes=0
-        )
-        if not quiet:
-            logging.info("Creating loss_avg")
-        self._loss_avg = (
-            lambda weights, xs: jnp.average(self._loss_batch(weights, xs))
-            * LOG2
-        )
+            if self.use_model2:
+                logging.info("Total weights:", self.model.weights)
+            else:
+                logging.info(
+                    "Total weights:", self.model.total_weights(self.weights)
+                )
+
+        if self.use_model2:
+            self._loss_avg = self.model.loss_batch
+        else:
+            if not quiet:
+                logging.info("Creating batch loss")
+            self._loss_batch = jax.vmap(
+                self.model.loss, in_axes=(None, 0), out_axes=0
+            )
+            if not quiet:
+                logging.info("Creating loss_avg")
+            self._loss_avg = (
+                lambda weights, xs: jnp.average(self._loss_batch(weights, xs))
+                * LOG2
+            )
+
         if training:
             if not quiet:
                 logging.info("Creating loss_grad")
@@ -219,10 +241,6 @@ class Manager(object):
             self._loss_grad = None
             self.optimizer = None
             self.opt_state = None
-
-    def key(self):
-        self._key, key = jax.random.split(self._key)
-        return key
 
     def sample_loss(self, s):
         """Loss of the model for a given string."""
@@ -266,7 +284,7 @@ class Manager(object):
         out = []
         while len(out) < l and c_selected != 0:
             state, c = self.model.step_prob(self.weights, state, c)
-            c_selected = jax.random.choice(self.key(), NCHAR, p=c)
+            c_selected = jax.random.choice(self._rng.gen(), NCHAR, p=c)
             c = jax.nn.one_hot(c_selected, NCHAR)
             out.append(c_selected)
         return bytes(out)
@@ -307,11 +325,15 @@ class Manager(object):
         last_report = 0
 
         while time.time() < finish_time and self.step < steps:
-            batch = train_set.sample(length=sample_length, batch_size=batch_size)
+            batch = train_set.sample(
+                length=sample_length, batch_size=batch_size
+            )
             try:
                 loss = self.train_step(batch)
             except XlaRuntimeError:
-                logging.warn("Internal XLA error, probabl OOM. Returning +inf loss.")
+                logging.warn(
+                    "Internal XLA error, probably OOM. Returning +inf loss."
+                )
                 raise TrainingDiverged
 
             if math.isnan(loss) or math.isinf(loss):
@@ -376,12 +398,19 @@ class Manager(object):
             print("Training stopped early.")
             batch_loss = INF
             train_time = time_limit  # This is a hack, but we need to record
-                                     # the loss with correct time.
+            # the loss with correct time.
+
+        if self.use_model2:
+            name = str(self.model)
+            weights = self.model.weights
+        else:
+            name = self.model.full_name
+            weights = self.model.total_weights(self.weights)
 
         report = TrainingRecord(
             timestamp=datetime.now(),
-            model_spec=self.model.full_name,
-            weights=self.model.total_weights(self.weights),
+            model_spec=name,
+            weights=weights,
             steps=self.step,
             train_time_s=train_time,
             learning_rate=self.learning_rate,
@@ -405,7 +434,8 @@ class Manager(object):
         if quiet:
             # Clear all GPU memory
             backend = jax.lib.xla_bridge.get_backend()
-            for buf in backend.live_buffers(): buf.delete()
+            for buf in backend.live_buffers():
+                buf.delete()
 
         return report
 

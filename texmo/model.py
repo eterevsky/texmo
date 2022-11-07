@@ -6,20 +6,6 @@ from .common import NCHAR
 
 
 class Model(object):
-    def __init__(self, **kwargs):
-        self._params = kwargs
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-    @property
-    def full_name(self):
-        """A name of the model, including its parameters (i.e. sizes of layers)"""
-        values = "-".join(map(str, self._params.values()))
-        if values:
-            return f"{self.name}-{values}"
-        else:
-            return self.name
-
     def serialize(self):
         spec = self._params.copy()
         spec["name"] = self.name
@@ -82,15 +68,6 @@ class Model(object):
             ybatch[:-1, :, :], xbatch[1:, :, :]
         )
         return jnp.average(entropy)
-
-    def weights_loss(self, weights):
-        if not weights:
-            return 0
-        s = 0
-        for v in weights.values():
-            s += jnp.average(v * v)
-
-        return s
 
     def total_weights(self, weights):
         n = 0

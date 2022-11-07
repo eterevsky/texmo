@@ -1,10 +1,13 @@
 from jax import numpy as jnp
 import jax.random
+import random
 from typing import Sequence
 
 
 class Rng(object):
-    def __init__(self, key: jax.random.PRNGKey):
+    def __init__(self, key: jax.random.PRNGKey = None):
+        if key is None:
+            key = jax.random.PRNGKey(random.randrange(2**32))
         self._key = key
 
     def gen(self) -> jax.random.PRNGKey:

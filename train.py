@@ -35,22 +35,25 @@ def main(
     print(f"Training data: {data}")
     train_set = DataSet(data)
 
-    if model_path is not None:
-        manager = Manager.from_json_file(model_path)
-    else:
-        manager = Manager.from_spec(model_spec, learning_rate, regularization)
+    try:
+        if model_path is not None:
+            manager = Manager.from_json_file(model_path)
+        else:
+            manager = Manager.from_spec(model_spec, learning_rate, regularization)
 
-    manager.train_and_eval(
-        steps,
-        time_limit,
-        train_set,
-        sample_len,
-        batch_size,
-        temp_steps,
-        temp_dir,
-        output_dir,
-        log,
-    )
+        manager.train_and_eval(
+            steps,
+            time_limit,
+            train_set,
+            sample_len,
+            batch_size,
+            temp_steps,
+            temp_dir,
+            output_dir,
+            log,
+        )
+    finally:
+        train_set.join()
 
     if prefix is not None:
         manager.continue_prefix(prefix, 256)
@@ -125,7 +128,7 @@ def parse_args():
     parser.add_argument(
         "--sample-len",
         type=int,
-        default=256,
+        default=128,
         metavar="LEN",
         help="length of text fragments used for training",
     )

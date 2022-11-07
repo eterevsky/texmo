@@ -11,3 +11,10 @@ def is_power2(x):
         return x & (x - 1) == 0
     log = math.log2(x)
     return abs(log - round(log)) < 1E-10
+
+
+def total_size(shape):
+    prod = 1
+    for dim in shape:
+        prod *= dim
+    return prod

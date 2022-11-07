@@ -8,6 +8,13 @@ from ..prng import Rng
 from .registry import layer_cls
 
 
+# dense.128.relu batch=128 16 seconds:
+#
+# auto use_step_batch=False -> 246
+# auto use_step_batch=True -> 252
+# custom step_batch -> 262
+# custom forward -> 333
+# custom forward_batch -> 342
 @layer_cls
 class Dense(Layer):
     name = "dense"
@@ -48,10 +55,9 @@ class Dense(Layer):
     ) -> tuple[None, DeviceArray]:
         batch_size = input.shape[0]
         input = jnp.reshape(input, (batch_size, -1))
-        # out = jnp.matmul(input, weights["w"].transpose()) + jnp.expand_dims(weights["b"], 0)
-
-        out = jnp.einsum("oi,bi->bo", weights["w"], input) + jnp.expand_dims(weights["b"], 0)
-        print("out:", out.shape)
+        out = jnp.einsum("oi,bi->bo", weights["w"], input) + jnp.expand_dims(
+            weights["b"], 0
+        )
         if self.activation is not None:
             out = self.activation(out)
         return None, out
@@ -59,9 +65,9 @@ class Dense(Layer):
     def forward(self, weights: LayerWeights, input: DeviceArray) -> DeviceArray:
         sample_len = input.shape[0]
         input = jnp.reshape(input, (sample_len, -1))
-        # out = jnp.matmul(input, weights["w"].transpose()) + jnp.expand_dims(weights["b"], 0)
-
-        out = jnp.einsum("oi,ni->no", weights["w"], input) + jnp.expand_dims(weights["b"], 0)
+        out = jnp.einsum("oi,ni->no", weights["w"], input) + jnp.expand_dims(
+            weights["b"], 0
+        )
         if self.activation is not None:
             out = self.activation(out)
         return out
@@ -69,9 +75,8 @@ class Dense(Layer):
     def forward_batch(self, weights: LayerWeights, input: DeviceArray) -> DeviceArray:
         batch_size, sample_len = input.shape[0:2]
         input = jnp.reshape(input, (batch_size, sample_len, -1))
-        # out = jnp.matmul(input, weights["w"].transpose()) + jnp.expand_dims(weights["b"], 0)
-
-        out = jnp.einsum("oi,bni->bno", weights["w"], input) + jnp.reshape(weights["b"], (1, 1, -1))
+        b = jnp.reshape(weights["b"], (1, 1, -1))
+        out = jnp.einsum("oi,bni->bno", weights["w"], input) + b
         if self.activation is not None:
             out = self.activation(out)
         return out

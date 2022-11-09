@@ -1,3 +1,2 @@
-from .dense import Dense
-from .suffix import Suffix
+from . import dense, gru, lstm, suffix, recurrent
 from .registry import build_layer

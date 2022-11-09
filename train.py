@@ -22,6 +22,7 @@ def main(
     steps,
     learning_rate,
     regularization,
+    init_scale,
     output_dir,
     model_path,
     model_spec,
@@ -41,7 +42,7 @@ def main(
             manager = Manager.from_json_file(model_path)
         else:
             manager = Manager.from_spec(
-                model_spec, learning_rate, regularization, use_model2=True
+                model_spec, learning_rate, regularization, init_scale, use_model2=True
             )
 
         manager.train_and_eval(
@@ -119,15 +120,21 @@ def parse_args():
         type=float,
         metavar="RATE",
         help="learning rate",
-        default=0.05,
+        default=0.125,
     )
     parser.add_argument(
         "-r",
         "--regularization",
         type=float,
         help="L2 regularization coefficient",
-        default=0.1,
+        default=0.125,
     )
+    parser.add_argument(
+        "--init-scale",
+        type=float,
+        help="Scaling coefficient for weights initialization",
+        default=1.0,
+    )    
     parser.add_argument(
         "--sample-len",
         type=int,

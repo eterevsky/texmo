@@ -182,6 +182,7 @@ class Manager(object):
         model_spec: str,
         learning_rate: float,
         regularization: float,
+        init_scale: float,
         use_model2: bool = True,
     ):
         if use_model2:
@@ -189,7 +190,7 @@ class Manager(object):
         else:
             model = LayeredModel2.parse(model_spec)
         manager = Manager(
-            model, learning_rate, regularization, use_model2=use_model2
+            model, learning_rate, regularization, init_scale=init_scale, use_model2=use_model2
         )
 
         manager.init()

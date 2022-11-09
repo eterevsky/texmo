@@ -108,11 +108,16 @@ class Layer(object):
                 lambda x: jnp.tile(x, (batch_size,) + (1,) * len(x.shape)),
                 init_state,
             )
-            _, out = jax.lax.scan(
+
+            # Change dimensions from (batch, position, ...) to (position, batch, ...)
+            inputs_swapped = jnp.swapaxes(inputs, 0, 1)
+
+            _, out_swapped = jax.lax.scan(
                 lambda state, v: self.step_batch(weights, state, v),
                 init_state,
-                inputs,
+                inputs_swapped,
             )
+            out = jnp.swapaxes(out_swapped, 0, 1)
             return out
         else:
             if self._forward_batch is None:

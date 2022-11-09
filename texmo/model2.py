@@ -1,6 +1,7 @@
 from .common import NCHAR
 from .layer import Layer, LayerState, LayerWeights
-from .layers import build_layer, Dense
+from .layers import build_layer
+from .layers.dense import Dense
 from .prng import Rng
 
 import jax

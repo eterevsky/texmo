@@ -60,7 +60,9 @@ class Layer(object):
             the shape (batch_size,) + output_shape
         """
         if self._step_batch is None:
-            self._step_batch = jax.vmap(self.step, in_axes=(None, 0, 0), out_axes=0)
+            self._step_batch = jax.vmap(
+                self.step, in_axes=(None, 0, 0), out_axes=0
+            )
         return self._step_batch(weights, states, inputs)
 
     def forward(self, weights: LayerWeights, input: DeviceArray) -> DeviceArray:
@@ -77,7 +79,7 @@ class Layer(object):
         _, out = jax.lax.scan(
             lambda state, v: self.step(weights, state, v),
             self.init_state(weights),
-            input
+            input,
         )
 
         return out
@@ -86,7 +88,9 @@ class Layer(object):
     # If False, forward_batch will be executed by batching forward().
     use_step_batch = False
 
-    def forward_batch(self, weights: LayerWeights, inputs: DeviceArray) -> DeviceArray:
+    def forward_batch(
+        self, weights: LayerWeights, inputs: DeviceArray
+    ) -> DeviceArray:
         """Make a forward pass on a batch of inputs.
 
         Args:
@@ -102,7 +106,7 @@ class Layer(object):
             init_state = self.init_state(weights)
             init_state = jax.tree_util.tree_map(
                 lambda x: jnp.tile(x, (batch_size,) + (1,) * len(x.shape)),
-                init_state
+                init_state,
             )
             _, out = jax.lax.scan(
                 lambda state, v: self.step_batch(weights, state, v),
@@ -112,6 +116,7 @@ class Layer(object):
             return out
         else:
             if self._forward_batch is None:
-                self._forward_batch = jax.vmap(self.forward, in_axes=(None, 0), out_axes=0)
+                self._forward_batch = jax.vmap(
+                    self.forward, in_axes=(None, 0), out_axes=0
+                )
             return self._forward_batch(weights, inputs)
-

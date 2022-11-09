@@ -1,4 +1,5 @@
 import argparse
+import logging
 import matplotlib.pyplot as plt
 import os
 
@@ -39,7 +40,9 @@ def main(
         if model_path is not None:
             manager = Manager.from_json_file(model_path)
         else:
-            manager = Manager.from_spec(model_spec, learning_rate, regularization)
+            manager = Manager.from_spec(
+                model_spec, learning_rate, regularization, use_model2=True
+            )
 
         manager.train_and_eval(
             steps,
@@ -176,5 +179,6 @@ def parse_args():
 
 
 if __name__ == "__main__":
+    logging.getLogger().setLevel(logging.INFO)
     args = parse_args()
     main(**vars(args))

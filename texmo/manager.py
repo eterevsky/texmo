@@ -132,7 +132,7 @@ class Manager(object):
         init_scale=1,
         test_sample_len=1024,
         test_batch=1024,
-        use_model2=True,
+        use_model2=False,
     ):
         self._rng = Rng()
         self.model = model
@@ -146,7 +146,9 @@ class Manager(object):
         elif use_model2:
             self.weights = self.model.init_weights(self._rng, self.init_scale)
         else:
-            self.weights = self.model.init_weights(self._rng.gen(), self.init_scale)
+            self.weights = self.model.init_weights(
+                self._rng.gen(), self.init_scale
+            )
         self.loss = None
         if step_loss is None:
             self.step_loss = []
@@ -186,7 +188,9 @@ class Manager(object):
             model = Model2(model_spec)
         else:
             model = LayeredModel2.parse(model_spec)
-        manager = Manager(model, learning_rate, regularization, use_model2=use_model2)
+        manager = Manager(
+            model, learning_rate, regularization, use_model2=use_model2
+        )
 
         manager.init()
         return manager
@@ -194,11 +198,10 @@ class Manager(object):
     def init(self, quiet=False, training=True):
         if not quiet:
             if self.use_model2:
-                logging.info("Total weights:", self.model.weights)
+                total_weights = self.model.weights
             else:
-                logging.info(
-                    "Total weights:", self.model.total_weights(self.weights)
-                )
+                total_weights = self.model.total_weights(self.weights)
+            logging.info(f"Total weights: {total_weights}")
 
         if self.use_model2:
             self._loss_avg = self.model.loss_batch

@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 from jax.numpy import DeviceArray
 
-from ..common import total_size
 from ..layer import Layer, LayerWeights
 from ..prng import Rng
 from .registry import layer_cls
@@ -19,10 +18,16 @@ class Dense(Layer):
         if relu:
             assert not tanh
             self.activation = jax.nn.relu
+            self._activation_suffix = ".relu"
         elif tanh:
             self.activation = jnp.tanh
+            self._activation_suffix = ".tanh"
         else:
             self.activation = None
+            self._activation_suffix = ""
+
+    def __str__(self) -> str:
+        return f"dense.{self.size}{self._activation_suffix}"
 
     @property
     def weights(self) -> int:
@@ -48,9 +53,10 @@ class Dense(Layer):
     ) -> tuple[None, DeviceArray]:
         batch_size = input.shape[0]
         input = jnp.reshape(input, (batch_size, -1))
-        # out = jnp.matmul(input, weights["w"].transpose()) + jnp.expand_dims(weights["b"], 0)
 
-        out = jnp.einsum("oi,bi->bo", weights["w"], input) + jnp.expand_dims(weights["b"], 0)
+        out = jnp.einsum("oi,bi->bo", weights["w"], input) + jnp.expand_dims(
+            weights["b"], 0
+        )
         print("out:", out.shape)
         if self.activation is not None:
             out = self.activation(out)
@@ -59,19 +65,23 @@ class Dense(Layer):
     def forward(self, weights: LayerWeights, input: DeviceArray) -> DeviceArray:
         sample_len = input.shape[0]
         input = jnp.reshape(input, (sample_len, -1))
-        # out = jnp.matmul(input, weights["w"].transpose()) + jnp.expand_dims(weights["b"], 0)
 
-        out = jnp.einsum("oi,ni->no", weights["w"], input) + jnp.expand_dims(weights["b"], 0)
+        out = jnp.einsum("oi,ni->no", weights["w"], input) + jnp.expand_dims(
+            weights["b"], 0
+        )
         if self.activation is not None:
             out = self.activation(out)
         return out
 
-    def forward_batch(self, weights: LayerWeights, input: DeviceArray) -> DeviceArray:
+    def forward_batch(
+        self, weights: LayerWeights, input: DeviceArray
+    ) -> DeviceArray:
         batch_size, sample_len = input.shape[0:2]
         input = jnp.reshape(input, (batch_size, sample_len, -1))
-        # out = jnp.matmul(input, weights["w"].transpose()) + jnp.expand_dims(weights["b"], 0)
 
-        out = jnp.einsum("oi,bni->bno", weights["w"], input) + jnp.reshape(weights["b"], (1, 1, -1))
+        out = jnp.einsum("oi,bni->bno", weights["w"], input) + jnp.reshape(
+            weights["b"], (1, 1, -1)
+        )
         if self.activation is not None:
             out = self.activation(out)
         return out

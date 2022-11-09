@@ -104,13 +104,30 @@ def exp_schedule(initial_steps, total_steps, initial_lr, final_lr):
     return sch
 
 
-def deserialize_weights(spec):
-    weights = {}
-    for key, value in spec.items():
-        if type(value) is dict:
-            weights[key] = deserialize_weights(value)
-        else:
-            weights[key] = jnp.array(value)
+def deserialize_weights(saved_weights):
+    if isinstance(saved_weights, list):
+        weights = []
+        for value in saved_weights:
+            if isinstance(value, dict):
+                value = deserialize_weights(value)
+            elif isinstance(value, list):
+                if len(value) > 0 and isinstance(value[0], float):
+                    value = jnp.array(value)
+                else:
+                    value = deserialize_weights(value)
+            elif value is None:
+                pass
+            else:
+                print(repr(value))
+                assert False
+            weights.append(value)
+    else:
+        weights = {}
+        for key, value in saved_weights.items():
+            if type(value) is dict:
+                weights[key] = deserialize_weights(value)
+            else:
+                weights[key] = jnp.array(value)
     return weights
 
 
@@ -163,8 +180,15 @@ class Manager(object):
         with open(path) as f:
             spec = json.load(f)
         model_spec = spec["model"]
-        assert model_spec["name"] == "layered"
-        model = LayeredModel2.from_spec(model_spec)
+        if model_spec["name"] == "model2":
+            model = Model2(model_spec["spec"])
+            use_model2 = True
+        elif model_spec["name"] == "layered":
+            model = LayeredModel2.from_spec(model_spec)
+            use_model2 = False
+        else:
+            assert False
+
         weights = deserialize_weights(spec["weights"])
         manager = Manager(
             model,
@@ -173,6 +197,7 @@ class Manager(object):
             step=spec["step"],
             weights=weights,
             step_loss=spec.get("step_loss", None),
+            use_model2=use_model2,
         )
         manager.init(training=training)
         return manager
@@ -202,7 +227,9 @@ class Manager(object):
                 total_weights = self.model.weights
             else:
                 total_weights = self.model.total_weights(self.weights)
-            logging.info(f"Total weights: {total_weights}")
+
+            logging.info(f"Model: {self.model} ({total_weights})")
+            logging.info(f"LR {self.learning_rate:.3f}  R {self.regularization:.3f}  init {self.init_scale:.3f}")
 
         if self.use_model2:
             self._loss_avg = self.model.loss_batch
@@ -327,6 +354,11 @@ class Manager(object):
             steps = INF
 
         last_report = 0
+
+        logging.info(f"Training for {time_limit} s")
+        logging.info(f"LEN {sample_length}  B {batch_size}")
+
+ 
 
         while time.time() < finish_time and self.step < steps:
             batch = train_set.sample(
@@ -458,6 +490,8 @@ class Manager(object):
     def serialize_weights(self, weights):
         if weights is None:
             return None
+        elif isinstance(weights, list):
+            return [self.serialize_weights(w) for w in weights]
         elif type(weights) is dict:
             serialized = {}
             for key, value in weights.items():
@@ -490,5 +524,5 @@ class Manager(object):
             json.dump(data, f, indent=2)
 
     def name(self):
-        model_name = self.model.full_name
+        model_name = str(self.model)
         return f"{model_name}-{self.step}"

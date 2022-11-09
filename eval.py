@@ -5,17 +5,18 @@ from texmo.dataset import DataSet
 from texmo.manager import Manager
 
 def main(data, model_path, prefix):
-    if data:
-        print(f"Loading dataset from {data}")
-        dataset = DataSet(data)
-
     manager = Manager.from_json_file(model_path, training=False)
 
     if data:
-        loss = manager.eval(dataset, manager)
-        print(f'Loss: {loss}')
+        try:
+            print(f"Loading dataset from {data}")
+            dataset = DataSet(data)
+            loss = manager.eval(dataset)
+            print(f'Loss: {loss}')
+        finally:
+            dataset.join()
 
-    manager.continue_prefix(manager, prefix, 256)
+    manager.continue_prefix(prefix, 256)
 
 
 def parse_args():

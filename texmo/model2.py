@@ -81,7 +81,7 @@ class Model2(object):
         """
         prefix_len = 1
         for layer in self.layers:
-            if layer.name == "suffix":
+            if layer.name in ("suffix", "attn"):
                 prefix_len += layer.length - 1
         batch_size, sample_len, n = batch.shape
         assert n == NCHAR
@@ -93,10 +93,13 @@ class Model2(object):
             v = layer.forward_batch(layer_weights, v)
 
         out = self.out_layer.forward_batch(weights[-1], v)
-        assert out.shape[0] == batch.shape[0]
+        assert out.shape == batch.shape
 
         entropy = optax.softmax_cross_entropy(out, batch)
         return jnp.average(entropy) / jnp.log(2)
+    
+    def serialize(self):
+        return {"name": "model2", "spec": str(self)}
 
 
 _cache: dict[str, Model2] = {}

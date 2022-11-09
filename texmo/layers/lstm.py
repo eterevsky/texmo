@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax.numpy import DeviceArray
 
+from ..common import is_power2_int
 from ..layer import Layer, LayerState, LayerWeights
 from ..prng import Rng
 from .registry import layer_cls
@@ -18,6 +19,9 @@ class Lstm(Layer):
 
     def __str__(self) -> str:
         return f"lstm.{self.size}"
+
+    def is_valid(self) -> bool:
+        return is_power2_int(self.size)
 
     @property
     def weights(self) -> int:

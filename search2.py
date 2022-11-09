@@ -5,10 +5,9 @@ from texmo.resultdb import ResultDB
 from texmo.configuration import Configuration, Template
 from texmo.dataset import build_dataset
 from texmo import latency
-from texmo.layered import LayeredModel2
 from texmo.manager import Manager
+from texmo.model2 import build_model
 from texmo.search import Search
-from texmo.spec import ModelSpec
 from texmo.common import INF
 
 
@@ -50,12 +49,13 @@ def pick_default_value(default, range):
 
 
 def warmup(dataset):
-    model = LayeredModel2.parse("suffix.4-rec.32.relu")
+    model = build_model("suffix.4-rec.32.relu")
     manager = Manager(
         model,
-        0.2,
-        regularization=0.1,
+        0.25,
+        regularization=0.125,
         init_scale=1.0,
+        use_model2=True,
     )
     manager.init(quiet=True)
     manager.train_and_eval(
@@ -105,7 +105,7 @@ def main(
     )
     init_conf = Configuration(
         None,
-        ModelSpec.parse(spec_default),
+        build_model(spec_default),
         lr=pick_default_value(lr_default, template.lr),
         sample_len=pick_default_value(sample_len_default, template.sample_len),
         batch=pick_default_value(batch_default, template.batch),
@@ -128,7 +128,7 @@ def main(
     while True:
         conf = search.select_conf()
 
-        weights = conf.spec.weights()
+        weights = conf.model.weights
         extras = ""
         if conf.sample_len != 128:
             extras += f"  LEN {conf.sample_len}"
@@ -137,18 +137,17 @@ def main(
         if conf.init_scale != 1.0:
             extras += f"  I {conf.init_scale}"
         print(
-            f"T = {conf.t:3}     LR{conf.lr:6.3f}  B{conf.batch:4}  {conf.spec} ({weights}){extras}"
+            f"T = {conf.t:3}     LR{conf.lr:6.3f}  B{conf.batch:4}  {conf.model} ({weights}){extras}"
         )
 
-        model = LayeredModel2.parse(str(conf.spec))
         manager = Manager(
-            model,
+            conf.model,
             conf.lr,
             regularization=conf.regularization,
             init_scale=conf.init_scale,
+            use_model2=True,
         )
         manager.init(quiet=True)
-        assert model.total_weights(manager.weights) == weights
         record = manager.train_and_eval(
             steps=None,
             time_limit=conf.t,

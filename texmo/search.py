@@ -105,7 +105,7 @@ class Search(object):
             top_conf = self._result_set.top_conf(t)
             if top_conf is None:
                 return self._min_max_weights
-            maxw = top_conf.spec.weights()
+            maxw = top_conf.model.weights
             if self._min_max_weights >= maxw * 4:
                 return self._min_max_weights
             l = random.uniform(
@@ -163,7 +163,7 @@ class Search(object):
                 if conf.init_scale != 1.0:
                     extras += f"  I {conf.init_scale}"
                 print(
-                    f"{score} LR{conf.lr:6.3f}  B{conf.batch:4}  {conf.spec}{extras}"
+                    f"{score} LR{conf.lr:6.3f}  B{conf.batch:4}  {conf.model}{extras}"
                 )
             print()
 

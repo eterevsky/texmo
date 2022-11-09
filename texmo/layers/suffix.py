@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax.numpy import DeviceArray
 
-from ..common import total_size
+from ..common import is_power2_int, power2_neighbors
 from ..layer import Layer, LayerState
 from .registry import layer_cls
 
@@ -20,15 +20,26 @@ class Suffix(Layer):
     def __str__(self) -> str:
         return f"suffix.{self.length}"
 
+    def is_valid(self) -> bool:
+        return is_power2_int(self.length) and self.length > 1
+
     @property
     def weights(self) -> int:
         return 0
+
+    def neighbors(self):
+        if self.length > 2:
+            l = self.length // 2
+            yield f"suffix.{l}"
+        l = self.length * 2
+        yield f"suffix.{l}"
+        yield f"attn.{self.length}.4.{self.input_size}"
 
     def init_weights(self, _rng, _init_scale) -> None:
         return None
 
     def init_state(self, _weights) -> LayerState:
-        return jnp.ones(self._state_shape) / total_size(self._state_shape)
+        return jnp.ones(self._state_shape) / self.input_size
 
     def step(self, _weights, state: LayerState, input: DeviceArray) -> tuple[LayerState, DeviceArray]:
         suffix = jnp.vstack((state, input.reshape((1, -1))))

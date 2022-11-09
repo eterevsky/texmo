@@ -81,7 +81,7 @@ class ResultSet(object):
               AND t = ?
             """,
             (
-                str(conf.spec),
+                str(conf.model),
                 conf.lr,
                 conf.sample_len,
                 conf.batch,
@@ -102,14 +102,14 @@ class ResultSet(object):
             return self._confs[id]
 
         conf_dict = {
-            "spec": str(conf.spec),
+            "spec": str(conf.model),
             "lr": conf.lr,
             "sample_len": conf.sample_len,
             "batch": conf.batch,
             "regularization": conf.regularization,
             "init_scale": conf.init_scale,
             "t": conf.t,
-            "weights": conf.spec.weights(),
+            "weights": conf.model.weights,
         }
         cursor = self._db.execute(
             """

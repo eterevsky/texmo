@@ -14,6 +14,7 @@ from .configuration import (
 from . import latency
 from .record import TrainingRecord
 from .spec import ObsoleteSpec
+from .model2 import build_model
 
 
 class ResultDB(object):
@@ -27,17 +28,17 @@ class ResultDB(object):
 
     def _find_or_add_conf(self, conf):
         """Finds the conf in the db and returns the copy with populated id."""
-        spec_str = str(conf.spec)
+        spec = str(conf.model)
 
         conf_tuple = (
-            spec_str,
+            spec,
             conf.lr,
             conf.sample_len,
             conf.batch,
             conf.regularization,
             conf.init_scale,
             conf.t,
-            conf.spec.weights(),
+            conf.model.weights,
         )
 
         cur = self._db.execute(
@@ -152,7 +153,7 @@ class ResultDB(object):
         cur = self._db.execute(query, bindings)
 
         for row in cur:
-            if template.match_spec(row[1]):
+            if template.match_model(build_model(row[1])):
                 conf = conf_from_row(row[:8])
                 if conf_is_valid(conf): 
                     yield conf, row[8]

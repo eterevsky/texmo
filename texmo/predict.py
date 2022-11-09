@@ -6,8 +6,8 @@ from statistics import median
 from typing import List
 
 from texmo.configuration import Configuration, conf_is_valid
-from texmo.model import NCHAR
-from texmo.spec import ModelSpec
+from texmo.common import NCHAR
+from texmo.model2 import Model2
 from texmo import latency
 
 
@@ -23,33 +23,33 @@ LayerStat = namedtuple(
 )
 
 
-def get_layer_stats(spec):
+def get_layer_stats(model):
     shape = (NCHAR,)
 
     layers = []
 
-    for layer in spec._layers:
+    for layer in model.layers:
         name = layer.name
         input = total_size(shape)
         if name in ("gru", "mgru", "rec"):
-            state = layer._size
+            state = layer.size
         elif name == "lstm":
-            state = 2 * layer._size
+            state = 2 * layer.size
         else:
             state = None
-        weights = layer.weights(shape)
-        shape = layer.output_shape(shape)
+        weights = layer.weights
+        shape = layer.output_shape
         output = total_size(shape)
         if name == "suffix":
-            suffix = layer._size
+            suffix = layer.length
         elif name == "attn":
-            suffix = layer._length
+            suffix = layer.length
         elif name == "dense":
             suffix = 1
         else:
             suffix = None
         if name in ("dense", "rec"):
-            name += "." + layer._activation
+            name += layer._activation_suffix
 
         layers.append(LayerStat(name, input, state, output, weights, suffix))
 
@@ -92,17 +92,17 @@ class FeatureProvider(object):
         for conf, s in self._runs.items():
             self._scores[conf] = median(s)
 
-    @staticmethod
-    def _count_layer(spec: ModelSpec, name: str) -> int:
-        count = 0
-        for layer in spec._layers:
-            if layer.name == name:
-                count += 1
-        return count
+    # @staticmethod
+    # def _count_layer(spec: Model, name: str) -> int:
+    #     count = 0
+    #     for layer in spec.layers:
+    #         if layer.name == name:
+    #             count += 1
+    #     return count
 
-    def _get_spec_features(self, spec: ModelSpec) -> list:
+    def _get_model_features(self, model: Model2) -> list:
         # return []
-        res = self._spec_features_cache.get(spec)
+        res = self._spec_features_cache.get(model)
         if res is not None:
             return res
 
@@ -116,7 +116,7 @@ class FeatureProvider(object):
         # features.append(self._count_layer(spec, "suffix"))
         # features.append(self._count_layer(spec, "attn"))
 
-        stats = get_layer_stats(spec)
+        stats = get_layer_stats(model)
 
         # features.append(math.log2(stats[0].input))
         # features.append(math.log2(stats[-1].output))
@@ -147,9 +147,9 @@ class FeatureProvider(object):
             suffix = None if stat.suffix is None else math.log2(stat.suffix)
             features.extend([layer_type, state, output, suffix])
 
-        features.append(len(spec._layers))
+        features.append(len(model.layers))
 
-        self._spec_features_cache[spec] = features
+        self._spec_features_cache[model] = features
 
         return features
 
@@ -176,12 +176,12 @@ class FeatureProvider(object):
             conf._replace(t=conf.t * 2, lr=conf.lr / 2),
             conf._replace(t=conf.t // 2, batch=conf.batch // 2),
             conf._replace(t=conf.t * 2, batch=conf.batch * 2),
-            conf._replace(spec=conf.spec.remove_last_layer()),
-            conf._replace(t=conf.t // 2, spec=conf.spec.remove_last_layer()),
+            conf._replace(model=conf.model.remove_last_layer()),
+            conf._replace(t=conf.t // 2, model=conf.model.remove_last_layer()),
             conf._replace(
                 t=conf.t // 2,
                 lr=conf.lr * 2,
-                spec=conf.spec.remove_last_layer(),
+                model=conf.model.remove_last_layer(),
             ),
         ]
 
@@ -194,13 +194,13 @@ class FeatureProvider(object):
     def get_features(self, conf) -> np.array:
         return np.array(
             self._get_metaparameter_features(conf)
-            + self._get_spec_features(conf.spec),
+            + self._get_model_features(conf.model),
             dtype=np.float32,
         )
 
     def get_sparse_features(self, conf) -> np.array:
         return np.array(
-            self._get_spec_features(conf.spec)
+            self._get_model_features(conf.model)
             + self._get_neighbor_features(conf)
             + self._get_metaparameter_features(conf),
             dtype=np.float32,

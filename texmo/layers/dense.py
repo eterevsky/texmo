@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax.numpy import DeviceArray
 
+from ..common import is_power2_int
 from ..layer import Layer, LayerWeights
 from ..prng import Rng
 from .registry import layer_cls
@@ -35,6 +36,11 @@ class Dense(Layer):
 
     def __str__(self) -> str:
         return f"dense.{self.size}{self._activation_suffix}"
+
+    def is_valid(self) -> bool:
+        # Normal layers should always have activation. This does not apply to
+        # output layer, but we aren't checking it using this function.
+        return is_power2_int(self.size) and self.activation is not None
 
     @property
     def weights(self) -> int:

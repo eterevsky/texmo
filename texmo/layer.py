@@ -1,4 +1,4 @@
-from .common import total_size
+from .common import total_size, power2_neighbors
 from .prng import Rng
 
 import jax
@@ -20,9 +20,35 @@ class Layer(object):
         self.input_size = total_size(self.input_shape)
         self.output_shape: tuple[int] = None
 
+    def __eq__(self, other):
+        return str(self) == str(other)
+    
+    @property
+    def output_size(self):
+        return total_size(self.output_shape)
+
     @property
     def weights(self) -> int:
         raise NotImplementedError
+    
+    def is_valid(self) -> bool:
+        raise NotImplementedError
+    
+    def neighbors(self):
+        """Generator layer neighbors.
+        
+        Should be overridden by suffix and attn.
+        """
+        size = self.size
+
+        for name in ("dense", "rec"):
+            for activation in ("tanh", "relu"):
+                for size in power2_neighbors(size):
+                    yield f"{name}.{size}.{activation}"
+
+        for name in ("gru", "mgru", "lstm"):
+            for size in power2_neighbors(size):
+                yield f"{name}.{size}"
 
     def init_weights(self, rng: Rng, init_scale: float = 1.0) -> LayerWeights:
         return None

@@ -3,7 +3,7 @@ import re
 from collections import namedtuple
 
 from .common import INF, is_power2
-from .spec import ModelSpec
+from .model2 import build_model
 
 
 def neighbor_power2(x):
@@ -18,7 +18,7 @@ Configuration = namedtuple(
     "Configuration",
     [
         "id",
-        "spec",
+        "model",
         "lr",
         "sample_len",
         "batch",
@@ -35,10 +35,10 @@ CONF_FIELDS = "id, spec, lr, sample_len, batch, regularization, init_scale, t"
 
 
 def conf_from_record(record):
-    spec = ModelSpec.parse(record.model_spec)
+    model = build_model(record.model_spec)
     return Configuration(
         None,
-        spec,
+        model,
         record.learning_rate,
         record.train_sample_len,
         record.train_batch,
@@ -52,14 +52,14 @@ def conf_from_row(row):
     """Create Configuration from a database row."""
     if row is None:
         return None
-    spec = ModelSpec.parse(row[1])
-    return Configuration(row[0], spec, *row[2:])
+    model = build_model(row[1])
+    return Configuration(row[0], model, *row[2:])
 
 
 def conf_is_valid(conf):
     return (
-        conf.spec is not None
-        and conf.spec.is_valid()
+        conf.model is not None
+        and conf.model.is_valid()
         and is_power2(conf.lr)
         and is_power2(conf.sample_len)
         and is_power2(conf.batch)
@@ -111,19 +111,17 @@ class Template(object):
             and match_bounds(self.regularization, conf.regularization)
             and match_bounds(self.init_scale, conf.init_scale)
             and match_bounds(self.t, conf.t)
-            and self.match_spec(conf.spec)
+            and self.match_model(conf.model)
         )
 
-    def match_spec(self, spec):
+    def match_model(self, model):
         if self.max_weights is not None:
-            if type(spec) is str:
-                spec = ModelSpec.parse(spec)
-            if spec.weights() > self.max_weights:
+            if model.weights > self.max_weights:
                 return False
-        return self.regex is None or self.regex.fullmatch(str(spec))
+        return self.regex is None or self.regex.fullmatch(str(model))
 
 
-_spec_neighbors = {}
+_model_neighbors = {}
 
 
 def conf_neighbors(conf: Configuration, template: Template):
@@ -132,36 +130,32 @@ def conf_neighbors(conf: Configuration, template: Template):
     Returns: iterator over pairs (neighbor conf, type of neighbor)
     """
     conf = conf._replace(id=None)
-    cache = _spec_neighbors.get(conf.spec)
+    cache = _model_neighbors.get(conf.model)
     if cache is None:
         cache = []
-        _spec_neighbors[conf.spec] = cache
-        for neighbor_spec, _ in conf.spec.all_neighbors():
-            if template.match_spec(neighbor_spec):
-                cache.append(neighbor_spec)
+        _model_neighbors[conf.model] = cache
+        for neighbor_model in conf.model.neighbors():
+            if template.match_model(neighbor_model):
+                cache.append(neighbor_model)
 
-    for neighbor_spec in cache:
-        yield conf._replace(spec=neighbor_spec)
+    for neighbor_model in cache:
+        yield conf._replace(model=neighbor_model)
 
         # For neighbor specs that add or remove layers we'll also add
         # configurations with increased/decreased time limit.
 
-        if len(neighbor_spec._layers) > len(conf.spec._layers) and match_bounds(
+        if len(neighbor_model.layers) > len(conf.model.layers) and match_bounds(
             template.t, conf.t * 2
         ):
-            yield conf._replace(spec=neighbor_spec, t=conf.t * 2)
+            yield conf._replace(model=neighbor_model, t=conf.t * 2)
             if match_bounds(template.lr, conf.lr / 2):
                 yield conf._replace(
-                    spec=neighbor_spec, t=conf.t * 2, lr=conf.lr / 2
+                    model=neighbor_model, t=conf.t * 2, lr=conf.lr / 2
                 )
-        elif len(neighbor_spec._layers) < len(
-            conf.spec._layers
-        ) and match_bounds(template.t, conf.t // 2):
-            yield conf._replace(spec=neighbor_spec, t=conf.t // 2)
+        elif len(neighbor_model.layers) < len(conf.model.layers) and match_bounds(template.t, conf.t // 2):
+            yield conf._replace(model=neighbor_model, t=conf.t // 2)
             if match_bounds(template.lr, conf.lr * 2):
-                yield conf._replace(
-                    spec=neighbor_spec, t=conf.t // 2, lr=conf.lr * 2
-                )
+                yield conf._replace(model=neighbor_model, t=conf.t // 2, lr=conf.lr * 2)
 
     for x in (conf.lr / 2, conf.lr * 2):
         if match_bounds(template.lr, x):

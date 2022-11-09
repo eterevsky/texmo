@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 from jax.numpy import DeviceArray
 
-from ..common import total_size
+from ..common import is_power2_int, power2_neighbors
 from ..layer import Layer, LayerState, LayerWeights
 from .registry import layer_cls
 
@@ -22,7 +22,6 @@ class Attn(Layer):
         """
         super().__init__(input_shape=input_shape)
         assert type(length) is int
-        assert length >= 2
         self.length = length
         assert type(heads) is int
         assert heads >= 1
@@ -40,6 +39,25 @@ class Attn(Layer):
     def __str__(self) -> str:
         return f"attn.{self.length}.{self.heads}.{self.size}"
 
+    def is_valid(self) -> bool:
+        return (
+            is_power2_int(self.length)
+            and self.length > 1
+            and is_power2_int(self.heads)
+            and is_power2_int(self.size)
+            and self.size % self.heads == 0
+        )
+    
+    def neighbors(self):
+        if self.heads == 4 and self.size == self.input_size:
+            yield f"suffix.{self.length}"
+        for l in power2_neighbors(self.length):
+            yield f"attn.{l}.{self.heads}.{self.size}"
+        for l in power2_neighbors(self.heads):
+            yield f"attn.{self.length}.{l}.{self.size}"
+        for l in power2_neighbors(self.size):
+            yield f"attn.{self.length}.{self.heads}.{l}"            
+
     @property
     def weights(self) -> int:
         return (
@@ -53,17 +71,15 @@ class Attn(Layer):
             "w": rng.he((self.heads, 3 * self._comp_size, self.input_size))
             * init_scale,
             "bkey": rng.normal((self.heads, self.length, self._comp_size))
-            * init_scale * 0.1,
-            "bquery": rng.normal((self.heads, self._comp_size))
-            * init_scale * 0.1,
+            * init_scale
+            * 0.1,
+            "bquery": rng.normal((self.heads, self._comp_size)) * init_scale * 0.1,
         }
 
     def init_state(self, _weights) -> LayerState:
         return {
             "keys": jnp.zeros((self.heads, self.length - 1, self._comp_size)),
-            "values": jnp.zeros(
-                (self.heads, self.length - 1, self._comp_size)
-            ),
+            "values": jnp.zeros((self.heads, self.length - 1, self._comp_size)),
         }
 
     def step(
@@ -72,22 +88,22 @@ class Attn(Layer):
         input = input.flatten()
 
         kqv = jnp.dot(weights["w"], input)
-        key = kqv[:,:self._comp_size]
-        query = kqv[:,self._comp_size:2*self._comp_size] + weights["bquery"]
-        value = kqv[:,2*self._comp_size:]
+        key = kqv[:, : self._comp_size]
+        query = kqv[:, self._comp_size : 2 * self._comp_size] + weights["bquery"]
+        value = kqv[:, 2 * self._comp_size :]
 
-        keys = jnp.concatenate((state["keys"], key.reshape((self.heads, 1, -1))), axis=1)
+        keys = jnp.concatenate(
+            (state["keys"], key.reshape((self.heads, 1, -1))), axis=1
+        )
         values = jnp.concatenate(
             (state["values"], value.reshape((self.heads, 1, -1))), axis=1
         )
 
         biased_keys = keys + weights["bkey"]
 
-        scores = self._score_scale * jnp.einsum(
-            "hT,hpT->hp", query, biased_keys
-        )
+        scores = self._score_scale * jnp.einsum("hT,hpT->hp", query, biased_keys)
         weights = jax.nn.softmax(scores)  # head,position -> weight
-                                          # softmax by default calculated by the last dim
+        # softmax by default calculated by the last dim
 
         attn_value = jnp.einsum("hp,hpv->hv", weights, values)
         attn_value = attn_value.flatten()
@@ -102,17 +118,23 @@ class Attn(Layer):
 
         kvq = jnp.einsum("hoi,pi->pho", weights["w"], input)
 
-        queries = kvq[:,:,2*self._comp_size:] + jnp.expand_dims(weights["bquery"], 0)
-        queries = queries[self.length - 1:]
+        queries = kvq[:, :, 2 * self._comp_size :] + jnp.expand_dims(
+            weights["bquery"], 0
+        )
+        queries = queries[self.length - 1 :]
 
-        kv = kvq[:,:,:2*self._comp_size]  # position, head, value
+        kv = kvq[:, :, : 2 * self._comp_size]  # position, head, value
         kv_slices = []
         for offset in range(self.length):
-            kv_slices.append(kv[offset:input_len - self.length + offset + 1,:,:])
-        kv_suffixes = jnp.stack(kv_slices, axis=2)  # position, head, relative position, value
+            kv_slices.append(kv[offset : input_len - self.length + offset + 1, :, :])
+        kv_suffixes = jnp.stack(
+            kv_slices, axis=2
+        )  # position, head, relative position, value
 
-        keys = kv_suffixes[:,:,:,:self._comp_size] + jnp.expand_dims(weights["bkey"], 0)
-        values = kv_suffixes[:,:,:,self._comp_size:]
+        keys = kv_suffixes[:, :, :, : self._comp_size] + jnp.expand_dims(
+            weights["bkey"], 0
+        )
+        values = kv_suffixes[:, :, :, self._comp_size :]
 
         scores = jnp.einsum("phrv,phv->phr", keys, queries)
         weights = jax.nn.softmax(scores)  # position,head,relative position -> weight

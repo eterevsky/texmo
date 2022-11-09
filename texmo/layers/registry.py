@@ -1,7 +1,5 @@
-from ..layer import Layer
-
-_registry: dict[str, None] = {}
-_cache: dict[str, Layer] = {}
+_registry = {}
+_cache = {}
 
 
 def layer_cls(cls):

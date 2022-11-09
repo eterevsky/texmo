@@ -295,7 +295,11 @@ class Manager(object):
         for i in range(xs.shape[0] // 256):
             shard = xs[i * 256 : (i + 1) * 256]
             shard = jax.nn.one_hot(shard, NCHAR)
-            loss += self._loss_avg(self.weights, shard).item()
+            try:
+                loss += self._loss_avg(self.weights, shard).item()
+            except XlaRuntimeError:
+                self.loss = INF
+                return INF
 
         self.loss = loss / (xs.shape[0] // 256)
 

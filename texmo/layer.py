@@ -43,12 +43,16 @@ class Layer(object):
 
         for name in ("dense", "rec"):
             for activation in ("tanh", "relu"):
-                for size in power2_neighbors(size):
-                    yield f"{name}.{size}.{activation}"
+                yield f"{name}.{size}.{activation}"
 
         for name in ("gru", "mgru", "lstm"):
-            for size in power2_neighbors(size):
-                yield f"{name}.{size}"
+            yield f"{name}.{size}"
+
+        for neighbor_size in power2_neighbors(size):
+            if self.name in ("dense", "rec"):
+                yield f"{self.name}.{neighbor_size}{self._activation_suffix}"
+            else:
+                yield f"{self.name}.{neighbor_size}"
 
     def init_weights(self, rng: Rng, init_scale: float = 1.0) -> LayerWeights:
         return None

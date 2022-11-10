@@ -292,8 +292,8 @@ class Manager(object):
 
     def evaluate(self, xs):
         loss = 0
-        for i in range(xs.shape[0] // 256):
-            shard = xs[i * 256 : (i + 1) * 256]
+        for i in range(xs.shape[0] // 128):
+            shard = xs[i * 128 : (i + 1) * 128]
             shard = jax.nn.one_hot(shard, NCHAR)
             try:
                 loss += self._loss_avg(self.weights, shard).item()
@@ -301,7 +301,7 @@ class Manager(object):
                 self.loss = INF
                 return INF
 
-        self.loss = loss / (xs.shape[0] // 256)
+        self.loss = loss / (xs.shape[0] // 128)
 
         return self.loss
 

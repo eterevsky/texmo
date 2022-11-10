@@ -1,3 +1,4 @@
+import logging
 import math
 import random
 
@@ -124,6 +125,7 @@ class Search(object):
                 expected_runs = 1
                 while i > 0:
                     if confs[i][1] < expected_runs:
+                        logging.info(f"Selecting conf #{i} by predicted score")
                         return confs[i][0]
                     i //= 3
                     expected_runs += 1
@@ -131,12 +133,13 @@ class Search(object):
     def _select_neighbor(self, t: int, max_weights: int):
         """Select a neighbor of a top-scoring conf."""
         with latency.timer("Search._select_neighbor"):
-            for conf in self._result_set.top_confs(t, max_weights):
+            for i, conf in enumerate(self._result_set.top_confs(t, max_weights)):
                 neighbors = list(conf_neighbors(conf, self._template))
                 if neighbors is not None:
                     random.shuffle(neighbors)
                     for neighbor in neighbors:
                         if not self._result_set.has_runs(neighbor):
+                            logging.info(f"Selecting neighbor of conf #{i} LR {conf.lr:.3f}  B{conf.batch:4}  {conf.model}")
                             return neighbor
 
     def print_top_confs(self, t, max_weights):

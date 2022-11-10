@@ -1,6 +1,7 @@
 import re
 
 from collections import namedtuple
+import logging
 
 from .common import INF, is_power2
 from .model2 import build_model

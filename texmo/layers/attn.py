@@ -28,7 +28,6 @@ class Attn(Layer):
         self.heads = heads
         assert type(size) is int
         assert size >= 1
-        assert size % heads == 0
         self.size = size
 
         self._comp_size = self.size // heads
@@ -52,11 +51,14 @@ class Attn(Layer):
         if self.heads == 4 and self.size == self.input_size:
             yield f"suffix.{self.length}"
         for l in power2_neighbors(self.length):
-            yield f"attn.{l}.{self.heads}.{self.size}"
+            if l >= 2:
+                yield f"attn.{l}.{self.heads}.{self.size}"
         for l in power2_neighbors(self.heads):
-            yield f"attn.{self.length}.{l}.{self.size}"
+            if self.size % l == 0:
+                yield f"attn.{self.length}.{l}.{self.size}"
         for l in power2_neighbors(self.size):
-            yield f"attn.{self.length}.{self.heads}.{l}"            
+            if l % self.heads == 0:
+                yield f"attn.{self.length}.{self.heads}.{l}"            
 
     @property
     def weights(self) -> int:

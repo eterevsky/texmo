@@ -17,7 +17,7 @@ def max_points(result_set, t, maxx):
         if results.score > min_loss:
             continue
 
-        weights = conf.spec.weights()
+        weights = conf.model.weights
 
         if x:
             if x[-1] < weights - 1:
@@ -41,7 +41,7 @@ def get_top_confs(result_set):
     top_confs = {}  # (weights_limit, time_round) -> (conf, score)
     count = {}  # (weights_limit, time_round) -> count
     for conf, results in result_set.all_results_by_weights():
-        weights = conf.spec.weights()
+        weights = conf.model.weights
         weights_bucket = 2 ** math.ceil(math.log2(weights))
         try:
             count[(weights_bucket, conf.t)] += results.num_runs
@@ -64,7 +64,7 @@ def get_top_confs(result_set):
 def print_top_confs(top_confs, run_count, filename):
     spec_len = 0
     for conf, score in top_confs.values():
-        l = len(str(conf.spec))
+        l = len(str(conf.model))
         if l > spec_len:
             spec_len = l
     with open(filename, "w") as out:
@@ -97,8 +97,8 @@ def print_top_confs(top_confs, run_count, filename):
                     print("|         | ", file=out, end="")
                 print(f"{t:>4} | {count:>4} | ", file=out, end="")
                 print(
-                    conf.spec,
-                    " " * (spec_len - len(str(conf.spec))),
+                    conf.model,
+                    " " * (spec_len - len(str(conf.model))),
                     file=out,
                     end="",
                 )
@@ -217,7 +217,7 @@ def parse_args():
         "-r",
         "--regularization",
         type=str,
-        default="0.1",
+        default="0.125",
         help="range of values for regularization coefficient (default: 0.1-0.1)",
     )
     parser.add_argument(

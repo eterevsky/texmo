@@ -116,7 +116,7 @@ class ResultDB(object):
         """Iterates through all confs that match template."""
         if template is None:
             template = Template()
-
+        
         conditions = []
         bindings = []
 

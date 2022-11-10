@@ -36,33 +36,47 @@ class Model2(object):
 
     def __hash__(self):
         return hash(str(self))
-    
+
     def is_valid(self):
         for layer1, layer2 in zip(self.layers[:-1], self.layers[1:]):
-            if layer1.name in ("suffix", "attn") and layer2.name in ("suffix", "attn"):
+            if layer1.name in ("suffix", "attn") and layer2.name in (
+                "suffix",
+                "attn",
+            ):
                 return False
         return all(l.is_valid() for l in self.layers)
 
     @property
     def weights(self) -> int:
         return sum(l.weights for l in self.layers) + self.out_layer.weights
-    
+
     def _gen_neighbors(self):
         layers_str = [str(l) for l in self.layers]
 
         # Mutate every separate layer
         for i in range(len(layers_str)):
             for layer_neighbor in self.layers[i].neighbors():
-                yield "-".join(chain(layers_str[:i], (str(layer_neighbor),), layers_str[i+1:]))
-        
+                yield "-".join(
+                    chain(
+                        layers_str[:i],
+                        (str(layer_neighbor),),
+                        layers_str[i + 1 :],
+                    )
+                )
+
         if len(self.layers) > 1:
-            if self.layers[-1] != "suffix.2" and self.layers[-1].output_size == min(self.layers[-2].output_size, NCHAR):
+            # Remove suffix.2 layer
+            if self.layers[-1] != "suffix.2" and self.layers[
+                -1
+            ].output_size == min(self.layers[-2].output_size, NCHAR):
                 yield "-".join(layers_str[:-1])
-        
+
+            # Remove the last layer
             for i in range(len(layers_str)):
                 if layers_str[i] == "suffix.2":
-                    yield "-".join(chain(layers_str[:i], layers_str[i+1:]))
+                    yield "-".join(chain(layers_str[:i], layers_str[i + 1 :]))
 
+        # Add layer to the end
         new_layer_size = min(self.layers[-1].output_size, NCHAR)
         for layer_type in ("dense", "rec"):
             for activation in ("relu", "tanh"):
@@ -71,17 +85,20 @@ class Model2(object):
         for layer_type in ("gru", "mgru", "lstm"):
             yield str(self) + f"-{layer_type}.{new_layer_size}"
 
+        # Add suffix.2 layers.
         yield "suffix.2-" + str(self)
-        
+
         for i in range(len(layers_str)):
-            yield "-".join(chain(layers_str[:i], ["suffix.2"], layers_str[i+1:]))
+            yield "-".join(
+                chain(layers_str[:i], ["suffix.2"], layers_str[i:])
+            )
 
     def neighbors(self):
         for spec in self._gen_neighbors():
             model = build_model(spec)
             if model.is_valid() and model != self:
                 yield model
-        
+
     def remove_last_layer(self):
         if len(self.layers) == 1:
             return None
@@ -110,7 +127,9 @@ class Model2(object):
         assert len(self.layers) == len(weights) - 1 == len(state)
         new_state = []
         v = input
-        for layer, layer_weights, layer_state in zip(self.layers, weights[:-1], state):
+        for layer, layer_weights, layer_state in zip(
+            self.layers, weights[:-1], state
+        ):
             layer_state, v = layer.step(layer_weights, layer_state, v)
             new_state.append(layer_state)
         _, out = self.out_layer.step(weights[-1], None, v)
@@ -142,7 +161,7 @@ class Model2(object):
         batch_size, sample_len, n = batch.shape
         assert n == NCHAR
         prefix = jnp.ones((batch_size, prefix_len, NCHAR)) / NCHAR
-        v = jnp.concatenate([prefix, batch], axis=1)[:,:-1,:]
+        v = jnp.concatenate([prefix, batch], axis=1)[:, :-1, :]
         assert v.shape == (batch_size, prefix_len + sample_len - 1, NCHAR)
 
         for layer, layer_weights in zip(self.layers, weights):
@@ -153,7 +172,7 @@ class Model2(object):
 
         entropy = optax.softmax_cross_entropy(out, batch)
         return jnp.average(entropy) / jnp.log(2)
-    
+
     def serialize(self):
         return {"name": "model2", "spec": str(self)}
 

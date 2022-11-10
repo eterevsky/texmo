@@ -116,6 +116,8 @@ class ResultDB(object):
         """Iterates through all confs that match template."""
         if template is None:
             template = Template()
+        
+        print("get_confs_runs")
 
         conditions = []
         bindings = []
@@ -149,6 +151,9 @@ class ResultDB(object):
             f"SELECT {CONF_FIELDS}, run.loss FROM conf, run "
             + f"WHERE conf.id = run.conf_id {condition}"
         )
+
+        print(query)
+        print(bindings)
 
         cur = self._db.execute(query, bindings)
 

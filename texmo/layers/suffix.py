@@ -33,7 +33,8 @@ class Suffix(Layer):
             yield f"suffix.{l}"
         l = self.length * 2
         yield f"suffix.{l}"
-        yield f"attn.{self.length}.4.{self.input_size}"
+        input_size = max(8, self.input_size)
+        yield f"attn.{self.length}.4.{input_size}"
 
     def init_weights(self, _rng, _init_scale) -> None:
         return None

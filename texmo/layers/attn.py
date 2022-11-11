@@ -28,6 +28,7 @@ class Attn(Layer):
         self.heads = heads
         assert type(size) is int
         assert size >= 1
+        assert size >= heads
         self.size = size
 
         self._comp_size = self.size // heads
@@ -54,10 +55,10 @@ class Attn(Layer):
             if l >= 2:
                 yield f"attn.{l}.{self.heads}.{self.size}"
         for l in power2_neighbors(self.heads):
-            if self.size % l == 0:
+            if self.size % l == 0 and self.size >= l:
                 yield f"attn.{self.length}.{l}.{self.size}"
         for l in power2_neighbors(self.size):
-            if l % self.heads == 0:
+            if l % self.heads == 0 and l >= self.heads:
                 yield f"attn.{self.length}.{self.heads}.{l}"            
 
     @property

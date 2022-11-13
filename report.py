@@ -1,9 +1,10 @@
 import argparse
+import logging
 import math
 import matplotlib.pyplot as plt
 
 from texmo.results import ResultSet
-from texmo.configuration import Configuration, Template
+from texmo.configuration import Configuration, Template, add_template_args
 from texmo.resultdb import ResultDB
 
 def max_points(result_set, t, maxx):
@@ -135,36 +136,17 @@ def parse_interval_float(arg: str):
     else:
         return float(comps[0]), float(comps[1])
 
-def main(
-    db,
-    spec_regex,
-    batch,
-    lr,
-    sample_len,
-    regularization,
-    init_scale,
-    time,
-):
-    template = Template(
-        spec_regex=spec_regex,
-        batch=parse_interval_int(batch),
-        lr=parse_interval_float(lr),
-        sample_len=parse_interval_int(sample_len),
-        regularization=parse_interval_float(regularization),
-        init_scale=parse_interval_float(init_scale),
-        t=parse_interval_int(time),
-    )
-
+def main(db, output, template):
     print(f"Creating ResultDB from {db}")
     result_db = ResultDB(db)
 
-    print(f"Creaing ResultSet.")
+    print(f"Creaing ResultSet")
     result_set = ResultSet(result_db, template, populate_neighbors=False)
 
     top_confs, run_count = get_top_confs(result_set)
-    print("prepared data for report.txt")
-    print_top_confs(top_confs, run_count, "results/report.txt")
-    print("wrote report.txt")
+    print("prepared data for the report")
+    print_top_confs(top_confs, run_count, output)
+    print(f"wrote {output}")
 
     plt.xscale("log")
     plt.yscale("log")
@@ -180,6 +162,8 @@ def main(
 def parse_args():
     parser = argparse.ArgumentParser()
 
+    add_template_args(parser)
+
     parser.add_argument(
         "--db",
         type=str,
@@ -187,57 +171,18 @@ def parse_args():
         help="path to the SQLite database with the results",
     )
     parser.add_argument(
-        "-s",
-        "--spec-regex",
+        "-o",
+        "--output",
         type=str,
-        default=None,
-        help="regex convering the acceptable specs (default: unrestricted)",
-    )
-    parser.add_argument(
-        "-b",
-        "--batch",
-        type=str,
-        default=None,
-        help='range of acceptable batch sizes, for example "1-256" (default: unrestricted)',
-    )
-    parser.add_argument(
-        "-l",
-        "--lr",
-        type=str,
-        default=None,
-        help="range of acceptable learning rates (default: unrestricted)",
-    )
-    parser.add_argument(
-        "--sample-len",
-        type=str,
-        default="128",
-        help="range of acceptable sample lens (default: 128-128)",
-    )
-    parser.add_argument(
-        "-r",
-        "--regularization",
-        type=str,
-        default="0.125",
-        help="range of values for regularization coefficient (default: 0.1-0.1)",
-    )
-    parser.add_argument(
-        "-i",
-        "--init-scale",
-        type=str,
-        default="1.0",
-        help="range of values of the coefficient for the initial weights (default: 0.1-0.1)",
-    )
-    parser.add_argument(
-        "-t",
-        "--time",
-        type=str,
-        default="1-256",
-        help="range of training time (default: 1-256)",
+        default="results/report.txt",
+        help="path to the created report file"
     )
 
     return parser.parse_args()
 
 
 if __name__ == "__main__":
+    logging.getLogger().setLevel(logging.INFO)
     args = parse_args()
-    main(**vars(args))
+    template = Template.from_args(args)
+    main(args.db, args.output, template)

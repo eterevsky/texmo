@@ -25,6 +25,7 @@ def total_size(shape):
 
 
 def power2_neighbors(x):
+    """Produce neighbor integer powers of 2."""
     if x == 1:
         return (2,)
     else:

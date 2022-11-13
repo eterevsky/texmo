@@ -2,7 +2,7 @@ import argparse
 import logging
 
 from texmo.resultdb import ResultDB
-from texmo.configuration import Configuration, Template
+from texmo.configuration import Configuration, Template, add_template_args, parse_conf, default_from_template
 from texmo.dataset import build_dataset
 from texmo import latency
 from texmo.manager import Manager
@@ -14,30 +14,6 @@ from texmo.common import INF
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
 # with t = 2^k
 RUNS_EXP = 0.6
-
-
-def parse_interval_int(arg: str):
-    if arg is None:
-        return None
-    comps = arg.split("-")
-    assert len(comps) in (1, 2)
-    if len(comps) == 1:
-        v = int(comps[0])
-        return (v, v)
-    else:
-        return int(comps[0]), int(comps[1])
-
-
-def parse_interval_float(arg: str):
-    if arg is None:
-        return None
-    comps = arg.split("-")
-    assert len(comps) in (1, 2)
-    if len(comps) == 1:
-        v = float(comps[0])
-        return (v, v)
-    else:
-        return float(comps[0]), float(comps[1])
 
 
 def pick_default_value(default, range):
@@ -72,54 +48,15 @@ def warmup(dataset):
     )
 
 
-def main(
-    data,
-    dataset,
-    log,
-    db,
-    spec_regex,
-    spec_default,
-    batch,
-    batch_default,
-    lr,
-    lr_default,
-    sample_len,
-    sample_len_default,
-    regularization,
-    regularization_default,
-    init_scale,
-    init_scale_default,
-    time,
-    max_weights,
-    min_max_weights,
-):
-    template = Template(
-        spec_regex=spec_regex,
-        batch=parse_interval_int(batch),
-        lr=parse_interval_float(lr),
-        sample_len=parse_interval_int(sample_len),
-        regularization=parse_interval_float(regularization),
-        init_scale=parse_interval_float(init_scale),
-        t=parse_interval_int(time),
-        max_weights=max_weights,
-    )
-    init_conf = Configuration(
-        None,
-        build_model(spec_default),
-        lr=pick_default_value(lr_default, template.lr),
-        sample_len=pick_default_value(sample_len_default, template.sample_len),
-        batch=pick_default_value(batch_default, template.batch),
-        regularization=pick_default_value(
-            regularization_default, template.regularization
-        ),
-        init_scale=pick_default_value(init_scale_default, template.init_scale),
-        t=template.t[0],
-    )
-    print("Initial configuration:", init_conf)
+def main(args, dataset, template):
+    template = Template.from_args(args)
+    default = parse_conf(args.default, default_from_template(template))
+    assert template.match_conf(default)
+    print("Default configuration:", default)
 
-    print(f"Creating ResultDB from {db}")
-    result_db = ResultDB(db)
-    search = Search(result_db, template, init_conf, min_max_weights)
+    print(f"Creating ResultDB from {args.db}")
+    result_db = ResultDB(args.db)
+    search = Search(result_db, template, default, args.min_max_weights)
 
     print("Warming up training")
     warmup(dataset)
@@ -157,7 +94,7 @@ def main(
             temp_steps=None,
             temp_dir=None,
             output_dir=None,
-            log=log,
+            log=args.log,
             quiet=True,
         )
 
@@ -170,8 +107,10 @@ def main(
         print()
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+
+    add_template_args(parser)
 
     parser.add_argument(
         "-d",
@@ -192,91 +131,6 @@ def parse_args():
         required=True,
         help="path to the SQLite database with the results",
     )
-
-    parser.add_argument(
-        "-s",
-        "--spec-regex",
-        type=str,
-        default=None,
-        help="regex convering the acceptable specs (default: unrestricted)",
-    )
-    parser.add_argument(
-        "--spec-default",
-        type=str,
-        default="dense.1.relu",
-        help="initial spec (default: dense.1.relu)",
-    )
-    parser.add_argument(
-        "-b",
-        "--batch",
-        type=str,
-        default=None,
-        help='range of acceptable batch sizes, for example "1-256" (default: unrestricted)',
-    )
-    parser.add_argument(
-        "--batch-default",
-        type=int,
-        default=64,
-        help="default batch size. Should agree with limits from -b and be a power of 2. (default: 64)",
-    )
-    parser.add_argument(
-        "-l",
-        "--lr",
-        type=str,
-        default=None,
-        help="range of acceptable learning rates (default: unrestricted)",
-    )
-    parser.add_argument(
-        "--lr-default",
-        type=float,
-        default=0.125,
-        help="default learning rate. (default: 0.125)",
-    )
-    parser.add_argument(
-        "--sample-len",
-        type=str,
-        default="128",
-        help="range of acceptable sample lens (default: 128)",
-    )
-    parser.add_argument(
-        "--sample-len-default",
-        type=int,
-        default=None,
-        help="default sample length (default: taken from --sample-len)",
-    )
-    parser.add_argument(
-        "-r",
-        "--regularization",
-        type=str,
-        default="0.125",
-        help="range of values for regularization coefficient (default: 0.125)",
-    )
-    parser.add_argument(
-        "--regularization-default",
-        type=float,
-        default=None,
-        help="default value for regularization coefficient (default: taken from -r)",
-    )
-    parser.add_argument(
-        "-i",
-        "--init-scale",
-        type=str,
-        default="1.0",
-        help="range of values of the coefficient for the initial weights (default: 1.0)",
-    )
-    parser.add_argument(
-        "--init-scale-default",
-        type=float,
-        default=None,
-        help="default value for init scaling coefficient (default: taken from --init-scale)",
-    )
-    parser.add_argument(
-        "-t",
-        "--time",
-        type=str,
-        default="1-256",
-        help="range of training time (default: 1-256)",
-    )
     parser.add_argument(
         "--min-max-weights",
         type=int,
@@ -284,10 +138,10 @@ def parse_args():
         help="minimum max-weights value in search",
     )
     parser.add_argument(
-        "--max-weights",
-        type=int,
-        default=None,
-        help="max weights. Will vary if left undefined",
+        "--default",
+        type=str,
+        default="dense.1.relu LR0.125 LEN128 B64 R0.125 I1.0 T1",
+        help="default configuration (default: 'dense.1.relu LR0.125 LEN128 B64 R0.125 I1.0 T1')"
     )
 
     return parser.parse_args()
@@ -298,7 +152,8 @@ if __name__ == "__main__":
     args = parse_args()
     try:
         dataset = build_dataset(args.data)
-        main(dataset=dataset, **vars(args))
+        template = Template.from_args(args)
+        main(args, dataset=dataset, template=template)
     except KeyboardInterrupt:
         print("\nInterrupted\n")
         latency.report()

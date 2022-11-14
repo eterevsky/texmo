@@ -281,6 +281,17 @@ class ResultSet(object):
         row = cur.fetchone()
         return None if row is None else self._confs[row[0]]
 
+    def top_conf_all_t(self, t_lo, t_hi):
+        """A configuration with the highest (self) score with time = t."""
+        cur = self._db.execute(
+            "SELECT id FROM conf "
+            + "WHERE t >= ? AND T <= ? AND score IS NOT NULL "
+            + "ORDER BY score LIMIT 1",
+            (t_lo, t_hi),
+        )
+        row = cur.fetchone()
+        return None if row is None else self._confs[row[0]]
+
     def top_confs(self, t, max_weights):
         with latency.timer("ResultSet.top_confs"):
             cur = self._db.execute(

@@ -1,14 +1,22 @@
 import argparse
 import logging
 
+from texmo.configuration import (
+    Configuration,
+    Template,
+    add_template_args,
+    parse_conf,
+    default_from_template,
+)
+from texmo.results import ResultSet
 from texmo.resultdb import ResultDB
-from texmo.configuration import Configuration, Template, add_template_args, parse_conf, default_from_template
 from texmo.dataset import build_dataset
 from texmo import latency
 from texmo.manager import Manager
 from texmo.model2 import build_model
 from texmo.search import Search
 from texmo.common import INF
+from texmo.report import draw_weight_loss_graph
 
 
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
@@ -48,16 +56,11 @@ def warmup(dataset):
     )
 
 
-def main(args, dataset, template):
-    template = Template.from_args(args)
-    default = parse_conf(args.default, default_from_template(template))
-    assert template.match_conf(default)
-    print("Default configuration:", default)
+def generate_report(result_set, template):
+    draw_weight_loss_graph(result_set, template)
 
-    print(f"Creating ResultDB from {args.db}")
-    result_db = ResultDB(args.db)
-    search = Search(result_db, template, default, args.min_max_weights)
 
+def search_loop(dataset, search):
     print("Warming up training")
     warmup(dataset)
 
@@ -107,6 +110,29 @@ def main(args, dataset, template):
         print()
 
 
+def main(args, dataset, template):
+    template = Template.from_args(args)
+    default = parse_conf(args.default, default_from_template(template))
+    assert template.match_conf(default)
+    print("Default configuration:", default)
+
+    print(f"Creating ResultDB from {args.db}")
+    result_db = ResultDB(args.db)
+
+    if args.only_report:
+        result_set = ResultSet(result_db, template, populate_neighbors=False)
+    else:
+        search = Search(result_db, template, default, args.min_max_weights)
+        result_set = search._result_set
+        try:
+            search_loop(dataset, search)
+        except KeyboardInterrupt:
+            print("\nInterrupted\n")
+            latency.report()
+
+    generate_report(result_set, template)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
@@ -141,7 +167,12 @@ def parse_args() -> argparse.Namespace:
         "--default",
         type=str,
         default="dense.1.relu",
-        help="default configuration (default: 'dense.1.relu LR0.125 LEN128 B64 R0.125 I1.0')"
+        help="default configuration (default: 'dense.1.relu LR0.125 LEN128 B64 R0.125 I1.0')",
+    )
+    parser.add_argument(
+        "--only-report",
+        action="store_true",
+        help="don't run a search, only generate a report",
     )
 
     return parser.parse_args()
@@ -150,12 +181,7 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     logging.getLogger().setLevel(logging.INFO)
     args = parse_args()
-    try:
-        dataset = build_dataset(args.data)
-        template = Template.from_args(args)
-        main(args, dataset=dataset, template=template)
-    except KeyboardInterrupt:
-        print("\nInterrupted\n")
-        latency.report()
-    finally:
-        dataset.join()
+    dataset = build_dataset(args.data)
+    template = Template.from_args(args)
+    main(args, dataset=dataset, template=template)
+    dataset.join()

@@ -7,37 +7,6 @@ from texmo.results import ResultSet
 from texmo.configuration import Configuration, Template, add_template_args
 from texmo.resultdb import ResultDB
 
-def max_points(result_set, t, maxx):
-    x = []
-    y = []
-    min_loss = 5
-
-    for conf, results in result_set.all_results_by_weights():
-        if conf.t != t or not results.score:
-            continue
-        if results.score > min_loss:
-            continue
-
-        weights = conf.model.weights
-
-        if x:
-            if x[-1] < weights - 1:
-                x.append(weights - 1)
-                y.append(min_loss)
-            elif x[-1] == weights:
-                x.pop()
-                y.pop()
-
-        x.append(weights)
-        y.append(results.score)
-        min_loss = results.score
-
-    x.append(maxx)
-    y.append(min_loss)
-
-    return x, y
-
-
 def get_top_confs(result_set):
     top_confs = {}  # (weights_limit, time_round) -> (conf, score)
     count = {}  # (weights_limit, time_round) -> count

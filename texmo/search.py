@@ -107,10 +107,10 @@ class Search(object):
             if top_conf is None:
                 return self._min_max_weights
             maxw = top_conf.model.weights
-            if self._min_max_weights >= maxw * 4:
+            if self._min_max_weights >= maxw * 8:
                 return self._min_max_weights
             l = random.uniform(
-                math.log2(self._min_max_weights), math.log2(maxw) + 2
+                math.log2(self._min_max_weights), math.log2(maxw) + 3
             )
             return int(2**l)
 

@@ -138,10 +138,12 @@ class Search(object):
             for i, conf in enumerate(
                 self._result_set.top_confs(t, max_weights)
             ):
+                assert conf is not None
                 neighbors = list(conf_neighbors(conf, self._template))
                 if neighbors is not None:
                     random.shuffle(neighbors)
                     for neighbor in neighbors:
+                        assert neighbor is not None
                         assert neighbor != conf
                         if not self._result_set.has_runs(neighbor):
                             logging.info(

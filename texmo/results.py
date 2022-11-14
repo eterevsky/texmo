@@ -351,7 +351,7 @@ class ResultSet(object):
                 )
                 yield conf, results
 
-    def top_confs(self, t, limit=10):
+    def top_confs_by_score(self, t, limit=10):
         limit_str = "" if limit is None else f"-{limit}"
         with latency.timer(f"ResultSet.top_pred_confs-cur"):
             cur = self._db.execute(

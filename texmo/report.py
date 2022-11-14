@@ -184,7 +184,7 @@ def generate_max_report(result_set: ResultSet, template: Template) -> str:
         runs = runs_count.get(t, 0)
         print(f"\nT = {t:3}  runs = {runs:5}", file=out)
 
-        for conf, results in result_set.top_confs(t, limit=5):
+        for conf, results in result_set.top_confs_by_score(t, limit=5):
             score = f"{results.score:.4f} ({results.num_runs})"
             if results.num_runs < 10:
                 score += " "

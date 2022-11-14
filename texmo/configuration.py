@@ -213,8 +213,8 @@ def add_template_args(parser: argparse.ArgumentParser):
         "-l",
         "--lr",
         type=str,
-        default=None,
-        help="range of acceptable learning rates (default: unrestricted)",
+        default="0.001-10",
+        help="range of acceptable learning rates (default: 0.001-10)",
     )
     parser.add_argument(
         "--sample-len",

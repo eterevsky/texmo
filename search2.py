@@ -16,7 +16,7 @@ from texmo.manager import Manager
 from texmo.model2 import build_model
 from texmo.search import Search
 from texmo.common import INF
-from texmo.report import draw_weight_loss_graph
+from texmo.report import draw_weight_loss_graph, generate_report_by_weight, generate_max_report, generate_param_report
 
 
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
@@ -56,7 +56,21 @@ def warmup(dataset):
     )
 
 
-def generate_report(result_set, template):
+def generate_report(result_set, template, min_max_weights):
+    if template.max_weights is None:
+        print(generate_report_by_weight(result_set, template, min_max_weights))
+        print()
+    print(generate_max_report(result_set, template))
+    print("\nLearning Rate")
+    print(generate_param_report(result_set, template, lambda conf: conf.lr))
+    print("\nSample Length")
+    print(generate_param_report(result_set, template, lambda conf: conf.sample_len, is_float=False))
+    print("\nBatch")
+    print(generate_param_report(result_set, template, lambda conf: conf.batch, is_float=False))
+    print("\nRegularization")
+    print(generate_param_report(result_set, template, lambda conf: conf.regularization))
+    print("\nInit Scale")
+    print(generate_param_report(result_set, template, lambda conf: conf.init_scale))
     draw_weight_loss_graph(result_set, template)
 
 
@@ -77,7 +91,8 @@ def search_loop(dataset, search):
         if conf.init_scale != 1.0:
             extras += f"  I {conf.init_scale}"
         print(
-            f"T = {conf.t:3}     LR{conf.lr:6.3f}  B{conf.batch:4}  {conf.model} ({weights}){extras}"
+            f"T = {conf.t:3}     LR{conf.lr:6.3f}  B{conf.batch:4}  "
+            + f"{conf.model} ({weights}){extras}"
         )
 
         manager = Manager(
@@ -130,7 +145,7 @@ def main(args, dataset, template):
             print("\nInterrupted\n")
             latency.report()
 
-    generate_report(result_set, template)
+    generate_report(result_set, template, args.min_max_weights)
 
 
 def parse_args() -> argparse.Namespace:
@@ -185,3 +200,4 @@ if __name__ == "__main__":
     template = Template.from_args(args)
     main(args, dataset=dataset, template=template)
     dataset.join()
+    latency.report()

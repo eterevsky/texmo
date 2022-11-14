@@ -162,7 +162,6 @@ class ResultSet(object):
                 "UPDATE conf SET score = ? WHERE id = ?", (score, conf.id)
             )
 
-
     def add_run(self, conf: Configuration, loss: float, update_scores=True):
         conf = self._find_or_add_conf(conf)
         if math.isnan(loss) or loss is None:
@@ -207,6 +206,15 @@ class ResultSet(object):
         for id, score, pred_score in cur:
             conf = self._confs[id]
             results = Results(score, pred_score, self.num_runs_by_id(id))
+            yield conf, results
+
+    def all_results_for_t(self, t):
+        cur = self._db.execute(
+            "SELECT id, score FROM conf WHERE t = ? AND score IS NOT NULL", (t,)
+        )
+        for id, score in cur:
+            conf = self._confs[id]
+            results = Results(score, None, self.num_runs_by_id(id))
             yield conf, results
 
     def total_runs_count(self):
@@ -329,9 +337,7 @@ class ResultSet(object):
                     f"""
                     SELECT id, score, pred_score
                     FROM conf
-                    WHERE t = ?
-                    AND weights <= ?
-                    AND pred_score IS NOT NULL
+                    WHERE t = ? AND weights <= ? AND pred_score IS NOT NULL
                     ORDER BY pred_score
                     """
                     + limit_clause,
@@ -340,8 +346,29 @@ class ResultSet(object):
             for id, score, pred_score in cur:
                 # conf = conf_from_row(row[:8])
                 conf = self._confs[id]
-                results = Results(score, pred_score, self.num_runs_by_id(conf.id))
+                results = Results(
+                    score, pred_score, self.num_runs_by_id(conf.id)
+                )
                 yield conf, results
+
+    def top_confs(self, t, limit=10):
+        limit_str = "" if limit is None else f"-{limit}"
+        with latency.timer(f"ResultSet.top_pred_confs-cur"):
+            cur = self._db.execute(
+                f"""
+                SELECT id, score, pred_score
+                FROM conf
+                WHERE t = ? AND score IS NOT NULL
+                ORDER BY score
+                LIMIT ?
+                """,
+                (t, limit),
+            )
+        for id, score, pred_score in cur:
+            # conf = conf_from_row(row[:8])
+            conf = self._confs[id]
+            results = Results(score, pred_score, self.num_runs_by_id(conf.id))
+            yield conf, results
 
     def all_confs(self):
         return self._confs.values()

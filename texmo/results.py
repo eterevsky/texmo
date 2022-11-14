@@ -36,7 +36,9 @@ class ResultSet(object):
         self._confs = {}  # conf id -> Configuration
         self._runs = {}  # conf id -> [run losses]
         self._db = sqlite3.connect(":memory:")
-        with open("runtime-db.sql") as schema:
+        schema_path = os.path.join(os.path.dirname(__file__), "runtime-db.sql")
+
+        with open(schema_path) as schema:
             self._db.executescript(schema.read())
 
         if self._result_db is not None:
@@ -160,7 +162,6 @@ class ResultSet(object):
                 "UPDATE conf SET score = ? WHERE id = ?", (score, conf.id)
             )
 
-
     def add_run(self, conf: Configuration, loss: float, update_scores=True):
         conf = self._find_or_add_conf(conf)
         if math.isnan(loss) or loss is None:
@@ -205,6 +206,15 @@ class ResultSet(object):
         for id, score, pred_score in cur:
             conf = self._confs[id]
             results = Results(score, pred_score, self.num_runs_by_id(id))
+            yield conf, results
+
+    def all_results_for_t(self, t):
+        cur = self._db.execute(
+            "SELECT id, score FROM conf WHERE t = ? AND score IS NOT NULL", (t,)
+        )
+        for id, score in cur:
+            conf = self._confs[id]
+            results = Results(score, None, self.num_runs_by_id(id))
             yield conf, results
 
     def total_runs_count(self):
@@ -279,6 +289,17 @@ class ResultSet(object):
         row = cur.fetchone()
         return None if row is None else self._confs[row[0]]
 
+    def top_conf_all_t(self, t_lo, t_hi):
+        """A configuration with the highest (self) score with time = t."""
+        cur = self._db.execute(
+            "SELECT id FROM conf "
+            + "WHERE t >= ? AND T <= ? AND score IS NOT NULL "
+            + "ORDER BY score LIMIT 1",
+            (t_lo, t_hi),
+        )
+        row = cur.fetchone()
+        return None if row is None else self._confs[row[0]]
+
     def top_confs(self, t, max_weights):
         with latency.timer("ResultSet.top_confs"):
             cur = self._db.execute(
@@ -316,9 +337,7 @@ class ResultSet(object):
                     f"""
                     SELECT id, score, pred_score
                     FROM conf
-                    WHERE t = ?
-                    AND weights <= ?
-                    AND pred_score IS NOT NULL
+                    WHERE t = ? AND weights <= ? AND pred_score IS NOT NULL
                     ORDER BY pred_score
                     """
                     + limit_clause,
@@ -327,8 +346,29 @@ class ResultSet(object):
             for id, score, pred_score in cur:
                 # conf = conf_from_row(row[:8])
                 conf = self._confs[id]
-                results = Results(score, pred_score, self.num_runs_by_id(conf.id))
+                results = Results(
+                    score, pred_score, self.num_runs_by_id(conf.id)
+                )
                 yield conf, results
+
+    def top_confs_by_score(self, t, limit=10):
+        limit_str = "" if limit is None else f"-{limit}"
+        with latency.timer(f"ResultSet.top_pred_confs-cur"):
+            cur = self._db.execute(
+                f"""
+                SELECT id, score, pred_score
+                FROM conf
+                WHERE t = ? AND score IS NOT NULL
+                ORDER BY score
+                LIMIT ?
+                """,
+                (t, limit),
+            )
+        for id, score, pred_score in cur:
+            # conf = conf_from_row(row[:8])
+            conf = self._confs[id]
+            results = Results(score, pred_score, self.num_runs_by_id(conf.id))
+            yield conf, results
 
     def all_confs(self):
         return self._confs.values()

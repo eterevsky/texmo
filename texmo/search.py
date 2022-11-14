@@ -117,15 +117,17 @@ class Search(object):
     def _select_by_pred_score(self, t: int, max_weights: int):
         with latency.timer("Search._select_by_pred_score"):
             confs = [(None, 0)]
-            for (iconf, (conf, results)) in enumerate(self._result_set.top_pred_confs(
-                t, max_weights
-            )):
+            for (iconf, (conf, results)) in enumerate(
+                self._result_set.top_pred_confs(t, max_weights)
+            ):
                 i = len(confs)
                 confs.append((conf, results.num_runs))
                 expected_runs = 1
                 while i > 0:
                     if confs[i][1] < expected_runs:
-                        logging.info(f"Selecting conf #{iconf} by predicted score")
+                        logging.info(
+                            f"Selecting conf #{iconf} by predicted score"
+                        )
                         return confs[i][0]
                     i //= 3
                     expected_runs += 1
@@ -133,13 +135,20 @@ class Search(object):
     def _select_neighbor(self, t: int, max_weights: int):
         """Select a neighbor of a top-scoring conf."""
         with latency.timer("Search._select_neighbor"):
-            for i, conf in enumerate(self._result_set.top_confs(t, max_weights)):
+            for i, conf in enumerate(
+                self._result_set.top_confs(t, max_weights)
+            ):
+                assert conf is not None
                 neighbors = list(conf_neighbors(conf, self._template))
                 if neighbors is not None:
                     random.shuffle(neighbors)
                     for neighbor in neighbors:
+                        assert neighbor is not None
+                        assert neighbor != conf
                         if not self._result_set.has_runs(neighbor):
-                            logging.info(f"Selecting neighbor of conf #{i}: LR {conf.lr:.3f}  B{conf.batch:4}  {conf.model}")
+                            logging.info(
+                                f"Selecting neighbor of conf #{i}: LR {conf.lr:.3f}  B{conf.batch:4}  {conf.model}"
+                            )
                             return neighbor
 
     def print_top_confs(self, t, max_weights):

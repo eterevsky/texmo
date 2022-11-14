@@ -95,7 +95,7 @@ def parse_conf(s: str, defaults: Configuration) -> Configuration:
             init_scale = float(value)
         elif name == "T":
             t = int(value)
-    
+
     return Configuration(None, model, lr, sample_len, batch, regularization, init_scale, t)
 
 
@@ -190,7 +190,7 @@ def default_from_template(template: Template) -> Configuration:
     init_scale = _pick_default_value(template.init_scale, 1.0)
     t = _pick_default_value(template.t, 1)
     return Configuration(None, None, lr, sample_len, batch, regularization, init_scale, t)
-    
+
 
 
 def add_template_args(parser: argparse.ArgumentParser):
@@ -213,8 +213,8 @@ def add_template_args(parser: argparse.ArgumentParser):
         "-l",
         "--lr",
         type=str,
-        default=None,
-        help="range of acceptable learning rates (default: unrestricted)",
+        default="0.001-10",
+        help="range of acceptable learning rates (default: 0.001-10)",
     )
     parser.add_argument(
         "--sample-len",

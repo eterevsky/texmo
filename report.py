@@ -107,7 +107,7 @@ def print_top_confs(top_confs, run_count, filename):
                 print(f"B{conf.batch} LR{conf.lr}", file=out, end="")
                 if conf.sample_len != 128:
                     print(f" LEN{conf.sample_len}", file=out, end="")
-                if conf.regularization != 0.1:
+                if conf.regularization != 0.125:
                     print(f" R{conf.regularization}", file=out, end="")
                 if conf.init_scale != 1.0:
                     print(f" i{conf.init_scale}", file=out, end="")

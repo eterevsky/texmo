@@ -140,8 +140,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--default",
         type=str,
-        default="dense.1.relu LR0.125 LEN128 B64 R0.125 I1.0 T1",
-        help="default configuration (default: 'dense.1.relu LR0.125 LEN128 B64 R0.125 I1.0 T1')"
+        default="dense.1.relu",
+        help="default configuration (default: 'dense.1.relu LR0.125 LEN128 B64 R0.125 I1.0')"
     )
 
     return parser.parse_args()

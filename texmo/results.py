@@ -36,7 +36,9 @@ class ResultSet(object):
         self._confs = {}  # conf id -> Configuration
         self._runs = {}  # conf id -> [run losses]
         self._db = sqlite3.connect(":memory:")
-        with open("runtime-db.sql") as schema:
+        schema_path = os.path.join(os.path.dirname(__file__), "runtime-db.sql")
+
+        with open(schema_path) as schema:
             self._db.executescript(schema.read())
 
         if self._result_db is not None:

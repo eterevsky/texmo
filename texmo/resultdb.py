@@ -22,7 +22,10 @@ class ResultDB(object):
         exists = path != ":memory:" and os.path.exists(path)
         self._db = sqlite3.connect(path)
         if not exists:
-            with open("persistent-db.sql") as schema:
+            schema_path = os.path.join(
+                os.path.dirname(__file__), "persistent-db.sql"
+            )
+            with open(schema_path) as schema:
                 self._db.executescript(schema.read())
                 self._db.commit()
 
@@ -116,7 +119,7 @@ class ResultDB(object):
         """Iterates through all confs that match template."""
         if template is None:
             template = Template()
-        
+
         conditions = []
         bindings = []
 
@@ -155,7 +158,7 @@ class ResultDB(object):
         for row in cur:
             if template.match_model(build_model(row[1])):
                 conf = conf_from_row(row[:8])
-                if conf_is_valid(conf): 
+                if conf_is_valid(conf):
                     yield conf, row[8]
 
 

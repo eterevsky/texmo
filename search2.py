@@ -63,14 +63,18 @@ def generate_report(result_set, template, min_max_weights):
     print(generate_max_report(result_set, template))
     print("\nLearning Rate")
     print(generate_param_report(result_set, template, lambda conf: conf.lr))
-    print("\nSample Length")
-    print(generate_param_report(result_set, template, lambda conf: conf.sample_len, is_float=False))
-    print("\nBatch")
-    print(generate_param_report(result_set, template, lambda conf: conf.batch, is_float=False))
-    print("\nRegularization")
-    print(generate_param_report(result_set, template, lambda conf: conf.regularization))
-    print("\nInit Scale")
-    print(generate_param_report(result_set, template, lambda conf: conf.init_scale))
+    if template.sample_len[0] < template.sample_len[1]:
+        print("\nSample Length")
+        print(generate_param_report(result_set, template, lambda conf: conf.sample_len, is_float=False))
+    if template.batch[0] < template.batch[1]:
+        print("\nBatch")
+        print(generate_param_report(result_set, template, lambda conf: conf.batch, is_float=False))
+    if template.regularization[0] < template.regularization[1]:
+        print("\nRegularization")
+        print(generate_param_report(result_set, template, lambda conf: conf.regularization))
+    if template.init_scale[0] < template.init_scale[1]:
+        print("\nInit Scale")
+        print(generate_param_report(result_set, template, lambda conf: conf.init_scale))
     draw_weight_loss_graph(result_set, template)
 
 
@@ -175,7 +179,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--min-max-weights",
         type=int,
-        default=1024,
+        default=2048,
         help="minimum max-weights value in search",
     )
     parser.add_argument(

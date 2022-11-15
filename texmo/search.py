@@ -4,7 +4,7 @@ import random
 
 from . import latency
 from .common import INF
-from .configuration import conf_neighbors
+from .configuration import conf_neighbors, conf_to_string
 from .results import ResultSet
 from .predict import Predictor
 
@@ -23,11 +23,11 @@ class Search(object):
         self._init_conf = init_conf
         self._min_max_weights = min_max_weights
 
-        print(f"Creaing ResultSet.")
+        logging.info("Creaing ResultSet.")
         self._result_set = ResultSet(db, template)
         self._last_predictor_update = 0
 
-        print("Creating Predictor")
+        logging.info("Creating Predictor")
         self._predictor = Predictor(self._result_set.all_conf_runs())
         if self._result_set.total_runs_count() > 0:
             self.train_predictor()
@@ -125,12 +125,10 @@ class Search(object):
                 expected_runs = 1
                 while i > 0:
                     if confs[i][1] < expected_runs:
-                        logging.info(
-                            f"Selecting conf #{iconf} by predicted score"
-                        )
-                        return confs[i][0]
+                        return i - 1, confs[i][0]
                     i //= 3
                     expected_runs += 1
+        return None, None
 
     def _select_neighbor(self, t: int, max_weights: int):
         """Select a neighbor of a top-scoring conf."""
@@ -146,10 +144,8 @@ class Search(object):
                         assert neighbor is not None
                         assert neighbor != conf
                         if not self._result_set.has_runs(neighbor):
-                            logging.info(
-                                f"Selecting neighbor of conf #{i}: LR {conf.lr:.3f}  B{conf.batch:4}  {conf.model}"
-                            )
-                            return neighbor
+                            return i, neighbor, conf
+        return None, None, None
 
     def print_top_confs(self, t, max_weights):
         with latency.timer("Search.print_top_confs"):
@@ -189,11 +185,19 @@ class Search(object):
 
             self.print_top_confs(t, max_weights)
 
-            if random.randrange(2):
-                conf = self._select_by_pred_score(t, max_weights)
-            else:
-                conf = self._select_neighbor(t, max_weights)
-            if conf is None:
-                conf = self._init_conf._replace(t=t)
+            ipred, pred_conf = self._select_by_pred_score(t, max_weights)
+            ineighbor, neighbor_conf, parent_conf = self._select_neighbor(t, max_weights)
 
-            return conf
+            if ipred is not None and (ineighbor is None or ineighbor >= ipred):
+                logging.info(f"Selecting conf top #{ipred} by predicted score.")
+                return pred_conf
+            
+            if ineighbor is not None and (ipred is None or random.randrange(2)):
+                c = conf_to_string(parent_conf, self._init_conf)
+                logging.info(f"Selecting a neighbor or conf #{ipred} by median score: {c}")
+                return neighbor_conf
+            elif ipred is not None:
+                logging.info(f"Selecting conf top #{ipred} by predicted score.")
+                return pred_conf
+
+            return self._init_conf._replace(t=t)

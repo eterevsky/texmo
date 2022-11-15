@@ -12,7 +12,7 @@ from .registry import layer_cls
 class Gru(Layer):
     name = "gru"
 
-    def __init__(self, size, input_shape=None):
+    def __init__(self, size, input_shape=None, tanh=False, relu=False):
         super().__init__(input_shape=input_shape)
         self.size = size
         self.output_shape = (size,)

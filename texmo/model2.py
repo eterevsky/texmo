@@ -65,16 +65,21 @@ class Model2(object):
                 )
 
         if len(self.layers) > 1:
-            # Remove suffix.2 layer
+            # Remove the last layer
             if self.layers[-1] != "suffix.2" and self.layers[
                 -1
             ].output_size == min(self.layers[-2].output_size, NCHAR):
                 yield "-".join(layers_str[:-1])
 
-            # Remove the last layer
+            # Remove the intermediate suffix or attn layer
             for i in range(len(layers_str)):
                 if layers_str[i] == "suffix.2":
                     yield "-".join(chain(layers_str[:i], layers_str[i + 1 :]))
+                if i > 0:
+                    size = self.layers[i].output_size
+                    heads = min(size, 4)
+                    if layers_str[i] == f"attn.4.{heads}.{size}":
+                        yield "-".join(chain(layers_str[:i], layers_str[i + 1 :]))
 
         # Add layer to the end
         new_layer_size = min(self.layers[-1].output_size, NCHAR)
@@ -89,9 +94,15 @@ class Model2(object):
         yield "suffix.2-" + str(self)
 
         for i in range(len(layers_str)):
+            # Inserting between layers i and i + 1
             yield "-".join(
-                chain(layers_str[:i], ["suffix.2"], layers_str[i:])
+                chain(layers_str[:i+1], ["suffix.2"], layers_str[i+1:])
             )
+
+            size = self.layers[i].output_size
+            heads = min(size, 4)
+            
+            yield "-".join(chain(layers_str[:i+1], [f"attn.4.{heads}.{size}"], layers_str[i+1:]))
 
     def neighbors(self):
         for spec in self._gen_neighbors():

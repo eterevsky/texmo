@@ -156,7 +156,11 @@ class ResultDB(object):
         cur = self._db.execute(query, bindings)
 
         for row in cur:
-            if template.match_model(build_model(row[1])):
+            try:
+                model = build_model(row[1])
+            except KeyError:
+                continue
+            if template.match_model(model):
                 conf = conf_from_row(row[:8])
                 if conf_is_valid(conf):
                     yield conf, row[8]

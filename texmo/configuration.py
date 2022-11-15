@@ -176,6 +176,18 @@ class Template(object):
                 return False
         return self.regex is None or self.regex.fullmatch(str(model))
 
+    def clone(self):
+        return Template(
+            spec_regex=self.regex,
+            lr=self.lr,
+            sample_len=self.sample_len,
+            batch=self.batch,
+            regularization=self.regularization,
+            init_scale=self.init_scale,
+            t=self.t,
+            max_weights=self.max_weights,
+        )
+
 
 def _pick_default_value(range, default):
     if range is None or range[0] <= default <= range[1]: return default

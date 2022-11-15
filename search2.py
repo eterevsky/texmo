@@ -7,6 +7,7 @@ from texmo.configuration import (
     add_template_args,
     parse_conf,
     default_from_template,
+    conf_to_string,
 )
 from texmo.results import ResultSet
 from texmo.resultdb import ResultDB
@@ -66,13 +67,13 @@ def generate_report(result_set, template, min_max_weights):
     if template.sample_len[0] < template.sample_len[1]:
         print("\nSample Length")
         print(generate_param_report(result_set, template, lambda conf: conf.sample_len, is_float=False))
-    if template.batch[0] < template.batch[1]:
+    if template.batch is None or template.batch[0] < template.batch[1]:
         print("\nBatch")
         print(generate_param_report(result_set, template, lambda conf: conf.batch, is_float=False))
-    if template.regularization[0] < template.regularization[1]:
+    if template.regularization is None or template.regularization[0] < template.regularization[1]:
         print("\nRegularization")
         print(generate_param_report(result_set, template, lambda conf: conf.regularization))
-    if template.init_scale[0] < template.init_scale[1]:
+    if template.init_scale is None or template.init_scale[0] < template.init_scale[1]:
         print("\nInit Scale")
         print(generate_param_report(result_set, template, lambda conf: conf.init_scale))
     draw_weight_loss_graph(result_set, template)
@@ -133,7 +134,7 @@ def main(args, dataset, template):
     template = Template.from_args(args)
     default = parse_conf(args.default, default_from_template(template))
     assert template.match_conf(default)
-    print("Default configuration:", default)
+    logging.info("Default configuration: " + conf_to_string(default, default_from_template(template)))
 
     print(f"Creating ResultDB from {args.db}")
     result_db = ResultDB(args.db)

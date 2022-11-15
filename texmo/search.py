@@ -117,9 +117,7 @@ class Search(object):
     def _select_by_pred_score(self, t: int, max_weights: int):
         with latency.timer("Search._select_by_pred_score"):
             confs = [(None, 0)]
-            for (iconf, (conf, results)) in enumerate(
-                self._result_set.top_pred_confs(t, max_weights)
-            ):
+            for (conf, results) in self._result_set.top_pred_confs(t, max_weights):
                 i = len(confs)
                 confs.append((conf, results.num_runs))
                 expected_runs = 1
@@ -194,7 +192,7 @@ class Search(object):
             
             if ineighbor is not None and (ipred is None or random.randrange(2)):
                 c = conf_to_string(parent_conf, self._init_conf)
-                logging.info(f"Selecting a neighbor or conf #{ipred} by median score: {c}")
+                logging.info(f"Selecting a neighbor or conf #{ineighbor} by median score: {c}")
                 return neighbor_conf
             elif ipred is not None:
                 logging.info(f"Selecting conf top #{ipred} by predicted score.")

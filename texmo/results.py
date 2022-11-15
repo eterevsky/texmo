@@ -55,7 +55,11 @@ class ResultSet(object):
         with latency.timer("ResultSet._import_from_result_db"):
             print("Importing relevant configurations and results from ResultDB")
             n = 0
-            for conf, loss in self._result_db.get_confs_runs(self._template):
+
+            template_wo_t = self._template.clone()
+            template_wo_t.t = None
+
+            for conf, loss in self._result_db.get_confs_runs(template_wo_t):
                 conf = conf._replace(id=None)
                 conf = self._find_or_add_conf(conf)
 

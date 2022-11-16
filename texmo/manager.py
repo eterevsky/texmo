@@ -131,6 +131,12 @@ def deserialize_weights(saved_weights):
     return weights
 
 
+def release_device_buffers():
+    backend = jax.lib.xla_bridge.get_backend()
+    for buf in backend.live_buffers():
+        buf.delete()
+
+
 class TrainingDiverged(Exception):
     """Thrown if the loss turs inf or NaN."""
 
@@ -291,18 +297,32 @@ class Manager(object):
         return self._loss_avg(self.weights, xs)
 
     def evaluate(self, xs):
-        loss = 0
-        for i in range(xs.shape[0] // 128):
-            shard = xs[i * 128 : (i + 1) * 128]
-            shard = jax.nn.one_hot(shard, NCHAR)
-            try:
-                loss += self._loss_avg(self.weights, shard).item()
-            except XlaRuntimeError:
-                self.loss = INF
-                return INF
-
-        self.loss = loss / (xs.shape[0] // 128)
-
+        shards = 2
+        while shards <= xs.shape[0]:
+            logging.info(f"Evaluating with {shards} batches")
+            shard_size = xs.shape[0] // shards
+            
+            loss = 0
+            for i in range(shards):
+                shard = xs[i * shard_size : (i + 1) * shard_size]
+                try:
+                    shard = jax.nn.one_hot(shard, NCHAR)
+                    loss += self._loss_avg(self.weights, shard).item()
+                except XlaRuntimeError:
+                    loss = INF
+                    break
+            
+            if loss < INF:
+                self.loss = loss / shards
+                return self.loss
+            
+            # Convert weights to numpy arrays and then release all the GPU buffers.
+            self.weights = jax.device_get(self.weights)
+            release_device_buffers()
+            shards *= 2
+        
+        logging.info("Can't evaluate the model even with shar 1. Assuming INF loss.")
+        self.loss = INF
         return self.loss
 
     def sample(self, prefix, l, temperature=0.05):
@@ -361,8 +381,6 @@ class Manager(object):
 
         logging.info(f"Training for {time_limit} s")
         logging.info(f"LEN {sample_length}  B {batch_size}")
-
- 
 
         while time.time() < finish_time and self.step < steps:
             batch = train_set.sample(

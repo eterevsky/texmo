@@ -75,6 +75,35 @@ class Search(object):
             if lo == hi:
                 return lo
 
+            times = [lo]
+            weights = [1]
+
+            runs_count = self._result_set.runs_count_per_t()
+            runs = runs_count.get(lo, 0)
+            print(f"t = {lo:3}  complete = {runs:5}")
+
+            prev_runs = runs
+
+            t = 2 * lo
+            while t <= hi:
+                times.append(t)
+                weights.append(0.6 * weights[-1])
+
+                runs = runs_count.get(t, 0)
+                ratio = runs / prev_runs
+                print(f"t = {t:3}  complete = {runs:5}  ratio = {ratio:.2f}")
+                prev_runs = runs
+                t *= 2
+
+            return random.choices(times, weights)[0]
+
+    def _select_time_deterministic(self):
+        with latency.timer("Search._select_time"):
+            lo, hi = self._template.t
+            assert 1 <= lo <= hi
+            if lo == hi:
+                return lo
+
             runs_count = self._result_set.runs_count_per_t()
             runs = runs_count.get(lo, 0)
             print(f"t = {lo:3}  complete = {runs:5}")

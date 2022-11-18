@@ -301,26 +301,28 @@ class Manager(object):
         while shards <= xs.shape[0]:
             logging.info(f"Evaluating with {shards} batches")
             shard_size = xs.shape[0] // shards
-            
+
             loss = 0
+            evaluation_failed = False
             for i in range(shards):
                 shard = xs[i * shard_size : (i + 1) * shard_size]
                 try:
                     shard = jax.nn.one_hot(shard, NCHAR)
                     loss += self._loss_avg(self.weights, shard).item()
                 except XlaRuntimeError:
-                    loss = INF
+                    evaluation_failed = True
                     break
-            
-            if loss < INF:
+
+            if not evaluation_failed:
                 self.loss = loss / shards
                 return self.loss
-            
+
             # Convert weights to numpy arrays and then release all the GPU buffers.
             self.weights = jax.device_get(self.weights)
             release_device_buffers()
             shards *= 2
-        
+            evaluation_failed = False
+
         logging.info("Can't evaluate the model even with shar 1. Assuming INF loss.")
         self.loss = INF
         return self.loss

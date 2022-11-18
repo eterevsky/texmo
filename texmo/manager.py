@@ -297,7 +297,7 @@ class Manager(object):
         return self._loss_avg(self.weights, xs)
 
     def evaluate(self, xs):
-        shards = 2
+        shards = 4
         while shards <= xs.shape[0]:
             logging.info(f"Evaluating with {shards} batches")
             shard_size = xs.shape[0] // shards
@@ -308,7 +308,7 @@ class Manager(object):
                 try:
                     shard = jax.nn.one_hot(shard, NCHAR)
                     loss += self._loss_avg(self.weights, shard).item()
-                except XlaRuntimeError:
+                except (XlaRuntimeError, ValueError):
                     loss = INF
                     break
             
@@ -388,7 +388,7 @@ class Manager(object):
             )
             try:
                 loss = self.train_step(batch)
-            except XlaRuntimeError:
+            except (XlaRuntimeError, ValueError):
                 logging.warn(
                     "Internal XLA error, probably OOM. Returning +inf loss."
                 )

@@ -8,12 +8,10 @@ import logging
 import math
 import optax
 import os
-import random
 import time
 
 from .common import INF, NCHAR
 from . import latency
-from .layered import LayeredModel2
 from .model2 import Model2
 from .prng import Rng
 from .record import TrainingRecord
@@ -186,15 +184,9 @@ class Manager(object):
         with open(path) as f:
             spec = json.load(f)
         model_spec = spec["model"]
-        if model_spec["name"] == "model2":
-            model = Model2(model_spec["spec"])
-            use_model2 = True
-        elif model_spec["name"] == "layered":
-            model = LayeredModel2.from_spec(model_spec)
-            use_model2 = False
-        else:
-            assert False
-
+        assert model_spec["name"] == "model2"
+        model = Model2(model_spec["spec"])
+        use_model2 = True
         weights = deserialize_weights(spec["weights"])
         manager = Manager(
             model,
@@ -216,10 +208,7 @@ class Manager(object):
         init_scale: float,
         use_model2: bool = True,
     ):
-        if use_model2:
-            model = Model2(model_spec)
-        else:
-            model = LayeredModel2.parse(model_spec)
+        model = Model2(model_spec)
         manager = Manager(
             model, learning_rate, regularization, init_scale=init_scale, use_model2=use_model2
         )

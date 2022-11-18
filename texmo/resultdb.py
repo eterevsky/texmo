@@ -13,7 +13,6 @@ from .configuration import (
 )
 from . import latency
 from .record import TrainingRecord
-from .spec import ObsoleteSpec
 from .model2 import build_model
 
 
@@ -78,10 +77,7 @@ class ResultDB(object):
 
     def add_record(self, record, commit=True, skip_invalid=False):
         if skip_invalid:
-            try:
-                conf = conf_from_record(record)
-            except ObsoleteSpec:
-                return
+            conf = conf_from_record(record)
             if not conf_is_valid(conf):
                 return
         else:

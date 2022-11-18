@@ -90,10 +90,10 @@ class Attn(Layer):
     ) -> tuple[LayerState, DeviceArray]:
         input = input.flatten()
 
-        kqv = jnp.dot(weights["w"], input)
-        key = kqv[:, : self._comp_size]
-        query = kqv[:, self._comp_size : 2 * self._comp_size] + weights["bquery"]
-        value = kqv[:, 2 * self._comp_size :]
+        kvq = jnp.dot(weights["w"], input)
+        key = kvq[:, : self._comp_size]
+        value = kvq[:, self._comp_size : 2 * self._comp_size]
+        query = kvq[:, 2 * self._comp_size :] + weights["bquery"]
 
         keys = jnp.concatenate(
             (state["keys"], key.reshape((self.heads, 1, -1))), axis=1
@@ -104,15 +104,15 @@ class Attn(Layer):
 
         biased_keys = keys + weights["bkey"]
 
-        scores = self._score_scale * jnp.einsum("hT,hpT->hp", query, biased_keys)
+        scores = self._score_scale * jnp.einsum("hv,hpv->hp", query, biased_keys)
         weights = jax.nn.softmax(scores)  # head,position -> weight
         # softmax by default calculated by the last dim
 
         attn_value = jnp.einsum("hp,hpv->hv", weights, values)
         attn_value = attn_value.flatten()
 
-        next_keys = keys[:, :-1, :]
-        next_values = values[:, :-1, :]
+        next_keys = keys[:, 1:, :]
+        next_values = values[:, 1:, :]
         return {"keys": next_keys, "values": next_values}, attn_value
 
     def forward(self, weights: LayerWeights, input: DeviceArray) -> DeviceArray:
@@ -139,8 +139,9 @@ class Attn(Layer):
         )
         values = kv_suffixes[:, :, :, self._comp_size :]
 
-        scores = jnp.einsum("phrv,phv->phr", keys, queries)
-        weights = jax.nn.softmax(scores)  # position,head,relative position -> weight
+        scores = jnp.einsum("phv,phrv->phr", queries, keys)
+        print("scores.shape", scores.shape)
+        weights = jax.nn.softmax(scores, axis=2)  # position,head,relative position -> weight
 
         attn_value = jnp.einsum("phr,phrv->phv", weights, values)
         assert attn_value.shape[0] == input.shape[0] - self.length + 1

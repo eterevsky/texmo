@@ -19,6 +19,7 @@ class Layer(object):
         self.input_shape: tuple[int] = input_shape
         self.input_size = total_size(self.input_shape)
         self.output_shape: tuple[int] = None
+        self.length = 1
 
     def __eq__(self, other):
         return str(self) == str(other)
@@ -111,6 +112,8 @@ class Layer(object):
             self.init_state(weights),
             input,
         )
+
+        out = out[self.length-1:,:]
 
         return out
 

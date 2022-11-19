@@ -23,7 +23,7 @@ class Layer(object):
 
     def __eq__(self, other):
         return str(self) == str(other)
-    
+
     @property
     def output_size(self):
         return total_size(self.output_shape)
@@ -31,13 +31,13 @@ class Layer(object):
     @property
     def weights(self) -> int:
         raise NotImplementedError
-    
+
     def is_valid(self) -> bool:
         raise NotImplementedError
-    
+
     def neighbors(self):
         """Generator layer neighbors.
-        
+
         Should be overridden by suffix and attn.
         """
         size = self.size
@@ -113,7 +113,7 @@ class Layer(object):
             input,
         )
 
-        out = out[self.length-1:,:]
+        out = out[self.length - 1 :, :]
 
         return out
 

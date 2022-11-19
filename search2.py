@@ -17,7 +17,12 @@ from texmo.manager import Manager
 from texmo.model2 import build_model
 from texmo.search import Search
 from texmo.common import INF
-from texmo.report import draw_weight_loss_graph, generate_report_by_weight, generate_max_report, generate_param_report
+from texmo.report import (
+    draw_weight_loss_graph,
+    generate_report_by_weight,
+    generate_max_report,
+    generate_param_report,
+)
 
 
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
@@ -34,7 +39,9 @@ def pick_default_value(default, range):
 
 
 def warmup(dataset):
-    conf = Configuration(None, build_model("suffix.4-rec.32.relu"), 0.25, 128, 256, 0.125, 1.0, 8)
+    conf = Configuration(
+        None, build_model("suffix.4-rec.32.relu"), 0.25, 128, 256, 0.125, 1.0, 8
+    )
     manager = Manager(conf)
     manager.init(quiet=True)
     manager.train_and_eval(
@@ -58,16 +65,41 @@ def generate_report(result_set, template, min_max_weights):
     print(generate_param_report(result_set, template, lambda conf: conf.lr))
     if template.sample_len[0] < template.sample_len[1]:
         print("\nSample Length")
-        print(generate_param_report(result_set, template, lambda conf: conf.sample_len, is_float=False))
+        print(
+            generate_param_report(
+                result_set,
+                template,
+                lambda conf: conf.sample_len,
+                is_float=False,
+            )
+        )
     if template.batch is None or template.batch[0] < template.batch[1]:
         print("\nBatch")
-        print(generate_param_report(result_set, template, lambda conf: conf.batch, is_float=False))
-    if template.regularization is None or template.regularization[0] < template.regularization[1]:
+        print(
+            generate_param_report(
+                result_set, template, lambda conf: conf.batch, is_float=False
+            )
+        )
+    if (
+        template.regularization is None
+        or template.regularization[0] < template.regularization[1]
+    ):
         print("\nRegularization")
-        print(generate_param_report(result_set, template, lambda conf: conf.regularization))
-    if template.init_scale is None or template.init_scale[0] < template.init_scale[1]:
+        print(
+            generate_param_report(
+                result_set, template, lambda conf: conf.regularization
+            )
+        )
+    if (
+        template.init_scale is None
+        or template.init_scale[0] < template.init_scale[1]
+    ):
         print("\nInit Scale")
-        print(generate_param_report(result_set, template, lambda conf: conf.init_scale))
+        print(
+            generate_param_report(
+                result_set, template, lambda conf: conf.init_scale
+            )
+        )
     draw_weight_loss_graph(result_set, template)
 
 

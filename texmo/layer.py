@@ -17,6 +17,7 @@ class Layer(object):
         self._step_batch = None
         self._forward_batch = None
         self._forward_batch_impl = None
+        self._step_batch_impl = None
         self.input_shape: tuple[int] = input_shape
         self.input_size = total_size(self.input_shape)
         self.output_shape: tuple[int] = None

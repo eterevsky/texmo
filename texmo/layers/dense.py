@@ -70,7 +70,6 @@ class Dense(Layer):
         out = jnp.einsum("oi,bi->bo", weights["w"], input) + jnp.expand_dims(
             weights["b"], 0
         )
-        print("out:", out.shape)
         if self.activation is not None:
             out = self.activation(out)
         return None, out

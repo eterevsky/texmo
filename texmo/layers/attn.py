@@ -47,7 +47,7 @@ class Attn(Layer):
             and is_power2_int(self.size)
             and self.size % self.heads == 0
         )
-    
+
     def neighbors(self):
         if self.heads == 4 and self.size == self.input_size:
             yield f"suffix.{self.length}"
@@ -59,7 +59,7 @@ class Attn(Layer):
                 yield f"attn.{self.length}.{l}.{self.size}"
         for l in power2_neighbors(self.size):
             if l % self.heads == 0 and l >= self.heads:
-                yield f"attn.{self.length}.{self.heads}.{l}"            
+                yield f"attn.{self.length}.{self.heads}.{l}"
 
     @property
     def weights(self) -> int:
@@ -76,7 +76,9 @@ class Attn(Layer):
             "bkey": rng.normal((self.heads, self.length, self._comp_size))
             * init_scale
             * 0.1,
-            "bquery": rng.normal((self.heads, self._comp_size)) * init_scale * 0.1,
+            "bquery": rng.normal((self.heads, self._comp_size))
+            * init_scale
+            * 0.1,
         }
 
     def init_state(self, _weights) -> LayerState:
@@ -104,7 +106,9 @@ class Attn(Layer):
 
         biased_keys = keys + weights["bkey"]
 
-        scores = self._score_scale * jnp.einsum("hv,hpv->hp", query, biased_keys)
+        scores = self._score_scale * jnp.einsum(
+            "hv,hpv->hp", query, biased_keys
+        )
         weights = jax.nn.softmax(scores)  # head,position -> weight
         # softmax by default calculated by the last dim
 
@@ -129,7 +133,9 @@ class Attn(Layer):
         kv = kvq[:, :, : 2 * self._comp_size]  # position, head, value
         kv_slices = []
         for offset in range(self.length):
-            kv_slices.append(kv[offset : input_len - self.length + offset + 1, :, :])
+            kv_slices.append(
+                kv[offset : input_len - self.length + offset + 1, :, :]
+            )
         kv_suffixes = jnp.stack(
             kv_slices, axis=2
         )  # position, head, relative position, value
@@ -140,7 +146,9 @@ class Attn(Layer):
         values = kv_suffixes[:, :, :, self._comp_size :]
 
         scores = jnp.einsum("phv,phrv->phr", queries, keys)
-        weights = jax.nn.softmax(scores, axis=2)  # position,head,relative position -> weight
+        weights = jax.nn.softmax(
+            scores, axis=2
+        )  # position,head,relative position -> weight
 
         attn_value = jnp.einsum("phr,phrv->phv", weights, values)
         assert attn_value.shape[0] == input.shape[0] - self.length + 1

@@ -16,10 +16,14 @@ class Layer(object):
         # here.
         self._step_batch = None
         self._forward_batch = None
+        self._forward_batch_impl = None
         self.input_shape: tuple[int] = input_shape
         self.input_size = total_size(self.input_shape)
         self.output_shape: tuple[int] = None
-        self.length = 1
+        # The number of the output steps from the previous layers on which
+        # this layer depends. Should be 1 for dense and various recursive
+        # layers, and length of the suffix for suffix and attn layers.
+        self.length: int = 1
 
     def __eq__(self, other):
         return str(self) == str(other)
@@ -74,6 +78,16 @@ class Layer(object):
         """
         raise NotImplementedError
 
+    def _step_batch_from_step(
+        self, weights: LayerWeights, states: LayerState, inputs: DeviceArray
+    ) -> tuple[LayerState, DeviceArray]:
+        if self._step_batch_impl is None:
+            self._step_batch_impl = jax.vmap(
+                self.step, in_axes=(None, 0, 0), out_axes=0
+            )
+
+        return self._step_batch_impl(weights, states, inputs)
+
     def step_batch(
         self, weights: LayerWeights, states: LayerState, inputs: DeviceArray
     ) -> tuple[LayerState, DeviceArray]:
@@ -90,11 +104,20 @@ class Layer(object):
             A pair of state in the same format as input and batch output with
             the shape (batch_size,) + output_shape
         """
-        if self._step_batch is None:
-            self._step_batch = jax.vmap(
-                self.step, in_axes=(None, 0, 0), out_axes=0
-            )
-        return self._step_batch(weights, states, inputs)
+        return self._step_batch_from_step(weights, states, inputs)
+
+    def _forward_from_step(
+        self, weights: LayerWeights, input: DeviceArray
+    ) -> DeviceArray:
+        _, out = jax.lax.scan(
+            lambda state, v: self.step(weights, state, v),
+            self.init_state(weights),
+            input,
+        )
+
+        out = out[self.length - 1 :, :]
+
+        return out
 
     def forward(self, weights: LayerWeights, input: DeviceArray) -> DeviceArray:
         """Make a forward pass on a single full sample.
@@ -107,15 +130,38 @@ class Layer(object):
         Returns:
             The output array.
         """
-        _, out = jax.lax.scan(
-            lambda state, v: self.step(weights, state, v),
-            self.init_state(weights),
-            input,
+        return self._forward_from_step(weights, input)
+
+    def _forward_batch_from_forward(
+        self, weights: LayerWeights, inputs: DeviceArray
+    ) -> DeviceArray:
+        if self._forward_batch_impl is None:
+            self._forward_batch_impl = jax.vmap(
+                self.forward, in_axes=(None, 0), out_axes=0
+            )
+        return self._forward_batch_impl(weights, inputs)
+
+    def _forward_batch_from_step(
+        self, weights: LayerWeights, inputs: DeviceArray
+    ) -> DeviceArray:
+        batch_size = inputs.shape[0]
+
+        init_state = self.init_state(weights)
+        init_state = jax.tree_util.tree_map(
+            lambda x: jnp.tile(x, (batch_size,) + (1,) * len(x.shape)),
+            init_state,
         )
 
-        out = out[self.length - 1 :, :]
+        # Change dimensions from (batch, position, ...) to (position, batch, ...)
+        inputs_swapped = jnp.swapaxes(inputs, 0, 1)
 
-        return out
+        _, out_swapped = jax.lax.scan(
+            lambda state, v: self.step_batch(weights, state, v),
+            init_state,
+            inputs_swapped,
+        )
+        out = jnp.swapaxes(out_swapped, 0, 1)
+        return out[:, self.length - 1 :, :]
 
     # If True, forward_batch will be executed by using step_batch() recurrently.
     # If False, forward_batch will be executed by batching forward().
@@ -133,28 +179,7 @@ class Layer(object):
         Returns:
             Output array with the shape (batch_size, sample_len, output_shape)
         """
-        batch_size = inputs.shape[0]
-
         if self.use_step_batch:
-            init_state = self.init_state(weights)
-            init_state = jax.tree_util.tree_map(
-                lambda x: jnp.tile(x, (batch_size,) + (1,) * len(x.shape)),
-                init_state,
-            )
-
-            # Change dimensions from (batch, position, ...) to (position, batch, ...)
-            inputs_swapped = jnp.swapaxes(inputs, 0, 1)
-
-            _, out_swapped = jax.lax.scan(
-                lambda state, v: self.step_batch(weights, state, v),
-                init_state,
-                inputs_swapped,
-            )
-            out = jnp.swapaxes(out_swapped, 0, 1)
-            return out
+            return self._forward_batch_from_step(weights, inputs)
         else:
-            if self._forward_batch is None:
-                self._forward_batch = jax.vmap(
-                    self.forward, in_axes=(None, 0), out_axes=0
-                )
-            return self._forward_batch(weights, inputs)
+            return self._forward_batch_from_forward(weights, inputs)

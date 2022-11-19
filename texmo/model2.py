@@ -179,7 +179,6 @@ class Model2(object):
             v = layer.forward_batch(layer_weights, v)
 
         out = self.out_layer.forward_batch(weights[-1], v)
-        print("out.shape", out.shape, "batch.shape", batch.shape)
         assert out.shape == batch.shape
 
         entropy = optax.softmax_cross_entropy(out, batch)

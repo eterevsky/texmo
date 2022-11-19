@@ -140,7 +140,6 @@ class Attn(Layer):
         values = kv_suffixes[:, :, :, self._comp_size :]
 
         scores = jnp.einsum("phv,phrv->phr", queries, keys)
-        print("scores.shape", scores.shape)
         weights = jax.nn.softmax(scores, axis=2)  # position,head,relative position -> weight
 
         attn_value = jnp.einsum("phr,phrv->phv", weights, values)

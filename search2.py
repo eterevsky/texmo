@@ -34,21 +34,13 @@ def pick_default_value(default, range):
 
 
 def warmup(dataset):
-    model = build_model("suffix.4-rec.32.relu")
-    manager = Manager(
-        model,
-        0.25,
-        regularization=0.125,
-        init_scale=1.0,
-        use_model2=True,
-    )
+    conf = Configuration(None, build_model("suffix.4-rec.32.relu"), 0.25, 128, 256, 0.125, 1.0, 8)
+    manager = Manager(conf)
     manager.init(quiet=True)
     manager.train_and_eval(
         steps=None,
         time_limit=8,
         train_set=dataset,
-        sample_len=128,
-        batch_size=64,
         temp_steps=None,
         temp_dir=None,
         output_dir=None,
@@ -100,20 +92,12 @@ def search_loop(dataset, search):
             + f"{conf.model} ({weights}){extras}"
         )
 
-        manager = Manager(
-            conf.model,
-            conf.lr,
-            regularization=conf.regularization,
-            init_scale=conf.init_scale,
-            use_model2=True,
-        )
+        manager = Manager(conf)
         manager.init(quiet=True)
         record = manager.train_and_eval(
             steps=None,
             time_limit=conf.t,
             train_set=dataset,
-            sample_len=conf.sample_len,
-            batch_size=conf.batch,
             temp_steps=None,
             temp_dir=None,
             output_dir=None,
@@ -134,7 +118,7 @@ def main(args, dataset, template):
     template = Template.from_args(args)
     default = parse_conf(args.default, default_from_template(template))
     assert template.match_conf(default)
-    logging.info("Default configuration: " + conf_to_string(default, default_from_template(template)))
+    logging.info("Default configuration: " + conf_to_string(default))
 
     print(f"Creating ResultDB from {args.db}")
     result_db = ResultDB(args.db)

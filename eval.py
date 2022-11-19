@@ -5,7 +5,7 @@ from texmo.dataset import DataSet
 from texmo.manager import Manager
 
 def main(data, model_path, prefix):
-    manager = Manager.from_json_file(model_path, training=False)
+    manager = Manager.load(model_path, training=False)
 
     if data:
         try:

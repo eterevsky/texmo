@@ -48,6 +48,32 @@ def conf_from_row(row) -> Configuration:
     return Configuration(row[0], model, *row[2:])
 
 
+def conf_to_dict(conf: Configuration) -> dict:
+    return {
+        "model": str(conf.model),
+        "lr": conf.lr,
+        "sample_len": conf.sample_len,
+        "batch": conf.batch,
+        "regularization": conf.regularization,
+        "init_scale": conf.init_scale,
+        "t": conf.t,
+    }
+
+
+def conf_from_dict(spec: dict) -> Configuration:
+    model = build_model(spec["model"])
+    return Configuration(
+        None,
+        model,
+        spec["lr"],
+        spec["sample_len"],
+        spec["batch"],
+        spec["regularization"],
+        spec["init_scale"],
+        spec["t"],
+    )
+
+
 def conf_is_valid(conf: Configuration) -> bool:
     return (
         conf.model is not None
@@ -60,18 +86,19 @@ def conf_is_valid(conf: Configuration) -> bool:
         and is_power2(conf.t)
     )
 
-def conf_to_string(conf: Configuration, defaults: Configuration) -> str:
+
+def conf_to_string(conf: Configuration) -> str:
     s = f"{conf.model}  LR{conf.lr:.3f}  B{conf.batch}  T{conf.t}"
-    if conf.sample_len != defaults.sample_len:
-        s += f"  LEN{conf.sample_len}"
-    if conf.regularization != defaults.regularization:
+    s += f"  LEN{conf.sample_len}"
+    if conf.regularization != 0.125:
         s += f"  R{conf.regularization:.3f}"
-    if conf.init_scale != defaults.init_scale:
+    if conf.init_scale != 1.0:
         s += f"  I{conf.regularization:.3f}"
     return s
 
 
 _COMPONENT_RE = re.compile("^([A-Z]+)([^A-Z].*)$")
+
 
 def parse_conf(s: str, defaults: Configuration) -> Configuration:
     components = s.split()
@@ -96,7 +123,9 @@ def parse_conf(s: str, defaults: Configuration) -> Configuration:
         elif name == "T":
             t = int(value)
 
-    return Configuration(None, model, lr, sample_len, batch, regularization, init_scale, t)
+    return Configuration(
+        None, model, lr, sample_len, batch, regularization, init_scale, t
+    )
 
 
 def match_bounds(bounds, value):
@@ -122,7 +151,6 @@ def parse_interval(arg: str, num_type) -> tuple:
         return (v, v)
     else:
         return num_type(comps[0]), num_type(comps[1])
-
 
 
 class Template(object):
@@ -190,7 +218,8 @@ class Template(object):
 
 
 def _pick_default_value(range, default):
-    if range is None or range[0] <= default <= range[1]: return default
+    if range is None or range[0] <= default <= range[1]:
+        return default
     return range[0]
 
 
@@ -201,8 +230,9 @@ def default_from_template(template: Template) -> Configuration:
     regularization = _pick_default_value(template.regularization, 0.125)
     init_scale = _pick_default_value(template.init_scale, 1.0)
     t = _pick_default_value(template.t, 1)
-    return Configuration(None, None, lr, sample_len, batch, regularization, init_scale, t)
-
+    return Configuration(
+        None, None, lr, sample_len, batch, regularization, init_scale, t
+    )
 
 
 def add_template_args(parser: argparse.ArgumentParser):
@@ -330,10 +360,10 @@ def conf_neighbors(conf: Configuration, template: Template):
         ):
             yield conf._replace(model=neighbor_model, t=conf.t * 2)
             if match_bounds(template.lr, conf.lr / 2):
-                yield conf._replace(
-                    model=neighbor_model, t=conf.t * 2, lr=conf.lr / 2
-                )
-        elif len(neighbor_model.layers) < len(conf.model.layers) and match_bounds(template.t, conf.t // 2):
+                yield conf._replace(model=neighbor_model, t=conf.t * 2, lr=conf.lr / 2)
+        elif len(neighbor_model.layers) < len(conf.model.layers) and match_bounds(
+            template.t, conf.t // 2
+        ):
             yield conf._replace(model=neighbor_model, t=conf.t // 2)
             if match_bounds(template.lr, conf.lr * 2):
                 yield conf._replace(model=neighbor_model, t=conf.t // 2, lr=conf.lr * 2)

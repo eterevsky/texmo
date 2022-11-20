@@ -79,7 +79,9 @@ class Model2(object):
                     size = self.layers[i].output_size
                     heads = min(size, 4)
                     if layers_str[i] == f"attn.4.{heads}.{size}":
-                        yield "-".join(chain(layers_str[:i], layers_str[i + 1 :]))
+                        yield "-".join(
+                            chain(layers_str[:i], layers_str[i + 1 :])
+                        )
 
         # Add layer to the end
         new_layer_size = min(self.layers[-1].output_size, NCHAR)
@@ -96,13 +98,19 @@ class Model2(object):
         for i in range(len(layers_str)):
             # Inserting between layers i and i + 1
             yield "-".join(
-                chain(layers_str[:i+1], ["suffix.2"], layers_str[i+1:])
+                chain(layers_str[: i + 1], ["suffix.2"], layers_str[i + 1 :])
             )
 
             size = self.layers[i].output_size
             heads = min(size, 4)
-            
-            yield "-".join(chain(layers_str[:i+1], [f"attn.4.{heads}.{size}"], layers_str[i+1:]))
+
+            yield "-".join(
+                chain(
+                    layers_str[: i + 1],
+                    [f"attn.4.{heads}.{size}"],
+                    layers_str[i + 1 :],
+                )
+            )
 
     def neighbors(self):
         for spec in self._gen_neighbors():
@@ -183,9 +191,6 @@ class Model2(object):
 
         entropy = optax.softmax_cross_entropy(out, batch)
         return jnp.average(entropy) / jnp.log(2)
-
-    def serialize(self):
-        return {"name": "model2", "spec": str(self)}
 
 
 _cache: dict[str, Model2] = {}

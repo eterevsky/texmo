@@ -16,12 +16,13 @@ class Gru(Layer):
         super().__init__(input_shape=input_shape)
         self.size = size
         self.output_shape = (size,)
+        self._no_activation = not tanh and not relu
 
     def __str__(self) -> str:
         return f"gru.{self.size}"
 
     def is_valid(self) -> bool:
-        return is_power2_int(self.size)
+        return self._no_activation and is_power2_int(self.size)
 
     @property
     def weights(self) -> int:

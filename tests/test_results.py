@@ -3,12 +3,12 @@ from unittest import main, TestCase
 from texmo import configuration
 from texmo.configuration import Configuration, Template
 from texmo.results import ResultSet
-from texmo.spec import ModelSpec
+from texmo.model2 import build_model
 
 
 INIT_CONF = Configuration(
     id=None,
-    spec=ModelSpec.parse("dense.1.relu"),
+    model=build_model("dense.1.relu"),
     lr=0.2,
     sample_len=128,
     batch=256,
@@ -51,7 +51,7 @@ class ResultSetTest(TestCase):
         )
         results.add_run(INIT_CONF, 1)
         results.add_run(
-            INIT_CONF._replace(spec=ModelSpec.parse("dense.2.relu")), 2
+            INIT_CONF._replace(model=build_model("dense.2.relu")), 2
         )
 
         cur = results._db.execute(
@@ -67,10 +67,10 @@ class ResultSetTest(TestCase):
         results.add_run(INIT_CONF, 1)
         results.add_run(INIT_CONF, 1)
         results.add_run(
-            INIT_CONF._replace(spec=ModelSpec.parse("dense.2.relu")), 2
+            INIT_CONF._replace(model=build_model("dense.2.relu")), 2
         )
         results.add_run(
-            INIT_CONF._replace(spec=ModelSpec.parse("dense.2.relu")), 2
+            INIT_CONF._replace(model=build_model("dense.2.relu")), 2
         )
 
         cur = results._db.execute(

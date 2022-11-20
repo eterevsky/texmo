@@ -16,7 +16,6 @@ from .configuration import (
 )
 from . import latency
 from .record import TrainingRecord
-from .spec import ModelSpec, ObsoleteSpec
 
 
 Results = namedtuple(

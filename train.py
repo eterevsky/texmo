@@ -3,8 +3,10 @@ import logging
 import matplotlib.pyplot as plt
 import os
 
+from texmo.configuration import Configuration
 from texmo.dataset import DataSet
 from texmo.manager import Manager
+from texmo.model2 import build_model
 
 
 def show_loss_graph(manager, output_dir):
@@ -39,18 +41,25 @@ def main(
 
     try:
         if model_path is not None:
-            manager = Manager.from_json_file(model_path)
+            manager = Manager.load(model_path)
         else:
-            manager = Manager.from_spec(
-                model_spec, learning_rate, regularization, init_scale, use_model2=True
+            conf = Configuration(
+                None,
+                build_model(model_spec),
+                learning_rate,
+                sample_len,
+                batch_size,
+                regularization,
+                init_scale,
+                time_limit,
             )
+            manager = Manager(conf)
+            manager.init()
 
         manager.train_and_eval(
             steps,
             time_limit,
             train_set,
-            sample_len,
-            batch_size,
             temp_steps,
             temp_dir,
             output_dir,
@@ -134,7 +143,7 @@ def parse_args():
         type=float,
         help="Scaling coefficient for weights initialization",
         default=1.0,
-    )    
+    )
     parser.add_argument(
         "--sample-len",
         type=int,

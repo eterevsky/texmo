@@ -220,7 +220,7 @@ class Search(object):
                 return pred_conf
             
             if ineighbor is not None and (ipred is None or random.randrange(2)):
-                c = conf_to_string(parent_conf, self._init_conf)
+                c = conf_to_string(parent_conf)
                 logging.info(f"Selecting a neighbor or conf #{ineighbor} by median score: {c}")
                 return neighbor_conf
             elif ipred is not None:

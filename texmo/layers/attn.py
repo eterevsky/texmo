@@ -34,7 +34,7 @@ class Attn(Layer):
         self._comp_size = self.size // heads
         self.output_shape = (size,)
         self._state_shape = (self.length - 1, self.input_size)
-        self._score_scale = 1 / math.sqrt(self._comp_size)
+        self._score_scale = 1 / math.sqrt(self.size)
 
     def __str__(self) -> str:
         return f"attn.{self.length}.{self.heads}.{self.size}"
@@ -47,7 +47,7 @@ class Attn(Layer):
             and is_power2_int(self.size)
             and self.size % self.heads == 0
         )
-    
+
     def neighbors(self):
         if self.heads == 4 and self.size == self.input_size:
             yield f"suffix.{self.length}"
@@ -59,7 +59,7 @@ class Attn(Layer):
                 yield f"attn.{self.length}.{l}.{self.size}"
         for l in power2_neighbors(self.size):
             if l % self.heads == 0 and l >= self.heads:
-                yield f"attn.{self.length}.{self.heads}.{l}"            
+                yield f"attn.{self.length}.{self.heads}.{l}"
 
     @property
     def weights(self) -> int:
@@ -76,7 +76,9 @@ class Attn(Layer):
             "bkey": rng.normal((self.heads, self.length, self._comp_size))
             * init_scale
             * 0.1,
-            "bquery": rng.normal((self.heads, self._comp_size)) * init_scale * 0.1,
+            "bquery": rng.normal((self.heads, self._comp_size))
+            * init_scale
+            * 0.1,
         }
 
     def init_state(self, _weights) -> LayerState:
@@ -90,10 +92,10 @@ class Attn(Layer):
     ) -> tuple[LayerState, DeviceArray]:
         input = input.flatten()
 
-        kqv = jnp.dot(weights["w"], input)
-        key = kqv[:, : self._comp_size]
-        query = kqv[:, self._comp_size : 2 * self._comp_size] + weights["bquery"]
-        value = kqv[:, 2 * self._comp_size :]
+        kvq = jnp.dot(weights["w"], input)
+        key = kvq[:, : self._comp_size]
+        value = kvq[:, self._comp_size : 2 * self._comp_size]
+        query = kvq[:, 2 * self._comp_size :] + weights["bquery"]
 
         keys = jnp.concatenate(
             (state["keys"], key.reshape((self.heads, 1, -1))), axis=1
@@ -104,15 +106,17 @@ class Attn(Layer):
 
         biased_keys = keys + weights["bkey"]
 
-        scores = self._score_scale * jnp.einsum("hT,hpT->hp", query, biased_keys)
+        scores = self._score_scale * jnp.einsum(
+            "hv,hpv->hp", query, biased_keys
+        )
         weights = jax.nn.softmax(scores)  # head,position -> weight
         # softmax by default calculated by the last dim
 
         attn_value = jnp.einsum("hp,hpv->hv", weights, values)
         attn_value = attn_value.flatten()
 
-        next_keys = keys[:, :-1, :]
-        next_values = values[:, :-1, :]
+        next_keys = keys[:, 1:, :]
+        next_values = values[:, 1:, :]
         return {"keys": next_keys, "values": next_values}, attn_value
 
     def forward(self, weights: LayerWeights, input: DeviceArray) -> DeviceArray:
@@ -129,7 +133,9 @@ class Attn(Layer):
         kv = kvq[:, :, : 2 * self._comp_size]  # position, head, value
         kv_slices = []
         for offset in range(self.length):
-            kv_slices.append(kv[offset : input_len - self.length + offset + 1, :, :])
+            kv_slices.append(
+                kv[offset : input_len - self.length + offset + 1, :, :]
+            )
         kv_suffixes = jnp.stack(
             kv_slices, axis=2
         )  # position, head, relative position, value
@@ -139,8 +145,10 @@ class Attn(Layer):
         )
         values = kv_suffixes[:, :, :, self._comp_size :]
 
-        scores = jnp.einsum("phrv,phv->phr", keys, queries)
-        weights = jax.nn.softmax(scores)  # position,head,relative position -> weight
+        scores = self._score_scale * jnp.einsum("phv,phrv->phr", queries, keys)
+        weights = jax.nn.softmax(
+            scores, axis=2
+        )  # position,head,relative position -> weight
 
         attn_value = jnp.einsum("phr,phrv->phv", weights, values)
         assert attn_value.shape[0] == input.shape[0] - self.length + 1

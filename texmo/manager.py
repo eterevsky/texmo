@@ -8,13 +8,17 @@ import logging
 import math
 import optax
 import os
-import random
 import time
 
 from .common import INF, NCHAR
+from .configuration import (
+    Configuration,
+    conf_from_dict,
+    conf_to_dict,
+    conf_to_string,
+)
 from . import latency
-from .layered import LayeredModel2
-from .model2 import Model2
+from .model2 import Model2, Weights
 from .prng import Rng
 from .record import TrainingRecord
 
@@ -146,111 +150,76 @@ class TrainingDiverged(Exception):
 class Manager(object):
     def __init__(
         self,
-        model,
-        learning_rate,
-        regularization,
-        step=0,
-        weights=None,
-        step_loss=None,
-        init_scale=1,
-        test_sample_len=1024,
-        test_batch=1024,
-        use_model2=False,
+        conf: Configuration,
+        step: int = 0,
+        weights: Weights = None,
+        step_loss: float = None,
+        test_sample_len: int = 1024,
+        test_batch: int = 1024,
     ):
-        self._rng = Rng()
-        self.model = model
-        self.learning_rate = learning_rate
-        self.regularization = regularization
-        self.total_steps = 100000
-        self.step = step
-        self.init_scale = init_scale
+        self._rng: Rng = Rng()
+        self.conf: Configuration = conf
+        self.model: Model2 = self.conf.model
+        self.step: int = step
         if weights is not None:
-            self.weights = weights
-        elif use_model2:
-            self.weights = self.model.init_weights(self._rng, self.init_scale)
+            self.weights: Weights = weights
         else:
-            self.weights = self.model.init_weights(
-                self._rng.gen(), self.init_scale
+            self.weights: Weights = self.model.init_weights(
+                self._rng, self.conf.init_scale
             )
-        self.loss = None
+
+        # Record of the latest and the past losses of the model.
+        self.loss: float = None
         if step_loss is None:
-            self.step_loss = []
+            self.step_loss: list[float] = []
         else:
-            self.step_loss = step_loss
-        self.test_sample_len = test_sample_len
-        self.test_batch = test_batch
-        self.use_model2 = use_model2
+            self.step_loss: list[float] = step_loss
+
+        self.test_sample_len: int = test_sample_len
+        self.test_batch: int = test_batch
+
+    def save(self, dir):
+        model_name = self.name()
+        path = os.path.join(dir, f"{model_name}.json")
+
+        weights = self.serialize_weights(self.weights)
+
+        data = {
+            "conf": conf_to_dict(self.conf),
+            "training": {
+                "step": self.step,
+                "step_loss": self.step_loss,
+            },
+            "weights": weights,
+        }
+
+        print(f"Saving model to {path}")
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
 
     @staticmethod
-    def from_json_file(path, training=True):
+    def load(path, training=True):
         with open(path) as f:
             spec = json.load(f)
-        model_spec = spec["model"]
-        if model_spec["name"] == "model2":
-            model = Model2(model_spec["spec"])
-            use_model2 = True
-        elif model_spec["name"] == "layered":
-            model = LayeredModel2.from_spec(model_spec)
-            use_model2 = False
-        else:
-            assert False
 
+        conf = conf_from_dict(spec["conf"])
+        training = spec["training"]
         weights = deserialize_weights(spec["weights"])
+
         manager = Manager(
-            model,
-            learning_rate=spec["learning_rate"],
-            regularization=spec["regularization"],
-            step=spec["step"],
+            conf,
+            training["step"],
             weights=weights,
-            step_loss=spec.get("step_loss", None),
-            use_model2=use_model2,
+            step_loss=training["step_loss"],
         )
+
         manager.init(training=training)
         return manager
 
-    @staticmethod
-    def from_spec(
-        model_spec: str,
-        learning_rate: float,
-        regularization: float,
-        init_scale: float,
-        use_model2: bool = True,
-    ):
-        if use_model2:
-            model = Model2(model_spec)
-        else:
-            model = LayeredModel2.parse(model_spec)
-        manager = Manager(
-            model, learning_rate, regularization, init_scale=init_scale, use_model2=use_model2
-        )
-
-        manager.init()
-        return manager
-
     def init(self, quiet=False, training=True):
-        if not quiet:
-            if self.use_model2:
-                total_weights = self.model.weights
-            else:
-                total_weights = self.model.total_weights(self.weights)
+        logging.info("Conf: " + conf_to_string(self.conf))
 
-            logging.info(f"Model: {self.model} ({total_weights})")
-            logging.info(f"LR {self.learning_rate:.3f}  R {self.regularization:.3f}  init {self.init_scale:.3f}")
-
-        if self.use_model2:
-            self._loss_avg = self.model.loss_batch
-        else:
-            if not quiet:
-                logging.info("Creating batch loss")
-            self._loss_batch = jax.vmap(
-                self.model.loss, in_axes=(None, 0), out_axes=0
-            )
-            if not quiet:
-                logging.info("Creating loss_avg")
-            self._loss_avg = (
-                lambda weights, xs: jnp.average(self._loss_batch(weights, xs))
-                * LOG2
-            )
+        self._loss_avg = self.model.loss_batch
 
         if training:
             if not quiet:
@@ -261,14 +230,14 @@ class Manager(object):
             self.optimizer = optax.chain(
                 clip_by_global_norm(1),
                 optax.scale_by_adam(),
-                additive_weight_decay(self.regularization),
-                optax.scale(-self.learning_rate),
+                additive_weight_decay(self.conf.regularization),
+                optax.scale(-self.conf.lr),
                 optax.scale_by_schedule(
                     exp_schedule(
                         10000,  # initial_steps
                         100000,  # steps to lr/10
-                        self.learning_rate,
-                        self.learning_rate / 10,
+                        self.conf.lr,
+                        self.conf.lr / 10,
                     )
                 ),
             )
@@ -322,11 +291,14 @@ class Manager(object):
             release_device_buffers()
             shards *= 2
 
-        logging.info("Can't evaluate the model even with shar 1. Assuming INF loss.")
+        logging.info(
+            "Can't evaluate the model even with shar 1. Assuming INF loss."
+        )
         self.loss = INF
         return self.loss
 
     def sample(self, prefix, l, temperature=0.05):
+        self._rng = Rng()
         prefix = jnp.array(list(prefix))
         c_selected = prefix[-1]
         prefix = jax.nn.one_hot(prefix, 256)
@@ -367,8 +339,6 @@ class Manager(object):
         steps,
         time_limit,
         train_set,
-        sample_length,
-        batch_size,
         temp_steps,
         temp_dir,
         quiet=False,
@@ -381,11 +351,10 @@ class Manager(object):
         last_report = 0
 
         logging.info(f"Training for {time_limit} s")
-        logging.info(f"LEN {sample_length}  B {batch_size}")
 
         while time.time() < finish_time and self.step < steps:
             batch = train_set.sample(
-                length=sample_length, batch_size=batch_size
+                length=self.conf.sample_len, batch_size=self.conf.batch
             )
             try:
                 loss = self.train_step(batch)
@@ -428,8 +397,6 @@ class Manager(object):
         steps,
         time_limit,
         train_set,
-        sample_len,
-        batch_size,
         temp_steps,
         temp_dir,
         output_dir,
@@ -441,8 +408,6 @@ class Manager(object):
                 steps,
                 time_limit,
                 train_set,
-                sample_len,
-                batch_size,
                 temp_steps,
                 temp_dir,
                 quiet=quiet,
@@ -459,29 +424,22 @@ class Manager(object):
             train_time = time_limit  # This is a hack, but we need to record
             # the loss with correct time.
 
-        if self.use_model2:
-            name = str(self.model)
-            weights = self.model.weights
-        else:
-            name = self.model.full_name
-            weights = self.model.total_weights(self.weights)
-
         report = TrainingRecord(
             timestamp=datetime.now(),
-            model_spec=name,
-            weights=weights,
+            model_spec=str(self.conf.model),
+            weights=self.conf.model.weights,
             steps=self.step,
             train_time_s=train_time,
-            learning_rate=self.learning_rate,
-            regularization=self.regularization,
-            train_sample_len=sample_len,
-            train_batch=batch_size,
+            learning_rate=self.conf.lr,
+            regularization=self.conf.regularization,
+            train_sample_len=self.conf.sample_len,
+            train_batch=self.conf.batch,
             total_data=train_set.total_size,
             loss=batch_loss,
             test_sample_len=self.test_sample_len,
             test_batch=self.test_batch,
             test_poisoned=True,
-            init_scale=self.init_scale,
+            init_scale=self.conf.init_scale,
         )
 
         print(report)
@@ -522,29 +480,6 @@ class Manager(object):
             return serialized
         else:
             return weights.tolist()
-
-    def save(self, dir):
-        model_spec = self.model.serialize()
-        model_name = self.name()
-
-        path = os.path.join(dir, f"{model_name}.json")
-
-        weights = self.serialize_weights(self.weights)
-
-        data = {
-            "model": model_spec,
-            "total_steps": self.total_steps,
-            "step": self.step,
-            "weights": weights,
-            "learning_rate": self.learning_rate,
-            "regularization": self.regularization,
-            "loss": self.loss,
-            "step_loss": self.step_loss,
-        }
-
-        print(f"Saving model to {path}")
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
 
     def name(self):
         model_name = str(self.model)

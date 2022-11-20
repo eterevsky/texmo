@@ -298,6 +298,7 @@ class Manager(object):
         return self.loss
 
     def sample(self, prefix, l, temperature=0.05):
+        self._rng = Rng()
         prefix = jnp.array(list(prefix))
         c_selected = prefix[-1]
         prefix = jax.nn.one_hot(prefix, 256)

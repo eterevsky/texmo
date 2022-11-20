@@ -34,7 +34,7 @@ class Attn(Layer):
         self._comp_size = self.size // heads
         self.output_shape = (size,)
         self._state_shape = (self.length - 1, self.input_size)
-        self._score_scale = 1 / math.sqrt(self._comp_size)
+        self._score_scale = 1 / math.sqrt(self.size)
 
     def __str__(self) -> str:
         return f"attn.{self.length}.{self.heads}.{self.size}"
@@ -145,7 +145,7 @@ class Attn(Layer):
         )
         values = kv_suffixes[:, :, :, self._comp_size :]
 
-        scores = jnp.einsum("phv,phrv->phr", queries, keys)
+        scores = self._score_scale * jnp.einsum("phv,phrv->phr", queries, keys)
         weights = jax.nn.softmax(
             scores, axis=2
         )  # position,head,relative position -> weight

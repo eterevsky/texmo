@@ -137,11 +137,6 @@ def search_loop(dataset, search):
             quiet=True,
         )
 
-        if record.time_round is None:
-            print("Bad training time, skipping")
-            record.time_round = conf.t
-            record.loss = INF
-
         search.add_record(record)
         print()
 

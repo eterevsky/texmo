@@ -36,7 +36,7 @@ def conf_from_record(record):
         record.train_batch,
         record.regularization,
         record.init_scale,
-        record.time_round,
+        record.planned_time_s,
     )
 
 

@@ -1,5 +1,6 @@
 import logging
 import math
+from math import log2
 import random
 
 from . import latency
@@ -44,6 +45,10 @@ class Search(object):
 
     def add_record(self, record):
         with latency.timer("Search.add_record"):
+            if abs(log2(record.planned_time_s) - log2(record.train_time_s)) > 0.1:
+                print("Bad training time, skipping")
+                record.loss = INF
+
             conf, loss = self._result_set.add_record(record)
             conf = conf._replace(id=None)
             affected_confs = set()

@@ -137,7 +137,7 @@ def search_loop(dataset, search):
             quiet=True,
         )
 
-        search.add_record(record)
+        search.add_record(record, manager.step_loss)
         print()
 
 

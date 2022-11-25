@@ -1,19 +1,32 @@
 import argparse
 import logging
 import matplotlib.pyplot as plt
+import numpy as np
 import os
 
 from texmo.configuration import Configuration
 from texmo.dataset import DataSet
 from texmo.manager import Manager
 from texmo.model2 import build_model
-
+from texmo.steploss import StepLossPredictor
 
 def show_loss_graph(manager, output_dir):
+    predictor = StepLossPredictor()
+    print("Fitting step loss")
+    predictor.fit(manager.step_loss)
+
+    steps = len(manager.step_loss)
+    xs = np.array(range(steps // 8, steps * 4 + 1))
+    ys = predictor.predict(xs)
+
+    steps2 = steps * 2
+    print(f"Expected loss at {steps2} steps:", predictor.predict(steps2))
+
     plt.xscale("log")
     plt.yscale("log")
     plt.ylim(top=8)
     plt.plot(range(1, len(manager.step_loss) + 1), manager.step_loss)
+    plt.plot(xs, ys)
     if output_dir is not None:
         plt.savefig(os.path.join(output_dir, manager.name() + ".png"))
     plt.show()

@@ -27,3 +27,6 @@ class StepLossPredictor(object):
 
     def predict(self, step):
         return self._c1 + self._c2 * step ** self._eps
+
+    def params(self) -> np.ndarray:
+        return np.array([self._c1, self._c2, self._eps])

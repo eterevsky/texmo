@@ -21,6 +21,7 @@ from . import latency
 from .model2 import Model2, Weights
 from .prng import Rng
 from .record import TrainingRecord
+from .steploss import StepLossPredictor
 
 
 LOG2 = 1 / math.log(2)
@@ -424,6 +425,9 @@ class Manager(object):
             train_time = time_limit  # This is a hack, but we need to record
             # the loss with correct time.
 
+        loss_model = StepLossPredictor()
+        loss_model.fit(self.step_loss)
+
         report = TrainingRecord(
             timestamp=datetime.now(),
             model_spec=str(self.conf.model),
@@ -440,6 +444,10 @@ class Manager(object):
             test_batch=self.test_batch,
             test_poisoned=True,
             init_scale=self.conf.init_scale,
+            planned_time_s=time_limit,
+            final_time_s=time_limit,
+            loss_model_v=1,
+            loss_model_params=loss_model.params(),
         )
 
         print(report)

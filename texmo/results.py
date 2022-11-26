@@ -1,4 +1,5 @@
 from collections import namedtuple
+from collections.abc import Iterable
 import logging
 import math
 import os
@@ -180,12 +181,12 @@ class ResultSet(object):
             self._update_scores(conf)
             self._update_neighbors(conf)
 
-    def add_record(self, record, update_scores=True):
+    def add_record(self, record, step_loss: Iterable[float], update_scores=True):
         conf = conf_from_record(record)
         assert conf_is_valid(conf)
 
         if self._result_db is not None:
-            self._result_db.add_record(record)
+            self._result_db.add_record(record, step_loss)
 
         conf = self._find_or_add_conf(conf)
         self.add_run(conf, record.loss, update_scores)

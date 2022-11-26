@@ -1,5 +1,6 @@
 import csv
 import math
+import numpy as np
 import os
 import sqlite3
 
@@ -75,7 +76,7 @@ class ResultDB(object):
         id = cur.lastrowid
         return conf._replace(id=id)
 
-    def add_record(self, record, commit=True, skip_invalid=False):
+    def add_record(self, record, step_loss=None, commit=True, skip_invalid=False):
         if skip_invalid:
             conf = conf_from_record(record)
             if not conf_is_valid(conf):
@@ -98,12 +99,16 @@ class ResultDB(object):
             "test_batch": record.test_batch,
             "loss": record.loss,
         }
+        if step_loss is not None:
+            row["step_loss"] = np.array(step_loss, dtype=np.float32).tobytes()
+        else:
+            row["step_loss"] = None
         if math.isnan(record.loss) or record.loss is None:
             row["loss"] = INF
         self._db.execute(
             """
-            INSERT INTO run(conf_id, timestamp, test_sample_len, test_batch, loss)
-            VALUES(:conf_id, :timestamp, :test_sample_len, :test_batch, :loss)
+            INSERT INTO run(conf_id, timestamp, test_sample_len, test_batch, loss, step_loss)
+            VALUES(:conf_id, :timestamp, :test_sample_len, :test_batch, :loss, :step_loss)
             """,
             row,
         )
@@ -111,7 +116,7 @@ class ResultDB(object):
             with latency.timer("ResultDB.add_record-commit"):
                 self._db.commit()
 
-    def get_confs_runs(self, template=None):
+    def get_confs_runs(self, template=None, load_step_loss=False):
         """Iterates through all confs that match template."""
         if template is None:
             template = Template()
@@ -143,9 +148,14 @@ class ResultDB(object):
         condition = " AND ".join(conditions)
         if condition != "":
             condition = "AND " + condition
+        
+        if load_step_loss:
+            maybe_step_loss = ", step_loss"
+        else:
+            maybe_step_loss = ""
 
         query = (
-            f"SELECT {CONF_FIELDS}, run.loss FROM conf, run "
+            f"SELECT {CONF_FIELDS}, run.loss{maybe_step_loss} FROM conf, run "
             + f"WHERE conf.id = run.conf_id {condition}"
         )
 
@@ -159,7 +169,14 @@ class ResultDB(object):
             if template.match_model(model):
                 conf = conf_from_row(row[:8])
                 if conf_is_valid(conf):
-                    yield conf, row[8]
+                    if load_step_loss:
+                        if row[9] is not None:
+                            step_loss = np.frombuffer(row[9], dtype=np.float32)
+                        else:
+                            step_loss = None
+                        yield conf, row[8], step_loss
+                    else:
+                        yield conf, row[8]
 
 
 def import_from_csv(result_db, filename):

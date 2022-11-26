@@ -1,5 +1,6 @@
 import logging
 import math
+from math import log2
 import random
 
 from . import latency
@@ -42,9 +43,13 @@ class Search(object):
         print("Pred scores ready")
         self._last_predictor_update = self._result_set.total_runs_count()
 
-    def add_record(self, record):
+    def add_record(self, record, step_loss):
         with latency.timer("Search.add_record"):
-            conf, loss = self._result_set.add_record(record)
+            if abs(log2(record.planned_time_s) - log2(record.train_time_s)) > 0.1:
+                print("Bad training time, skipping")
+                record.loss = INF
+
+            conf, loss = self._result_set.add_record(record, step_loss)
             conf = conf._replace(id=None)
             affected_confs = set()
             for neighbor in self._predictor.add_sample(conf, loss):

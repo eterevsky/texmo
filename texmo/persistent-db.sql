@@ -19,6 +19,10 @@ CREATE TABLE run (
     test_sample_len INTEGER,
     test_batch INTEGER,
     loss REAL NOT NULL,
+    -- A 1D array of training losses after each step, encoded as
+    -- ndarray(dtype=np.float32) and converted to bytes by ndarray.tobytes().
+    -- Can be converted back to an array by np.frombuffer().
+    step_loss BLOB,
     FOREIGN KEY (conf_id) REFERENCES conf(id)
 );
 

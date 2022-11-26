@@ -1,3 +1,5 @@
+from datetime import datetime
+import numpy as np
 from unittest import main, TestCase
 
 from texmo.configuration import Configuration, Template
@@ -8,7 +10,7 @@ from texmo.model2 import build_model
 
 def create_record(spec, loss, batch=256, reg=0.125):
     return TrainingRecord(
-        timestamp="2022-02-02T02:02:02",
+        timestamp=datetime.fromisoformat("2022-02-02T02:02:02"),
         model_spec=spec,
         weights=1024,
         steps=123,
@@ -23,6 +25,10 @@ def create_record(spec, loss, batch=256, reg=0.125):
         test_batch=1024,
         test_poisoned=True,
         init_scale=1.0,
+        planned_time_s=8,
+        final_time_s=8,
+        loss_model_v=0,
+        loss_model_params=None,
     )
 
 
@@ -103,7 +109,9 @@ class ResultDBTest(TestCase):
             },
         )
 
-        confs = self.db.get_confs_runs(Template(sample_len=128, init_scale=1.0, regularization=0.125))
+        confs = self.db.get_confs_runs(
+            Template(sample_len=128, init_scale=1.0, regularization=0.125)
+        )
         subset1 = set((conf._replace(id=None), loss) for conf, loss in confs)
 
         self.assertEqual(
@@ -116,7 +124,9 @@ class ResultDBTest(TestCase):
             },
         )
 
-        confs = self.db.get_confs_runs(Template(sample_len=128, init_scale=1.0, batch=256))
+        confs = self.db.get_confs_runs(
+            Template(sample_len=128, init_scale=1.0, batch=256)
+        )
         subset2 = set((conf._replace(id=None), loss) for conf, loss in confs)
 
         self.assertEqual(
@@ -127,6 +137,20 @@ class ResultDBTest(TestCase):
                 (conf, 3.321),
             },
         )
+
+    def test_step_loss(self):
+        step_loss = [1, 2, 3]
+        self.db.add_record(
+            create_record("dense.16.relu", 3.123), step_loss=step_loss
+        )
+
+        for i, (conf, loss, step_loss) in enumerate(
+            self.db.get_confs_runs(
+                Template(sample_len=128), load_step_loss=True
+            )
+        ):
+            self.assertEqual(i, 0)
+            self.assertTrue((np.array(step_loss) == step_loss).all())
 
 
 if __name__ == "__main__":

@@ -71,8 +71,8 @@ def draw_weight_loss_graph(result_set: ResultSet, template: Template):
 
 
 def get_top_confs(result_set, template, min_max_weights):
-    top_confs = {}  # (weights_limit, time_round) -> (conf, score)
-    count = {}  # (weights_limit, time_round) -> count
+    top_confs = {}  # (weights_limit, planned_time_s) -> (conf, score)
+    count = {}  # (weights_limit, planned_time_s) -> count
     tlo, thi = template.t
     for conf, results in result_set.all_results_by_weights():
         if not tlo <= conf.t <= thi:

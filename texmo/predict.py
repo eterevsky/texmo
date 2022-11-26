@@ -6,16 +6,26 @@ from statistics import median
 from typing import List
 
 from texmo.configuration import Configuration, conf_is_valid
-from texmo.common import NCHAR
+from texmo.common import NCHAR, total_size
 from texmo.model2 import Model2
 from texmo import latency
 
 
-def total_size(shape):
-    prod = 1
-    for dim in shape:
-        prod *= dim
-    return prod
+# We aren't differentiating losses above 10 bits per byte.
+MIN_LOSS = 0.1
+MAX_LOSS = 10
+
+
+def prediction_score(true_losses, predicted_losses):
+    n = len(true_losses)
+    assert len(predicted_losses) == n
+
+    all_losses = np.concatenate((true_losses, predicted_losses))
+    all_losses = np.minimum(all_losses, MAX_LOSS)
+    all_losses = np.maximum(all_losses, MIN_LOSS)
+    all_losses = np.log2(all_losses)
+
+    return np.average(np.abs(all_losses[:n] - all_losses[n:]))
 
 
 LayerStat = namedtuple(
@@ -57,7 +67,6 @@ def get_layer_stats(model):
 
 
 # We don't care about precisely predicting loss above this value
-MAX_LOSS = 10
 SCALE_LOSS = 1.2
 
 

@@ -17,6 +17,18 @@ from .record import TrainingRecord
 from .model2 import build_model
 
 
+def _pack_step_loss(step_loss):
+    if step_loss is None:
+        return None
+    return np.array(step_loss, dtype=np.float32).tobytes()
+
+
+def _unpack_step_loss(blob):
+    if blob is None:
+        return None
+    return np.frombuffer(blob, dtype=np.float32)
+
+
 class ResultDB(object):
     def __init__(self, path=None):
         exists = path != ":memory:" and os.path.exists(path)
@@ -76,7 +88,9 @@ class ResultDB(object):
         id = cur.lastrowid
         return conf._replace(id=id)
 
-    def add_record(self, record, step_loss=None, commit=True, skip_invalid=False):
+    def add_record(
+        self, record, step_loss=None, commit=True, skip_invalid=False
+    ):
         if skip_invalid:
             conf = conf_from_record(record)
             if not conf_is_valid(conf):
@@ -99,10 +113,7 @@ class ResultDB(object):
             "test_batch": record.test_batch,
             "loss": record.loss,
         }
-        if step_loss is not None:
-            row["step_loss"] = np.array(step_loss, dtype=np.float32).tobytes()
-        else:
-            row["step_loss"] = None
+        row["step_loss"] = _pack_step_loss(step_loss)
         if math.isnan(record.loss) or record.loss is None:
             row["loss"] = INF
         self._db.execute(
@@ -148,7 +159,7 @@ class ResultDB(object):
         condition = " AND ".join(conditions)
         if condition != "":
             condition = "AND " + condition
-        
+
         if load_step_loss:
             maybe_step_loss = ", step_loss"
         else:
@@ -170,13 +181,17 @@ class ResultDB(object):
                 conf = conf_from_row(row[:8])
                 if conf_is_valid(conf):
                     if load_step_loss:
-                        if row[9] is not None:
-                            step_loss = np.frombuffer(row[9], dtype=np.float32)
-                        else:
-                            step_loss = None
-                        yield conf, row[8], step_loss
+                        yield conf, row[8], _unpack_step_loss(row[9])
                     else:
                         yield conf, row[8]
+
+    def get_runs_with_step_loss(self):
+        cur = self._db.execute(
+            "SELECT loss, step_loss FROM run WHERE step_loss IS NOT NULL"
+        )
+
+        for row in cur:
+            yield row[0], _unpack_step_loss(row[1])
 
 
 def import_from_csv(result_db, filename):

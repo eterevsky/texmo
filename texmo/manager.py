@@ -233,14 +233,6 @@ class Manager(object):
                 optax.scale_by_adam(),
                 additive_weight_decay(self.conf.regularization),
                 optax.scale(-self.conf.lr),
-                optax.scale_by_schedule(
-                    exp_schedule(
-                        10000,  # initial_steps
-                        100000,  # steps to lr/10
-                        self.conf.lr,
-                        self.conf.lr / 10,
-                    )
-                ),
             )
 
             self.opt_state = self.optimizer.init(self.weights)

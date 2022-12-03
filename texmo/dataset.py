@@ -24,28 +24,34 @@ def _worker(all, request_queue, data_queues):
 
 
 class DataSet(object):
-    def __init__(self, path):
-        if os.path.isdir(path):
-            raise Exception(
-                "Directory with training data is currently not supported"
-            )
-        self.file = open(path, "rb")
-        self.all = mmap.mmap(
-            self.file.fileno(),
-            0,
-            flags=mmap.MAP_PRIVATE,
-            prot=mmap.PROT_READ,
-        )
+    def __init__(self, path: str = None, data: bytes = None):
+        if path is not None:
+            assert data is None
 
-        total = len(self.all) / 1e9
-        print(f"Dataset mmap'ed: {total:.2f} GB")
+            if os.path.isdir(path):
+                raise Exception(
+                    "Directory with training data is currently not supported"
+                )
+            self._file = open(path, "rb")
+            self.all = mmap.mmap(
+                self._file.fileno(),
+                0,
+                flags=mmap.MAP_PRIVATE,
+                prot=mmap.PROT_READ,
+            )
+
+            total = len(self.all) / 1e9
+            print(f"Dataset mmap'ed: {total:.2f} GB")
+        else:
+            assert data is not None
+            self.all = data
 
         # A queue of (length, batch_size) tuples.
         self._request_queue = Queue()
 
         # Queues of training batches, with (length, batch_size) as key. Each
         # queue should have at least one batch ready at any time.
-        self._data_queues = {}
+        self._data_queues: dict[tuple[int, int], Queue] = {}
 
         self._worker_thread = Thread(
             target=_worker,
@@ -78,8 +84,16 @@ class DataSet(object):
         _ = self.sample(1024, 1024)
 
 
-def build_dataset(data):
-    print(f"Loading dataset from {data}")
-    dataset = DataSet(data)
+def build_dataset(path):
+    print(f"Loading dataset from {path}")
+    dataset = DataSet(path=path)
     dataset.warmup()
     return dataset
+
+
+def build_fake_dataset():
+    """Build 'abacabadabacaba...' training set."""
+    s = b"aba"
+    for c in range(ord("c"), ord("o")):
+        s = s + bytes([c]) + s
+    return DataSet(data=s)

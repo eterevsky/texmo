@@ -78,37 +78,6 @@ def additive_weight_decay(
     return optax.GradientTransformation(init_fn, update_fn)
 
 
-def gpt3_schedule(warmup_steps, anneal_steps, peak_lr, end_lr):
-    def sch(step):
-        warmup_pct = jnp.clip(step, 0, warmup_steps) / warmup_steps
-        anneal_pct = (
-            jnp.clip(step - warmup_steps, 0, anneal_steps) / anneal_steps
-        )
-
-        return (
-            warmup_pct * peak_lr
-            - (peak_lr - end_lr) * (1 - jnp.cos(jnp.pi * anneal_pct)) / 2
-        )
-
-    return sch
-
-
-def exp_schedule(initial_steps, total_steps, initial_lr, final_lr):
-    log_scale = math.log(final_lr / initial_lr)
-
-    def sch(step):
-        if step <= initial_steps:
-            return initial_lr
-
-        if step >= total_steps:
-            return final_lr
-
-        t = (step - initial_steps) / (total_steps - initial_steps)
-        return initial_lr * math.exp(t * log_scale)
-
-    return sch
-
-
 def deserialize_weights(saved_weights):
     if isinstance(saved_weights, list):
         weights = []
@@ -332,8 +301,8 @@ class Manager(object):
         steps,
         time_limit,
         train_set,
-        temp_steps,
-        temp_dir,
+        temp_steps=None,
+        temp_dir=None,
         quiet=False,
     ):
         start = time.time()
@@ -456,17 +425,15 @@ class Manager(object):
 
         return report
 
-    def continue_prefix(self, prefix, length):
+    def continue_prefix(self, prefix: str, length: int) -> str | bytes:
         prefix = prefix.encode()  # convert str to bytes (?)
         out = self.sample(prefix, length)
 
         try:
             s = (prefix + out).decode("utf-8")
         except UnicodeDecodeError:
-            s = repr(prefix + out)
-        print()
-        print(s)
-        print()
+            s = prefix + out
+        return s
 
     def serialize_weights(self, weights):
         if weights is None:

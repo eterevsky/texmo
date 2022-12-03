@@ -66,7 +66,6 @@ def get_layer_stats(model):
     return layers
 
 
-# We don't care about precisely predicting loss above this value
 SCALE_LOSS = 1.2
 
 
@@ -101,29 +100,13 @@ class FeatureProvider(object):
         for conf, s in self._runs.items():
             self._scores[conf] = median(s)
 
-    # @staticmethod
-    # def _count_layer(spec: Model, name: str) -> int:
-    #     count = 0
-    #     for layer in spec.layers:
-    #         if layer.name == name:
-    #             count += 1
-    #     return count
-
     def _get_model_features(self, model: Model2) -> list:
-        # return []
         res = self._spec_features_cache.get(model)
         if res is not None:
             return res
 
         features = []
         # features.append(math.log2(spec.weights()))
-        # features.append(self._count_layer(spec, "dense"))
-        # features.append(self._count_layer(spec, "rec"))
-        # features.append(self._count_layer(spec, "gru"))
-        # features.append(self._count_layer(spec, "mgru"))
-        # features.append(self._count_layer(spec, "lstm"))
-        # features.append(self._count_layer(spec, "suffix"))
-        # features.append(self._count_layer(spec, "attn"))
 
         stats = get_layer_stats(model)
 

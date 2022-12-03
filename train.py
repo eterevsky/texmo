@@ -57,7 +57,6 @@ def main(
             manager = Manager.load(model_path)
         else:
             conf = Configuration(
-                None,
                 build_model(model_spec),
                 learning_rate,
                 sample_len,
@@ -82,7 +81,10 @@ def main(
         train_set.join()
 
     if prefix is not None:
-        manager.continue_prefix(prefix, 256)
+        s = manager.continue_prefix(prefix, 256)
+        print()
+        print(s)
+        print()
 
     show_loss_graph(manager, output_dir)
 

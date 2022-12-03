@@ -22,7 +22,6 @@ class ConfigurationTest(TestCase):
         )
 
         conf = Configuration(
-            id=None,
             model=build_model("dense.1.relu"),
             lr=0.25,
             sample_len=128,
@@ -55,7 +54,6 @@ class ConfigurationTest(TestCase):
         )
 
         conf = Configuration(
-            id=None,
             model=build_model("suffix.2"),
             lr=0.25,
             sample_len=128,
@@ -76,7 +74,6 @@ class ConfigurationTest(TestCase):
 
     def test_conf_is_valid(self):
         conf = Configuration(
-            id=None,
             model=build_model("lstm.64-lstm.32"),
             lr=0.5,
             sample_len=128,

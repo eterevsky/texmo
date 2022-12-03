@@ -7,7 +7,6 @@ from texmo.model2 import build_model
 
 
 INIT_CONF = Configuration(
-    id=None,
     model=build_model("dense.1.relu"),
     lr=0.2,
     sample_len=128,

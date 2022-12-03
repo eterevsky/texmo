@@ -9,7 +9,6 @@ from .model2 import build_model
 Configuration = namedtuple(
     "Configuration",
     [
-        "id",
         "model",
         "lr",
         "sample_len",
@@ -23,13 +22,12 @@ Configuration = namedtuple(
 
 # Database fields required to create a Configuration instance using
 # conf_from_row
-CONF_FIELDS = "id, spec, lr, sample_len, batch, regularization, init_scale, t"
+CONF_FIELDS = "spec, lr, sample_len, batch, regularization, init_scale, t"
 
 
 def conf_from_record(record):
     model = build_model(record.model_spec)
     return Configuration(
-        None,
         model,
         record.learning_rate,
         record.train_sample_len,
@@ -44,8 +42,8 @@ def conf_from_row(row) -> Configuration:
     """Create Configuration from a database row."""
     if row is None:
         return None
-    model = build_model(row[1])
-    return Configuration(row[0], model, *row[2:])
+    model = build_model(row[0])
+    return Configuration(model, *row[1:])
 
 
 def conf_to_dict(conf: Configuration) -> dict:
@@ -63,7 +61,6 @@ def conf_to_dict(conf: Configuration) -> dict:
 def conf_from_dict(spec: dict) -> Configuration:
     model = build_model(spec["model"])
     return Configuration(
-        None,
         model,
         spec["lr"],
         spec["sample_len"],
@@ -124,7 +121,7 @@ def parse_conf(s: str, defaults: Configuration) -> Configuration:
             t = int(value)
 
     return Configuration(
-        None, model, lr, sample_len, batch, regularization, init_scale, t
+        model, lr, sample_len, batch, regularization, init_scale, t
     )
 
 
@@ -340,7 +337,6 @@ def conf_neighbors(conf: Configuration, template: Template):
 
     Returns: iterator over pairs (neighbor conf, type of neighbor)
     """
-    conf = conf._replace(id=None)
     cache = _model_neighbors.get(conf.model)
     if cache is None:
         cache = []
@@ -360,13 +356,17 @@ def conf_neighbors(conf: Configuration, template: Template):
         ):
             yield conf._replace(model=neighbor_model, t=conf.t * 2)
             if match_bounds(template.lr, conf.lr / 2):
-                yield conf._replace(model=neighbor_model, t=conf.t * 2, lr=conf.lr / 2)
-        elif len(neighbor_model.layers) < len(conf.model.layers) and match_bounds(
-            template.t, conf.t // 2
-        ):
+                yield conf._replace(
+                    model=neighbor_model, t=conf.t * 2, lr=conf.lr / 2
+                )
+        elif len(neighbor_model.layers) < len(
+            conf.model.layers
+        ) and match_bounds(template.t, conf.t // 2):
             yield conf._replace(model=neighbor_model, t=conf.t // 2)
             if match_bounds(template.lr, conf.lr * 2):
-                yield conf._replace(model=neighbor_model, t=conf.t // 2, lr=conf.lr * 2)
+                yield conf._replace(
+                    model=neighbor_model, t=conf.t // 2, lr=conf.lr * 2
+                )
 
     for x in (conf.lr / 2, conf.lr * 2):
         if match_bounds(template.lr, x):

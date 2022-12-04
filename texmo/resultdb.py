@@ -174,6 +174,7 @@ class ResultDB(object):
             if template.match_model(model):
                 conf = conf_from_row(row[1:8])
                 run = Run(row[8], _unpack_step_loss(row[9]))
+                assert run.loss > 0.1
                 if conf_is_valid(conf):
                     yield row[0], conf, run
 

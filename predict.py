@@ -1,175 +1,46 @@
 import argparse
-from collections import namedtuple
-import math
+import logging
 import numpy as np
-from sklearn.linear_model import LinearRegression, Ridge
-from sklearn.svm import LinearSVR
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.ensemble import (
-    AdaBoostRegressor,
-    RandomForestRegressor,
-    HistGradientBoostingRegressor,
-)
-from sklearn.neighbors import KNeighborsRegressor
 from sklearn.model_selection import train_test_split
-from statistics import median
-from itertools import islice
 
-from texmo.predict import FeatureProvider, HistPredictor, encode_loss, decode_loss, MAX_LOSS
-from texmo.common import NCHAR
-from texmo.resultdb import ResultDB
 from texmo import latency
+from texmo.common import NCHAR
+from texmo.configuration import Template
+from texmo.predict import Predictor, prediction_score
+from texmo.resultdb import ResultDB
+from texmo.results import ResultSet
 
 
-class BasePredictor(object):
-    supports_sparse = False
+def main(db):
+    np.set_printoptions(linewidth=100, edgeitems=6, precision=3)
 
-    def _fit(self, xs, ys, sample_weight):
-        pass
+    logging.info(f"Loading results from {db}")
+    record_db = ResultDB(args.db)
+    result_set = ResultSet(record_db, template=Template(), populate_neighbors=False)
 
-    def _predict(self, xs):
-        pass
+    logging.info("Splitting result set into train & test")
+    train_set, test_set = result_set.train_test_split()
 
-    def fit(self, xs, ys, sample_weight):
-        with latency.timer(self.__class__.__name__ + "-fit"):
-            self._fit(xs, ys, sample_weight)
+    logging.info("Creating Predictor")
+    predictor = Predictor(train_set)
 
-    def predict(self, xs):
-        with latency.timer(self.__class__.__name__ + "-predict"):
-            return self._predict(xs)
+    logging.info("Training")
+    predictor.train()
 
-    def predict_one(self, x):
-        xs = x.reshape((1, -1))
-        return self._predict(xs)[0]
+    logging.info("Preparing test data")
+    losses = []
+    confs = []
 
-    def loss(self, test_xs, test_ys, sample_weight):
-        pred_ys = self.predict(test_xs)
-        pred_ys = decode_loss(pred_ys)
-        pred_ys = np.minimum(pred_ys, MAX_LOSS)
-        pred_ys = np.log2(pred_ys)
+    for conf_results in test_set._confs.values():
+        for run in conf_results.runs:
+            losses.append(run.loss)
+            confs.append(conf_results.conf)
 
-        test_ys = decode_loss(test_ys)
-        test_ys = np.minimum(test_ys, MAX_LOSS)
-        test_ys = np.log2(test_ys)
+    logging.info("Predicting")
+    predicted_losses = predictor.predict(confs)
 
-        error = np.abs(pred_ys - test_ys) * sample_weight
-        return np.sum(error) / np.sum(sample_weight)
-
-
-class Const(BasePredictor):
-    def __init__(self):
-        self._value = math.log2(4)
-
-    def _fit(self, xs, ys, sample_weight):
-        self._value = median(ys)
-
-    def _predict(self, xs):
-        xs = np.array(xs)
-        return np.ones(shape=(xs.shape[0],)) * self._value
-
-
-class Linear(BasePredictor):
-    def __init__(self):
-        self.pred = LinearRegression()
-
-    def _fit(self, xs, ys, sample_weight):
-        self.pred.fit(xs, ys, sample_weight)
-
-    def _predict(self, xs):
-        return self.pred.predict(xs)
-
-
-class LinearReg(BasePredictor):
-    def __init__(self):
-        self.pred = Ridge()
-
-    def _fit(self, xs, ys, sample_weight):
-        self.pred.fit(xs, ys, sample_weight)
-
-    def _predict(self, xs):
-        return self.pred.predict(xs)
-
-
-class Svm(BasePredictor):
-    def __init__(self):
-        self.pred = LinearSVR(max_iter=1000)
-
-    def _fit(self, xs, ys):
-        self.pred.fit(xs, ys)
-
-    def _predict(self, xs):
-        return self.pred.predict(xs)
-
-
-class Neighbors(BasePredictor):
-    def __init__(self):
-        self.pred = KNeighborsRegressor()
-
-    def _fit(self, xs, ys, sample_weight):
-        self.pred.fit(xs, ys)
-
-    def _predict(self, xs):
-        return self.pred.predict(xs)
-
-
-class Decision(BasePredictor):
-    def __init__(self):
-        self.pred = DecisionTreeRegressor(
-            criterion="absolute_error", max_depth=3
-        )
-
-    def _fit(self, xs, ys):
-        self.pred.fit(xs, ys)
-
-    def _predict(self, xs):
-        return self.pred.predict(xs)
-
-
-class AdaBoost(BasePredictor):
-    def __init__(self):
-        self.pred = AdaBoostRegressor(
-            DecisionTreeRegressor(criterion="absolute_error", max_depth=3),
-            loss="linear",
-        )
-
-    def _fit(self, xs, ys):
-        self.pred.fit(xs, ys)
-
-    def _predict(self, xs):
-        return self.pred.predict(xs)
-
-
-class Forest(BasePredictor):
-    def __init__(self):
-        self.pred = RandomForestRegressor(
-            n_estimators=10, criterion="absolute_error", max_depth=3
-        )
-
-    def _fit(self, xs, ys):
-        self.pred.fit(xs, ys)
-
-    def _predict(self, xs):
-        return self.pred.predict(xs)
-
-
-# class HistGradient(BasePredictor):
-#     supports_sparse = True
-
-#     def __init__(self):
-#         self.pred = HistGradientBoostingRegressor(
-#             loss="absolute_error",
-#             max_depth=None,
-#             max_leaf_nodes=65,
-#             max_iter=10000,
-#             n_iter_no_change=20,
-#             learning_rate=0.1,
-#         )
-
-#     def _fit(self, xs, ys, sample_weight):
-#         self.pred.fit(xs, ys, sample_weight)
-
-#     def _predict(self, xs):
-#         return self.pred.predict(xs)
+    score = prediction_score(losses, predicted_losses)
+    logging.info(f"Final score: {score:.5f}")
 
 
 def parse_args():
@@ -185,84 +56,7 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    np.set_printoptions(linewidth=100, edgeitems=6, precision=3)
+    logging.getLogger().setLevel(logging.INFO)
     args = parse_args()
-    print(f"Initializing the DB {args.db}")
-    record_db = ResultDB(args.db)
-
-    print("Loading all runs")
-    conf_runs = list(record_db.get_confs_runs())
-
-    feature_provider = FeatureProvider(conf_runs)
-    conf_features = []
-    sparse_features = []
-    sample_weight = []
-    losses = []
-    for conf, loss in conf_runs:
-        conf_features.append(feature_provider.get_features(conf))
-        sparse_features.append(feature_provider.get_sparse_features(conf))
-        sample_weight.append(conf.t)
-        losses.append(loss)
-
-    print("Read", len(sparse_features), "runs from the DB")
-
-    conf_features = np.array(conf_features, dtype=np.float32)
-    sparse_features = np.array(sparse_features, dtype=np.float32)
-    sample_weight = np.array(sample_weight, dtype=np.float32)
-    losses = np.array(losses, dtype=np.float32)
-    losses = encode_loss(losses)
-
-    (
-        train_features,
-        test_features,
-        train_sparse_features,
-        test_sparse_features,
-        train_sample_weight,
-        test_sample_weight,
-        train_losses,
-        test_losses,
-    ) = train_test_split(
-        conf_features, sparse_features, sample_weight, losses, test_size=0.2
-    )
-
-    print(
-        "Train data:",
-        train_features.shape,
-        train_sparse_features.shape,
-        train_losses.shape,
-    )
-    # print(train_features)
-    print(train_sparse_features)
-    print(train_losses)
-    print()
-
-    print("Test data:", test_sparse_features.shape, test_losses.shape)
-    # print(test_features)
-    print(test_sparse_features)
-    print(test_losses)
-    print()
-
-    for pred_cls in (
-        Const,
-        # Linear,
-        # LinearReg,
-        # Svm,
-        # Neighbors,
-        # Decision,
-        # AdaBoost,
-        # HistGradient,
-    ):
-        pred = pred_cls()
-        pred.fit(train_features, train_losses, sample_weight=train_sample_weight)
-        loss = pred.loss(test_features, test_losses, test_sample_weight)
-        print(pred_cls.__name__, "loss:", loss)
-
-    pred = HistPredictor(feature_provider)
-    pred.fit(
-        train_sparse_features, train_losses, sample_weight=train_sample_weight
-    )
-    loss = pred.loss(test_sparse_features, test_losses, test_sample_weight)
-    print("Hist loss:", loss)
-
-    print()
+    main(**vars(args))
     latency.report()

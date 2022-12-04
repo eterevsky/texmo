@@ -1,4 +1,3 @@
-import numpy as np
 from unittest import TestCase
 
 from texmo.configuration import Configuration
@@ -7,7 +6,7 @@ from texmo.manager import Manager
 from texmo.model2 import build_model
 
 
-class ManagreTest(TestCase):
+class ManagerTest(TestCase):
     def test_train(self):
         dataset = build_fake_dataset()
         conf = Configuration(

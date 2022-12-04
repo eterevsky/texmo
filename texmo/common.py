@@ -1,5 +1,12 @@
 from collections.abc import Iterable
+import logging
 import math
+
+
+logging.basicConfig(
+        format='[%(asctime)s.%(msecs)03d] %(message)s',
+        level=logging.INFO,
+        datefmt='%H:%M:%S')
 
 
 INF = float("inf")

@@ -4,6 +4,7 @@ import os
 from queue import Queue
 import random
 from threading import Thread
+from typing import Optional
 
 from . import latency
 
@@ -24,7 +25,8 @@ def _worker(all, request_queue, data_queues):
 
 
 class DataSet(object):
-    def __init__(self, path: str = None, data: bytes = None):
+    def __init__(self, path: Optional[str] = None, data: Optional[bytes] = None):
+        self.all: bytes | mmap.mmap = b""
         if path is not None:
             assert data is None
 
@@ -47,7 +49,7 @@ class DataSet(object):
             self.all = data
 
         # A queue of (length, batch_size) tuples.
-        self._request_queue = Queue()
+        self._request_queue: Queue = Queue()
 
         # Queues of training batches, with (length, batch_size) as key. Each
         # queue should have at least one batch ready at any time.

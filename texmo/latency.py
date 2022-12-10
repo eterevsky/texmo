@@ -2,11 +2,11 @@ from statistics import quantiles
 from time import perf_counter_ns
 
 
-_measures = {}
+_measures: dict[str, list[float]] = {}
 
 
 class Timer(object):
-    def __init__(self, name):
+    def __init__(self, name: str):
         self.name = name
         self.start = None
 

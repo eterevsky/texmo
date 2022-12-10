@@ -228,7 +228,7 @@ def default_from_template(template: Template) -> Configuration:
     init_scale = _pick_default_value(template.init_scale, 1.0)
     t = _pick_default_value(template.t, 1)
     return Configuration(
-        None, None, lr, sample_len, batch, regularization, init_scale, t
+        None, lr, sample_len, batch, regularization, init_scale, t
     )
 
 

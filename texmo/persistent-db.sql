@@ -12,6 +12,8 @@ CREATE TABLE conf (
     cluster_score REAL
 );
 
+CREATE INDEX conf_spec ON conf(spec);
+
 CREATE TABLE run (
     conf_id INTEGER NOT NULL,
 

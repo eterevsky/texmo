@@ -1,4 +1,5 @@
 from collections import namedtuple
+from collections.abc import Iterable
 import math
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -70,12 +71,14 @@ def get_layer_stats(model):
 
 
 def encode_loss(loss: np.ndarray):
+    if loss is None: return None
     loss = np.minimum(loss, 2**16)
     loss = np.log2(loss)
     return loss
 
 
 def decode_loss(loss):
+    if loss is None: return None
     loss = np.minimum(loss, MAX_LOG_LOSS)
     return np.exp2(loss)
 
@@ -84,6 +87,7 @@ class FeatureProvider(object):
     """Provides configuration features for loss prediction."""
 
     def __init__(self, result_set: ResultSet):
+        assert isinstance(result_set, ResultSet)
         self._result_set = result_set
         # conf -> median loss
         self._conf_loss = {}
@@ -192,7 +196,7 @@ class FeatureProvider(object):
         Returns the list of confs that need to be updated.
         """
 
-        self._scores[conf_results.conf] = conf_results.median_score
+        self._conf_loss[conf_results.conf] = conf_results.median_score
         for neighbor in self._get_neighbors(conf_results.conf):
             if conf_is_valid(neighbor):
                 yield neighbor
@@ -326,7 +330,7 @@ class Predictor(object):
 
             print("Loss on the training data:", loss)
 
-    def predict(self, confs):
+    def predict(self, confs: Iterable[Configuration]):
         with latency.timer("Predictor.predict"):
             if len(confs) > 10000:
                 print("Preparing features")

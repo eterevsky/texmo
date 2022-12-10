@@ -19,6 +19,7 @@ class ConfResults(object):
         self.id: int = id
         self.conf: Configuration = conf
         self.runs: list[Run] = []
+        self.pred_score: float = None
 
     @property
     def median_score(self) -> float:

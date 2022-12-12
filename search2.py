@@ -40,7 +40,7 @@ def pick_default_value(default, range):
 
 def warmup(dataset):
     conf = Configuration(
-        None, build_model("suffix.4-rec.32.relu"), 0.25, 128, 256, 0.125, 1.0, 8
+        None, build_model("suffix.4-rec.64.relu"), 0.25, 128, 256, 0.125, 1.0, 8
     )
     manager = Manager(conf)
     manager.init(quiet=True)

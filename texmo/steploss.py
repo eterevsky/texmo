@@ -6,25 +6,27 @@ from scipy.optimize import minimize
 from . import latency
 from .predict import prediction_score
 
+
+def pred_log(c1, c2, eps, step):
+    return c1 + c2 * step ** eps - 0.01 / step
+
+
 class StepLossPredictor(object):
     def __init__(self):
         self._c1 = None
         self._c2 = 0.0
-        self._c3 = 0.0
         self._eps = -1.0
-        self._last_loss = None
 
     def fit(self, losses):
         with latency.timer("StepLossPredictor.fit"):
             losses = np.log2(losses)
 
             if len(losses) == 0:
-                self._c1 = 10
-                self._last_loss = 8
+                self._c1 = 8
                 return
 
-            self._last_loss = losses[-1]
-            start = max(len(losses) // 3, 2)
+            start = max(len(losses) // 2, 2)
+            start = max(round(0.55 * len(losses)), 2)
             steps = np.array(range(start, len(losses)))
 
             if len(steps) < 3:
@@ -35,7 +37,7 @@ class StepLossPredictor(object):
             target_losses = np.array(losses[start:])
             def _score(x):
                 c1, c2, eps = x
-                prediction = c1 + c2 * steps ** eps
+                prediction = pred_log(c1, c2, eps, steps)
                 return prediction_score(target_losses, prediction)
 
             init = np.array([1.0, 1.0, -1.0])
@@ -45,10 +47,10 @@ class StepLossPredictor(object):
 
     def predict(self, step):
         if self._eps > 0 or step < 4:
-            prediction = self._last_loss
+            prediction = self._c1
         else:
-            prediction = self._c1 + self._c2 * step ** self._eps
+            prediction = pred_log(self._c1, self._c2, self._eps, step)
         return 2**prediction
 
     def params(self) -> np.ndarray:
-        return np.array([self._c1, self._c2, self._c3, self._eps])
+        return np.array([self._c1, self._c2, self._eps])

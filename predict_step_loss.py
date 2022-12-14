@@ -21,6 +21,9 @@ def main(db):
         for run in record_db.get_runs_with_step_loss():
             step_loss = run.step_loss
             true_loss = step_loss[-1]
+
+            if len(step_loss) < 16: continue
+
             if math.isnan(true_loss):
                 true_loss = INF
             true_losses.append(true_loss)

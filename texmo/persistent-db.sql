@@ -14,7 +14,9 @@ CREATE TABLE conf (
 
 CREATE INDEX conf_spec ON conf(spec);
 
-CREATE TABLE run (
+CREATE TABLE run2 (
+    id INTEGER NOT NULL PRIMARY KEY,
+
     conf_id INTEGER NOT NULL,
 
     timestamp TEXT,

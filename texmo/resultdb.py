@@ -159,7 +159,7 @@ class ResultDB(object):
             condition = " AND " + condition
 
         query = (
-            f"SELECT conf.id, {CONF_FIELDS}, run.loss, run.step_loss "
+            f"SELECT conf.id, {CONF_FIELDS}, run.loss, run.step_loss, run.id "
             + "FROM conf, run "
             + f"WHERE conf.id = run.conf_id{condition}"
         )
@@ -173,18 +173,22 @@ class ResultDB(object):
                 continue
             if template.match_model(model):
                 conf = conf_from_row(row[1:8])
-                run = Run(row[8], _unpack_step_loss(row[9]))
+                run = Run(row[8], _unpack_step_loss(row[9]), id=row[10])
                 assert run.loss > 0.1
                 if conf_is_valid(conf):
                     yield row[0], conf, run
 
     def get_runs_with_step_loss(self) -> Iterable[Run]:
         cur = self._db.execute(
-            "SELECT loss, step_loss FROM run WHERE step_loss IS NOT NULL"
+            """
+            SELECT loss, step_loss FROM run
+            WHERE step_loss IS NOT NULL
+              AND length(step_loss) > 0
+            """
         )
 
         for row in cur:
-            yield Run(row[0], _unpack_step_loss(row[1]))
+            yield Run(row[0], _unpack_step_loss(row[1]))        
 
 
 def import_from_csv(result_db, filename):

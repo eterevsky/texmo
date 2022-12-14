@@ -178,7 +178,7 @@ class ResultDB(object):
                 if conf_is_valid(conf):
                     yield row[0], conf, run
 
-    def get_runs_with_step_loss(self):
+    def get_runs_with_step_loss(self) -> Iterable[Run]:
         cur = self._db.execute(
             "SELECT loss, step_loss FROM run WHERE step_loss IS NOT NULL"
         )

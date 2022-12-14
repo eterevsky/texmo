@@ -3,6 +3,7 @@ import math
 import numpy as np
 
 from texmo.common import INF
+from texmo import latency
 from texmo.predict import prediction_score
 from texmo.resultdb import ResultDB
 from texmo.steploss import StepLossPredictor
@@ -16,19 +17,22 @@ def main(db):
     true_losses = []
     predicted_losses = []
 
-    for _, step_loss in record_db.get_runs_with_step_loss():
-        true_loss = step_loss[-1]
-        if math.isnan(true_loss):
-            true_loss = INF
-        true_losses.append(true_loss)
-        predictor = StepLossPredictor()
-        predictor.fit(step_loss[:len(step_loss) // 2])
-        predicted_losses.append(predictor.predict(len(step_loss) - 1))
+    with latency.timer("predict-step-loss"):
+        for run in record_db.get_runs_with_step_loss():
+            step_loss = run.step_loss
+            true_loss = step_loss[-1]
+            if math.isnan(true_loss):
+                true_loss = INF
+            true_losses.append(true_loss)
+            predictor = StepLossPredictor()
+            predictor.fit(step_loss[:len(step_loss) // 2])
+            predicted_losses.append(predictor.predict(len(step_loss) - 1))
 
     losses = np.stack((true_losses, predicted_losses))
     print(losses)
 
-    print(prediction_score(true_losses, predicted_losses))
+    print("Total samples:", len(true_losses))
+    print("Score:", prediction_score(true_losses, predicted_losses))
 
 
 def parse_args():
@@ -46,3 +50,4 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     main(args.db)
+    latency.report()

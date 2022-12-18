@@ -16,6 +16,7 @@ class StepLossPredictor(object):
         self._c1 = None
         self._c2 = 0.0
         self._eps = -1.0
+        self._known_steps = 0
 
     def fit(self, losses):
         with latency.timer("StepLossPredictor.fit"):
@@ -24,6 +25,8 @@ class StepLossPredictor(object):
             if len(losses) == 0:
                 self._c1 = 8
                 return
+
+            self._known_steps = len(losses)
 
             start = max(round(0.55 * len(losses)), 2)
             steps = np.array(range(start, len(losses)))
@@ -46,7 +49,7 @@ class StepLossPredictor(object):
             self._c1, self._c2, self._eps = res.x
 
     def predict(self, step):
-        if self._eps > 0 or step < 4:
+        if self._eps > 0 or self._known_steps < 3:
             prediction = self._c1
         else:
             prediction = pred_log(self._c1, self._c2, self._eps, step)

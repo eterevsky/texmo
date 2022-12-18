@@ -1,6 +1,7 @@
 import argparse
 import logging
 
+import config
 from texmo.configuration import (
     Configuration,
     Template,
@@ -173,19 +174,19 @@ def parse_args() -> argparse.Namespace:
         "-d",
         "--data",
         type=str,
-        required=True,
+        default=config.DATA,
         help="a file with training data",
     )
     parser.add_argument(
         "--log",
-        default=None,
+        default=config.LOG,
         metavar="LOG",
         help="path to a CSV file for logging",
     )
     parser.add_argument(
         "--db",
         type=str,
-        required=True,
+        default=config.DB,
         help="path to the SQLite database with the results",
     )
     parser.add_argument(

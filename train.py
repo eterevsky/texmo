@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 
+import config
 from texmo.configuration import Configuration
 from texmo.dataset import DataSet
 from texmo.manager import Manager
@@ -97,7 +98,7 @@ def parse_args():
         "-d",
         "--data",
         type=str,
-        required=True,
+        default=config.DATA,
         help="directory with training data",
     )
 
@@ -192,7 +193,7 @@ def parse_args():
 
     parser.add_argument(
         "--log",
-        default=None,
+        default=config.LOG,
         metavar="LOG",
         help="path to a CSV file for logging",
     )

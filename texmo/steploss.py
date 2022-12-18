@@ -29,7 +29,7 @@ class StepLossPredictor(object):
             steps = np.array(range(start, len(losses)))
 
             if len(steps) < 3:
-                self._c1 = self._last_loss
+                self._c1 = losses[-1]
                 self._c2 = 0
                 return
 

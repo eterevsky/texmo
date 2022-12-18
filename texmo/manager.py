@@ -78,6 +78,22 @@ def additive_weight_decay(
     return optax.GradientTransformation(init_fn, update_fn)
 
 
+def exp_schedule(initial_steps, total_steps, initial_lr, final_lr):
+    log_scale = math.log(final_lr / initial_lr)
+
+    def sch(step):
+        if step <= initial_steps:
+            return initial_lr
+
+        if step >= total_steps:
+            return final_lr
+
+        t = (step - initial_steps) / (total_steps - initial_steps)
+        return initial_lr * math.exp(t * log_scale)
+
+    return sch
+
+
 def deserialize_weights(saved_weights):
     if isinstance(saved_weights, list):
         weights = []
@@ -202,6 +218,14 @@ class Manager(object):
                 optax.scale_by_adam(),
                 additive_weight_decay(self.conf.regularization),
                 optax.scale(-self.conf.lr),
+                optax.scale_by_schedule(
+                    exp_schedule(
+                        10000,  # initial_steps
+                        100000,  # steps to lr/10
+                        self.conf.lr,
+                        self.conf.lr / 10,
+                    )
+                ),
             )
 
             self.opt_state = self.optimizer.init(self.weights)

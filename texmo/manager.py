@@ -27,73 +27,6 @@ from .steploss import StepLossPredictor
 LOG2 = 1 / math.log(2)
 
 
-def global_norm(updates):
-    pre_sqrt = sum(
-        [jnp.sum(jnp.square(x)) for x in jax.tree_util.tree_leaves(updates)]
-    )
-    return jnp.sqrt(pre_sqrt)
-
-
-def clip_by_global_norm(max_norm) -> optax.GradientTransformation:
-    """Clip updates using their global norm.
-    References:
-      [Pascanu et al, 2012](https://arxiv.org/abs/1211.5063)
-    Args:
-      max_norm: the maximum global norm for an update.
-    Returns:
-      An (init_fn, update_fn) tuple.
-    """
-
-    def init_fn(_):
-        return optax.EmptyState()
-
-    def update_fn(updates, state, weights=None):
-        del weights
-        g_norm = global_norm(updates)
-        trigger = g_norm < max_norm
-        updates = jax.tree_util.tree_map(
-            lambda t: jnp.where(trigger, t, (t / g_norm) * max_norm), updates
-        )
-        return updates, state
-
-    return optax.GradientTransformation(init_fn, update_fn)
-
-
-def additive_weight_decay(
-    weight_decay: float = 0.0,
-) -> optax.GradientTransformation:
-    """Add a delta emulating L2 regularization to all parameters except biases."""
-
-    def init_fn(_):
-        return optax.AdditiveWeightDecayState()
-
-    def update_fn(updates, state, weights):
-        updates = jax.tree_util.tree_map(
-            lambda g, p: g + weight_decay * p * (len(g.shape) > 1),
-            updates,
-            weights,
-        )
-        return updates, state
-
-    return optax.GradientTransformation(init_fn, update_fn)
-
-
-def exp_schedule(initial_steps, total_steps, initial_lr, final_lr):
-    log_scale = math.log(final_lr / initial_lr)
-
-    def sch(step):
-        if step <= initial_steps:
-            return initial_lr
-
-        if step >= total_steps:
-            return final_lr
-
-        t = (step - initial_steps) / (total_steps - initial_steps)
-        return initial_lr * math.exp(t * log_scale)
-
-    return sch
-
-
 def deserialize_weights(saved_weights):
     if isinstance(saved_weights, list):
         weights = []
@@ -213,19 +146,12 @@ class Manager(object):
             self._loss_grad = jax.jit(jax.value_and_grad(self._loss_avg))
             if not quiet:
                 logging.info("Creating optimizer")
-            self.optimizer = optax.chain(
-                clip_by_global_norm(1),
-                optax.scale_by_adam(),
-                additive_weight_decay(self.conf.regularization),
-                optax.scale(-self.conf.lr),
-                optax.scale_by_schedule(
-                    exp_schedule(
-                        10000,  # initial_steps
-                        100000,  # steps to lr/10
-                        self.conf.lr,
-                        self.conf.lr / 10,
-                    )
-                ),
+            mask_bias = lambda tree: jax.tree_util.tree_map(
+                lambda g: len(g.shape) > 1, tree
+            )
+            self.optimizer =  optax.chain(
+                optax.clip_by_global_norm(1.0),
+                optax.adamw(self.conf.lr, mask=mask_bias),
             )
 
             self.opt_state = self.optimizer.init(self.weights)

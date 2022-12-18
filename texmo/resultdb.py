@@ -159,7 +159,7 @@ class ResultDB(object):
             condition = " AND " + condition
 
         query = (
-            f"SELECT conf.id, {CONF_FIELDS}, run.loss, run.step_loss, run.id "
+            f"SELECT conf.id, {CONF_FIELDS}, run.loss, run.step_loss, NULL "
             + "FROM conf, run "
             + f"WHERE conf.id = run.conf_id{condition}"
         )
@@ -188,7 +188,7 @@ class ResultDB(object):
         )
 
         for row in cur:
-            yield Run(row[0], _unpack_step_loss(row[1]))        
+            yield Run(row[0], _unpack_step_loss(row[1]))
 
 
 def import_from_csv(result_db, filename):

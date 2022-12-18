@@ -1,4 +1,5 @@
 import argparse
+import logging
 import math
 import numpy as np
 
@@ -11,14 +12,20 @@ from texmo.steploss import StepLossPredictor
 
 def main(db):
     np.set_printoptions(linewidth=100, edgeitems=6, precision=3)
-    print(f"Initializing the DB {args.db}")
+    logging.info(f"Initializing the DB {args.db}")
     record_db = ResultDB(args.db)
 
     true_losses = []
     predicted_losses = []
 
+    runs = list(record_db.get_runs_with_step_loss())
+    l = len(runs)
+    logging.info(f"Preparing steploss model for {l} runs")
+
     with latency.timer("predict-step-loss"):
-        for run in record_db.get_runs_with_step_loss():
+        for i, run in enumerate(runs):
+            if i % 1000 == 0 and i > 0:
+                logging.info(f"Finished {i} runs")
             step_loss = run.step_loss
             true_loss = step_loss[-1]
 
@@ -30,6 +37,8 @@ def main(db):
             predictor = StepLossPredictor()
             predictor.fit(step_loss[:len(step_loss) // 2])
             predicted_losses.append(predictor.predict(len(step_loss) - 1))
+    
+    logging.info("Completed steploss models")
 
     losses = np.stack((true_losses, predicted_losses))
     print(losses)

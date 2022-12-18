@@ -14,7 +14,7 @@ CREATE TABLE conf (
 
 CREATE INDEX conf_spec ON conf(spec);
 
-CREATE TABLE run2 (
+CREATE TABLE run (
     id INTEGER NOT NULL PRIMARY KEY,
 
     conf_id INTEGER NOT NULL,

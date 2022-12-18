@@ -8,7 +8,7 @@ from .predict import prediction_score
 
 
 def pred_log(c1, c2, eps, step):
-    return c1 + c2 * step ** eps - 0.01 / step
+    return c1 + c2 * step**eps
 
 
 class StepLossPredictor(object):
@@ -25,7 +25,6 @@ class StepLossPredictor(object):
                 self._c1 = 8
                 return
 
-            start = max(len(losses) // 2, 2)
             start = max(round(0.55 * len(losses)), 2)
             steps = np.array(range(start, len(losses)))
 
@@ -35,6 +34,7 @@ class StepLossPredictor(object):
                 return
 
             target_losses = np.array(losses[start:])
+
             def _score(x):
                 c1, c2, eps = x
                 prediction = pred_log(c1, c2, eps, steps)

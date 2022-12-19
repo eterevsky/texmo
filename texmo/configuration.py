@@ -1,9 +1,11 @@
 import argparse
 from collections import namedtuple
 import re
+from typing import Any
 
 from .common import INF, is_power2, power2_neighbors
-from .model2 import build_model
+from .model2 import build_model, Model2
+from .record import TrainingRecord
 
 
 Configuration = namedtuple(
@@ -20,12 +22,7 @@ Configuration = namedtuple(
 )
 
 
-# Database fields required to create a Configuration instance using
-# conf_from_row
-CONF_FIELDS = "spec, lr, sample_len, batch, regularization, init_scale, t"
-
-
-def conf_from_record(record):
+def conf_from_record(record: TrainingRecord) -> Configuration:
     model = build_model(record.model_spec)
     return Configuration(
         model,
@@ -38,17 +35,9 @@ def conf_from_record(record):
     )
 
 
-def conf_from_row(row) -> Configuration:
-    """Create Configuration from a database row."""
-    if row is None:
-        return None
-    model = build_model(row[0])
-    return Configuration(model, *row[1:])
-
-
-def conf_to_dict(conf: Configuration) -> dict:
+def conf_to_dict(conf: Configuration) -> dict[str, Any]:
     return {
-        "model": str(conf.model),
+        "spec": str(conf.model),
         "lr": conf.lr,
         "sample_len": conf.sample_len,
         "batch": conf.batch,
@@ -58,16 +47,16 @@ def conf_to_dict(conf: Configuration) -> dict:
     }
 
 
-def conf_from_dict(spec: dict) -> Configuration:
-    model = build_model(spec["model"])
+def conf_from_dict(conf_dict: dict) -> Configuration:
+    model = build_model(conf_dict["spec"])
     return Configuration(
         model,
-        spec["lr"],
-        spec["sample_len"],
-        spec["batch"],
-        spec["regularization"],
-        spec["init_scale"],
-        spec["t"],
+        conf_dict["lr"],
+        conf_dict["sample_len"],
+        conf_dict["batch"],
+        conf_dict["regularization"],
+        conf_dict["init_scale"],
+        conf_dict["t"],
     )
 
 
@@ -108,7 +97,9 @@ def parse_conf(s: str, defaults: Configuration) -> Configuration:
     t = defaults.t
 
     for c in components[1:]:
-        name, value = _COMPONENT_RE.match(c).groups()
+        match = _COMPONENT_RE.match(c)
+        assert match
+        name, value = match.groups()
         if name == "LR":
             lr = float(value)
         elif name == "B":
@@ -329,7 +320,7 @@ def add_default_conf_args(parser: argparse.ArgumentParser):
     )
 
 
-_model_neighbors = {}
+_model_neighbors: dict[Model2, list[Model2]] = {}
 
 
 def conf_neighbors(conf: Configuration, template: Template):

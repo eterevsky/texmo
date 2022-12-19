@@ -44,21 +44,21 @@ class ResultDBTest(TestCase):
         self.db.add_record(create_record("dense.16.relu", 3.123))
         self.db.add_record(create_record("dense.16.relu", 3.321))
 
-        cur = self.db._db.execute("SELECT COUNT(*) FROM conf")
-        self.assertEqual(cur.fetchall()[0][0], 1)
+        cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
+        self.assertEqual(cur.fetchall()[0]["count"], 1)
 
-        cur = self.db._db.execute("SELECT COUNT(*) FROM run")
-        self.assertEqual(cur.fetchall()[0][0], 2)
+        cur = self.db._db.execute("SELECT COUNT(*) AS count FROM run")
+        self.assertEqual(cur.fetchall()[0]["count"], 2)
 
     def test_add_record_two_specs(self):
         self.db.add_record(create_record("dense.16.relu", 3.123))
         self.db.add_record(create_record("dense.16.tanh", 3.321))
 
-        cur = self.db._db.execute("SELECT COUNT(*) FROM conf")
-        self.assertEqual(cur.fetchall()[0][0], 2)
+        cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
+        self.assertEqual(cur.fetchall()[0]["count"], 2)
 
-        cur = self.db._db.execute("SELECT COUNT(*) FROM run")
-        self.assertEqual(cur.fetchall()[0][0], 2)
+        cur = self.db._db.execute("SELECT COUNT(*) AS count FROM run")
+        self.assertEqual(cur.fetchall()[0]["count"], 2)
 
     def test_skip_invalid(self):
         self.db.add_record(create_record("gru.16.relu", 123), skip_invalid=True)
@@ -66,11 +66,11 @@ class ResultDBTest(TestCase):
             create_record("dense.16.tanh", 3.321, batch=127), skip_invalid=True
         )
 
-        cur = self.db._db.execute("SELECT COUNT(*) FROM conf")
-        self.assertEqual(cur.fetchall()[0][0], 0)
+        cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
+        self.assertEqual(cur.fetchall()[0]["count"], 0)
 
-        cur = self.db._db.execute("SELECT COUNT(*) FROM run")
-        self.assertEqual(cur.fetchall()[0][0], 0)
+        cur = self.db._db.execute("SELECT COUNT(*) AS count FROM run")
+        self.assertEqual(cur.fetchall()[0]["count"], 0)
 
     def test_get_confs(self):
         self.db.add_record(create_record("dense.16.tanh", 3.123))

@@ -4,16 +4,17 @@ import math
 import numpy as np
 import os
 import sqlite3
+from typing import Optional
 
 from .configuration import (
-    CONF_FIELDS,
-    Configuration,
+    conf_from_dict,
     conf_from_record,
-    conf_from_row,
     conf_is_valid,
-    INF,
+    conf_to_dict,
+    Configuration,
     Template,
 )
+from .common import INF
 from .confresults import Run
 from . import latency
 from .record import TrainingRecord
@@ -32,6 +33,11 @@ def _unpack_step_loss(blob):
     return np.frombuffer(blob, dtype=np.float32)
 
 
+def _dict_row_factory(cursor, row):
+    fields = [column[0] for column in cursor.description]
+    return {key: value for key, value in zip(fields, row)}
+
+
 class ResultDB(object):
     def __init__(self, path=None):
         if path is None:
@@ -45,55 +51,48 @@ class ResultDB(object):
             with open(schema_path) as schema:
                 self._db.executescript(schema.read())
                 self._db.commit()
+        self._db.row_factory = _dict_row_factory
 
     def find_or_add_conf(self, conf: Configuration) -> int:
         """Finds the conf in the db and returns the configuration id."""
-        spec = str(conf.model)
 
-        conf_tuple = (
-            spec,
-            conf.lr,
-            conf.sample_len,
-            conf.batch,
-            conf.regularization,
-            conf.init_scale,
-            conf.t,
-            conf.model.weights,
-        )
+        conf_dict = conf_to_dict(conf)
+        conf_dict["weights"] = conf.model.weights
 
         cur = self._db.execute(
             """
             SELECT id FROM conf
-            WHERE spec = ?
-              AND lr = ?
-              AND sample_len = ?
-              AND batch = ?
-              AND regularization = ?
-              AND init_scale = ?
-              AND t = ?
-              AND weights = ?
+            WHERE spec = :spec
+              AND lr = :lr
+              AND sample_len = :sample_len
+              AND batch = :batch
+              AND regularization = :regularization
+              AND init_scale = :init_scale
+              AND t = :t
+              AND weights = :weights
             """,
-            conf_tuple,
+            conf_dict,
         )
         rows = cur.fetchall()
         assert len(rows) <= 1
         if rows:
-            return rows[0][0]
+            return rows[0]["id"]
         else:
             cur = self._db.execute(
                 """
                 INSERT INTO conf (spec, lr, sample_len, batch, regularization,
-                                init_scale, t, weights)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                  init_scale, t, weights)
+                VALUES (:spec, :lr, :sample_len, :batch, :regularization,
+                        :init_scale, :t, :weights)
                 """,
-                conf_tuple,
+                conf_dict,
             )
             return cur.lastrowid
 
     def add_record(
         self,
         record: TrainingRecord,
-        step_loss: Iterable[float] = None,
+        step_loss: Optional[Iterable[float]] = None,
         commit: bool = True,
         skip_invalid: bool = False,
     ):
@@ -116,8 +115,10 @@ class ResultDB(object):
             row["loss"] = INF
         self._db.execute(
             """
-            INSERT INTO run(conf_id, timestamp, test_sample_len, test_batch, loss, step_loss)
-            VALUES(:conf_id, :timestamp, :test_sample_len, :test_batch, :loss, :step_loss)
+            INSERT INTO run(conf_id, timestamp, test_sample_len, test_batch,
+                            loss, step_loss)
+            VALUES(:conf_id, :timestamp, :test_sample_len, :test_batch,
+                   :loss, :step_loss)
             """,
             row,
         )
@@ -156,27 +157,41 @@ class ResultDB(object):
 
         condition = " AND ".join(conditions)
         if condition != "":
-            condition = " AND " + condition
+            condition = "AND " + condition
 
-        query = (
-            f"SELECT conf.id, {CONF_FIELDS}, run.loss, run.step_loss, NULL "
-            + "FROM conf, run "
-            + f"WHERE conf.id = run.conf_id{condition}"
-        )
+        query = f"""
+            SELECT conf.id AS conf_id,
+                   spec,
+                   lr,
+                   sample_len,
+                   batch,
+                   regularization,
+                   init_scale,
+                   t,
+                   run.id AS run_id,
+                   run.loss AS loss,
+                   run.step_loss AS step_loss
+            FROM conf, run
+            WHERE conf.id = run.conf_id {condition}
+        """
 
         cur = self._db.execute(query, bindings)
 
         for row in cur:
             try:
-                model = build_model(row[1])
+                model = build_model(row["spec"])
             except KeyError:
                 continue
             if template.match_model(model):
-                conf = conf_from_row(row[1:8])
-                run = Run(row[8], _unpack_step_loss(row[9]), id=row[10])
+                conf = conf_from_dict(row)
+                run = Run(
+                    id=row["run_id"],
+                    loss=row["loss"],
+                    step_loss=_unpack_step_loss(row["step_loss"]),
+                )
                 assert run.loss > 0.1
                 if conf_is_valid(conf):
-                    yield row[0], conf, run
+                    yield row["conf_id"], conf, run
 
     def get_runs_with_step_loss(self) -> Iterable[Run]:
         cur = self._db.execute(

@@ -3,7 +3,6 @@
 import argparse
 import logging
 import numpy as np
-from sklearn.model_selection import train_test_split
 
 from texmo import latency
 from texmo.common import NCHAR
@@ -18,7 +17,9 @@ def main(db):
 
     logging.info(f"Loading results from {db}")
     record_db = ResultDB(args.db)
-    result_set = ResultSet(record_db, template=Template(), populate_neighbors=False)
+    result_set = ResultSet(
+        record_db, template=Template(), populate_neighbors=False
+    )
 
     logging.info("Splitting result set into train & test")
     train_set, test_set = result_set.train_test_split()

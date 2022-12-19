@@ -149,7 +149,7 @@ class Manager(object):
             mask_bias = lambda tree: jax.tree_util.tree_map(
                 lambda g: len(g.shape) > 1, tree
             )
-            self.optimizer =  optax.chain(
+            self.optimizer = optax.chain(
                 optax.clip_by_global_norm(1.0),
                 optax.adamw(self.conf.lr, mask=mask_bias),
             )

@@ -6,7 +6,12 @@ from .configuration import Configuration
 
 
 class Run(object):
-    def __init__(self, loss: float, step_loss: Optional[list[float]] = None, id: Optional[int] = None):
+    def __init__(
+        self,
+        loss: float,
+        step_loss: Optional[list[float]] = None,
+        id: Optional[int] = None,
+    ):
         self.id: Optional[int] = id
         # Final loss, evaluated on the test set.
         self.loss: float = loss

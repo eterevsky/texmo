@@ -34,7 +34,7 @@ class ResultSetTest(TestCase):
 
     def test_add_run(self):
         results = ResultSet(result_db=None, template=TEMPLATE)
-        results.add_run(INIT_CONF, 1.5)
+        results.add_run_conf(INIT_CONF, 1.5, update_scores=True)
 
         conf_id = results.find_conf_id(INIT_CONF)
 
@@ -48,9 +48,11 @@ class ResultSetTest(TestCase):
             result_db=None,
             template=TEMPLATE,
         )
-        results.add_run(INIT_CONF, 1)
-        results.add_run(
-            INIT_CONF._replace(model=build_model("dense.2.relu")), 2
+        results.add_run_conf(INIT_CONF, 1, update_scores=True)
+        results.add_run_conf(
+            INIT_CONF._replace(model=build_model("dense.2.relu")),
+            2,
+            update_scores=True,
         )
 
         cur = results._db.execute(
@@ -63,13 +65,17 @@ class ResultSetTest(TestCase):
 
     def test_add_run3(self):
         results = ResultSet(result_db=None, template=TEMPLATE)
-        results.add_run(INIT_CONF, 1)
-        results.add_run(INIT_CONF, 1)
-        results.add_run(
-            INIT_CONF._replace(model=build_model("dense.2.relu")), 2
+        results.add_run_conf(INIT_CONF, 1, update_scores=True)
+        results.add_run_conf(INIT_CONF, 1, update_scores=True)
+        results.add_run_conf(
+            INIT_CONF._replace(model=build_model("dense.2.relu")),
+            2,
+            update_scores=True,
         )
-        results.add_run(
-            INIT_CONF._replace(model=build_model("dense.2.relu")), 2
+        results.add_run_conf(
+            INIT_CONF._replace(model=build_model("dense.2.relu")),
+            2,
+            update_scores=True,
         )
 
         cur = results._db.execute(
@@ -82,10 +88,12 @@ class ResultSetTest(TestCase):
 
     def test_update_all_scores(self):
         results = ResultSet(result_db=None, template=TEMPLATE)
-        results.add_run(INIT_CONF, 1, False)
-        results.add_run(INIT_CONF, 1.5, False)
-        results.add_run(INIT_CONF, 2, False)
-        results.add_run(INIT_CONF._replace(batch=512), 3, False)
+        results.add_run_conf(INIT_CONF, 1, False, update_scores=True)
+        results.add_run_conf(INIT_CONF, 1.5, False, update_scores=True)
+        results.add_run_conf(INIT_CONF, 2, False, update_scores=True)
+        results.add_run_conf(
+            INIT_CONF._replace(batch=512), 3, False, update_scores=True
+        )
 
         results.update_all_scores()
 
@@ -96,7 +104,7 @@ class ResultSetTest(TestCase):
 
     def test_update_all_neighbors(self):
         results = ResultSet(result_db=None, template=TEMPLATE)
-        results.add_run(INIT_CONF, 1, False)
+        results.add_run_conf(INIT_CONF, 1, False, update_scores=True)
         results.update_all_scores()
         results.update_all_neighbors()
 

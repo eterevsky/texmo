@@ -148,13 +148,6 @@ def parse_args():
         default=0.125,
     )
     parser.add_argument(
-        "-r",
-        "--regularization",
-        type=float,
-        help="L2 regularization coefficient",
-        default=0.125,
-    )
-    parser.add_argument(
         "--init-scale",
         type=float,
         help="Scaling coefficient for weights initialization",

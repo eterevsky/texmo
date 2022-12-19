@@ -9,7 +9,6 @@ def main(spec_regex, spec_default, max_weights):
         batch=(256, 256),
         lr=(1.0, 1.0),
         sample_len=(128, 128),
-        regularization=(1.0, 1.0),
         init_scale=(1.0, 1.0),
         t=(1.0, 1.0),
         max_weights=max_weights,

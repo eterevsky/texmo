@@ -210,7 +210,7 @@ def generate_param_report(
 
     t = lo
     while t <= hi:
-        top_confs = {}  # bucket -> (conf, score)
+        top_confs: dict = {}  # bucket -> (conf, score)
         count = {}  # bucket -> count
 
         for conf_results in result_set.all_results_for_t(t):

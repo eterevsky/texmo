@@ -21,11 +21,7 @@ class ManagerTest(TestCase):
         manager = Manager(conf)
         manager.init()
 
-        train_time = manager.train(
-            steps=30, time_limit=None, train_set=dataset, quiet=True
-        )
-        self.assertGreater(train_time, 0.9)
-        self.assertLess(train_time, 1.2)
+        manager.train(steps=30, time_limit=None, train_set=dataset, quiet=True)
 
         loss = manager.eval(dataset)
         self.assertLess(loss, 2)

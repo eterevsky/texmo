@@ -6,6 +6,7 @@ import os
 import random
 import sqlite3
 from statistics import median
+from typing import Optional
 
 from .common import INF
 from .configuration import (
@@ -23,7 +24,7 @@ from .resultdb import ResultDB
 class ResultSet(object):
     def __init__(
         self,
-        result_db: ResultDB,
+        result_db: Optional[ResultDB],
         template: Template,
         populate_neighbors: bool = True,
     ):
@@ -37,10 +38,10 @@ class ResultSet(object):
             self._db.executescript(schema.read())
 
         if result_db is None:
-            self._result_db = ResultDB()
-        else:
-            self._result_db = result_db
-            self._import_from_result_db()
+            result_db = ResultDB()
+
+        self._result_db: ResultDB = result_db
+        self._import_from_result_db()
 
         if populate_neighbors:
             logging.info("Generating all neighbors")
@@ -123,11 +124,11 @@ class ResultSet(object):
             logging.info("Populating scores from run results")
             self.update_all_scores()
 
-    def find_conf_id(self, conf: Configuration) -> int:
+    def find_conf_id(self, conf: Configuration) -> Optional[int]:
         conf_results = self._conf_to_results.get(conf)
         return None if conf_results is None else conf_results.id
 
-    def get_conf_results(self, conf: Configuration) -> ConfResults:
+    def get_conf_results(self, conf: Configuration) -> Optional[ConfResults]:
         return self._conf_to_results.get(conf)
 
     def _update_neighbors(self, conf=None):
@@ -168,7 +169,7 @@ class ResultSet(object):
         self,
         conf_results: ConfResults,
         loss: float,
-        step_loss: Iterable[float] = None,
+        step_loss: Optional[list[float]] = None,
         update_scores: bool = True,
     ):
         if math.isnan(loss) or loss is None:
@@ -184,7 +185,7 @@ class ResultSet(object):
         self,
         conf: Configuration,
         loss: float,
-        step_loss: Iterable[float] = None,
+        step_loss: Optional[list[float]] = None,
         update_scores=False,
     ):
         conf_results = self._find_or_add_conf(conf)

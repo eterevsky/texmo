@@ -81,9 +81,7 @@ class ResultDBTest(TestCase):
             create_record("dense.16.relu", 3.321, batch=64, reg=0.03125)
         )
 
-        conf_runs = self.db.get_confs_runs(
-            Template(sample_len=128, init_scale=1.0)
-        )
+        conf_runs = self.db.get_confs_runs(Template(sample_len=128))
         all = set((conf, run.loss) for _, conf, run in conf_runs)
 
         spec_tanh = build_model("dense.16.tanh")
@@ -94,8 +92,6 @@ class ResultDBTest(TestCase):
             lr=0.25,
             sample_len=128,
             batch=256,
-            regularization=0.125,
-            init_scale=1.0,
             t=8,
         )
 
@@ -106,13 +102,10 @@ class ResultDBTest(TestCase):
                 (conf._replace(model=spec_tanh), 3.321),
                 (conf, 3.321),
                 (conf._replace(batch=64), 3.321),
-                (conf._replace(batch=64, regularization=0.03125), 3.321),
             },
         )
 
-        conf_runs = self.db.get_confs_runs(
-            Template(sample_len=128, init_scale=1.0, regularization=0.125)
-        )
+        conf_runs = self.db.get_confs_runs(Template(sample_len=128))
         subset1 = set((conf, run.loss) for _, conf, run in conf_runs)
 
         self.assertEqual(
@@ -126,7 +119,7 @@ class ResultDBTest(TestCase):
         )
 
         conf_runs = self.db.get_confs_runs(
-            Template(sample_len=128, init_scale=1.0, batch=256)
+            Template(sample_len=128, batch=256)
         )
         subset2 = set((conf, run.loss) for _, conf, run in conf_runs)
 

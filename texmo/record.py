@@ -46,7 +46,7 @@ class TrainingRecord(object):
         # this is close to trin_time_s, but if a single optimization step
         # takes a long time, it could diverge.
         self.planned_time_s = planned_time_s
-        
+
         # In case this report is for a checkpoint in the longer optimization,
         # this is an eventual planned optimization time. Otherwise
         # == planned_time_s.

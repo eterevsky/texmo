@@ -5,8 +5,6 @@ CREATE TABLE conf (
     lr REAL NOT NULL,
     sample_len INTEGER NOT NULL,
     batch INTEGER NOT NULL,
-    regularization REAL NOT NULL,
-    init_scale REAL NOT NULL,
     t INTEGER NOT NULL,
     weights INTEGER NOT NULL,
     cluster_score REAL

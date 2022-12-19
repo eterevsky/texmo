@@ -1,14 +1,13 @@
 import argparse
 import logging
+import numpy as np
 
 import config
 from texmo.configuration import (
-    Configuration,
-    Template,
-    add_template_args,
-    parse_conf,
-    default_from_template,
     conf_to_string,
+    Configuration,
+    default_from_template,
+    Template,
 )
 from texmo.results import ResultSet
 from texmo.resultdb import ResultDB
@@ -20,9 +19,9 @@ from texmo.search import Search
 from texmo.common import INF
 from texmo.report import (
     draw_weight_loss_graph,
-    generate_report_by_weight,
     generate_max_report,
     generate_param_report,
+    generate_report_by_weight,
 )
 
 
@@ -41,7 +40,11 @@ def pick_default_value(default, range):
 
 def warmup(dataset):
     conf = Configuration(
-        build_model("suffix.4-rec.32.relu"), 0.25, 128, 256, 0.125, 1.0, 8
+        build_model("suffix.4-rec.32.relu"),
+        config.DEFAULT_LR,
+        128,
+        config.DEFAULT_BATCH,
+        8
     )
     manager = Manager(conf)
     manager.init(quiet=True)
@@ -81,49 +84,17 @@ def generate_report(result_set, template, min_max_weights):
                 result_set, template, lambda conf: conf.batch, is_float=False
             )
         )
-    if (
-        template.regularization is None
-        or template.regularization[0] < template.regularization[1]
-    ):
-        print("\nRegularization")
-        print(
-            generate_param_report(
-                result_set, template, lambda conf: conf.regularization
-            )
-        )
-    if (
-        template.init_scale is None
-        or template.init_scale[0] < template.init_scale[1]
-    ):
-        print("\nInit Scale")
-        print(
-            generate_param_report(
-                result_set, template, lambda conf: conf.init_scale
-            )
-        )
     draw_weight_loss_graph(result_set, template)
 
 
 def search_loop(dataset, search):
-    print("Warming up training")
+    logging.info("Warming up training")
     warmup(dataset)
 
-    print("Starting search")
+    logging.info("Starting search")
     while True:
         conf = search.select_conf()
-
-        weights = conf.model.weights
-        extras = ""
-        if conf.sample_len != 128:
-            extras += f"  LEN {conf.sample_len}"
-        if conf.regularization != 0.125:
-            extras += f"  R {conf.regularization}"
-        if conf.init_scale != 1.0:
-            extras += f"  I {conf.init_scale}"
-        print(
-            f"T = {conf.t:3}     LR{conf.lr:6.3f}  B{conf.batch:4}  "
-            + f"{conf.model} ({weights}){extras}"
-        )
+        logging.info(conf_to_string(conf))
 
         manager = Manager(conf)
         manager.init(quiet=True)
@@ -144,7 +115,8 @@ def search_loop(dataset, search):
 
 def main(args, dataset, template):
     template = Template.from_args(args)
-    default = parse_conf(args.default, default_from_template(template))
+    default = default_from_template(template)
+    default = default._replace(model=build_model("dense.1.relu"))
     assert template.match_conf(default)
     logging.info("Default configuration: " + conf_to_string(default))
 
@@ -163,6 +135,50 @@ def main(args, dataset, template):
             latency.report()
 
     generate_report(result_set, template, args.min_max_weights)
+
+
+def add_template_args(parser: argparse.ArgumentParser):
+    """Add command-line arguments describing a template."""
+    parser.add_argument(
+        "-s",
+        "--spec-regex",
+        type=str,
+        default=None,
+        help="regex convering the acceptable specs (default: unrestricted)",
+    )
+    parser.add_argument(
+        "-b",
+        "--batch",
+        type=str,
+        default="1-8192",
+        help='range of acceptable batch sizes, for example "1-256" (default: unrestricted)',
+    )
+    parser.add_argument(
+        "-l",
+        "--lr",
+        type=str,
+        default="0.00001-10",
+        help="range of acceptable learning rates (default: 0.001-10)",
+    )
+    parser.add_argument(
+        "--sample-len",
+        type=str,
+        default="128",
+        help="range of acceptable sample lens (default: 128)",
+    )
+    parser.add_argument(
+        "-t",
+        "--time",
+        type=str,
+        default="1-256",
+        help="range of training time (default: 1-256)",
+    )
+    parser.add_argument(
+        "--max-weights",
+        type=int,
+        default=None,
+        help="max weights. Will vary if left undefined (default: unrestricted)",
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -196,12 +212,6 @@ def parse_args() -> argparse.Namespace:
         help="minimum max-weights value in search",
     )
     parser.add_argument(
-        "--default",
-        type=str,
-        default="dense.1.relu",
-        help="default configuration (default: 'dense.1.relu LR0.125 LEN128 B64 R0.125 I1.0')",
-    )
-    parser.add_argument(
         "--only-report",
         action="store_true",
         help="don't run a search, only generate a report",
@@ -212,6 +222,7 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     logging.getLogger().setLevel(logging.INFO)
+    np.set_printoptions(linewidth=100, edgeitems=6, precision=3)
     args = parse_args()
     dataset = build_dataset(args.data)
     template = Template.from_args(args)

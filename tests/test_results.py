@@ -11,8 +11,6 @@ INIT_CONF = Configuration(
     lr=0.2,
     sample_len=128,
     batch=256,
-    regularization=0.1,
-    init_scale=1.0,
     t=1,
 )
 
@@ -22,8 +20,6 @@ TEMPLATE = Template(
     lr=0.2,
     sample_len=128,
     batch=None,
-    regularization=0.1,
-    init_scale=1.0,
     t=1,
 )
 

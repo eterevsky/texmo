@@ -94,7 +94,7 @@ class Search(object):
                 weights.append(0.6 * weights[-1])
 
                 runs = runs_count.get(t, 0)
-                ratio = runs / prev_runs
+                ratio = runs / (prev_runs + 1)
                 print(f"t = {t:3}  complete = {runs:5}  ratio = {ratio:.2f}")
                 prev_runs = runs
                 t *= 2
@@ -200,10 +200,6 @@ class Search(object):
                 conf = conf_results.conf
                 if conf.sample_len != 128:
                     extras += f"  LEN {conf.sample_len}"
-                if conf.regularization != 0.125:
-                    extras += f"  R {conf.regularization}"
-                if conf.init_scale != 1.0:
-                    extras += f"  I {conf.init_scale}"
                 print(
                     f"{score} LR{conf.lr:6.3f}  B{conf.batch:4}  {conf.model}{extras}"
                 )
@@ -234,4 +230,5 @@ class Search(object):
                 logging.info(f"Selecting conf top #{ipred} by predicted score.")
                 return pred_conf
 
+            logging.info("Selecting default configuration")
             return self._init_conf._replace(t=t)

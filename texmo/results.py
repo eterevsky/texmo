@@ -86,15 +86,13 @@ class ResultSet(object):
             "lr": conf.lr,
             "sample_len": conf.sample_len,
             "batch": conf.batch,
-            "regularization": conf.regularization,
-            "init_scale": conf.init_scale,
             "t": conf.t,
             "weights": conf.model.weights,
         }
         self._db.execute(
             """
-            INSERT INTO conf(id, spec, lr, sample_len, batch, regularization, init_scale, t, weights)
-            VALUES(:id, :spec, :lr, :sample_len, :batch, :regularization, :init_scale, :t, :weights)
+            INSERT INTO conf(id, spec, lr, sample_len, batch, t, weights)
+            VALUES(:id, :spec, :lr, :sample_len, :batch, :t, :weights)
             """,
             conf_dict,
         )

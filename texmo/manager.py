@@ -83,9 +83,7 @@ class Manager(object):
         if weights is not None:
             self.weights: Weights = weights
         else:
-            self.weights: Weights = self.model.init_weights(
-                self._rng, self.conf.init_scale
-            )
+            self.weights: Weights = self.model.init_weights(self._rng, 1.0)
 
         # Record of the latest and the past losses of the model.
         self.loss: float = None
@@ -151,7 +149,7 @@ class Manager(object):
             )
             self.optimizer = optax.chain(
                 optax.clip_by_global_norm(1.0),
-                optax.adamw(self.conf.lr, mask=mask_bias),
+                optax.adamw(self.conf.lr, mask=mask_bias, weight_decay=0.01),
             )
 
             self.opt_state = self.optimizer.init(self.weights)
@@ -255,14 +253,16 @@ class Manager(object):
         temp_dir=None,
         quiet=False,
     ):
-        start = time.time()
-        finish_time = start + time_limit if time_limit else INF
-        if steps is None:
-            steps = INF
-
         last_report = 0
 
-        logging.info(f"Training for {time_limit} s")
+        start = time.time()
+        finish_time = start + time_limit if time_limit else INF
+
+        if steps is None: steps = INF
+
+        t = "" if time_limit is None else f" {time_limit} s"
+        s = "" if steps > 1E10 else f" {steps} steps"
+        logging.info(f"Training for{t}{s}")
 
         while time.time() < finish_time and self.step < steps:
             batch = train_set.sample(
@@ -346,7 +346,7 @@ class Manager(object):
             steps=self.step,
             train_time_s=train_time,
             learning_rate=self.conf.lr,
-            regularization=self.conf.regularization,
+            regularization=1E-4,
             train_sample_len=self.conf.sample_len,
             train_batch=self.conf.batch,
             total_data=train_set.total_size,
@@ -354,7 +354,7 @@ class Manager(object):
             test_sample_len=self.test_sample_len,
             test_batch=self.test_batch,
             test_poisoned=True,
-            init_scale=self.conf.init_scale,
+            init_scale=1.0,
             planned_time_s=time_limit,
             final_time_s=time_limit,
             loss_model_v=1,

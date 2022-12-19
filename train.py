@@ -17,7 +17,7 @@ def show_loss_graph(manager, output_dir):
     predictor.fit(manager.step_loss)
 
     steps = len(manager.step_loss)
-    xs = np.array(range(steps // 8, steps * 4 + 1))
+    xs = np.array(range(steps // 2, steps * 4 + 1))
     ys = predictor.predict(xs)
 
     steps2 = steps * 2
@@ -36,17 +36,15 @@ def show_loss_graph(manager, output_dir):
 def main(
     data,
     steps,
-    learning_rate,
-    regularization,
-    init_scale,
+    lr,
     output_dir,
     model_path,
-    model_spec,
+    spec,
     temp_dir,
     sample_len,
-    batch_size,
+    batch,
     temp_steps,
-    time_limit,
+    time,
     log,
     prefix,
 ):
@@ -58,20 +56,18 @@ def main(
             manager = Manager.load(model_path)
         else:
             conf = Configuration(
-                build_model(model_spec),
-                learning_rate,
+                build_model(spec),
+                lr,
                 sample_len,
-                batch_size,
-                regularization,
-                init_scale,
-                time_limit,
+                batch,
+                time,
             )
             manager = Manager(conf)
             manager.init()
 
         manager.train_and_eval(
             steps,
-            time_limit,
+            time,
             train_set,
             temp_steps,
             temp_dir,
@@ -112,14 +108,11 @@ def parse_args():
         help="load trained model from file",
     )
     model_group.add_argument(
-        "-c",
-        "--model-spec",
-        metavar="SPEC",
+        "-s",
+        "--spec",
         default=None,
         help="layer-by-layer model specification",
     )
-
-    # Training
     parser.add_argument(
         "-o",
         "--output-dir",
@@ -129,29 +122,24 @@ def parse_args():
         help="directory to save the trained model",
     )
     parser.add_argument(
-        "-s", "--steps", type=int, default=None, help="number of training steps"
+        "--steps", type=int, default=None, help="number of training steps"
     )
+
+    # Configuration
     parser.add_argument(
-        "-t",
-        "--time-limit",
+        "-b",
+        "--batch",
         type=int,
-        metavar="SECONDS",
-        help="time limit for training",
-        default=None,
+        metavar="BATCH",
+        default=config.DEFAULT_BATCH,
+        help="batch size",
     )
     parser.add_argument(
         "-l",
-        "--learning-rate",
+        "--lr",
         type=float,
-        metavar="RATE",
+        default=config.DEFAULT_LR,
         help="learning rate",
-        default=0.125,
-    )
-    parser.add_argument(
-        "--init-scale",
-        type=float,
-        help="Scaling coefficient for weights initialization",
-        default=1.0,
     )
     parser.add_argument(
         "--sample-len",
@@ -161,12 +149,12 @@ def parse_args():
         help="length of text fragments used for training",
     )
     parser.add_argument(
-        "-b",
-        "--batch-size",
+        "-t",
+        "--time",
         type=int,
-        metavar="BATCH",
-        default=256,
-        help="batch size",
+        metavar="SECONDS",
+        help="time limit for training",
+        default=None,
     )
 
     # Intermediate models

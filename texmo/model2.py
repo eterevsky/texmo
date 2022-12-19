@@ -132,8 +132,8 @@ class Model2(object):
         return [l.init_state(w) for l, w in zip(self.layers, weights)]
 
     def step(
-        self, weights: Weights, state: State, input: DeviceArray
-    ) -> tuple[State, DeviceArray]:
+        self, weights: Weights, state: State, input: jnp.ndarray
+    ) -> tuple[State, jnp.ndarray]:
         """Run inference for one input character.
 
         `input` is a one-hot array representing input character with shape

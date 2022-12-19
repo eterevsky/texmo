@@ -14,8 +14,6 @@ class ManagerTest(TestCase):
             lr=0.125,
             sample_len=32,
             batch=8,
-            regularization=0.125,
-            init_scale=1.0,
             t=1,
         )
         manager = Manager(conf)

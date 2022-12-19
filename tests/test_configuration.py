@@ -16,8 +16,6 @@ class ConfigurationTest(TestCase):
             lr=None,
             sample_len=(0.2, 0.2),
             batch=(128, 256),
-            regularization=(0.125, 0.125),
-            init_scale=(1.0, 1.0),
             t=(1, 1),
         )
 
@@ -26,8 +24,6 @@ class ConfigurationTest(TestCase):
             lr=0.25,
             sample_len=128,
             batch=256,
-            regularization=0.125,
-            init_scale=1.0,
             t=1,
         )
         self.assertEqual(
@@ -48,8 +44,6 @@ class ConfigurationTest(TestCase):
             lr=None,
             sample_len=(128, 128),
             batch=(128, 256),
-            regularization=(0.125, 0.125),
-            init_scale=(1.0, 1.0),
             t=(1, 1),
         )
 
@@ -58,8 +52,6 @@ class ConfigurationTest(TestCase):
             lr=0.25,
             sample_len=128,
             batch=256,
-            regularization=0.125,
-            init_scale=1.0,
             t=1,
         )
         self.assertEqual(
@@ -78,8 +70,6 @@ class ConfigurationTest(TestCase):
             lr=0.5,
             sample_len=128,
             batch=256,
-            regularization=0.125,
-            init_scale=1.0,
             t=1,
         )
         self.assertTrue(conf_is_valid(conf))

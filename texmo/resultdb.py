@@ -66,8 +66,6 @@ class ResultDB(object):
               AND lr = :lr
               AND sample_len = :sample_len
               AND batch = :batch
-              AND regularization = :regularization
-              AND init_scale = :init_scale
               AND t = :t
               AND weights = :weights
             """,
@@ -80,10 +78,8 @@ class ResultDB(object):
         else:
             cur = self._db.execute(
                 """
-                INSERT INTO conf (spec, lr, sample_len, batch, regularization,
-                                  init_scale, t, weights)
-                VALUES (:spec, :lr, :sample_len, :batch, :regularization,
-                        :init_scale, :t, :weights)
+                INSERT INTO conf (spec, lr, sample_len, batch, t, weights)
+                VALUES (:spec, :lr, :sample_len, :batch, :t, :weights)
                 """,
                 conf_dict,
             )
@@ -151,8 +147,6 @@ class ResultDB(object):
         _add_constraint("lr", template.lr)
         _add_constraint("sample_len", template.sample_len)
         _add_constraint("batch", template.batch)
-        _add_constraint("regularization", template.regularization)
-        _add_constraint("init_scale", template.init_scale)
         _add_constraint("t", template.t)
 
         condition = " AND ".join(conditions)
@@ -165,8 +159,6 @@ class ResultDB(object):
                    lr,
                    sample_len,
                    batch,
-                   regularization,
-                   init_scale,
                    t,
                    run.id AS run_id,
                    run.loss AS loss,

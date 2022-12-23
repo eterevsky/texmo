@@ -9,6 +9,7 @@ import math
 import optax
 import os
 import time
+from typing import Optional
 
 from .common import INF, NCHAR
 from .configuration import (
@@ -71,8 +72,8 @@ class Manager(object):
         self,
         conf: Configuration,
         step: int = 0,
-        weights: Weights = None,
-        step_loss: float = None,
+        weights: Optional[Weights] = None,
+        step_loss: Optional[list[float]] = None,
         test_sample_len: int = 1024,
         test_batch: int = 1024,
     ):
@@ -86,11 +87,8 @@ class Manager(object):
             self.weights: Weights = self.model.init_weights(self._rng, 1.0)
 
         # Record of the latest and the past losses of the model.
-        self.loss: float = None
-        if step_loss is None:
-            self.step_loss: list[float] = []
-        else:
-            self.step_loss: list[float] = step_loss
+        self.loss: Optional[float] = None
+        self.step_loss: list[float] = [] if step_loss is None else step_loss
 
         self.test_sample_len: int = test_sample_len
         self.test_batch: int = test_batch
@@ -376,13 +374,13 @@ class Manager(object):
         return report
 
     def continue_prefix(self, prefix: str, length: int) -> str | bytes:
-        prefix = prefix.encode()  # convert str to bytes (?)
-        out = self.sample(prefix, length)
+        prefix_bytes: bytes = prefix.encode()  # convert str to bytes (?)
+        out = self.sample(prefix_bytes, length)
 
         try:
-            s = (prefix + out).decode("utf-8")
+            s = (prefix_bytes + out).decode("utf-8")
         except UnicodeDecodeError:
-            s = prefix + out
+            s = prefix_bytes + out
         return s
 
     def serialize_weights(self, weights):

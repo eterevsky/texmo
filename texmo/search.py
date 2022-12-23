@@ -6,6 +6,7 @@ import random
 from . import latency
 from .common import INF
 from .configuration import conf_neighbors, conf_to_string
+from .record import TrainingRecord
 from .results import ResultSet
 from .predict import Predictor
 
@@ -43,9 +44,12 @@ class Search(object):
         print("Pred scores ready")
         self._last_predictor_update = self._result_set.total_runs_count()
 
-    def add_record(self, record, step_loss):
+    def add_record(self, record: TrainingRecord, step_loss):
         with latency.timer("Search.add_record"):
-            if abs(log2(record.planned_time_s) - log2(record.train_time_s)) > 0.1:
+            if (
+                abs(log2(record.planned_time_s) - log2(record.train_time_s))
+                > 0.1
+            ):
                 print("Bad training time, skipping")
                 record.loss = INF
 
@@ -216,7 +220,9 @@ class Search(object):
             self.print_top_confs(t, max_weights)
 
             ipred, pred_conf = self._select_by_pred_score(t, max_weights)
-            ineighbor, neighbor_conf, parent_conf = self._select_neighbor(t, max_weights)
+            ineighbor, neighbor_conf, parent_conf = self._select_neighbor(
+                t, max_weights
+            )
 
             if ipred is not None and (ineighbor is None or ineighbor >= ipred):
                 logging.info(f"Selecting conf top #{ipred} by predicted score.")
@@ -224,7 +230,9 @@ class Search(object):
 
             if ineighbor is not None and (ipred is None or random.randrange(2)):
                 c = conf_to_string(parent_conf)
-                logging.info(f"Selecting a neighbor or conf #{ineighbor} by median score: {c}")
+                logging.info(
+                    f"Selecting a neighbor or conf #{ineighbor} by median score: {c}"
+                )
                 return neighbor_conf
             elif ipred is not None:
                 logging.info(f"Selecting conf top #{ipred} by predicted score.")

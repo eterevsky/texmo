@@ -1,30 +1,26 @@
 import csv
-from copy import copy
-from datetime import datetime
-import jax
-import jax.numpy as jnp
-from jaxlib.xla_extension import XlaRuntimeError
 import json
 import logging
 import math
-import optax
 import os
 import time
+from copy import copy
+from datetime import datetime
 from typing import Optional
 
-from .common import INF, NCHAR
-from .configuration import (
-    Configuration,
-    conf_from_dict,
-    conf_to_dict,
-    conf_to_string,
-)
+import jax
+import jax.numpy as jnp
+import optax
+from jaxlib.xla_extension import XlaRuntimeError
+
 from . import latency
+from .common import INF, NCHAR
+from .configuration import (Configuration, conf_from_dict, conf_to_dict,
+                            conf_to_string)
 from .model2 import Model2, Weights
 from .prng import Rng
 from .record import TrainingRecord
 from .steploss import StepLossPredictor
-
 
 LOG2 = 1 / math.log(2)
 

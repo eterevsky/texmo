@@ -1,14 +1,14 @@
 from jax import numpy as jnp
 from jax.random import KeyArray
 import jax.random
-import random
+from random import randrange
 from typing import Optional, Sequence
 
 
 class Rng(object):
     def __init__(self, key: Optional[KeyArray] = None):
         if key is None:
-            key = jax.random.PRNGKey(random.randrange(2**32))
+            key = jax.random.PRNGKey(randrange(2**32))
         self._key: KeyArray = key
 
     def gen(self) -> KeyArray:

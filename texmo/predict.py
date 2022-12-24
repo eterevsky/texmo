@@ -71,14 +71,16 @@ def get_layer_stats(model):
 
 
 def encode_loss(loss: np.ndarray):
-    if loss is None: return None
+    if loss is None:
+        return None
     loss = np.minimum(loss, 2**16)
     loss = np.log2(loss)
     return loss
 
 
 def decode_loss(loss):
-    if loss is None: return None
+    if loss is None:
+        return None
     loss = np.minimum(loss, MAX_LOG_LOSS)
     return np.exp2(loss)
 
@@ -350,7 +352,12 @@ class Predictor(object):
             for conf, pred_loss in zip(confs, pred_losses):
                 conf_results = self._result_set.get_conf_results(conf)
                 if conf_results is not None:
-                    losses.append(median([run.loss for run in conf_results.runs] + [pred_loss]))
+                    losses.append(
+                        median(
+                            [run.loss for run in conf_results.runs]
+                            + [pred_loss]
+                        )
+                    )
                 else:
                     losses.append(pred_loss)
 

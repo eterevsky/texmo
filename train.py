@@ -33,6 +33,12 @@ def show_loss_graph(manager, output_dir):
     plt.show()
 
 
+def parse_lr(x: str) -> float:
+    if x.startswith("2^"):
+        return 2**int(x[2:])
+    return float(x) 
+
+
 def main(
     data,
     steps,
@@ -51,6 +57,7 @@ def main(
 ):
     print(f"Training data: {data}")
     train_set = DataSet(data)
+    lr = parse_lr(lr)
 
     try:
         if model_path is not None:
@@ -150,9 +157,9 @@ def parse_args():
     parser.add_argument(
         "-l",
         "--lr",
-        type=float,
+        type=str,
         default=config.DEFAULT_LR,
-        help="learning rate",
+        help="learning rate, could be written as a float or as 2^-10",
     )
     parser.add_argument(
         "--sample-len",

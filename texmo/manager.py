@@ -130,7 +130,6 @@ class Manager(object):
             step_loss=training_history["step_loss"],
         )
 
-        manager.init(training=training)
         return manager
 
     def update_conf(self, lr, sample_len, batch, t):
@@ -142,9 +141,9 @@ class Manager(object):
             self.conf = self.conf._replace(lr=lr)
         if sample_len is not None:
             self.conf = self.conf._replace(sample_len=sample_len)
-        if batch is None:
+        if batch is not None:
             self.conf = self.conf._replace(batch=batch)
-        if t is None:
+        if t is not None:
             self.conf = self.conf._replace(t=t)
 
     def add_layers(self, layers_spec):

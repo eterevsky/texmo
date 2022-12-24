@@ -12,6 +12,8 @@ LayerState = Optional[jnp.ndarray | dict[str, jnp.ndarray]]
 
 
 class Layer(object):
+    name = "OVERRIDE"
+
     def __init__(self, input_shape: tuple[int]):
         # If step_batch() is not overridden, we'll vectorize step() and write it
         # here.

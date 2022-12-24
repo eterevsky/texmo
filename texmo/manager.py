@@ -1,4 +1,5 @@
 import csv
+from copy import copy
 from datetime import datetime
 import jax
 import jax.numpy as jnp
@@ -81,10 +82,11 @@ class Manager(object):
         self.conf: Configuration = conf
         self.model: Model2 = self.conf.model
         self.step: int = step
-        if weights is not None:
-            self.weights: Weights = weights
-        else:
-            self.weights: Weights = self.model.init_weights(self._rng, 1.0)
+        if weights is None:
+            weights = self.model.init_weights(self._rng, 1.0)
+        self.weights: Weights = weights
+        # Only layers starting from this one will be trained
+        self.train_from: int = 0
 
         # Record of the latest and the past losses of the model.
         self.loss: Optional[float] = None
@@ -118,23 +120,54 @@ class Manager(object):
             spec = json.load(f)
 
         conf = conf_from_dict(spec["conf"])
-        training = spec["training"]
+        training_history = spec["training"]
         weights = deserialize_weights(spec["weights"])
 
         manager = Manager(
             conf,
-            training["step"],
+            training_history["step"],
             weights=weights,
-            step_loss=training["step_loss"],
+            step_loss=training_history["step_loss"],
         )
 
         manager.init(training=training)
         return manager
 
+    def update_conf(self, lr, sample_len, batch, t):
+        """Updates the configuration with new parameters.
+
+        Useful after loading a model.
+        """
+        if lr is not None:
+            self.conf = self.conf._replace(lr=lr)
+        if sample_len is not None:
+            self.conf = self.conf._replace(sample_len=sample_len)
+        if batch is None:
+            self.conf = self.conf._replace(batch=batch)
+        if t is None:
+            self.conf = self.conf._replace(t=t)
+
+    def add_layers(self, layers_spec):
+        """Fix pretrained weights and add more layers."""
+        # Drop the output layer
+        model = copy(self.conf.model)
+        model.add_layers(layers_spec)
+        self.conf = self.conf._replace(model=model)
+
+        self.train_from = len(self.weights) - 1
+        weights = self.model.init_weights(self._rng, 1.0)
+        weights[:self.train_from] = self.weights[:-1]
+        self.weights = weights
+
     def init(self, quiet=False, training=True):
         logging.info("Conf: " + conf_to_string(self.conf))
 
-        self._loss_avg = self.model.loss_batch
+        if self.train_from == 0:
+            self._loss_avg = self.model.loss_batch
+        else:
+            self._loss_avg = lambda w, batch: self.model.loss_batch(
+                self.weights[:self.train_from] + w, batch
+            )
 
         if training:
             if not quiet:
@@ -150,7 +183,7 @@ class Manager(object):
                 optax.adamw(self.conf.lr, mask=mask_bias, weight_decay=0.01),
             )
 
-            self.opt_state = self.optimizer.init(self.weights)
+            self.opt_state = self.optimizer.init(self.weights[self.train_from:])
         else:
             self._loss_grad = None
             self.optimizer = None
@@ -171,7 +204,7 @@ class Manager(object):
 
     def batch_loss(self, xs):
         xs = jax.nn.one_hot(xs, NCHAR)
-        return self._loss_avg(self.weights, xs)
+        return self.model.loss_batch(self.weights, xs)
 
     def evaluate(self, xs):
         shards = 4
@@ -185,7 +218,7 @@ class Manager(object):
                 shard = xs[i * shard_size : (i + 1) * shard_size]
                 try:
                     shard = jax.nn.one_hot(shard, NCHAR)
-                    loss += self._loss_avg(self.weights, shard).item()
+                    loss += self.model.loss_batch(self.weights, shard).item()
                 except (XlaRuntimeError, ValueError):
                     evaluation_failed = True
                     break
@@ -200,7 +233,7 @@ class Manager(object):
             shards *= 2
 
         logging.info(
-            "Can't evaluate the model even with shar 1. Assuming INF loss."
+            "Can't evaluate the model even with shards 1. Assuming INF loss."
         )
         self.loss = INF
         return self.loss
@@ -227,13 +260,14 @@ class Manager(object):
 
     def train_step(self, xs):
         xs = jax.nn.one_hot(xs, NCHAR)
-        loss, grads = self._loss_grad(self.weights, xs)
+        trainable_weights = self.weights[self.train_from:]
+        loss, grads = self._loss_grad(trainable_weights, xs)
 
         updates, self.opt_state = self.optimizer.update(
-            grads, self.opt_state, self.weights
+            grads, self.opt_state, trainable_weights
         )
-        self.prev_weights = self.weights
-        self.weights = optax.apply_updates(self.weights, updates)
+        trainable_weights = optax.apply_updates(trainable_weights, updates)
+        self.weights[self.train_from:] = trainable_weights
 
         loss = float(loss)
 
@@ -256,23 +290,25 @@ class Manager(object):
         start = time.time()
         finish_time = start + time_limit if time_limit else INF
 
-        if steps is None: steps = INF
+        if steps is None:
+            steps = INF
 
         t = "" if time_limit is None else f" {time_limit} s"
-        s = "" if steps > 1E10 else f" {steps} steps"
+        s = "" if steps > 1e10 else f" {steps} steps"
         logging.info(f"Training for{t}{s}")
 
         while time.time() < finish_time and self.step < steps:
             batch = train_set.sample(
                 length=self.conf.sample_len, batch_size=self.conf.batch
             )
-            try:
-                loss = self.train_step(batch)
-            except (XlaRuntimeError, ValueError):
-                logging.warn(
-                    "Internal XLA error, probably OOM. Returning +inf loss."
-                )
-                raise TrainingDiverged
+            loss = self.train_step(batch)
+            # try:
+            #     loss = self.train_step(batch)
+            # except (XlaRuntimeError, ValueError):
+            #     logging.warn(
+            #         "Internal XLA error, probably OOM. Returning +inf loss."
+            #     )
+            #     raise TrainingDiverged
 
             if math.isnan(loss) or math.isinf(loss):
                 raise TrainingDiverged
@@ -344,7 +380,7 @@ class Manager(object):
             steps=self.step,
             train_time_s=train_time,
             learning_rate=self.conf.lr,
-            regularization=1E-4,
+            regularization=1e-4,
             train_sample_len=self.conf.sample_len,
             train_batch=self.conf.batch,
             total_data=train_set.total_size,

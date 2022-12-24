@@ -47,6 +47,7 @@ def main(
     time,
     log,
     prefix,
+    add_layers,
 ):
     print(f"Training data: {data}")
     train_set = DataSet(data)
@@ -54,13 +55,17 @@ def main(
     try:
         if model_path is not None:
             manager = Manager.load(model_path)
+            manager.update_conf(lr, sample_len, batch, time)
+            if add_layers:
+                manager.add_layers(add_layers)
+            manager.init()
         else:
             conf = Configuration(
                 build_model(spec),
                 lr,
                 sample_len,
                 batch,
-                time,
+                t=time,
             )
             manager = Manager(conf)
             manager.init()
@@ -112,6 +117,14 @@ def parse_args():
         "--spec",
         default=None,
         help="layer-by-layer model specification",
+    )
+    parser.add_argument(
+        "-a",
+        "--add-layers",
+        type=str,
+        metavar="SPEC",
+        default=None,
+        help="add and train layers to a pre-trained model loaded with -m"
     )
     parser.add_argument(
         "-o",

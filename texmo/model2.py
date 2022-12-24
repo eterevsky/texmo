@@ -118,6 +118,14 @@ class Model2(object):
             if model.is_valid() and model != self:
                 yield model
 
+    def add_layers(self, layers_spec):
+        shape = self.layers[-1].output_shape
+        for layer_spec in layers_spec.split("-"):
+            layer = build_layer(layer_spec, shape)
+            self.layers.append(layer)
+            shape = layer.output_shape
+        self.out_layer = Dense(NCHAR, input_shape=shape)
+
     def remove_last_layer(self):
         if len(self.layers) == 1:
             return None
@@ -166,7 +174,7 @@ class Model2(object):
         out_softmax = jax.nn.softmax(out / temperature)
         return state, out_softmax
 
-    def loss_batch(self, weights: Weights, batch: DeviceArray) -> DeviceArray:
+    def loss_batch(self, weights: Weights, batch: jnp.ndarray) -> DeviceArray:
         """Compute the average loss over a batch of training data.
 
         Args:

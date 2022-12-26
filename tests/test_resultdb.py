@@ -1,11 +1,12 @@
 from datetime import datetime
+from unittest import TestCase, main
+
 import numpy as np
-from unittest import main, TestCase
 
 from texmo.configuration import Configuration, Template
+from texmo.model2 import build_model
 from texmo.record import TrainingRecord
 from texmo.resultdb import ResultDB
-from texmo.model2 import build_model
 
 
 def create_record(spec, loss, batch=256, reg=0.125):
@@ -139,9 +140,7 @@ class ResultDBTest(TestCase):
         )
 
         for i, (conf, loss, step_loss) in enumerate(
-            self.db.get_confs_runs(
-                Template(sample_len=128), load_step_loss=True
-            )
+            self.db.get_confs_runs(Template(sample_len=128))
         ):
             self.assertEqual(i, 0)
             self.assertTrue((np.array(step_loss) == step_loss).all())

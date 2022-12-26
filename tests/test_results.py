@@ -4,6 +4,7 @@ from texmo import configuration
 from texmo.configuration import Configuration, Template
 from texmo.results import ResultSet
 from texmo.model2 import build_model
+from texmo.steploss import StepLossPredictor
 
 
 INIT_CONF = Configuration(
@@ -23,6 +24,8 @@ TEMPLATE = Template(
     t=1,
 )
 
+LOSS_TREND = StepLossPredictor(1.0, 0.0, 0.0)
+
 
 class ResultSetTest(TestCase):
     def setUp(self):
@@ -30,7 +33,9 @@ class ResultSetTest(TestCase):
 
     def test_add_run(self):
         results = ResultSet(result_db=None, template=TEMPLATE)
-        results.add_run_conf(INIT_CONF, 1.5, update_scores=True)
+        results.add_run_conf(
+            INIT_CONF, 1.5, update_scores=True, loss_model=LOSS_TREND
+        )
 
         conf_id = results.find_conf_id(INIT_CONF)
 
@@ -44,11 +49,14 @@ class ResultSetTest(TestCase):
             result_db=None,
             template=TEMPLATE,
         )
-        results.add_run_conf(INIT_CONF, 1, update_scores=True)
+        results.add_run_conf(
+            INIT_CONF, 1, update_scores=True, loss_model=LOSS_TREND
+        )
         results.add_run_conf(
             INIT_CONF._replace(model=build_model("dense.2.relu")),
             2,
             update_scores=True,
+            loss_model=LOSS_TREND,
         )
 
         cur = results._db.execute(
@@ -61,17 +69,23 @@ class ResultSetTest(TestCase):
 
     def test_add_run3(self):
         results = ResultSet(result_db=None, template=TEMPLATE)
-        results.add_run_conf(INIT_CONF, 1, update_scores=True)
-        results.add_run_conf(INIT_CONF, 1, update_scores=True)
         results.add_run_conf(
-            INIT_CONF._replace(model=build_model("dense.2.relu")),
-            2,
-            update_scores=True,
+            INIT_CONF, 1, update_scores=True, loss_model=LOSS_TREND
+        )
+        results.add_run_conf(
+            INIT_CONF, 1, update_scores=True, loss_model=LOSS_TREND
         )
         results.add_run_conf(
             INIT_CONF._replace(model=build_model("dense.2.relu")),
             2,
             update_scores=True,
+            loss_model=LOSS_TREND,
+        )
+        results.add_run_conf(
+            INIT_CONF._replace(model=build_model("dense.2.relu")),
+            2,
+            update_scores=True,
+            loss_model=LOSS_TREND,
         )
 
         cur = results._db.execute(
@@ -84,11 +98,21 @@ class ResultSetTest(TestCase):
 
     def test_update_all_scores(self):
         results = ResultSet(result_db=None, template=TEMPLATE)
-        results.add_run_conf(INIT_CONF, 1, False, update_scores=True)
-        results.add_run_conf(INIT_CONF, 1.5, False, update_scores=True)
-        results.add_run_conf(INIT_CONF, 2, False, update_scores=True)
         results.add_run_conf(
-            INIT_CONF._replace(batch=512), 3, False, update_scores=True
+            INIT_CONF, 1, False, update_scores=True, loss_model=LOSS_TREND
+        )
+        results.add_run_conf(
+            INIT_CONF, 1.5, False, update_scores=True, loss_model = LOSS_TREND
+        )
+        results.add_run_conf(
+            INIT_CONF, 2, False, update_scores=True, loss_model=LOSS_TREND
+        )
+        results.add_run_conf(
+            INIT_CONF._replace(batch=512),
+            3,
+            False,
+            update_scores=True,
+            loss_model=LOSS_TREND,
         )
 
         results.update_all_scores()
@@ -100,7 +124,9 @@ class ResultSetTest(TestCase):
 
     def test_update_all_neighbors(self):
         results = ResultSet(result_db=None, template=TEMPLATE)
-        results.add_run_conf(INIT_CONF, 1, False, update_scores=True)
+        results.add_run_conf(
+            INIT_CONF, 1, False, update_scores=True, loss_model=LOSS_TREND
+        )
         results.update_all_scores()
         results.update_all_neighbors()
 

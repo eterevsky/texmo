@@ -9,6 +9,7 @@ from .configuration import conf_neighbors, conf_to_string
 from .record import TrainingRecord
 from .results import ResultSet
 from .predict import Predictor
+from .run import Run
 
 
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
@@ -44,7 +45,7 @@ class Search(object):
         print("Pred scores ready")
         self._last_predictor_update = self._result_set.total_runs_count()
 
-    def add_record(self, record: TrainingRecord, step_loss):
+    def add_record(self, record: TrainingRecord, run: Run):
         with latency.timer("Search.add_record"):
             if (
                 abs(log2(record.planned_time_s) - log2(record.train_time_s))
@@ -53,7 +54,7 @@ class Search(object):
                 print("Bad training time, skipping")
                 record.loss = INF
 
-            conf_results, loss = self._result_set.add_record(record, step_loss)
+            conf_results, loss = self._result_set.add_record(record, run)
             affected_confs = set()
             for neighbor in self._predictor.add_sample(conf_results, loss):
                 if self._template.match_conf(neighbor):

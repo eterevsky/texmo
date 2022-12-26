@@ -5,7 +5,7 @@ MIN_LOSS = 0.1
 MAX_LOSS = 10
 
 
-def prediction_score(true_losses, predicted_losses):
+def prediction_score(true_losses: np.ndarray, predicted_losses: np.ndarray):
     n = len(true_losses)
     assert len(predicted_losses) == n
 

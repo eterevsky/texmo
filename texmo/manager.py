@@ -20,7 +20,7 @@ from .configuration import (Configuration, conf_from_dict, conf_to_dict,
 from .model2 import Model2, Weights
 from .prng import Rng
 from .record import TrainingRecord
-from .steploss import StepLossPredictor
+from .run import Run
 
 LOG2 = 1 / math.log(2)
 
@@ -68,9 +68,7 @@ class Manager(object):
     def __init__(
         self,
         conf: Configuration,
-        step: int = 0,
         weights: Optional[Weights] = None,
-        step_loss: Optional[list[float]] = None,
         test_sample_len: int = 1024,
         test_batch: int = 1024,
         pre_training: Optional[list] = None,
@@ -78,22 +76,26 @@ class Manager(object):
         self._rng: Rng = Rng()
         self.conf: Configuration = conf
         self.model: Model2 = self.conf.model
-        self.step: int = step
         if weights is None:
             weights = self.model.init_weights(self._rng, 1.0)
         self.weights: Weights = weights
         # Only layers starting from this one will be trained
         self.train_from: int = 0
 
-        # Record of the latest and the past losses of the model.
-        self.loss: Optional[float] = None
-        self.step_loss: list[float] = [] if step_loss is None else step_loss
-
         self.test_sample_len: int = test_sample_len
         self.test_batch: int = test_batch
         if pre_training is not None and not isinstance(pre_training, list):
             pre_training = [pre_training]
         self.pre_training: Optional[list] = pre_training
+        self.run: Optional[Run] = None
+
+    @property
+    def step(self):
+        return self.run.steps
+
+    @property
+    def loss(self):
+        return self.run.loss
 
     def save(self, dir):
         model_name = self.name()
@@ -110,8 +112,7 @@ class Manager(object):
         training.append(
             {
                 "conf": conf_to_dict(self.conf),
-                "step": self.step,
-                "step_loss": self.step_loss,
+                "run": self.run.to_dict(),
             }
         )
 
@@ -189,6 +190,7 @@ class Manager(object):
             )
 
             self.opt_state = self.optimizer.init(self.weights[self.train_from:])
+            self.run = Run()
         else:
             self._loss_grad = None
             self.optimizer = None
@@ -211,7 +213,7 @@ class Manager(object):
         xs = jax.nn.one_hot(xs, NCHAR)
         return self.model.loss_batch(self.weights, xs)
 
-    def evaluate(self, xs):
+    def _eval(self, xs):
         shards = 4
         while shards <= xs.shape[0]:
             logging.info(f"Evaluating with {shards} batches")
@@ -229,8 +231,7 @@ class Manager(object):
                     break
 
             if not evaluation_failed:
-                self.loss = loss / shards
-                return self.loss
+                return loss / shards
 
             # Convert weights to numpy arrays and then release all the GPU buffers.
             self.weights = jax.device_get(self.weights)
@@ -240,10 +241,16 @@ class Manager(object):
         logging.info(
             "Can't evaluate the model even with shards 1. Assuming INF loss."
         )
-        self.loss = INF
-        return self.loss
+        return INF
+
+    def eval(self, dataset) -> float:
+        """Evaluate a model on a random sample from the training data."""
+        with latency.timer("Manager.eval"):
+            batch = dataset.sample(self.test_sample_len, self.test_batch)
+            return self._eval(batch)
 
     def sample(self, prefix, l, temperature=0.05):
+        """Sample from the distribution to continue the given prefix."""
         self._rng = Rng()
         prefix = jnp.array(list(prefix))
         c_selected = prefix[-1]
@@ -276,8 +283,7 @@ class Manager(object):
 
         loss = float(loss)
 
-        self.step += 1
-        self.step_loss.append(loss)
+        self.run.add_step(loss)
 
         return loss
 
@@ -306,14 +312,13 @@ class Manager(object):
             batch = train_set.sample(
                 length=self.conf.sample_len, batch_size=self.conf.batch
             )
-            loss = self.train_step(batch)
-            # try:
-            #     loss = self.train_step(batch)
-            # except (XlaRuntimeError, ValueError):
-            #     logging.warn(
-            #         "Internal XLA error, probably OOM. Returning +inf loss."
-            #     )
-            #     raise TrainingDiverged
+            try:
+                loss = self.train_step(batch)
+            except (XlaRuntimeError, ValueError):
+                logging.warn(
+                    "Internal XLA error, probably OOM. Returning +inf loss."
+                )
+                raise TrainingDiverged
 
             if math.isnan(loss) or math.isinf(loss):
                 raise TrainingDiverged
@@ -323,9 +328,7 @@ class Manager(object):
                 or time.time() - last_report > 10
             ):
                 last_report = time.time()
-                recent_losses = self.step_loss[-10:]
-                avg_loss = sum(recent_losses) / len(recent_losses)
-                print(f"{self.step} {avg_loss:.4f} {self.step_loss[-1]:.4f}")
+                logging.info(self.run.report_recent_loss())
 
             if (
                 temp_steps is not None
@@ -337,12 +340,6 @@ class Manager(object):
 
         return time.time() - start
 
-    def eval(self, dataset) -> float:
-        """Evaluate a model on a random sample from the training data."""
-        with latency.timer("Manager.eval"):
-            batch = dataset.sample(self.test_sample_len, self.test_batch)
-            return self.evaluate(batch)
-
     def train_and_eval(
         self,
         steps,
@@ -353,7 +350,7 @@ class Manager(object):
         output_dir,
         log,
         quiet=False,
-    ) -> TrainingRecord:
+    ) -> tuple[TrainingRecord, Run]:
         try:
             train_time = self.train(
                 steps,
@@ -366,17 +363,16 @@ class Manager(object):
             if output_dir is not None:
                 self.save(output_dir)
 
-            batch_loss = self.eval(train_set)
-            if math.isnan(batch_loss):
-                batch_loss = INF
+            eval_loss = self.eval(train_set)
+            if math.isnan(eval_loss):
+                eval_loss = INF
         except TrainingDiverged:
             print("Training stopped early.")
-            batch_loss = INF
+            eval_loss = INF
             train_time = time_limit  # This is a hack, but we need to record
             # the loss with correct time.
 
-        loss_model = StepLossPredictor()
-        loss_model.fit(self.step_loss)
+        self.run.finalize(eval_loss)
 
         report = TrainingRecord(
             timestamp=datetime.now(),
@@ -389,18 +385,18 @@ class Manager(object):
             train_sample_len=self.conf.sample_len,
             train_batch=self.conf.batch,
             total_data=train_set.total_size,
-            loss=batch_loss,
+            loss=eval_loss,
             test_sample_len=self.test_sample_len,
             test_batch=self.test_batch,
             test_poisoned=True,
             init_scale=1.0,
             planned_time_s=time_limit,
             final_time_s=time_limit,
-            loss_model_v=loss_model.version,
-            loss_model_params=loss_model.params(),
+            loss_model_v=self.run.loss_trend.version,
+            loss_model_params=self.run.loss_trend.params(),
         )
 
-        print(report)
+        logging.info(str(report))
         if log is not None:
             with open(log, "a", newline="") as logfile:
                 writer = csv.writer(logfile)
@@ -412,7 +408,7 @@ class Manager(object):
             for buf in backend.live_buffers():
                 buf.delete()
 
-        return report
+        return (report, self.run)
 
     def continue_prefix(self, prefix: str, length: int) -> str | bytes:
         prefix_bytes: bytes = prefix.encode()  # convert str to bytes (?)

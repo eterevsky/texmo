@@ -1,32 +1,32 @@
 import argparse
 import logging
+import os
+
 import matplotlib.pyplot as plt
 import numpy as np
-import os
 
 import config
 from texmo.configuration import Configuration
 from texmo.dataset import DataSet
 from texmo.manager import Manager
 from texmo.model2 import build_model
-from texmo.steploss import StepLossPredictor
+
 
 def show_loss_graph(manager, output_dir):
-    predictor = StepLossPredictor()
-    print("Fitting step loss")
-    predictor.fit(manager.step_loss)
+    run = manager.run
 
-    steps = len(manager.step_loss)
+    steps = run.steps
     xs = np.array(range(steps // 2, steps * 4 + 1))
-    ys = predictor.predict(xs)
+    ys = run.loss_trend.predict(xs)
 
     steps2 = steps * 2
-    print(f"Expected loss at {steps2} steps:", predictor.predict(steps2))
+    loss2 = run.loss_trend.predict([steps2])[0]
+    logging.info(f"Expected loss at {steps2} steps: {loss2:.4f}")
 
     plt.xscale("log")
     plt.yscale("log")
     plt.ylim(top=8)
-    plt.plot(range(1, len(manager.step_loss) + 1), manager.step_loss)
+    plt.plot(range(1, steps + 1), run.step_loss)
     plt.plot(xs, ys)
     if output_dir is not None:
         plt.savefig(os.path.join(output_dir, manager.name() + ".png"))
@@ -35,8 +35,8 @@ def show_loss_graph(manager, output_dir):
 
 def parse_lr(x: str) -> float:
     if x.startswith("2^"):
-        return 2**int(x[2:])
-    return float(x) 
+        return 2 ** int(x[2:])
+    return float(x)
 
 
 def main(
@@ -131,7 +131,7 @@ def parse_args():
         type=str,
         metavar="SPEC",
         default=None,
-        help="add and train layers to a pre-trained model loaded with -m"
+        help="add and train layers to a pre-trained model loaded with -m",
     )
     parser.add_argument(
         "-o",
@@ -158,7 +158,7 @@ def parse_args():
         "-l",
         "--lr",
         type=str,
-        default=config.DEFAULT_LR,
+        default=str(config.DEFAULT_LR),
         help="learning rate, could be written as a float or as 2^-10",
     )
     parser.add_argument(

@@ -3,7 +3,6 @@ import math
 import os
 import random
 import sqlite3
-from collections import namedtuple
 from collections.abc import Iterable
 from statistics import median
 from typing import Optional
@@ -12,9 +11,27 @@ from . import latency
 from .common import INF
 from .configuration import (Configuration, Template, conf_from_record,
                             conf_is_valid, conf_neighbors)
-from .confresults import ConfResults, Run
+from .record import TrainingRecord
 from .resultdb import ResultDB
-from .steploss import StepLossPredictor, build_loss_model
+from .run import Run
+
+
+class ConfResults(object):
+    def __init__(self, id: int, conf: Configuration):
+        self.id: int = id
+        self.conf: Configuration = conf
+        self.runs: list[Run] = []
+        self.pred_score: Optional[float] = None
+
+    @property
+    def median_score(self) -> Optional[float]:
+        if self.runs:
+            return median(r.loss for r in self.runs)
+        else:
+            return None
+
+    def add_run(self, run: Run):
+        self.runs.append(run)
 
 
 class ResultSet(object):
@@ -163,15 +180,10 @@ class ResultSet(object):
     def add_run(
         self,
         conf_results: ConfResults,
-        loss: float,
-        step_loss: Optional[list[float]] = None,
-        loss_model = None,
+        run: Run,
         update_scores: bool = True,
     ):
-        if math.isnan(loss) or loss is None:
-            loss = INF
-
-        conf_results.add_run(Run(loss, step_loss, loss_model=loss_model))
+        conf_results.add_run(run)
 
         if update_scores:
             self._update_scores(conf_results)
@@ -180,26 +192,23 @@ class ResultSet(object):
     def add_run_conf(
         self,
         conf: Configuration,
-        loss: float,
-        step_loss: Optional[list[float]] = None,
-        loss_model: StepLossPredictor = None,
+        run: Run,
         update_scores=False,
     ):
         conf_results = self._find_or_add_conf(conf)
-        self.add_run(conf_results, loss, step_loss, loss_model, update_scores)
+        self.add_run(conf_results, run, update_scores)
 
     def add_record(
-        self, record, step_loss: Iterable[float], update_scores=True
+        self, record: TrainingRecord, run: Run, update_scores=True
     ) -> tuple[ConfResults, float]:
         conf = conf_from_record(record)
         assert conf_is_valid(conf)
 
         if self._result_db is not None:
-            self._result_db.add_record(record, step_loss)
+            self._result_db.add_record(record, run)
 
         conf_results = self._find_or_add_conf(conf)
-        loss_model = build_loss_model(step_loss, record.loss_model_v, record.loss_model_params)
-        self.add_run(conf_results, loss=record.loss, step_loss=step_loss, loss_model=loss_model, update_scores=update_scores)
+        self.add_run(conf_results, run, update_scores=update_scores)
 
         return conf_results, record.loss
 

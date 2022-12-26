@@ -1,29 +1,21 @@
 import argparse
 import logging
+
 import numpy as np
 
 import config
-from texmo.configuration import (
-    conf_to_string,
-    Configuration,
-    default_from_template,
-    Template,
-)
-from texmo.results import ResultSet
-from texmo.resultdb import ResultDB
-from texmo.dataset import build_dataset
 from texmo import latency
+from texmo.common import INF
+from texmo.configuration import (Configuration, Template, conf_to_string,
+                                 default_from_template)
+from texmo.dataset import build_dataset
 from texmo.manager import Manager
 from texmo.model2 import build_model
+from texmo.report import (draw_weight_loss_graph, generate_max_report,
+                          generate_param_report, generate_report_by_weight)
+from texmo.resultdb import ResultDB
+from texmo.results import ResultSet
 from texmo.search import Search
-from texmo.common import INF
-from texmo.report import (
-    draw_weight_loss_graph,
-    generate_max_report,
-    generate_param_report,
-    generate_report_by_weight,
-)
-
 
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
 # with t = 2^k
@@ -44,7 +36,7 @@ def warmup(dataset):
         config.DEFAULT_LR,
         128,
         config.DEFAULT_BATCH,
-        8
+        8,
     )
     manager = Manager(conf)
     manager.init(quiet=True)
@@ -87,7 +79,7 @@ def generate_report(result_set, template, min_max_weights):
     draw_weight_loss_graph(result_set, template)
 
 
-def search_loop(dataset, search):
+def search_loop(dataset, search: Search):
     logging.info("Warming up training")
     warmup(dataset)
 
@@ -98,7 +90,7 @@ def search_loop(dataset, search):
 
         manager = Manager(conf)
         manager.init(quiet=True)
-        record = manager.train_and_eval(
+        record, run = manager.train_and_eval(
             steps=None,
             time_limit=conf.t,
             train_set=dataset,
@@ -109,7 +101,7 @@ def search_loop(dataset, search):
             quiet=True,
         )
 
-        search.add_record(record, manager.step_loss)
+        search.add_record(record, run)
         print()
 
 

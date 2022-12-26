@@ -1,10 +1,12 @@
 __pycache__
 .DS_Store
 .vscode
+checkpoints
 config.py
 data
 data.txt
 models
+out
 results
 temp
 texts

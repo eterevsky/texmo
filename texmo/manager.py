@@ -73,6 +73,7 @@ class Manager(object):
         step_loss: Optional[list[float]] = None,
         test_sample_len: int = 1024,
         test_batch: int = 1024,
+        pre_training: Optional[list] = None,
     ):
         self._rng: Rng = Rng()
         self.conf: Configuration = conf
@@ -90,6 +91,9 @@ class Manager(object):
 
         self.test_sample_len: int = test_sample_len
         self.test_batch: int = test_batch
+        if pre_training is not None and not isinstance(pre_training, list):
+            pre_training = [pre_training]
+        self.pre_training: Optional[list] = pre_training
 
     def save(self, dir):
         model_name = self.name()
@@ -97,12 +101,24 @@ class Manager(object):
 
         weights = self.serialize_weights(self.weights)
 
-        data = {
-            "conf": conf_to_dict(self.conf),
-            "training": {
+        if self.pre_training:
+            training = self.pre_training
+            if not isinstance(training, list):
+                training = [training]
+        else:
+            training = []
+        training.append(
+            {
+                "conf": conf_to_dict(self.conf),
                 "step": self.step,
                 "step_loss": self.step_loss,
-            },
+            }
+        )
+
+        data = {
+            "conf": conf_to_dict(self.conf),
+            "model": str(self.conf.model),
+            "training": training,
             "weights": weights,
         }
 
@@ -116,10 +132,9 @@ class Manager(object):
             spec = json.load(f)
 
         conf = conf_from_dict(spec["conf"])
-        training_history = spec["training"]
         weights = deserialize_weights(spec["weights"])
 
-        manager = Manager(conf, weights=weights)
+        manager = Manager(conf, weights=weights, pre_training=spec["training"])
 
         return manager
 
@@ -424,4 +439,10 @@ class Manager(object):
 
     def name(self):
         model_name = str(self.model)
+
+        total_steps = self.step
+
+        if self.pre_training:
+            for stage in self.pre_training:
+                total_steps += stage["step"]
         return f"{model_name}-{self.step}"

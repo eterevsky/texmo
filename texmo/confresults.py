@@ -3,6 +3,7 @@ from statistics import median
 from typing import Optional
 
 from .configuration import Configuration
+from .steploss import StepLossPredictor
 
 
 class Run(object):
@@ -11,7 +12,10 @@ class Run(object):
         loss: float,
         step_loss: Optional[list[float]] = None,
         id: Optional[int] = None,
+        loss_model: Optional[StepLossPredictor] = None,
     ):
+        assert loss_model is not None
+        assert isinstance(loss_model, StepLossPredictor)
         self.id: Optional[int] = id
         # Final loss, evaluated on the test set.
         self.loss: float = loss
@@ -19,6 +23,7 @@ class Run(object):
         self.step_loss: Optional[np.ndarray] = None
         if step_loss is not None:
             self.step_loss = np.array(step_loss, dtype=np.float32)
+        self.loss_model = loss_model
 
 
 class ConfResults(object):

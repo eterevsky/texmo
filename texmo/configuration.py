@@ -66,8 +66,7 @@ def conf_is_valid(conf: Configuration) -> bool:
 
 def conf_to_string(conf: Configuration) -> str:
     return (
-        f"{conf.model} ({conf.model.weights})  LR{conf.lr:.3f}  B{conf.batch}  T{conf.t}  "
-        + f"LEN{conf.sample_len}"
+        f"{conf.model} ({conf.model.weights})  LEN{conf.sample_len}  B{conf.batch}  LR{conf.lr:.4f}  T{conf.t}"
     )
 
 

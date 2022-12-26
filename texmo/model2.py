@@ -1,15 +1,15 @@
+from itertools import chain
+
+import jax
+import jax.numpy as jnp
+import optax
+from jax.numpy import DeviceArray
+
 from .common import NCHAR
 from .layer import Layer, LayerState, LayerWeights
 from .layers import build_layer
 from .layers.dense import Dense
 from .prng import Rng
-
-from itertools import chain
-import jax
-import jax.numpy as jnp
-from jax.numpy import DeviceArray
-import optax
-
 
 Weights = list[LayerWeights]
 State = list[LayerState]

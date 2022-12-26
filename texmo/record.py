@@ -83,7 +83,7 @@ class TrainingRecord(object):
             planned_time = f"{self.planned_time_s} s / {self.final_time_s} s"
 
         if self.loss_model_v == 1:
-            c = self.loss_model_params[0]
+            c = 2**self.loss_model_params[0]
             expected_loss = f" (expected -> {c:.4f})"
         else:
             expected_loss = ""

@@ -119,12 +119,7 @@ class Manager(object):
         training_history = spec["training"]
         weights = deserialize_weights(spec["weights"])
 
-        manager = Manager(
-            conf,
-            training_history["step"],
-            weights=weights,
-            step_loss=training_history["step_loss"],
-        )
+        manager = Manager(conf, weights=weights)
 
         return manager
 
@@ -386,7 +381,7 @@ class Manager(object):
             init_scale=1.0,
             planned_time_s=time_limit,
             final_time_s=time_limit,
-            loss_model_v=1,
+            loss_model_v=loss_model.version,
             loss_model_params=loss_model.params(),
         )
 

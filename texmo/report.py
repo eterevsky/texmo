@@ -78,6 +78,8 @@ def get_top_confs(result_set, template, min_max_weights):
     count = {}  # (weights_limit, planned_time_s) -> count
     tlo, thi = template.t
     for conf_results in result_set.all_results_by_weights():
+        if not conf_results.runs:
+            continue
         conf = conf_results.conf
         if not tlo <= conf.t <= thi:
             continue
@@ -98,8 +100,10 @@ def get_top_confs(result_set, template, min_max_weights):
                     conf_results.median_score is not None
                     and conf_results.median_score < top_score
                 ):
+                    assert conf_results.median_score is not None
                     top_confs[key] = (conf, conf_results.median_score)
             else:
+                assert conf_results.median_score is not None
                 top_confs[key] = (conf, conf_results.median_score)
             weights_bucket *= 2
 
@@ -149,7 +153,7 @@ def print_top_confs(top_confs, run_count) -> str:
                 end="",
             )
             print(f"| {score:.4f} | ", file=out, end="")
-            print(f"B{conf.batch} LR{conf.lr}", file=out, end="")
+            print(f"B{conf.batch} LR{conf.lr:.4f}", file=out, end="")
             if conf.sample_len != 128:
                 print(f" LEN{conf.sample_len}", file=out, end="")
 

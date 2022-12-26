@@ -157,7 +157,7 @@ def add_template_args(parser: argparse.ArgumentParser):
         "-l",
         "--lr",
         type=str,
-        default="0.00001-10",
+        default="0.000001-10",
         help="range of acceptable learning rates (default: 0.001-10)",
     )
     parser.add_argument(

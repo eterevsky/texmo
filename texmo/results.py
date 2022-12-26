@@ -1,24 +1,20 @@
-from collections import namedtuple
-from collections.abc import Iterable
 import logging
 import math
 import os
 import random
 import sqlite3
+from collections import namedtuple
+from collections.abc import Iterable
 from statistics import median
 from typing import Optional
 
-from .common import INF
-from .configuration import (
-    Configuration,
-    Template,
-    conf_neighbors,
-    conf_from_record,
-    conf_is_valid,
-)
-from .confresults import ConfResults, Run
 from . import latency
+from .common import INF
+from .configuration import (Configuration, Template, conf_from_record,
+                            conf_is_valid, conf_neighbors)
+from .confresults import ConfResults, Run
 from .resultdb import ResultDB
+from .steploss import StepLossPredictor, build_loss_model
 
 
 class ResultSet(object):
@@ -62,6 +58,7 @@ class ResultSet(object):
                     conf_results.conf,
                     run.loss,
                     run.step_loss,
+                    run.loss_model,
                     update_scores=False,
                 )
 
@@ -168,12 +165,13 @@ class ResultSet(object):
         conf_results: ConfResults,
         loss: float,
         step_loss: Optional[list[float]] = None,
+        loss_model = None,
         update_scores: bool = True,
     ):
         if math.isnan(loss) or loss is None:
             loss = INF
 
-        conf_results.add_run(Run(loss, step_loss))
+        conf_results.add_run(Run(loss, step_loss, loss_model=loss_model))
 
         if update_scores:
             self._update_scores(conf_results)
@@ -184,10 +182,11 @@ class ResultSet(object):
         conf: Configuration,
         loss: float,
         step_loss: Optional[list[float]] = None,
+        loss_model: StepLossPredictor = None,
         update_scores=False,
     ):
         conf_results = self._find_or_add_conf(conf)
-        self.add_run(conf_results, loss, step_loss, update_scores)
+        self.add_run(conf_results, loss, step_loss, loss_model, update_scores)
 
     def add_record(
         self, record, step_loss: Iterable[float], update_scores=True
@@ -199,7 +198,8 @@ class ResultSet(object):
             self._result_db.add_record(record, step_loss)
 
         conf_results = self._find_or_add_conf(conf)
-        self.add_run(conf_results, record.loss, step_loss, update_scores)
+        loss_model = build_loss_model(step_loss, record.loss_model_v, record.loss_model_params)
+        self.add_run(conf_results, loss=record.loss, step_loss=step_loss, loss_model=loss_model, update_scores=update_scores)
 
         return conf_results, record.loss
 

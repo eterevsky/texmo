@@ -1,35 +1,21 @@
+import math
 from collections import namedtuple
 from collections.abc import Iterable
-import math
-import numpy as np
-from sklearn.ensemble import HistGradientBoostingRegressor
 from statistics import median
 from typing import List
 
-from texmo.configuration import Configuration, conf_is_valid
-from texmo.confresults import Run
-from texmo.common import NCHAR, total_size
-from texmo import latency
-from texmo.model2 import Model2
-from texmo.results import ResultSet
+import numpy as np
+from sklearn.ensemble import HistGradientBoostingRegressor
 
+from . import latency
+from .common import NCHAR, total_size
+from .configuration import Configuration, conf_is_valid
+from .confresults import Run
+from .model2 import Model2
+from .predict_common import MAX_LOSS
+from .results import ResultSet
 
-# We aren't differentiating losses above 10 bits per byte.
-MIN_LOSS = 0.1
-MAX_LOSS = 10
 MAX_LOG_LOSS = math.log2(MAX_LOSS)
-
-
-def prediction_score(true_losses, predicted_losses):
-    n = len(true_losses)
-    assert len(predicted_losses) == n
-
-    all_losses = np.concatenate((true_losses, predicted_losses))
-    all_losses = np.minimum(all_losses, MAX_LOSS)
-    all_losses = np.maximum(all_losses, MIN_LOSS)
-    all_losses = np.log2(all_losses)
-
-    return np.average(np.abs(all_losses[:n] - all_losses[n:]))
 
 
 LayerStat = namedtuple(
@@ -172,6 +158,18 @@ class FeatureProvider(object):
     def _get_neighbor_features(self, conf) -> list:
         neighbors = self._get_neighbors(conf)
         neighbor_scores = [self._conf_loss.get(n) for n in neighbors]
+
+        neighbor_shorter = conf._replace(t=conf.t // 2)
+        results = self._result_set.get_conf_results(neighbor_shorter)
+        if results is None or not results.runs:
+            neighbor_scores.extend((None, None))
+        else:
+            steps = median(len(r.step_loss) for r in results.runs)
+            pred_score = median(
+                r.loss_model.predict(2 * len(r.step_loss)) for r in results.runs
+            )
+            neighbor_scores.extend((math.log2(steps), pred_score))
+
         return neighbor_scores
 
     def get_dense_features(self, conf) -> np.array:
@@ -190,7 +188,7 @@ class FeatureProvider(object):
         )
 
     def categorical(self) -> list:
-        return [False] * 5 + [True, False, False, False] * 4 + [False] * 13
+        return [False] * 5 + [True, False, False, False] * 4 + [False] * 15
 
     def add_sample(self, conf_results, run) -> list:
         """Add a new run.

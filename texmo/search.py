@@ -200,12 +200,9 @@ class Search(object):
                 )
                 if num_runs < 10:
                     score += " "
-                extras = ""
                 conf = conf_results.conf
-                if conf.sample_len != 128:
-                    extras += f"  LEN {conf.sample_len}"
                 print(
-                    f"{score} LR{conf.lr:6.3f}  B{conf.batch:4}  {conf.model}{extras}"
+                    f"{score}  LEN{conf.sample_len:4}  B{conf.batch:4}  LR{conf.lr:7.4f}  {conf.model}"
                 )
             print()
 

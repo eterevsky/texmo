@@ -1,13 +1,14 @@
-# test
-
 import argparse
 import logging
+
 import numpy as np
 
+import config
 from texmo import latency
 from texmo.common import NCHAR
 from texmo.configuration import Template
-from texmo.predict import Predictor, prediction_score
+from texmo.predict import Predictor
+from texmo.predict_common import prediction_score
 from texmo.resultdb import ResultDB
 from texmo.results import ResultSet
 
@@ -52,7 +53,7 @@ def parse_args():
     parser.add_argument(
         "--db",
         type=str,
-        required=True,
+        default=config.DB,
         help="path to the SQLite database with the results",
     )
     return parser.parse_args()

@@ -19,18 +19,21 @@ from .confresults import Run
 from . import latency
 from .record import TrainingRecord
 from .model2 import build_model
+from .steploss import build_loss_model
 
 
-def _pack_step_loss(step_loss):
-    if step_loss is None:
-        return None
-    return np.array(step_loss, dtype=np.float32).tobytes()
+def _pack_ndarray(step_loss):
+    step_loss = np.array(step_loss, dtype=np.float32)
+    return step_loss.tobytes()
 
 
-def _unpack_step_loss(blob):
+def _unpack_ndarray(blob):
     if blob is None:
         return None
-    return np.frombuffer(blob, dtype=np.float32)
+    if len(blob) == 24:
+        return np.frombuffer(blob, dtype=np.float64)
+    else:
+        return np.frombuffer(blob, dtype=np.float32)
 
 
 def _dict_row_factory(cursor, row):
@@ -105,16 +108,18 @@ class ResultDB(object):
             "test_sample_len": record.test_sample_len,
             "test_batch": record.test_batch,
             "loss": record.loss,
-            "step_loss": _pack_step_loss(step_loss),
+            "step_loss": _pack_ndarray(step_loss),
+            "loss_model_v": record.loss_model_v,
+            "loss_model": _pack_ndarray(record.loss_model_params)
         }
         if math.isnan(record.loss) or record.loss is None:
             row["loss"] = INF
         self._db.execute(
             """
             INSERT INTO run(conf_id, timestamp, test_sample_len, test_batch,
-                            loss, step_loss)
+                            loss, step_loss, loss_model_v, loss_model)
             VALUES(:conf_id, :timestamp, :test_sample_len, :test_batch,
-                   :loss, :step_loss)
+                   :loss, :step_loss, :loss_model_v, :loss_model)
             """,
             row,
         )
@@ -122,7 +127,7 @@ class ResultDB(object):
             with latency.timer("ResultDB.add_record-commit"):
                 self._db.commit()
 
-    def get_confs_runs(self, template=None, load_step_loss=False):
+    def get_confs_runs(self, template=None):
         """Iterates through all confs that match template."""
         if template is None:
             template = Template()
@@ -162,7 +167,9 @@ class ResultDB(object):
                    t,
                    run.id AS run_id,
                    run.loss AS loss,
-                   run.step_loss AS step_loss
+                   run.step_loss AS step_loss,
+                   run.loss_model_v AS loss_model_v,
+                   run.loss_model AS loss_model
             FROM conf, run
             WHERE conf.id = run.conf_id {condition}
         """
@@ -176,10 +183,13 @@ class ResultDB(object):
                 continue
             if template.match_model(model):
                 conf = conf_from_dict(row)
+                step_loss = _unpack_ndarray(row["step_loss"])
+                loss_model = build_loss_model(step_loss, row["loss_model_v"], _unpack_ndarray(row["loss_model"]))
                 run = Run(
                     id=row["run_id"],
                     loss=row["loss"],
-                    step_loss=_unpack_step_loss(row["step_loss"]),
+                    step_loss=_unpack_ndarray(row["step_loss"]),
+                    loss_model=loss_model,
                 )
                 assert run.loss > 0.1
                 if conf_is_valid(conf):
@@ -195,7 +205,7 @@ class ResultDB(object):
         )
 
         for row in cur:
-            yield Run(row[0], _unpack_step_loss(row[1]))
+            yield Run(row[0], _unpack_ndarray(row[1]))
 
 
 def import_from_csv(result_db, filename):

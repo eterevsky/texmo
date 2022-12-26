@@ -25,6 +25,10 @@ CREATE TABLE run (
     -- ndarray(dtype=np.float32) and converted to bytes by ndarray.tobytes().
     -- Can be converted back to an array by np.frombuffer().
     step_loss BLOB,
+    -- Loss model version.
+    loss_model_v INTEGER,
+    -- Parameters of loss model as ndarray(dtype=np.float32).
+    loss_model BLOB,
     FOREIGN KEY (conf_id) REFERENCES conf(id)
 );
 

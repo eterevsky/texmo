@@ -74,19 +74,19 @@ class LossTrend(object):
         return np.array([self._c1, self._c2, self._eps])
 
 
-def build_loss_trend(losses, model_version, params):
+def build_loss_trend(step_loss, model_version, params):
     if params is None or model_version != 1:
         predictor = LossTrend()
-        predictor.fit(losses)
+        predictor.fit(step_loss)
         return predictor
     c1, c2, eps = params
     return LossTrend(c1, c2, eps)
 
 
-def loss_trend_from_dict(loss_trend_dict: dict, losses: np.ndarray):
+def loss_trend_from_dict(loss_trend_dict: dict, step_loss: np.ndarray):
     if loss_trend_dict is None or loss_trend_dict["version"] != 1:
         loss_trend = LossTrend()
-        loss_trend.fit(losses)
+        loss_trend.fit(step_loss)
         return loss_trend
     return LossTrend(
         c1=loss_trend_dict["c1"],

@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from unittest import TestCase, main
 
@@ -7,6 +8,8 @@ from texmo.configuration import Configuration, Template
 from texmo.model2 import build_model
 from texmo.record import TrainingRecord
 from texmo.resultdb import ResultDB
+
+logging.disable(level=logging.ERROR)
 
 
 def create_record(spec, loss, batch=256, reg=0.125):
@@ -119,9 +122,7 @@ class ResultDBTest(TestCase):
             },
         )
 
-        conf_runs = self.db.get_confs_runs(
-            Template(sample_len=128, batch=256)
-        )
+        conf_runs = self.db.get_confs_runs(Template(sample_len=128, batch=256))
         subset2 = set((conf, run.loss) for _, conf, run in conf_runs)
 
         self.assertEqual(

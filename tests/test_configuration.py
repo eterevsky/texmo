@@ -1,12 +1,11 @@
+import logging
 from unittest import TestCase
 
-from texmo.configuration import (
-    Configuration,
-    Template,
-    conf_neighbors,
-    conf_is_valid,
-)
+from texmo.configuration import (Configuration, Template, conf_is_valid,
+                                 conf_neighbors)
 from texmo.model2 import build_model
+
+logging.disable(level=logging.ERROR)
 
 
 class ConfigurationTest(TestCase):

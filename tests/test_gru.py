@@ -1,8 +1,12 @@
-from jax import numpy as jnp
+import logging
 from unittest import TestCase
+
+from jax import numpy as jnp
 
 from texmo.layers.gru import Gru
 from texmo.prng import Rng
+
+logging.disable(level=logging.ERROR)
 
 
 class GruTest(TestCase):
@@ -20,7 +24,7 @@ class GruTest(TestCase):
         out = jnp.stack((out0, out1, out2))
         out_fw = layer.forward(weights, input)
 
-        self.assertTrue(jnp.linalg.norm(out - out_fw) < 1E-6)
+        self.assertTrue(jnp.linalg.norm(out - out_fw) < 1e-6)
 
     def test_forward_batch(self):
         layer = Gru(2, input_shape=(4,))
@@ -37,4 +41,4 @@ class GruTest(TestCase):
         out_ff = layer._forward_batch_from_forward(weights, input)
         out_fs = layer._forward_batch_from_step(weights, input)
 
-        self.assertTrue(jnp.linalg.norm(out_ff - out_fs) < 1E-6)
+        self.assertTrue(jnp.linalg.norm(out_ff - out_fs) < 1e-6)

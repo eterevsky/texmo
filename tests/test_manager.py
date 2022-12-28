@@ -1,9 +1,12 @@
+import logging
 from unittest import TestCase
 
 from texmo.configuration import Configuration
 from texmo.dataset import build_fake_dataset
 from texmo.manager import Manager
 from texmo.model2 import build_model
+
+logging.disable(level=logging.ERROR)
 
 
 class ManagerTest(TestCase):

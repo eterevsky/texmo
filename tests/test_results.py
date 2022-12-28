@@ -1,10 +1,13 @@
-from unittest import main, TestCase
+import logging
+from unittest import TestCase, main
 
 from texmo import configuration
 from texmo.configuration import Configuration, Template
-from texmo.results import ResultSet
 from texmo.model2 import build_model
-from texmo.steploss import StepLossPredictor
+from texmo.results import ResultSet
+from texmo.run import LossTrend
+
+logging.disable(level=logging.ERROR)
 
 
 INIT_CONF = Configuration(
@@ -24,7 +27,7 @@ TEMPLATE = Template(
     t=1,
 )
 
-LOSS_TREND = StepLossPredictor(1.0, 0.0, 0.0)
+LOSS_TREND = LossTrend(1.0, 0.0, 0.0)
 
 
 class ResultSetTest(TestCase):
@@ -102,7 +105,7 @@ class ResultSetTest(TestCase):
             INIT_CONF, 1, False, update_scores=True, loss_model=LOSS_TREND
         )
         results.add_run_conf(
-            INIT_CONF, 1.5, False, update_scores=True, loss_model = LOSS_TREND
+            INIT_CONF, 1.5, False, update_scores=True, loss_model=LOSS_TREND
         )
         results.add_run_conf(
             INIT_CONF, 2, False, update_scores=True, loss_model=LOSS_TREND

@@ -10,7 +10,7 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from . import latency
 from .common import NCHAR, total_size
 from .configuration import Configuration, conf_is_valid
-from .confresults import Run
+from .run import Run
 from .model2 import Model2
 from .predict_common import MAX_LOSS
 from .results import ResultSet

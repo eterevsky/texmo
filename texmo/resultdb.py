@@ -1,25 +1,19 @@
-from collections.abc import Iterable
 import csv
 import math
-import numpy as np
 import os
 import sqlite3
+from collections.abc import Iterable
 from typing import Optional
 
-from .configuration import (
-    conf_from_dict,
-    conf_from_record,
-    conf_is_valid,
-    conf_to_dict,
-    Configuration,
-    Template,
-)
-from .common import INF
-from .confresults import Run
+import numpy as np
+
 from . import latency
-from .record import TrainingRecord
+from .common import INF
+from .configuration import (Configuration, Template, conf_from_dict,
+                            conf_from_record, conf_is_valid, conf_to_dict)
 from .model2 import build_model
-from .steploss import build_loss_model
+from .record import TrainingRecord
+from .run import Run, build_loss_trend
 
 
 def _pack_ndarray(step_loss):
@@ -110,7 +104,7 @@ class ResultDB(object):
             "loss": record.loss,
             "step_loss": _pack_ndarray(step_loss),
             "loss_model_v": record.loss_model_v,
-            "loss_model": _pack_ndarray(record.loss_model_params)
+            "loss_model": _pack_ndarray(record.loss_model_params),
         }
         if math.isnan(record.loss) or record.loss is None:
             row["loss"] = INF
@@ -184,12 +178,18 @@ class ResultDB(object):
             if template.match_model(model):
                 conf = conf_from_dict(row)
                 step_loss = _unpack_ndarray(row["step_loss"])
-                loss_model = build_loss_model(step_loss, row["loss_model_v"], _unpack_ndarray(row["loss_model"]))
+
+                loss_trend = build_loss_trend(
+                    step_loss,
+                    row["loss_model_v"],
+                    _unpack_ndarray(row["loss_model"]),
+                )
+
                 run = Run(
                     id=row["run_id"],
+                    step_loss=step_loss,
                     loss=row["loss"],
-                    step_loss=_unpack_ndarray(row["step_loss"]),
-                    loss_model=loss_model,
+                    loss_trend=loss_trend,
                 )
                 assert run.loss > 0.1
                 if conf_is_valid(conf):

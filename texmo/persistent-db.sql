@@ -29,6 +29,8 @@ CREATE TABLE run (
     loss_model_v INTEGER,
     -- Parameters of loss model as ndarray(dtype=np.float32).
     loss_model BLOB,
+    -- If non-empty, this contains the filename of the weights checkpoint.
+    checkpoint TEXT,
     FOREIGN KEY (conf_id) REFERENCES conf(id)
 );
 

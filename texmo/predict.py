@@ -167,7 +167,7 @@ class FeatureProvider(object):
         else:
             steps = median(len(r.step_loss) for r in results.runs)
             pred_score = median(
-                r.loss_model.predict(2 * len(r.step_loss)) for r in results.runs
+                r.loss_trend.predict(2 * len(r.step_loss)) for r in results.runs
             )
             neighbor_scores.extend((math.log2(steps), pred_score))
 
@@ -323,13 +323,13 @@ class Predictor(object):
             losses = np.array(losses, dtype=np.float32)
             losses = encode_loss(losses)
 
-            logging.info("Prepared training data:", features.shape)
+            logging.info(f"Prepared training data: {features.shape}")
             self._predictor.fit(features, losses, sample_weight)
 
             logging.info("Evaluating")
             loss = self._predictor.loss(features, losses, sample_weight)
 
-            logging.info("Loss on the training data:", loss)
+            logging.info(f"Loss on the training data: {loss}")
 
     def predict(self, confs: Iterable[Configuration]):
         with latency.timer("Predictor.predict"):

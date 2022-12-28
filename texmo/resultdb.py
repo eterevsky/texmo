@@ -11,7 +11,7 @@ from . import latency
 from .common import INF
 from .configuration import (Configuration, Template, conf_from_dict,
                             conf_from_record, conf_is_valid, conf_to_dict)
-from .model2 import build_model
+from .model2 import build_model, Model2
 from .record import TrainingRecord
 from .run import Run, build_loss_trend
 
@@ -95,25 +95,26 @@ class ResultDB(object):
                 return
             raise Exception(f"Invalid configuration: {conf}")
 
-        id = self.find_or_add_conf(conf)
+        conf_id = self.find_or_add_conf(conf)
         row = {
-            "conf_id": id,
+            "conf_id": conf_id,
             "timestamp": record.timestamp,
             "test_sample_len": record.test_sample_len,
             "test_batch": record.test_batch,
-            "loss": record.loss,
+            "loss": run.loss,
             "step_loss": _pack_ndarray(run.step_loss),
-            "loss_model_v": record.loss_model_v,
-            "loss_model": _pack_ndarray(record.loss_model_params),
+            "loss_model_v": run.loss_trend.version,
+            "loss_model": _pack_ndarray(run.loss_trend.params()),
+            "checkpoint": run.checkpoint if run.checkpoint else None,
         }
         if math.isnan(record.loss) or record.loss is None:
             row["loss"] = INF
         self._db.execute(
             """
             INSERT INTO run(conf_id, timestamp, test_sample_len, test_batch,
-                            loss, step_loss, loss_model_v, loss_model)
+                            loss, step_loss, loss_model_v, loss_model, checkpoint)
             VALUES(:conf_id, :timestamp, :test_sample_len, :test_batch,
-                   :loss, :step_loss, :loss_model_v, :loss_model)
+                   :loss, :step_loss, :loss_model_v, :loss_model, :checkpoint)
             """,
             row,
         )
@@ -206,6 +207,20 @@ class ResultDB(object):
 
         for row in cur:
             yield Run(row[0], _unpack_ndarray(row[1]))
+
+    def best_checkpoint_loss(self, model: Model2) -> float:
+        cur = self._db.execute(
+            """
+            SELECT MIN(run.loss) AS loss FROM conf, run
+            WHERE conf.spec = :spec
+              AND run.conf_id = conf.id
+              AND run.checkpoint IS NOT NULL
+            """,
+            {"spec": str(model)}
+        )
+
+        res = cur.fetchall()[0]["loss"]
+        return INF if res is None else res
 
 
 def import_from_csv(result_db, filename):

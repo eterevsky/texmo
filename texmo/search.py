@@ -1,16 +1,17 @@
 import logging
-import math
-from math import log2
 import random
+from math import log2
+import os
+import pickle
 
 from . import latency
 from .common import INF
-from .configuration import conf_neighbors, conf_to_string
+from .configuration import conf_neighbors, conf_to_string, Configuration
+from .model2 import Weights
+from .predict import Predictor
 from .record import TrainingRecord
 from .results import ResultSet
-from .predict import Predictor
 from .run import Run
-
 
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
 # with t = 2^k
@@ -20,11 +21,14 @@ RUNS_EXP = 0.6
 class Search(object):
     """Keep track of the configurations and selects what to try next."""
 
-    def __init__(self, db, template, init_conf, min_max_weights):
+    def __init__(
+        self, db, template, init_conf, min_max_weights, checkpoints: str = None
+    ):
         self._db = db
         self._template = template
         self._init_conf = init_conf
         self._min_max_weights = min_max_weights
+        self._checkpoints = checkpoints
 
         logging.info("Creaing ResultSet.")
         self._result_set = ResultSet(db, template)
@@ -45,7 +49,30 @@ class Search(object):
         logging.info("Pred scores ready")
         self._last_predictor_update = self._result_set.total_runs_count()
 
-    def add_record(self, record: TrainingRecord, run: Run):
+    def _save_checkpoint(
+        self, conf: Configuration, run: Run, weights: Weights
+    ) -> str:
+        base_name = f"{conf.model}-{run.loss:.4f}"
+        name = base_name + ".pickle"
+        i = 0
+        while os.path.exists(os.path.join(self._checkpoints, name)):
+            i += 1
+            name = f"{base_name}({i}).pickle"
+        with open(os.path.join(self._checkpoints, name), "wb") as f:
+            logging.info(f"Saving the model to {name}")
+            pickle.dump(weights, f)
+        run.checkpoint = name
+
+    def add_run(
+        self,
+        record: TrainingRecord,
+        conf: Configuration,
+        run: Run,
+        weights: Weights,
+    ):
+        assert isinstance(record, TrainingRecord)
+        assert isinstance(conf, Configuration)
+        assert isinstance(run, Run)
         with latency.timer("Search.add_record"):
             if (
                 abs(log2(record.planned_time_s) - log2(record.train_time_s))
@@ -53,6 +80,14 @@ class Search(object):
             ):
                 logging.warn("Bad training time, skipping")
                 record.loss = INF
+
+            if (
+                self._checkpoints
+                and run.loss < 3.5
+                and record.train_time_s >= 3.9
+                and run.loss < self._db.best_checkpoint_loss(conf.model)
+            ):
+                self._save_checkpoint(conf, run, weights)
 
             conf_results, loss = self._result_set.add_record(record, run)
             affected_confs = set()
@@ -147,9 +182,7 @@ class Search(object):
             maxw = top_conf_results.conf.model.weights
             if self._min_max_weights >= maxw * 8:
                 return self._min_max_weights
-            l = random.uniform(
-                math.log2(self._min_max_weights), math.log2(maxw) + 3
-            )
+            l = random.uniform(log2(self._min_max_weights), log2(maxw) + 3)
             return int(2**l)
 
     def _select_by_pred_score(self, t: int, max_weights: int):

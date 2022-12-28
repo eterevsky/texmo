@@ -102,6 +102,7 @@ class Run(object):
         step_loss: Optional[list[float]] = None,
         loss: Optional[float] = None,
         loss_trend: Optional[LossTrend] = None,
+        checkpoint: str = None,
     ):
         self.id: Optional[int] = id
 
@@ -115,6 +116,8 @@ class Run(object):
 
         # Final loss, evaluated on the test set.
         self.loss: float = loss
+
+        self.checkpoint: str = checkpoint
 
     def add_step(self, loss: float):
         self.step_loss.append(loss)

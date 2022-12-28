@@ -89,6 +89,12 @@ class Manager(object):
         self.pre_training: Optional[list] = pre_training
         self.run: Optional[Run] = None
 
+    # def __del__(self):
+    #     # Clear all GPU memory
+    #     backend = jax.lib.xla_bridge.get_backend()
+    #     for buf in backend.live_buffers():
+    #         buf.delete()
+
     @property
     def step(self):
         return self.run.steps
@@ -402,13 +408,7 @@ class Manager(object):
                 writer = csv.writer(logfile)
                 writer.writerow(report.csv_tuple())
 
-        if quiet:
-            # Clear all GPU memory
-            backend = jax.lib.xla_bridge.get_backend()
-            for buf in backend.live_buffers():
-                buf.delete()
-
-        return (report, self.run)
+        return (report, self.run, self.weights)
 
     def continue_prefix(self, prefix: str, length: int) -> str | bytes:
         prefix_bytes: bytes = prefix.encode()  # convert str to bytes (?)

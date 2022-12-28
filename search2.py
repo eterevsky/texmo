@@ -90,7 +90,7 @@ def search_loop(dataset, search: Search):
 
         manager = Manager(conf)
         manager.init(quiet=True)
-        record, run = manager.train_and_eval(
+        record, run, weights = manager.train_and_eval(
             steps=None,
             time_limit=conf.t,
             train_set=dataset,
@@ -101,8 +101,7 @@ def search_loop(dataset, search: Search):
             quiet=True,
         )
 
-        search.add_record(record, run)
-        print()
+        search.add_run(record, conf, run, weights)
 
 
 def main(args, dataset, template):
@@ -118,7 +117,7 @@ def main(args, dataset, template):
     if args.only_report:
         result_set = ResultSet(result_db, template, populate_neighbors=False)
     else:
-        search = Search(result_db, template, default, args.min_max_weights)
+        search = Search(result_db, template, default, args.min_max_weights, checkpoints=args.checkpoints)
         result_set = search._result_set
         try:
             search_loop(dataset, search)
@@ -207,6 +206,11 @@ def parse_args() -> argparse.Namespace:
         "--only-report",
         action="store_true",
         help="don't run a search, only generate a report",
+    )
+    parser.add_argument(
+        "--checkpoints",
+        default=config.CHECKPOINTS,
+        help="directory for saving trained checkpoints"
     )
 
     return parser.parse_args()

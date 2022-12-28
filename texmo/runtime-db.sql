@@ -31,6 +31,7 @@ CREATE INDEX neighbor_conf2_id ON neighbor(conf2_id);
 CREATE TABLE run (
     conf_id INTEGER NOT NULL,
     loss REAL NOT NULL,
+    checkpoint TEXT,
     FOREIGN KEY (conf_id) REFERENCES conf(id)
 );
 

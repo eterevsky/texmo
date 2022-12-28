@@ -85,7 +85,7 @@ class ResultDB(object):
     def add_record(
         self,
         record: TrainingRecord,
-        step_loss: Optional[Iterable[float]] = None,
+        run: Run,
         commit: bool = True,
         skip_invalid: bool = False,
     ):
@@ -102,7 +102,7 @@ class ResultDB(object):
             "test_sample_len": record.test_sample_len,
             "test_batch": record.test_batch,
             "loss": record.loss,
-            "step_loss": _pack_ndarray(step_loss),
+            "step_loss": _pack_ndarray(run.step_loss),
             "loss_model_v": record.loss_model_v,
             "loss_model": _pack_ndarray(record.loss_model_params),
         }

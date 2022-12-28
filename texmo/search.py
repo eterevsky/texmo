@@ -37,12 +37,12 @@ class Search(object):
 
     def train_predictor(self):
         self._predictor.train()
-        print("Generating predicted losses for all confs")
+        logging.info("Generating predicted losses for all confs")
         all_confs = list(self._result_set.all_confs())
         pred_losses = self._predictor.predict(all_confs)
-        print("Populating predicted losses")
+        logging.info("Populating predicted losses")
         self._result_set.update_pred_scores(all_confs, pred_losses)
-        print("Pred scores ready")
+        logging.info("Pred scores ready")
         self._last_predictor_update = self._result_set.total_runs_count()
 
     def add_record(self, record: TrainingRecord, run: Run):
@@ -51,7 +51,7 @@ class Search(object):
                 abs(log2(record.planned_time_s) - log2(record.train_time_s))
                 > 0.1
             ):
-                print("Bad training time, skipping")
+                logging.warn("Bad training time, skipping")
                 record.loss = INF
 
             conf_results, loss = self._result_set.add_record(record, run)
@@ -161,6 +161,7 @@ class Search(object):
                 expected_runs = 1
                 while i > 0:
                     if confs[i][1] < expected_runs:
+                        assert self._template.match_conf(confs[i][0])
                         return i - 1, confs[i][0]
                     i //= 3
                     expected_runs += 1
@@ -174,13 +175,12 @@ class Search(object):
             ):
                 conf = conf_results.conf
                 neighbors = list(conf_neighbors(conf, self._template))
-                if neighbors is not None:
-                    random.shuffle(neighbors)
-                    for neighbor in neighbors:
-                        assert neighbor is not None
-                        assert neighbor != conf
-                        if not self._result_set.has_runs(neighbor):
-                            return i, neighbor, conf
+                random.shuffle(neighbors)
+                for neighbor in neighbors:
+                    assert neighbor is not None
+                    assert neighbor != conf
+                    if not self._result_set.has_runs(neighbor):
+                        return i, neighbor, conf
         return None, None, None
 
     def print_top_confs(self, t, max_weights):

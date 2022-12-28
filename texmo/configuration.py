@@ -183,6 +183,8 @@ def conf_neighbors(conf: Configuration, template: Template):
                 cache.append(neighbor_model)
 
     for neighbor_model in cache:
+        if not template.match_model(neighbor_model): continue
+
         yield conf._replace(model=neighbor_model)
 
         # For neighbor specs that add or remove layers we'll also add

@@ -1,3 +1,4 @@
+import logging
 import math
 from collections import namedtuple
 from collections.abc import Iterable
@@ -10,10 +11,10 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from . import latency
 from .common import NCHAR, total_size
 from .configuration import Configuration, conf_is_valid
-from .run import Run
 from .model2 import Model2
 from .predict_common import MAX_LOSS
 from .results import ResultSet
+from .run import Run
 
 MAX_LOG_LOSS = math.log2(MAX_LOSS)
 
@@ -304,7 +305,7 @@ class Predictor(object):
 
     def train(self):
         with latency.timer("Predictor.train"):
-            print("Retraining loss prediction.")
+            logging.info("Retraining loss prediction.")
 
             features = []
             sample_weight = []
@@ -317,23 +318,23 @@ class Predictor(object):
                 losses.append(loss)
 
             features = np.array(features, dtype=np.float32)
-            print(features)
+            logging.info("Features:\n" + str(features))
             sample_weight = np.array(sample_weight, dtype=np.float32)
             losses = np.array(losses, dtype=np.float32)
             losses = encode_loss(losses)
 
-            print("Prepared training data:", features.shape)
+            logging.info("Prepared training data:", features.shape)
             self._predictor.fit(features, losses, sample_weight)
 
-            print("Evaluating")
+            logging.info("Evaluating")
             loss = self._predictor.loss(features, losses, sample_weight)
 
-            print("Loss on the training data:", loss)
+            logging.info("Loss on the training data:", loss)
 
     def predict(self, confs: Iterable[Configuration]):
         with latency.timer("Predictor.predict"):
             if len(confs) > 10000:
-                print("Preparing features")
+                logging.info("Preparing features")
             features = []
             for conf in confs:
                 features.append(self._feature_provider.get_features(conf))
@@ -341,11 +342,11 @@ class Predictor(object):
             features = np.array(features, dtype=np.float32)
 
             if len(confs) > 10000:
-                print("Predicting")
+                logging.info("Predicting")
             pred_losses = decode_loss(self._predictor.predict(features))
 
             if len(confs) > 10000:
-                print("Adjusting losses using existing runs")
+                logging.info("Adjusting losses using existing runs")
             losses = []
             for conf, pred_loss in zip(confs, pred_losses):
                 conf_results = self._result_set.get_conf_results(conf)

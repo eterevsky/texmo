@@ -303,7 +303,6 @@ class ResultSet(object):
             )
             for row in cur:
                 yield self._confs[row[0]]
-            # return map(conf_from_row, cur)
 
     def top_pred_confs(self, t, max_weights, limit=None):
         limit_str = "" if limit is None else f"-{limit}"

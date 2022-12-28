@@ -8,6 +8,7 @@ from texmo.configuration import Configuration, Template
 from texmo.model2 import build_model
 from texmo.record import TrainingRecord
 from texmo.resultdb import ResultDB
+from texmo.run import Run
 
 logging.disable(level=logging.ERROR)
 
@@ -45,8 +46,12 @@ class ResultDBTest(TestCase):
         self.assertIsNone(cur.fetchone())
 
     def test_add_record_same_spec(self):
-        self.db.add_record(create_record("dense.16.relu", 3.123))
-        self.db.add_record(create_record("dense.16.relu", 3.321))
+        self.db.add_record(
+            create_record("dense.16.relu", 3.123), Run(loss=3.123)
+        )
+        self.db.add_record(
+            create_record("dense.16.relu", 3.321), Run(loss=3.123)
+        )
 
         cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
         self.assertEqual(cur.fetchall()[0]["count"], 1)
@@ -55,8 +60,12 @@ class ResultDBTest(TestCase):
         self.assertEqual(cur.fetchall()[0]["count"], 2)
 
     def test_add_record_two_specs(self):
-        self.db.add_record(create_record("dense.16.relu", 3.123))
-        self.db.add_record(create_record("dense.16.tanh", 3.321))
+        self.db.add_record(
+            create_record("dense.16.relu", 3.123), Run(loss=3.123)
+        )
+        self.db.add_record(
+            create_record("dense.16.tanh", 3.321), Run(loss=3.123)
+        )
 
         cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
         self.assertEqual(cur.fetchall()[0]["count"], 2)
@@ -65,9 +74,13 @@ class ResultDBTest(TestCase):
         self.assertEqual(cur.fetchall()[0]["count"], 2)
 
     def test_skip_invalid(self):
-        self.db.add_record(create_record("gru.16.relu", 123), skip_invalid=True)
         self.db.add_record(
-            create_record("dense.16.tanh", 3.321, batch=127), skip_invalid=True
+            create_record("gru.16.relu", 123), Run(loss=123), skip_invalid=True
+        )
+        self.db.add_record(
+            create_record("dense.16.tanh", 3.321, batch=127),
+            Run(loss=3.321),
+            skip_invalid=True,
         )
 
         cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
@@ -77,12 +90,21 @@ class ResultDBTest(TestCase):
         self.assertEqual(cur.fetchall()[0]["count"], 0)
 
     def test_get_confs(self):
-        self.db.add_record(create_record("dense.16.tanh", 3.123))
-        self.db.add_record(create_record("dense.16.tanh", 3.321))
-        self.db.add_record(create_record("dense.16.relu", 3.321))
-        self.db.add_record(create_record("dense.16.relu", 3.321, batch=64))
         self.db.add_record(
-            create_record("dense.16.relu", 3.321, batch=64, reg=0.03125)
+            create_record("dense.16.tanh", 3.123), Run(loss=3.123)
+        )
+        self.db.add_record(
+            create_record("dense.16.tanh", 3.321), Run(loss=3.321)
+        )
+        self.db.add_record(
+            create_record("dense.16.relu", 3.321), Run(loss=3.321)
+        )
+        self.db.add_record(
+            create_record("dense.16.relu", 3.321, batch=64), Run(loss=3.321)
+        )
+        self.db.add_record(
+            create_record("dense.16.relu", 3.321, batch=64, reg=0.03125),
+            Run(loss=3.321),
         )
 
         conf_runs = self.db.get_confs_runs(Template(sample_len=128))
@@ -137,7 +159,8 @@ class ResultDBTest(TestCase):
     def test_step_loss(self):
         step_loss = [1, 2, 3]
         self.db.add_record(
-            create_record("dense.16.relu", 3.123), step_loss=step_loss
+            create_record("dense.16.relu", 3.123),
+            Run(loss=3.123, step_loss=[1, 2, 3]),
         )
 
         for i, (conf, loss, step_loss) in enumerate(

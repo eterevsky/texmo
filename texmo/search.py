@@ -6,7 +6,7 @@ import pickle
 
 from . import latency
 from .common import INF
-from .configuration import conf_neighbors, conf_to_string, Configuration
+from .configuration import conf_neighbors, conf_to_string, Configuration, conf_to_dict
 from .model2 import Weights
 from .predict import Predictor
 from .record import TrainingRecord
@@ -52,15 +52,24 @@ class Search(object):
     def _save_checkpoint(
         self, conf: Configuration, run: Run, weights: Weights
     ) -> str:
-        base_name = f"{conf.model}-{run.loss:.4f}"
+        base_name = f"{run.loss:.4f}-{conf.model}"
         name = base_name + ".pickle"
         i = 0
+        save = {
+            "training": [
+                {
+                    "conf": conf_to_dict(conf),
+                    "run": run.to_dict(),
+                }
+            ],
+            "weights": weights
+        }
         while os.path.exists(os.path.join(self._checkpoints, name)):
             i += 1
             name = f"{base_name}({i}).pickle"
         with open(os.path.join(self._checkpoints, name), "wb") as f:
             logging.info(f"Saving the model to {name}")
-            pickle.dump(weights, f)
+            pickle.dump(save, f)
         run.checkpoint = name
 
     def add_run(
@@ -83,8 +92,7 @@ class Search(object):
 
             if (
                 self._checkpoints
-                and run.loss < 3.5
-                and record.train_time_s >= 3.9
+                and run.loss < 4.5
                 and run.loss < self._db.best_checkpoint_loss(conf.model)
             ):
                 self._save_checkpoint(conf, run, weights)

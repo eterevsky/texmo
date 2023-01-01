@@ -154,7 +154,7 @@ def add_template_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--sample-len",
         type=str,
-        default="128",
+        default="2-1024",
         help="range of acceptable sample lens (default: 128)",
     )
     parser.add_argument(
@@ -199,7 +199,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--min-max-weights",
         type=int,
-        default=2048,
+        default=1024,
         help="minimum max-weights value in search",
     )
     parser.add_argument(

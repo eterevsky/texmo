@@ -222,6 +222,13 @@ class ResultDB(object):
         res = cur.fetchall()[0]["loss"]
         return INF if res is None else res
 
+    # def get_checkpoints(self) -> Iterable[tuple[Configuration, Run]]:
+    #     cur = self._db.execute(
+    #         """
+    #         SELECT
+    #         """
+    #     )
+
 
 def import_from_csv(result_db, filename):
     with open(filename) as csvfile:

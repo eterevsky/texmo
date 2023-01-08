@@ -7,6 +7,7 @@ CREATE TABLE conf (
     batch INTEGER NOT NULL,
     t INTEGER NOT NULL,
     weights INTEGER NOT NULL,
+    checkpoint_id INTEGER,
 
     -- Cached self-score (median of run scores for this conf)
     score REAL,

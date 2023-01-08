@@ -6,13 +6,21 @@ import numpy as np
 import config
 from texmo import latency
 from texmo.common import INF
-from texmo.configuration import (Configuration, Template, conf_to_string,
-                                 default_from_template)
+from texmo.configuration import (
+    Configuration,
+    Template,
+    conf_to_string,
+    default_from_template,
+)
 from texmo.dataset import build_dataset
 from texmo.manager import Manager
 from texmo.model2 import build_model
-from texmo.report import (draw_weight_loss_graph, generate_max_report,
-                          generate_param_report, generate_report_by_weight)
+from texmo.report import (
+    draw_weight_loss_graph,
+    generate_max_report,
+    generate_param_report,
+    generate_report_by_weight,
+)
 from texmo.resultdb import ResultDB
 from texmo.results import ResultSet
 from texmo.search import Search
@@ -79,17 +87,22 @@ def generate_report(result_set, template, min_max_weights):
     draw_weight_loss_graph(result_set, template)
 
 
-def search_loop(dataset, search: Search):
+def search_loop(dataset, search: Search, checkpoints_path: str):
     logging.info("Warming up training")
     warmup(dataset)
 
     logging.info("Starting search")
     while True:
-        conf = search.select_conf()
+        conf, checkpoint = search.select_conf()
         logging.info(conf_to_string(conf))
+        weights = None
+        if checkpoint is not None:
+            logging.info(f"Checkpoint: {checkpoint}")
+            weights = checkpoint.load_weights(checkpoints_path)
 
-        manager = Manager(conf)
+        manager = Manager(conf, weights=weights)
         manager.init(quiet=True)
+
         record, run, weights = manager.train_and_eval(
             steps=None,
             time_limit=conf.t,
@@ -101,13 +114,13 @@ def search_loop(dataset, search: Search):
             quiet=True,
         )
 
-        search.add_run(record, conf, run, weights)
+        search.add_run(record, conf, run, weights, parent_checkpoint=checkpoint)
 
 
 def main(args, dataset, template):
     template = Template.from_args(args)
     default = default_from_template(template)
-    default = default._replace(model=build_model("dense.1.relu"))
+    default = default._replace(model=build_model(args.default_spec))
     assert template.match_conf(default)
     logging.info("Default configuration: " + conf_to_string(default))
 
@@ -117,10 +130,16 @@ def main(args, dataset, template):
     if args.only_report:
         result_set = ResultSet(result_db, template, populate_neighbors=False)
     else:
-        search = Search(result_db, template, default, args.min_max_weights, checkpoints=args.checkpoints)
+        search = Search(
+            result_db,
+            template,
+            default,
+            args.min_max_weights,
+            checkpoints_path=args.checkpoints,
+        )
         result_set = search._result_set
         try:
-            search_loop(dataset, search)
+            search_loop(dataset, search, args.checkpoints)
         except KeyboardInterrupt:
             print("\nInterrupted\n")
             latency.report()
@@ -197,6 +216,9 @@ def parse_args() -> argparse.Namespace:
         help="path to the SQLite database with the results",
     )
     parser.add_argument(
+        "--default-spec", type=str, default="dense.1.relu", help="default model"
+    )
+    parser.add_argument(
         "--min-max-weights",
         type=int,
         default=1024,
@@ -210,7 +232,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoints",
         default=config.CHECKPOINTS,
-        help="directory for saving trained checkpoints"
+        help="directory for saving trained checkpoints",
     )
 
     return parser.parse_args()

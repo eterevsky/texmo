@@ -1,14 +1,15 @@
 import logging
 import random
 from math import log2
-import os
-import pickle
+from typing import Optional
 
 from . import latency
 from .common import INF
-from .configuration import conf_neighbors, conf_to_string, Configuration, conf_to_dict
+from .configuration import (Configuration, conf_neighbors, conf_to_dict,
+                            conf_to_string)
 from .model2 import Weights
 from .predict import Predictor
+from .pretrained import Checkpoint
 from .record import TrainingRecord
 from .results import ResultSet
 from .run import Run
@@ -22,13 +23,13 @@ class Search(object):
     """Keep track of the configurations and selects what to try next."""
 
     def __init__(
-        self, db, template, init_conf, min_max_weights, checkpoints: str = None
+        self, db, template, init_conf, min_max_weights, checkpoints_path: str = None
     ):
         self._db = db
         self._template = template
         self._init_conf = init_conf
         self._min_max_weights = min_max_weights
-        self._checkpoints = checkpoints
+        self._checkpoints_path = checkpoints_path
 
         logging.info("Creaing ResultSet.")
         self._result_set = ResultSet(db, template)
@@ -49,35 +50,13 @@ class Search(object):
         logging.info("Pred scores ready")
         self._last_predictor_update = self._result_set.total_runs_count()
 
-    def _save_checkpoint(
-        self, conf: Configuration, run: Run, weights: Weights
-    ) -> str:
-        base_name = f"{run.loss:.4f}-{conf.model}"
-        name = base_name + ".pickle"
-        i = 0
-        save = {
-            "training": [
-                {
-                    "conf": conf_to_dict(conf),
-                    "run": run.to_dict(),
-                }
-            ],
-            "weights": weights
-        }
-        while os.path.exists(os.path.join(self._checkpoints, name)):
-            i += 1
-            name = f"{base_name}({i}).pickle"
-        with open(os.path.join(self._checkpoints, name), "wb") as f:
-            logging.info(f"Saving the model to {name}")
-            pickle.dump(save, f)
-        run.checkpoint = name
-
     def add_run(
         self,
         record: TrainingRecord,
         conf: Configuration,
         run: Run,
         weights: Weights,
+        parent_checkpoint: Optional[Checkpoint],
     ):
         assert isinstance(record, TrainingRecord)
         assert isinstance(conf, Configuration)
@@ -90,12 +69,18 @@ class Search(object):
                 logging.warn("Bad training time, skipping")
                 record.loss = INF
 
+            if parent_checkpoint is None:
+                checkpoint = Checkpoint(conf, run)
+            else:
+                checkpoint = parent_checkpoint.clone()
+                checkpoint.add_run(conf, run)
+
             if (
-                self._checkpoints
+                self._checkpoints_path
                 and run.loss < 4.5
                 and run.loss < self._db.best_checkpoint_loss(conf.model)
             ):
-                self._save_checkpoint(conf, run, weights)
+                checkpoint.save(weights, self._checkpoints_path)
 
             conf_results, loss = self._result_set.add_record(record, run)
             affected_confs = set()
@@ -248,9 +233,15 @@ class Search(object):
                 )
             print()
 
+    def _select_checkpoint(self, t):
+        pass
+
     def select_conf(self):
         with latency.timer("Search.select_conf"):
             t = self._select_time()
+            if False:
+                return self._select_checkpoint(t)
+
             if self._template.max_weights is None:
                 max_weights = self._select_max_weights(t)
             else:
@@ -265,17 +256,17 @@ class Search(object):
 
             if ipred is not None and (ineighbor is None or ineighbor >= ipred):
                 logging.info(f"Selecting conf top #{ipred} by predicted score.")
-                return pred_conf
+                return pred_conf, None
 
             if ineighbor is not None and (ipred is None or random.randrange(2)):
                 c = conf_to_string(parent_conf)
                 logging.info(
                     f"Selecting a neighbor or conf #{ineighbor} by median score: {c}"
                 )
-                return neighbor_conf
+                return neighbor_conf, None
             elif ipred is not None:
                 logging.info(f"Selecting conf top #{ipred} by predicted score.")
-                return pred_conf
+                return pred_conf, None
 
             logging.info("Selecting default configuration")
-            return self._init_conf._replace(t=t)
+            return self._init_conf._replace(t=t), None

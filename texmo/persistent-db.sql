@@ -7,6 +7,7 @@ CREATE TABLE conf (
     batch INTEGER NOT NULL,
     t INTEGER NOT NULL,
     weights INTEGER NOT NULL,
+    checkpoint_id INTEGER,
     cluster_score REAL
 );
 

@@ -13,7 +13,7 @@ from .common import NCHAR, total_size
 from .configuration import Configuration, conf_is_valid
 from .model2 import Model2
 from .predict_common import MAX_LOSS
-from .results import ResultSet
+from .results import ResultSet, ConfResults
 from .run import Run
 
 MAX_LOG_LOSS = math.log2(MAX_LOSS)
@@ -82,7 +82,7 @@ class FeatureProvider(object):
         self._conf_loss = {}
         self._spec_features_cache = {}
 
-        for conf_results in self._result_set._confs.values():
+        for conf_results in self._result_set.all_conf_results():
             self._conf_loss[conf_results.conf] = encode_loss(
                 conf_results.median_score
             )
@@ -142,6 +142,10 @@ class FeatureProvider(object):
             conf._replace(lr=conf.lr * 2),
             conf._replace(batch=conf.batch // 2),
             conf._replace(batch=conf.batch * 2),
+            conf._replace(sample_len=conf.sample_len // 2),
+            conf._replace(sample_len=conf.sample_len * 2),
+            conf._replace(sample_len=conf.sample_len // 2, batch=conf.batch * 2),
+            conf._replace(sample_len=conf.sample_len * 2, batch=conf.batch // 2),
             conf._replace(t=conf.t // 2, lr=conf.lr * 2),
             conf._replace(t=conf.t * 2, lr=conf.lr / 2),
             conf._replace(t=conf.t // 2, batch=conf.batch // 2),
@@ -153,7 +157,6 @@ class FeatureProvider(object):
                 lr=conf.lr * 2,
                 model=conf.model.remove_last_layer(),
             ),
-            # conf,
         ]
 
     def _get_neighbor_features(self, conf) -> list:
@@ -189,14 +192,14 @@ class FeatureProvider(object):
         )
 
     def categorical(self) -> list:
-        return [False] * 5 + [True, False, False, False] * 4 + [False] * 15
+        return [False] * 5 + [True, False, False, False] * 4 + [False] * 19
 
-    def add_sample(self, conf_results, run) -> list:
+    def update_conf_results(self, conf_results: ConfResults) -> list:
         """Add a new run.
 
         Returns the list of confs that need to be updated.
         """
-
+        assert isinstance(conf_results, ConfResults)
         self._conf_loss[conf_results.conf] = conf_results.median_score
         for neighbor in self._get_neighbors(conf_results.conf):
             if conf_is_valid(neighbor):
@@ -249,59 +252,16 @@ class _HistPredictor(object):
         return np.sum(error) / np.sum(sample_weight)
 
 
-class AveragePredictor(object):
-    """Predictor based on the previous runs."""
-
-    def __init__(self, result_set):
-        self._result_set = result_set
-
-    def train(self):
-        pass
-
-    def predict(self, confs):
-        with latency.timer("MedianPredictor.predict"):
-            losses = []
-            for conf in confs:
-                conf_results = self._result_set.find_conf_results(conf)
-                if conf_results is None or not conf_results.runs:
-                    losses.append(3)
-                else:
-                    # losses.append(median(r.loss for r in conf_results.runs))
-                    l = [
-                        math.log2(min(r.loss, MAX_LOSS))
-                        for r in conf_results.runs
-                    ]
-                    losses.append(2 ** (sum(l) / len(l)))
-
-            return losses
-
-
-class Predictor3(object):
-    """Predictor based on the previous runs."""
-
-    def __init__(self, result_set):
-        self._result_set = result_set
-
-    def train(self):
-        pass
-
-    def predict(self, confs):
-        with latency.timer("Predictor3.predict"):
-            losses = []
-            for conf in confs:
-                losses.append(3)
-            return losses
-
-
 class Predictor(object):
-    def __init__(self, result_set):
+    def __init__(self, result_set: ResultSet):
+        assert isinstance(result_set, ResultSet)
         self._result_set = result_set
         self._feature_provider = FeatureProvider(result_set)
         categorical_features = self._feature_provider.categorical()
         self._predictor = _HistPredictor(categorical_features)
 
-    def add_sample(self, conf: Configuration, run: Run) -> List[Configuration]:
-        return self._feature_provider.add_sample(conf, run)
+    def update_conf_results(self, conf_results: ConfResults) -> List[Configuration]:
+        return self._feature_provider.update_conf_results(conf_results)
 
     def train(self):
         with latency.timer("Predictor.train"):
@@ -361,6 +321,3 @@ class Predictor(object):
                     losses.append(pred_loss)
 
             return losses
-
-
-# Predictor = AveragePredictor

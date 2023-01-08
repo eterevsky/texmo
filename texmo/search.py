@@ -43,7 +43,7 @@ class Search(object):
     def train_predictor(self):
         self._predictor.train()
         logging.info("Generating predicted losses for all confs")
-        all_confs = list(self._result_set.all_confs())
+        all_confs = list(self._result_set.get_confs())
         pred_losses = self._predictor.predict(all_confs)
         logging.info("Populating predicted losses")
         self._result_set.update_pred_scores(all_confs, pred_losses)
@@ -84,7 +84,7 @@ class Search(object):
 
             conf_results, loss = self._result_set.add_record(record, run)
             affected_confs = set()
-            for neighbor in self._predictor.add_sample(conf_results, loss):
+            for neighbor in self._predictor.update_conf_results(conf_results):
                 if self._template.match_conf(neighbor):
                     affected_confs.add(neighbor)
 

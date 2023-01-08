@@ -42,8 +42,11 @@ class ResultSet(object):
         populate_neighbors: bool = True,
     ):
         self._template: Template = template
-        self._confs: dict[int, ConfResults] = {}
-        self._conf_to_results: dict[Configuration, ConfResults] = {}
+
+        # Configurations, matching the template
+        self._conf_results_by_id: dict[int, ConfResults] = {}
+        # All configurations from the DB
+        self._all_conf_results_by_conf: dict[Configuration, ConfResults] = {}
 
         self._db = sqlite3.connect(":memory:")
         schema_path = os.path.join(os.path.dirname(__file__), "runtime-db.sql")
@@ -68,7 +71,7 @@ class ResultSet(object):
             result_db=None, template=self._template, populate_neighbors=False
         )
 
-        for conf_results in self._confs.values():
+        for conf_results in self._conf_results_by_id.values():
             for run in conf_results.runs:
                 target_set = train_set if random.random() < 0.8 else test_set
                 target_set.add_run_conf(
@@ -84,15 +87,16 @@ class ResultSet(object):
     def _find_or_add_conf(self, conf: Configuration, id=None) -> ConfResults:
         """Finds the conf in the db and returns the copy with populated id."""
         assert isinstance(conf, Configuration)
-        conf_results = self._conf_to_results.get(conf)
+        conf_results = self._all_conf_results_by_conf.get(conf)
         if conf_results is not None:
             assert id is None or conf_results.id == id
             return conf_results
         if id is None:
             id = self._result_db.find_or_add_conf(conf)
         conf_results = ConfResults(id, conf)
-        self._confs[id] = conf_results
-        self._conf_to_results[conf] = conf_results
+        if self._template.match_conf(conf):
+            self._conf_results_by_id[id] = conf_results
+        self._all_conf_results_by_conf[conf] = conf_results
 
         conf_dict = {
             "id": id,
@@ -123,25 +127,28 @@ class ResultSet(object):
                 "Importing relevant configurations and results from ResultDB"
             )
             n = 0
+            n_w_template = 0
 
-            template_wo_t = self._template.clone()
-            template_wo_t.t = None
-
-            for id, conf, run in self._result_db.get_confs_runs(template_wo_t):
+            for id, conf, run in self._result_db.get_confs_runs():
                 n += 1
+                if self._template.match_conf(conf):
+                    n_w_template += 1
                 conf_results = self._find_or_add_conf(conf, id)
                 conf_results.add_run(run)
 
-            logging.info(f"Imported {n} runs")
+            logging.info(f"Imported {n} runs ({n_w_template} matching template)")
             logging.info("Populating scores from run results")
             self.update_all_scores()
 
     def find_conf_id(self, conf: Configuration) -> Optional[int]:
-        conf_results = self._conf_to_results.get(conf)
+        conf_results = self._all_conf_results_by_conf.get(conf)
         return None if conf_results is None else conf_results.id
 
     def get_conf_results(self, conf: Configuration) -> Optional[ConfResults]:
-        return self._conf_to_results.get(conf)
+        return self._all_conf_results_by_conf.get(conf)
+
+    def all_conf_results(self) -> Iterable[ConfResults]:
+        return self._all_conf_results_by_conf.values()
 
     def _update_neighbors(self, conf=None):
         with latency.timer("ResultSet._update_neighbors"):
@@ -151,7 +158,7 @@ class ResultSet(object):
     def update_all_neighbors(self):
         with latency.timer("ResultSet.update_all_neighbors"):
             confs = []
-            for conf_results in self._conf_to_results.values():
+            for conf_results in self._conf_results_by_id.values():
                 if conf_results.median_score is not None:
                     confs.append(conf_results.conf)
 
@@ -163,7 +170,7 @@ class ResultSet(object):
 
     def update_all_scores(self):
         with latency.timer("ResultSet.update_all_scores"):
-            for conf_results in self._confs.values():
+            for conf_results in self._conf_results_by_id.values():
                 score = conf_results.median_score
                 if score is not None:
                     self._db.execute(
@@ -185,7 +192,7 @@ class ResultSet(object):
     ):
         conf_results.add_run(run)
 
-        if update_scores:
+        if update_scores and self._template.match_conf(conf_results.conf):
             self._update_scores(conf_results)
             self._update_neighbors(conf_results.conf)
 
@@ -204,17 +211,15 @@ class ResultSet(object):
         conf = conf_from_record(record)
         assert conf_is_valid(conf)
 
-        if self._result_db is not None:
-            self._result_db.add_record(record, run)
-
+        self._result_db.add_record(record, run)
         conf_results = self._find_or_add_conf(conf)
         self.add_run(conf_results, run, update_scores=update_scores)
 
         return conf_results, record.loss
 
-    def all_results_by_weights(self):
+    def get_results_by_weights(self):
         return sorted(
-            self._conf_to_results.values(), key=lambda cr: cr.conf.model.weights
+            self._conf_results_by_id.values(), key=lambda cr: cr.conf.model.weights
         )
 
     def all_results_for_t(self, t: int) -> Iterable[ConfResults]:
@@ -222,16 +227,16 @@ class ResultSet(object):
             "SELECT id FROM conf WHERE t = ? AND score IS NOT NULL", (t,)
         )
         for row in cur:
-            yield self._confs[row[0]]
+            yield self._conf_results_by_id[row[0]]
 
     def total_runs_count(self):
         with latency.timer("ResultSet.total_runs_count"):
-            return sum(len(cr.runs) for cr in self._confs.values())
+            return sum(len(cr.runs) for cr in self._conf_results_by_id.values())
             # cur = self._db.execute("SELECT COUNT(*) FROM run")
             # return cur.fetchone()[0]
 
     def num_runs_by_id(self, conf_id):
-        conf_runs = self._confs.get(conf_id)
+        conf_runs = self._conf_results_by_id.get(conf_id)
         return 0 if conf_runs is None else len(conf_runs.runs)
 
     def runs_count(self, t, max_weights=INF, min_weights=512):
@@ -253,7 +258,7 @@ class ResultSet(object):
         for i in range(11):
             runs_per_t[2**i] = 0
 
-        for conf_results in self._confs.values():
+        for conf_results in self._conf_results_by_id.values():
             runs_per_t[conf_results.conf.t] += len(conf_results.runs)
 
         return runs_per_t
@@ -280,7 +285,7 @@ class ResultSet(object):
             (t,),
         )
         row = cur.fetchone()
-        return None if row is None else self._confs[row[0]]
+        return None if row is None else self._conf_results_by_id[row[0]]
 
     def top_conf_all_t(self, t_lo, t_hi):
         """A configuration with the highest (self) score with time = t."""
@@ -291,7 +296,7 @@ class ResultSet(object):
             (t_lo, t_hi),
         )
         row = cur.fetchone()
-        return None if row is None else self._confs[row[0]]
+        return None if row is None else self._conf_results_by_id[row[0]]
 
     def top_confs(self, t, max_weights) -> Iterable[ConfResults]:
         with latency.timer("ResultSet.top_confs"):
@@ -302,7 +307,7 @@ class ResultSet(object):
                 (t, max_weights),
             )
             for row in cur:
-                yield self._confs[row[0]]
+                yield self._conf_results_by_id[row[0]]
 
     def top_pred_confs(self, t, max_weights, limit=None):
         limit_str = "" if limit is None else f"-{limit}"
@@ -320,7 +325,7 @@ class ResultSet(object):
                     (t, max_weights),
                 )
             for row in cur:
-                yield self._confs[row[0]]
+                yield self._conf_results_by_id[row[0]]
 
     def top_confs_by_score(self, t, limit=10):
         with latency.timer(f"ResultSet.top_pred_confs-cur"):
@@ -335,10 +340,10 @@ class ResultSet(object):
                 (t, limit),
             )
         for row in cur:
-            yield self._confs[row[0]]
+            yield self._conf_results_by_id[row[0]]
 
-    def all_confs(self):
-        for conf_results in self._conf_to_results.values():
+    def get_confs(self):
+        for conf_results in self._conf_results_by_id.values():
             yield conf_results.conf
 
     def update_pred_scores(self, confs: Iterable[Configuration], scores):
@@ -351,12 +356,12 @@ class ResultSet(object):
             )
 
     def all_conf_runs(self):
-        for conf_results in self._conf_to_results.values():
+        for conf_results in self._all_conf_results_by_conf.values():
             for run in conf_results.runs:
                 yield conf_results.conf, run.loss
 
     def has_runs(self, conf):
-        conf_results = self._conf_to_results.get(conf)
+        conf_results = self._all_conf_results_by_conf.get(conf)
         return conf_results is not None and conf_results.runs
 
 

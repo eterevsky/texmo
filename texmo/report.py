@@ -1,19 +1,20 @@
 import math
+from io import StringIO
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-from io import StringIO
 
-from texmo.results import ResultSet
 from texmo.configuration import Template, conf_to_string
+from texmo.results import ResultSet
 
 
-def max_points(result_set, t, maxx):
+def max_points(result_set: ResultSet, t: int, maxx: int):
     x = []
     y = []
     min_loss = 5
 
-    for conf_results in result_set.all_results_by_weights():
+    for conf_results in result_set.get_results_by_weights():
         conf = conf_results.conf
         if conf.t != t or not conf_results.median_score:
             continue
@@ -73,11 +74,13 @@ def draw_weight_loss_graph(result_set: ResultSet, template: Template):
     plt.show()
 
 
-def get_top_confs(result_set, template, min_max_weights):
+def get_top_confs(
+    result_set: ResultSet, template: Template, min_max_weights: int
+):
     top_confs = {}  # (weights_limit, planned_time_s) -> (conf, score)
     count = {}  # (weights_limit, planned_time_s) -> count
     tlo, thi = template.t
-    for conf_results in result_set.all_results_by_weights():
+    for conf_results in result_set.get_results_by_weights():
         if not conf_results.runs:
             continue
         conf = conf_results.conf

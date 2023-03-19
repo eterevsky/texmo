@@ -1,5 +1,5 @@
-_registry = {}
-_cache = {}
+_registry: dict = {}
+_cache: dict = {}
 
 
 def layer_cls(cls):

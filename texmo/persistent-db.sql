@@ -5,14 +5,17 @@ CREATE TABLE conf (
     lr REAL NOT NULL,
     sample_len INTEGER NOT NULL,
     batch INTEGER NOT NULL,
-    regularization REAL NOT NULL,
-    init_scale REAL NOT NULL,
     t INTEGER NOT NULL,
     weights INTEGER NOT NULL,
+    checkpoint_id INTEGER,
     cluster_score REAL
 );
 
+CREATE INDEX conf_spec ON conf(spec);
+
 CREATE TABLE run (
+    id INTEGER NOT NULL PRIMARY KEY,
+
     conf_id INTEGER NOT NULL,
 
     timestamp TEXT,
@@ -23,6 +26,12 @@ CREATE TABLE run (
     -- ndarray(dtype=np.float32) and converted to bytes by ndarray.tobytes().
     -- Can be converted back to an array by np.frombuffer().
     step_loss BLOB,
+    -- Loss model version.
+    loss_model_v INTEGER,
+    -- Parameters of loss model as ndarray(dtype=np.float32).
+    loss_model BLOB,
+    -- If non-empty, this contains the filename of the weights checkpoint.
+    checkpoint TEXT,
     FOREIGN KEY (conf_id) REFERENCES conf(id)
 );
 

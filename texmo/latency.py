@@ -2,11 +2,11 @@ from statistics import quantiles
 from time import perf_counter_ns
 
 
-_measures = {}
+_measures: dict[str, list[float]] = {}
 
 
 class Timer(object):
-    def __init__(self, name):
+    def __init__(self, name: str):
         self.name = name
         self.start = None
 
@@ -30,12 +30,14 @@ def timer(name):
 def report():
     for name, measures in sorted(_measures.items()):
         if len(measures) == 1:
-            val = measures[0] / 1E9
+            val = measures[0] / 1e9
             print(f"{name}(1)  {val:.3f} s")
         else:
             percentiles = quantiles(measures, n=100)
-            p50th = percentiles[48] / 1E6
-            p90th = percentiles[88] / 1E6
-            p99th = percentiles[98] / 1E6
+            p50th = percentiles[48] / 1e6
+            p90th = percentiles[88] / 1e6
+            p99th = percentiles[98] / 1e6
             total = len(measures)
-            print(f"{name}({total})  {p50th:.3f} ms  {p90th:.3f} ms  {p99th:.3f} ms")
+            print(
+                f"{name}({total})  {p50th:.3f} ms  {p90th:.3f} ms  {p99th:.3f} ms"
+            )

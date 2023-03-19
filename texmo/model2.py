@@ -1,15 +1,15 @@
+from itertools import chain
+
+import jax
+import jax.numpy as jnp
+import optax
+from jax.numpy import DeviceArray
+
 from .common import NCHAR
 from .layer import Layer, LayerState, LayerWeights
 from .layers import build_layer
 from .layers.dense import Dense
 from .prng import Rng
-
-from itertools import chain
-import jax
-import jax.numpy as jnp
-from jax.numpy import DeviceArray
-import optax
-
 
 Weights = list[LayerWeights]
 State = list[LayerState]
@@ -118,6 +118,14 @@ class Model2(object):
             if model.is_valid() and model != self:
                 yield model
 
+    def add_layers(self, layers_spec):
+        shape = self.layers[-1].output_shape
+        for layer_spec in layers_spec.split("-"):
+            layer = build_layer(layer_spec, shape)
+            self.layers.append(layer)
+            shape = layer.output_shape
+        self.out_layer = Dense(NCHAR, input_shape=shape)
+
     def remove_last_layer(self):
         if len(self.layers) == 1:
             return None
@@ -132,8 +140,8 @@ class Model2(object):
         return [l.init_state(w) for l, w in zip(self.layers, weights)]
 
     def step(
-        self, weights: Weights, state: State, input: DeviceArray
-    ) -> tuple[State, DeviceArray]:
+        self, weights: Weights, state: State, input: jnp.ndarray
+    ) -> tuple[State, jnp.ndarray]:
         """Run inference for one input character.
 
         `input` is a one-hot array representing input character with shape
@@ -166,7 +174,7 @@ class Model2(object):
         out_softmax = jax.nn.softmax(out / temperature)
         return state, out_softmax
 
-    def loss_batch(self, weights: Weights, batch: DeviceArray) -> DeviceArray:
+    def loss_batch(self, weights: Weights, batch: jnp.ndarray) -> DeviceArray:
         """Compute the average loss over a batch of training data.
 
         Args:

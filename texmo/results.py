@@ -1,51 +1,121 @@
-from collections import namedtuple
-from collections.abc import Iterable
 import logging
 import math
 import os
+import random
 import sqlite3
+from collections.abc import Iterable
 from statistics import median
+from typing import Optional
 
-from .configuration import (
-    CONF_FIELDS,
-    INF,
-    conf_from_row,
-    conf_neighbors,
-    Configuration,
-    conf_from_record,
-    conf_is_valid,
-)
 from . import latency
+from .common import INF
+from .configuration import (Configuration, Template, conf_from_record,
+                            conf_is_valid, conf_neighbors)
 from .record import TrainingRecord
+from .resultdb import ResultDB
+from .run import Run
 
 
-Results = namedtuple(
-    "Results",
-    [
-        "score",
-        "cluster_score",
-        "num_runs",
-    ],
-)
+class ConfResults(object):
+    def __init__(self, id: int, conf: Configuration):
+        self.id: int = id
+        self.conf: Configuration = conf
+        self.runs: list[Run] = []
+        self.pred_score: Optional[float] = None
+
+    @property
+    def median_score(self) -> Optional[float]:
+        if self.runs:
+            return median(r.loss for r in self.runs)
+        else:
+            return None
+
+    def add_run(self, run: Run):
+        self.runs.append(run)
 
 
 class ResultSet(object):
-    def __init__(self, result_db, template, populate_neighbors=True):
-        self._result_db = result_db
-        self._template = template
-        self._confs = {}  # conf id -> Configuration
-        self._runs = {}  # conf id -> [run losses]
+    def __init__(
+        self,
+        result_db: Optional[ResultDB],
+        template: Template,
+        populate_neighbors: bool = True,
+    ):
+        self._template: Template = template
+
+        # Configurations, matching the template
+        self._conf_results_by_id: dict[int, ConfResults] = {}
+        # All configurations from the DB
+        self._all_conf_results_by_conf: dict[Configuration, ConfResults] = {}
+
         self._db = sqlite3.connect(":memory:")
         schema_path = os.path.join(os.path.dirname(__file__), "runtime-db.sql")
-
         with open(schema_path) as schema:
             self._db.executescript(schema.read())
 
-        if self._result_db is not None:
-            self._import_from_result_db()
+        if result_db is None:
+            result_db = ResultDB()
+
+        self._result_db: ResultDB = result_db
+        self._import_from_result_db()
+
         if populate_neighbors:
             logging.info("Generating all neighbors")
             self.update_all_neighbors()
+
+    def train_test_split(self) -> tuple:
+        train_set = ResultSet(
+            result_db=None, template=self._template, populate_neighbors=False
+        )
+        test_set = ResultSet(
+            result_db=None, template=self._template, populate_neighbors=False
+        )
+
+        for conf_results in self._conf_results_by_id.values():
+            for run in conf_results.runs:
+                target_set = train_set if random.random() < 0.8 else test_set
+                target_set.add_run_conf(
+                    conf_results.conf,
+                    run.loss,
+                    run.step_loss,
+                    run.loss_model,
+                    update_scores=False,
+                )
+
+        return train_set, test_set
+
+    def _find_or_add_conf(self, conf: Configuration, id=None) -> ConfResults:
+        """Finds the conf in the db and returns the copy with populated id."""
+        assert isinstance(conf, Configuration)
+        conf_results = self._all_conf_results_by_conf.get(conf)
+        if conf_results is not None:
+            assert id is None or conf_results.id == id
+            return conf_results
+        if id is None:
+            id = self._result_db.find_or_add_conf(conf)
+        conf_results = ConfResults(id, conf)
+        if self._template.match_conf(conf):
+            self._conf_results_by_id[id] = conf_results
+        self._all_conf_results_by_conf[conf] = conf_results
+
+        conf_dict = {
+            "id": id,
+            "spec": str(conf.model),
+            "lr": conf.lr,
+            "sample_len": conf.sample_len,
+            "batch": conf.batch,
+            "t": conf.t,
+            "weights": conf.model.weights,
+        }
+        self._db.execute(
+            """
+            INSERT INTO conf(id, spec, lr, sample_len, batch, t, weights)
+            VALUES(:id, :spec, :lr, :sample_len, :batch, :t, :weights)
+            """,
+            conf_dict,
+        )
+
+        return conf_results
 
     def _import_from_result_db(self):
         """Import from the persistent DB all matching confs.
@@ -53,183 +123,121 @@ class ResultSet(object):
         Only the confs that are matching `self._template` are being selected.
         """
         with latency.timer("ResultSet._import_from_result_db"):
-            print("Importing relevant configurations and results from ResultDB")
+            logging.info(
+                "Importing relevant configurations and results from ResultDB"
+            )
             n = 0
+            n_w_template = 0
 
-            template_wo_t = self._template.clone()
-            template_wo_t.t = None
-
-            for conf, loss in self._result_db.get_confs_runs(template_wo_t):
-                conf = conf._replace(id=None)
-                conf = self._find_or_add_conf(conf)
-
+            for id, conf, run in self._result_db.get_confs_runs():
                 n += 1
-                conf_runs = self._runs.get(conf.id)
-                if conf_runs is None:
-                    conf_runs = []
-                    self._runs[conf.id] = conf_runs
-                conf_runs.append(loss)
-            print(f"Imported {n} runs")
+                if self._template.match_conf(conf):
+                    n_w_template += 1
+                conf_results = self._find_or_add_conf(conf, id)
+                conf_results.add_run(run)
 
-            print("Populating scores from run results")
+            logging.info(f"Imported {n} runs ({n_w_template} matching template)")
+            logging.info("Populating scores from run results")
             self.update_all_scores()
 
-    def find_conf_id(self, conf):
-        cur = self._db.execute(
-            """
-            SELECT id FROM conf
-            WHERE spec = ?
-              AND lr = ?
-              AND sample_len = ?
-              AND batch = ?
-              AND regularization = ?
-              AND init_scale = ?
-              AND t = ?
-            """,
-            (
-                str(conf.model),
-                conf.lr,
-                conf.sample_len,
-                conf.batch,
-                conf.regularization,
-                conf.init_scale,
-                conf.t,
-            ),
-        )
-        rows = cur.fetchall()
-        assert len(rows) <= 1
-        return rows[0][0] if rows else None
+    def find_conf_id(self, conf: Configuration) -> Optional[int]:
+        conf_results = self._all_conf_results_by_conf.get(conf)
+        return None if conf_results is None else conf_results.id
 
-    def _find_or_add_conf(self, conf):
-        """Finds the conf in the db and returns the copy with populated id."""
-        id = self.find_conf_id(conf)
-        assert conf.id == None or id == conf.id
-        if id is not None:
-            return self._confs[id]
+    def get_conf_results(self, conf: Configuration) -> Optional[ConfResults]:
+        return self._all_conf_results_by_conf.get(conf)
 
-        conf_dict = {
-            "spec": str(conf.model),
-            "lr": conf.lr,
-            "sample_len": conf.sample_len,
-            "batch": conf.batch,
-            "regularization": conf.regularization,
-            "init_scale": conf.init_scale,
-            "t": conf.t,
-            "weights": conf.model.weights,
-        }
-        cursor = self._db.execute(
-            """
-            INSERT INTO conf(spec, lr, sample_len, batch, regularization, init_scale, t, weights)
-            VALUES(:spec, :lr, :sample_len, :batch, :regularization, :init_scale, :t, :weights)
-            """,
-            conf_dict,
-        )
-        id = cursor.lastrowid
-        conf = conf._replace(id=id)
-        self._confs[id] = conf
-        return conf
+    def all_conf_results(self) -> Iterable[ConfResults]:
+        return self._all_conf_results_by_conf.values()
 
     def _update_neighbors(self, conf=None):
         with latency.timer("ResultSet._update_neighbors"):
             for neighbor in conf_neighbors(conf, self._template):
-                neighbor = neighbor._replace(id=None)
-                neighbor = self._find_or_add_conf(neighbor)
+                self._find_or_add_conf(neighbor)
 
     def update_all_neighbors(self):
         with latency.timer("ResultSet.update_all_neighbors"):
-            cur = self._db.execute(
-                "SELECT id FROM conf WHERE score IS NOT NULL"
-            )
-            i = 0
-            for i, row in enumerate(cur):
-                conf_id = row[0]
-                conf = self._confs[conf_id]
+            confs = []
+            for conf_results in self._conf_results_by_id.values():
+                if conf_results.median_score is not None:
+                    confs.append(conf_results.conf)
+
+            for conf in confs:
                 for neighbor in conf_neighbors(conf, self._template):
                     self._find_or_add_conf(neighbor)
-            logging.info(f"Generated neighbors for {i} confs")
-
-            self._db.commit()
+            n = len(confs)
+            logging.info(f"Generated neighbors for {n} confs")
 
     def update_all_scores(self):
         with latency.timer("ResultSet.update_all_scores"):
-            for conf_id, conf_runs in self._runs.items():
-                score = median(conf_runs)
-                self._db.execute(
-                    "UPDATE conf SET score = ? WHERE id = ?", [score, conf_id]
-                )
-            self._db.commit()
+            for conf_results in self._conf_results_by_id.values():
+                score = conf_results.median_score
+                if score is not None:
+                    self._db.execute(
+                        "UPDATE conf SET score = ? WHERE id = ?",
+                        (score, conf_results.id),
+                    )
 
-    def _update_scores(self, conf):
-        with latency.timer("ResultSet._update_scores"):
-            score = median(self._runs[conf.id])
-            self._db.execute(
-                "UPDATE conf SET score = ? WHERE id = ?", (score, conf.id)
-            )
+    def _update_scores(self, conf_results: ConfResults):
+        self._db.execute(
+            "UPDATE conf SET score = ? WHERE id = ?",
+            (conf_results.median_score, conf_results.id),
+        )
 
-    def add_run(self, conf: Configuration, loss: float, update_scores=True):
-        conf = self._find_or_add_conf(conf)
-        if math.isnan(loss) or loss is None:
-            loss = INF
+    def add_run(
+        self,
+        conf_results: ConfResults,
+        run: Run,
+        update_scores: bool = True,
+    ):
+        conf_results.add_run(run)
 
-        conf_runs = self._runs.get(conf.id)
-        if conf_runs is None:
-            conf_runs = []
-            self._runs[conf.id] = conf_runs
-        conf_runs.append(loss)
+        if update_scores and self._template.match_conf(conf_results.conf):
+            self._update_scores(conf_results)
+            self._update_neighbors(conf_results.conf)
 
-        if update_scores:
-            self._update_scores(conf)
-            self._update_neighbors(conf)
+    def add_run_conf(
+        self,
+        conf: Configuration,
+        run: Run,
+        update_scores=False,
+    ):
+        conf_results = self._find_or_add_conf(conf)
+        self.add_run(conf_results, run, update_scores)
 
-    def add_record(self, record, step_loss: Iterable[float], update_scores=True):
+    def add_record(
+        self, record: TrainingRecord, run: Run, update_scores=True
+    ) -> tuple[ConfResults, float]:
         conf = conf_from_record(record)
         assert conf_is_valid(conf)
 
-        if self._result_db is not None:
-            self._result_db.add_record(record, step_loss)
+        self._result_db.add_record(record, run)
+        conf_results = self._find_or_add_conf(conf)
+        self.add_run(conf_results, run, update_scores=update_scores)
 
-        conf = self._find_or_add_conf(conf)
-        self.add_run(conf, record.loss, update_scores)
+        return conf_results, record.loss
 
-        return conf, record.loss
-
-    def all_results_by_weights(self):
-        # cur = self._db.execute(
-        #     "SELECT conf_id, COUNT(*) FROM run GROUP BY conf_id"
-        # )
-        # num_runs = dict(cur)
-
-        cur = self._db.execute(
-            f"""
-            SELECT id, score, pred_score
-            FROM conf
-            WHERE score IS NOT NULL
-            ORDER BY weights
-            """
+    def get_results_by_weights(self):
+        return sorted(
+            self._conf_results_by_id.values(), key=lambda cr: cr.conf.model.weights
         )
-        for id, score, pred_score in cur:
-            conf = self._confs[id]
-            results = Results(score, pred_score, self.num_runs_by_id(id))
-            yield conf, results
 
-    def all_results_for_t(self, t):
+    def all_results_for_t(self, t: int) -> Iterable[ConfResults]:
         cur = self._db.execute(
-            "SELECT id, score FROM conf WHERE t = ? AND score IS NOT NULL", (t,)
+            "SELECT id FROM conf WHERE t = ? AND score IS NOT NULL", (t,)
         )
-        for id, score in cur:
-            conf = self._confs[id]
-            results = Results(score, None, self.num_runs_by_id(id))
-            yield conf, results
+        for row in cur:
+            yield self._conf_results_by_id[row[0]]
 
     def total_runs_count(self):
         with latency.timer("ResultSet.total_runs_count"):
-            return sum(len(s) for s in self._runs.values())
+            return sum(len(cr.runs) for cr in self._conf_results_by_id.values())
             # cur = self._db.execute("SELECT COUNT(*) FROM run")
             # return cur.fetchone()[0]
 
     def num_runs_by_id(self, conf_id):
-        conf_runs = self._runs.get(conf_id)
-        return 0 if conf_runs is None else len(conf_runs)
+        conf_runs = self._conf_results_by_id.get(conf_id)
+        return 0 if conf_runs is None else len(conf_runs.runs)
 
     def runs_count(self, t, max_weights=INF, min_weights=512):
         cur = self._db.execute(
@@ -250,24 +258,10 @@ class ResultSet(object):
         for i in range(11):
             runs_per_t[2**i] = 0
 
-        for conf_id, conf_runs in self._runs.items():
-            conf = self._confs[conf_id]
-            runs_per_t[conf.t] += len(conf_runs)
+        for conf_results in self._conf_results_by_id.values():
+            runs_per_t[conf_results.conf.t] += len(conf_results.runs)
 
-        # cur = self._db.execute("SELECT id, t FROM conf")
-        # for id, t in cur:
-        #     runs_per_t[t] += self.num_runs_by_id(id)
         return runs_per_t
-
-        # cur = self._db.execute(
-        #     """
-        #     SELECT conf.t, COUNT(*)
-        #     FROM conf, run
-        #     WHERE conf.id = run.conf_id
-        #     GROUP BY conf.t
-        #     """
-        # )
-        # return dict(cur)
 
     def confs_count(self, t, max_weights=None):
         if max_weights is None:
@@ -282,7 +276,7 @@ class ResultSet(object):
             )
         return cur.fetchone()[0]
 
-    def top_conf(self, t):
+    def top_conf(self, t) -> ConfResults:
         """A configuration with the highest (self) score with time = t."""
         cur = self._db.execute(
             "SELECT id FROM conf "
@@ -291,7 +285,7 @@ class ResultSet(object):
             (t,),
         )
         row = cur.fetchone()
-        return None if row is None else self._confs[row[0]]
+        return None if row is None else self._conf_results_by_id[row[0]]
 
     def top_conf_all_t(self, t_lo, t_hi):
         """A configuration with the highest (self) score with time = t."""
@@ -302,9 +296,9 @@ class ResultSet(object):
             (t_lo, t_hi),
         )
         row = cur.fetchone()
-        return None if row is None else self._confs[row[0]]
+        return None if row is None else self._conf_results_by_id[row[0]]
 
-    def top_confs(self, t, max_weights):
+    def top_confs(self, t, max_weights) -> Iterable[ConfResults]:
         with latency.timer("ResultSet.top_confs"):
             cur = self._db.execute(
                 f"SELECT id FROM conf "
@@ -313,24 +307,7 @@ class ResultSet(object):
                 (t, max_weights),
             )
             for row in cur:
-                yield self._confs[row[0]]
-            # return map(conf_from_row, cur)
-
-    def find(self, conf):
-        """Find the configuration by its fields.
-
-        Returns an instance with populated id, and Results
-        """
-        conf = self._find_or_add_conf(conf)
-        cur = self._db.execute("SELECT score FROM conf WHERE id = ?", [conf.id])
-        return conf, cur.fetchone()[0]
-
-    def find_by_id(self, conf_id):
-        # cur = self._db.execute(
-        #     f"SELECT {CONF_FIELDS} FROM conf WHERE id = ?", (conf_id,)
-        # )
-        # return conf_from_row(cur.fetchone())
-        return self._confs.get(conf_id)
+                yield self._conf_results_by_id[row[0]]
 
     def top_pred_confs(self, t, max_weights, limit=None):
         limit_str = "" if limit is None else f"-{limit}"
@@ -339,7 +316,7 @@ class ResultSet(object):
             with latency.timer(f"ResultSet.top_pred_confs-cur"):
                 cur = self._db.execute(
                     f"""
-                    SELECT id, score, pred_score
+                    SELECT id
                     FROM conf
                     WHERE t = ? AND weights <= ? AND pred_score IS NOT NULL
                     ORDER BY pred_score
@@ -347,20 +324,14 @@ class ResultSet(object):
                     + limit_clause,
                     (t, max_weights),
                 )
-            for id, score, pred_score in cur:
-                # conf = conf_from_row(row[:8])
-                conf = self._confs[id]
-                results = Results(
-                    score, pred_score, self.num_runs_by_id(conf.id)
-                )
-                yield conf, results
+            for row in cur:
+                yield self._conf_results_by_id[row[0]]
 
     def top_confs_by_score(self, t, limit=10):
-        limit_str = "" if limit is None else f"-{limit}"
         with latency.timer(f"ResultSet.top_pred_confs-cur"):
             cur = self._db.execute(
                 f"""
-                SELECT id, score, pred_score
+                SELECT id
                 FROM conf
                 WHERE t = ? AND score IS NOT NULL
                 ORDER BY score
@@ -368,48 +339,30 @@ class ResultSet(object):
                 """,
                 (t, limit),
             )
-        for id, score, pred_score in cur:
-            # conf = conf_from_row(row[:8])
-            conf = self._confs[id]
-            results = Results(score, pred_score, self.num_runs_by_id(conf.id))
-            yield conf, results
+        for row in cur:
+            yield self._conf_results_by_id[row[0]]
 
-    def all_confs(self):
-        return self._confs.values()
-        # cur = self._db.execute(f"SELECT {CONF_FIELDS} FROM conf")
-        # for row in cur:
-        #     yield conf_from_row(row)
+    def get_confs(self):
+        for conf_results in self._conf_results_by_id.values():
+            yield conf_results.conf
 
-    def update_pred_scores(self, confs, scores):
+    def update_pred_scores(self, confs: Iterable[Configuration], scores):
         for conf, score in zip(confs, scores):
-            if conf.id is None:
-                conf = self._find_or_add_conf(conf)
+            conf_results = self._find_or_add_conf(conf)
+            conf_results.pred_score = score
             self._db.execute(
-                "UPDATE conf SET pred_score = ? WHERE id = ?", (score, conf.id)
+                "UPDATE conf SET pred_score = ? WHERE id = ?",
+                (score, conf_results.id),
             )
 
     def all_conf_runs(self):
-        for conf_id, conf_runs in self._runs.items():
-            conf = self._confs[conf_id]
-            for loss in conf_runs:
-                yield conf, loss
-        # cur = self._db.execute(f"SELECT {CONF_FIELDS} FROM conf")
-        # for row in cur:
-        #     conf = conf_from_row(row[:8])
-        #     conf_runs = self._runs.get(conf.id)
-        #     if conf_runs:
-        #         for loss in conf_runs:
-        #             yield conf, loss
+        for conf_results in self._all_conf_results_by_conf.values():
+            for run in conf_results.runs:
+                yield conf_results.conf, run.loss
 
     def has_runs(self, conf):
-        id = self.find_conf_id(conf)
-        # if id is None:
-        #     return False
-        return id in self._runs
-        # cur = self._db.execute(
-        #     "SELECT 1 FROM run WHERE conf_id = ? LIMIT 1", (id,)
-        # )
-        # return cur.fetchone() is not None
+        conf_results = self._all_conf_results_by_conf.get(conf)
+        return conf_results is not None and conf_results.runs
 
 
 def open_db(path):

@@ -1,21 +1,22 @@
-from collections import namedtuple
+import logging
 import math
-import numpy as np
-from sklearn.ensemble import HistGradientBoostingRegressor
+from collections import namedtuple
+from collections.abc import Iterable
 from statistics import median
 from typing import List
 
-from texmo.configuration import Configuration, conf_is_valid
-from texmo.common import NCHAR
-from texmo.model2 import Model2
-from texmo import latency
+import numpy as np
+from sklearn.ensemble import HistGradientBoostingRegressor
 
+from . import latency
+from .common import NCHAR, total_size
+from .configuration import Configuration, conf_is_valid
+from .model2 import Model2
+from .predict_common import MAX_LOSS
+from .results import ResultSet, ConfResults
+from .run import Run
 
-def total_size(shape):
-    prod = 1
-    for dim in shape:
-        prod *= dim
-    return prod
+MAX_LOG_LOSS = math.log2(MAX_LOSS)
 
 
 LayerStat = namedtuple(
@@ -56,74 +57,55 @@ def get_layer_stats(model):
     return layers
 
 
-# We don't care about precisely predicting loss above this value
-MAX_LOSS = 10
-SCALE_LOSS = 1.2
-
-
-def encode_loss(loss):
+def encode_loss(loss: np.ndarray):
+    if loss is None:
+        return None
     loss = np.minimum(loss, 2**16)
-    return np.tanh(np.log2(loss) / SCALE_LOSS)
-
-
-ENC_MAX_LOSS = encode_loss(MAX_LOSS)
+    loss = np.log2(loss)
+    return loss
 
 
 def decode_loss(loss):
-    loss = np.minimum(loss, ENC_MAX_LOSS)
-    return np.exp2(SCALE_LOSS * np.arctanh(loss))
+    if loss is None:
+        return None
+    loss = np.minimum(loss, MAX_LOG_LOSS)
+    return np.exp2(loss)
 
 
 class FeatureProvider(object):
     """Provides configuration features for loss prediction."""
 
-    def __init__(self, conf_runs):
-        # conf -> [losses]
-        self._runs = {}
+    def __init__(self, result_set: ResultSet):
+        assert isinstance(result_set, ResultSet)
+        self._result_set = result_set
         # conf -> median loss
-        self._scores = {}
+        self._conf_loss = {}
         self._spec_features_cache = {}
 
-        for conf, run_loss in conf_runs:
-            conf = conf._replace(id=None)
-            if conf not in self._runs:
-                self._runs[conf] = []
-            self._runs[conf].append(encode_loss(run_loss))
-        for conf, s in self._runs.items():
-            self._scores[conf] = median(s)
+        for conf_results in self._result_set.all_conf_results():
+            self._conf_loss[conf_results.conf] = encode_loss(
+                conf_results.median_score
+            )
 
-    # @staticmethod
-    # def _count_layer(spec: Model, name: str) -> int:
-    #     count = 0
-    #     for layer in spec.layers:
-    #         if layer.name == name:
-    #             count += 1
-    #     return count
+    @staticmethod
+    def _get_metaparameter_features(conf) -> list:
+        assert conf_is_valid(conf)
+        return [
+            math.log2(conf.lr),
+            math.log2(conf.sample_len),
+            math.log2(conf.batch),
+            math.log2(conf.t),
+            len(conf.model.layers),
+        ]
 
-    def _get_model_features(self, model: Model2) -> list:
-        # return []
+    def _get_layer_features(self, model: Model2) -> list:
         res = self._spec_features_cache.get(model)
         if res is not None:
             return res
 
         features = []
-        # features.append(math.log2(spec.weights()))
-        # features.append(self._count_layer(spec, "dense"))
-        # features.append(self._count_layer(spec, "rec"))
-        # features.append(self._count_layer(spec, "gru"))
-        # features.append(self._count_layer(spec, "mgru"))
-        # features.append(self._count_layer(spec, "lstm"))
-        # features.append(self._count_layer(spec, "suffix"))
-        # features.append(self._count_layer(spec, "attn"))
 
         stats = get_layer_stats(model)
-
-        # features.append(math.log2(stats[0].input))
-        # features.append(math.log2(stats[-1].output))
-        # features.append(math.log2(min(s.input for s in stats)))
-        # features.append(math.log2(min(s.input + s.state for s in stats)))
-        # features.append(math.log2(1 + sum(s.state for s in stats)))
-        # features.append(math.log2(1 + sum(s.suffix - 1 for s in stats)))
 
         layer_type_enc = {
             "dense.tanh": 1,
@@ -147,21 +129,9 @@ class FeatureProvider(object):
             suffix = None if stat.suffix is None else math.log2(stat.suffix)
             features.extend([layer_type, state, output, suffix])
 
-        features.append(len(model.layers))
-
         self._spec_features_cache[model] = features
 
         return features
-
-    @staticmethod
-    def _get_metaparameter_features(conf) -> list:
-        assert conf_is_valid(conf)
-        return [
-            math.log2(conf.lr),
-            math.log2(conf.sample_len),
-            math.log2(conf.batch),
-            math.log2(conf.t),
-        ]
 
     @staticmethod
     def _get_neighbors(conf):
@@ -172,6 +142,10 @@ class FeatureProvider(object):
             conf._replace(lr=conf.lr * 2),
             conf._replace(batch=conf.batch // 2),
             conf._replace(batch=conf.batch * 2),
+            conf._replace(sample_len=conf.sample_len // 2),
+            conf._replace(sample_len=conf.sample_len * 2),
+            conf._replace(sample_len=conf.sample_len // 2, batch=conf.batch * 2),
+            conf._replace(sample_len=conf.sample_len * 2, batch=conf.batch // 2),
             conf._replace(t=conf.t // 2, lr=conf.lr * 2),
             conf._replace(t=conf.t * 2, lr=conf.lr / 2),
             conf._replace(t=conf.t // 2, batch=conf.batch // 2),
@@ -186,47 +160,54 @@ class FeatureProvider(object):
         ]
 
     def _get_neighbor_features(self, conf) -> list:
-        conf = conf._replace(id=None)
         neighbors = self._get_neighbors(conf)
-        neighbor_scores = [self._scores.get(n) for n in neighbors]
+        neighbor_scores = [self._conf_loss.get(n) for n in neighbors]
+
+        neighbor_shorter = conf._replace(t=conf.t // 2)
+        results = self._result_set.get_conf_results(neighbor_shorter)
+        if results is None or not results.runs:
+            neighbor_scores.extend((None, None))
+        else:
+            steps = median(len(r.step_loss) for r in results.runs)
+            pred_score = median(
+                r.loss_trend.predict(2 * len(r.step_loss)) for r in results.runs
+            )
+            neighbor_scores.extend((math.log2(steps), pred_score))
+
         return neighbor_scores
 
-    def get_features(self, conf) -> np.array:
+    def get_dense_features(self, conf) -> np.array:
         return np.array(
             self._get_metaparameter_features(conf)
             + self._get_model_features(conf.model),
             dtype=np.float32,
         )
 
-    def get_sparse_features(self, conf) -> np.array:
+    def get_features(self, conf) -> np.array:
         return np.array(
-            self._get_model_features(conf.model)
-            + self._get_neighbor_features(conf)
-            + self._get_metaparameter_features(conf),
+            self._get_metaparameter_features(conf)
+            + self._get_layer_features(conf.model)
+            + self._get_neighbor_features(conf),
             dtype=np.float32,
         )
 
     def categorical(self) -> list:
-        return [True, False, False, False] * 4 + [False] * 18
+        return [False] * 5 + [True, False, False, False] * 4 + [False] * 19
 
-    def add_sample(self, conf, loss) -> list:
+    def update_conf_results(self, conf_results: ConfResults) -> list:
         """Add a new run.
 
         Returns the list of confs that need to be updated.
         """
-        conf = conf._replace(id=None)
-        if conf not in self._runs:
-            self._runs[conf] = []
-        self._runs[conf].append(encode_loss(loss))
-        self._scores[conf] = median(self._runs[conf])
-
-        for neighbor in self._get_neighbors(conf):
+        assert isinstance(conf_results, ConfResults)
+        self._conf_loss[conf_results.conf] = conf_results.median_score
+        for neighbor in self._get_neighbors(conf_results.conf):
             if conf_is_valid(neighbor):
                 yield neighbor
 
 
-class HistPredictor(object):
-    def __init__(self, feature_provider):
+class _HistPredictor(object):
+    def __init__(self, categorical_features: list[bool]):
         self.pred = HistGradientBoostingRegressor(
             loss="absolute_error",
             max_depth=None,
@@ -236,7 +217,7 @@ class HistPredictor(object):
             # learning_rate=0.1,
             warm_start=False,
             early_stopping=False,
-            categorical_features=feature_provider.categorical(),
+            categorical_features=categorical_features,
         )
 
     def _fit(self, xs, ys, sample_weight):
@@ -272,77 +253,70 @@ class HistPredictor(object):
 
 
 class Predictor(object):
-    def __init__(self, conf_runs):
-        self._runs = {}
-        conf_runs = list(conf_runs)
-        for conf, loss in conf_runs:
-            conf = conf._replace(id=None)
-            if conf not in self._runs:
-                self._runs[conf] = []
-            self._runs[conf].append(loss)
-        self._feature_provider = FeatureProvider(conf_runs)
-        self._predictor = HistPredictor(self._feature_provider)
+    def __init__(self, result_set: ResultSet):
+        assert isinstance(result_set, ResultSet)
+        self._result_set = result_set
+        self._feature_provider = FeatureProvider(result_set)
+        categorical_features = self._feature_provider.categorical()
+        self._predictor = _HistPredictor(categorical_features)
 
-    def add_sample(self, conf, loss) -> List[Configuration]:
-        if conf not in self._runs:
-            self._runs[conf] = []
-        self._runs[conf].append(loss)
-        return self._feature_provider.add_sample(conf, loss)
+    def update_conf_results(self, conf_results: ConfResults) -> List[Configuration]:
+        return self._feature_provider.update_conf_results(conf_results)
 
     def train(self):
         with latency.timer("Predictor.train"):
-            print("Retraining loss prediction.")
+            logging.info("Retraining loss prediction.")
 
             features = []
             sample_weight = []
             losses = []
-            for conf, conf_losses in self._runs.items():
-                for loss in conf_losses:
-                    features.append(
-                        self._feature_provider.get_sparse_features(conf)
-                    )
-                    sample_weight.append(conf.t)
-                    losses.append(loss)
+            for conf, loss in self._result_set.all_conf_runs():
+                features.append(self._feature_provider.get_features(conf))
+                sample_weight.append(conf.t)
+                assert loss is not None
+                assert loss > 0.1
+                losses.append(loss)
 
             features = np.array(features, dtype=np.float32)
+            logging.info("Features:\n" + str(features))
             sample_weight = np.array(sample_weight, dtype=np.float32)
             losses = np.array(losses, dtype=np.float32)
             losses = encode_loss(losses)
 
-            print("Prepared training data:", features.shape)
+            logging.info(f"Prepared training data: {features.shape}")
             self._predictor.fit(features, losses, sample_weight)
 
-            print("Evaluating")
+            logging.info("Evaluating")
             loss = self._predictor.loss(features, losses, sample_weight)
 
-            print("Loss on the training data:", loss)
+            logging.info(f"Loss on the training data: {loss}")
 
-    def predict(self, confs):
+    def predict(self, confs: Iterable[Configuration]):
         with latency.timer("Predictor.predict"):
             if len(confs) > 10000:
-                print("Preparing features")
+                logging.info("Preparing features")
             features = []
             for conf in confs:
-                features.append(
-                    self._feature_provider.get_sparse_features(conf)
-                )
+                features.append(self._feature_provider.get_features(conf))
 
             features = np.array(features, dtype=np.float32)
 
             if len(confs) > 10000:
-                print("Predicting")
+                logging.info("Predicting")
             pred_losses = decode_loss(self._predictor.predict(features))
 
             if len(confs) > 10000:
-                print("Adjusting losses using existing runs")
+                logging.info("Adjusting losses using existing runs")
             losses = []
             for conf, pred_loss in zip(confs, pred_losses):
-                conf = conf._replace(id=None)
-                runs = self._runs.get(conf)
-                if runs is not None:
-                    med_loss = median(runs)
-                    alt_loss = median(runs + [pred_loss])
-                    losses.append(min(med_loss, alt_loss))
+                conf_results = self._result_set.get_conf_results(conf)
+                if conf_results is not None:
+                    losses.append(
+                        median(
+                            [run.loss for run in conf_results.runs]
+                            + [pred_loss]
+                        )
+                    )
                 else:
                     losses.append(pred_loss)
 

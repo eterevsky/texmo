@@ -1,8 +1,12 @@
-from jax import numpy as jnp
+import logging
 from unittest import TestCase
+
+from jax import numpy as jnp
 
 from texmo.layers.attn import Attn
 from texmo.prng import Rng
+
+logging.disable(level=logging.ERROR)
 
 
 class AttnTest(TestCase):
@@ -21,9 +25,8 @@ class AttnTest(TestCase):
         out_fw = layer.forward(weights, input)
         out_fw_fs = layer._forward_from_step(weights, input)
 
-        self.assertTrue(jnp.linalg.norm(out - out_fw_fs) < 1E-5)
-        self.assertTrue(jnp.linalg.norm(out - out_fw) < 1E-5)
-
+        self.assertTrue(jnp.linalg.norm(out - out_fw_fs) < 1e-5)
+        self.assertTrue(jnp.linalg.norm(out - out_fw) < 1e-5)
 
     def test_forward_batch(self):
         layer = Attn(2, 2, 4, input_shape=(4,))
@@ -40,5 +43,4 @@ class AttnTest(TestCase):
         out_ff = layer._forward_batch_from_forward(weights, input)
         out_fs = layer._forward_batch_from_step(weights, input)
 
-        self.assertTrue(jnp.linalg.norm(out_ff - out_fs) < 1E-5)
-
+        self.assertTrue(jnp.linalg.norm(out_ff - out_fs) < 1e-5)

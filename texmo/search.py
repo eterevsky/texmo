@@ -1,14 +1,18 @@
 import logging
-import math
-from math import log2
 import random
+from math import log2
+from typing import Optional
 
 from . import latency
 from .common import INF
-from .configuration import conf_neighbors, conf_to_string
-from .results import ResultSet
+from .configuration import (Configuration, conf_neighbors, conf_to_dict,
+                            conf_to_string)
+from .model2 import Weights
 from .predict import Predictor
-
+from .pretrained import Checkpoint
+from .record import TrainingRecord
+from .results import ResultSet
+from .run import Run
 
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
 # with t = 2^k
@@ -18,45 +22,73 @@ RUNS_EXP = 0.6
 class Search(object):
     """Keep track of the configurations and selects what to try next."""
 
-    def __init__(self, db, template, init_conf, min_max_weights):
+    def __init__(
+        self, db, template, init_conf, min_max_weights, checkpoints_path: str = None
+    ):
         self._db = db
         self._template = template
         self._init_conf = init_conf
         self._min_max_weights = min_max_weights
+        self._checkpoints_path = checkpoints_path
 
         logging.info("Creaing ResultSet.")
         self._result_set = ResultSet(db, template)
         self._last_predictor_update = 0
 
         logging.info("Creating Predictor")
-        self._predictor = Predictor(self._result_set.all_conf_runs())
+        self._predictor = Predictor(self._result_set)
         if self._result_set.total_runs_count() > 0:
             self.train_predictor()
 
     def train_predictor(self):
         self._predictor.train()
-        print("Generating predicted losses for all confs")
-        all_confs = list(self._result_set.all_confs())
+        logging.info("Generating predicted losses for all confs")
+        all_confs = list(self._result_set.get_confs())
         pred_losses = self._predictor.predict(all_confs)
-        print("Populating predicted losses")
+        logging.info("Populating predicted losses")
         self._result_set.update_pred_scores(all_confs, pred_losses)
-        print("Pred scores ready")
+        logging.info("Pred scores ready")
         self._last_predictor_update = self._result_set.total_runs_count()
 
-    def add_record(self, record, step_loss):
+    def add_run(
+        self,
+        record: TrainingRecord,
+        conf: Configuration,
+        run: Run,
+        weights: Weights,
+        parent_checkpoint: Optional[Checkpoint],
+    ):
+        assert isinstance(record, TrainingRecord)
+        assert isinstance(conf, Configuration)
+        assert isinstance(run, Run)
         with latency.timer("Search.add_record"):
-            if abs(log2(record.planned_time_s) - log2(record.train_time_s)) > 0.1:
-                print("Bad training time, skipping")
+            if (
+                abs(log2(record.planned_time_s) - log2(record.train_time_s))
+                > 0.1
+            ):
+                logging.warn("Bad training time, skipping")
                 record.loss = INF
 
-            conf, loss = self._result_set.add_record(record, step_loss)
-            conf = conf._replace(id=None)
+            if parent_checkpoint is None:
+                checkpoint = Checkpoint(conf, run)
+            else:
+                checkpoint = parent_checkpoint.clone()
+                checkpoint.add_run(conf, run)
+
+            if (
+                self._checkpoints_path
+                and run.loss < 4.5
+                and run.loss < self._db.best_checkpoint_loss(conf.model)
+            ):
+                checkpoint.save(weights, self._checkpoints_path)
+
+            conf_results, loss = self._result_set.add_record(record, run)
             affected_confs = set()
-            for neighbor in self._predictor.add_sample(conf, loss):
+            for neighbor in self._predictor.update_conf_results(conf_results):
                 if self._template.match_conf(neighbor):
                     affected_confs.add(neighbor)
 
-            for neighbor in conf_neighbors(conf, self._template):
+            for neighbor in conf_neighbors(conf_results.conf, self._template):
                 affected_confs.add(neighbor)
 
             affected_confs = list(affected_confs)
@@ -95,7 +127,7 @@ class Search(object):
                 weights.append(0.6 * weights[-1])
 
                 runs = runs_count.get(t, 0)
-                ratio = runs / prev_runs
+                ratio = runs / (prev_runs + 1)
                 print(f"t = {t:3}  complete = {runs:5}  ratio = {ratio:.2f}")
                 prev_runs = runs
                 t *= 2
@@ -137,26 +169,25 @@ class Search(object):
 
     def _select_max_weights(self, t):
         with latency.timer("Search._select_max_weights"):
-            top_conf = self._result_set.top_conf(t)
-            if top_conf is None:
+            top_conf_results = self._result_set.top_conf(t)
+            if top_conf_results is None:
                 return self._min_max_weights
-            maxw = top_conf.model.weights
+            maxw = top_conf_results.conf.model.weights
             if self._min_max_weights >= maxw * 8:
                 return self._min_max_weights
-            l = random.uniform(
-                math.log2(self._min_max_weights), math.log2(maxw) + 3
-            )
+            l = random.uniform(log2(self._min_max_weights), log2(maxw) + 3)
             return int(2**l)
 
     def _select_by_pred_score(self, t: int, max_weights: int):
         with latency.timer("Search._select_by_pred_score"):
             confs = [(None, 0)]
-            for (conf, results) in self._result_set.top_pred_confs(t, max_weights):
+            for conf_results in self._result_set.top_pred_confs(t, max_weights):
                 i = len(confs)
-                confs.append((conf, results.num_runs))
+                confs.append((conf_results.conf, len(conf_results.runs)))
                 expected_runs = 1
                 while i > 0:
                     if confs[i][1] < expected_runs:
+                        assert self._template.match_conf(confs[i][0])
                         return i - 1, confs[i][0]
                     i //= 3
                     expected_runs += 1
@@ -165,51 +196,52 @@ class Search(object):
     def _select_neighbor(self, t: int, max_weights: int):
         """Select a neighbor of a top-scoring conf."""
         with latency.timer("Search._select_neighbor"):
-            for i, conf in enumerate(
+            for i, conf_results in enumerate(
                 self._result_set.top_confs(t, max_weights)
             ):
-                assert conf is not None
+                conf = conf_results.conf
                 neighbors = list(conf_neighbors(conf, self._template))
-                if neighbors is not None:
-                    random.shuffle(neighbors)
-                    for neighbor in neighbors:
-                        assert neighbor is not None
-                        assert neighbor != conf
-                        if not self._result_set.has_runs(neighbor):
-                            return i, neighbor, conf
+                random.shuffle(neighbors)
+                for neighbor in neighbors:
+                    assert neighbor is not None
+                    assert neighbor != conf
+                    if not self._result_set.has_runs(neighbor):
+                        return i, neighbor, conf
         return None, None, None
 
     def print_top_confs(self, t, max_weights):
         with latency.timer("Search.print_top_confs"):
             print(f"\nT = {t}  W ≤ {max_weights}\n")
 
-            for i, (conf, results) in enumerate(
+            for i, conf_results in enumerate(
                 self._result_set.top_pred_confs(t, max_weights, limit=20)
             ):
                 if i >= 20:
                     break
+
+                num_runs = len(conf_results.runs)
                 score = (
-                    f"{results.score:.4f} ({results.num_runs})"
-                    if results.score
+                    f"{conf_results.median_score:.4f} ({num_runs})"
+                    if conf_results.median_score
                     else "          "
                 )
-                if results.num_runs < 10:
+                if num_runs < 10:
                     score += " "
-                extras = ""
-                if conf.sample_len != 128:
-                    extras += f"  LEN {conf.sample_len}"
-                if conf.regularization != 0.125:
-                    extras += f"  R {conf.regularization}"
-                if conf.init_scale != 1.0:
-                    extras += f"  I {conf.init_scale}"
+                conf = conf_results.conf
                 print(
-                    f"{score} LR{conf.lr:6.3f}  B{conf.batch:4}  {conf.model}{extras}"
+                    f"{score}  LEN{conf.sample_len:4}  B{conf.batch:4}  LR{conf.lr:7.4f}  {conf.model}"
                 )
             print()
+
+    def _select_checkpoint(self, t):
+        pass
 
     def select_conf(self):
         with latency.timer("Search.select_conf"):
             t = self._select_time()
+            if False:
+                return self._select_checkpoint(t)
+
             if self._template.max_weights is None:
                 max_weights = self._select_max_weights(t)
             else:
@@ -218,18 +250,23 @@ class Search(object):
             self.print_top_confs(t, max_weights)
 
             ipred, pred_conf = self._select_by_pred_score(t, max_weights)
-            ineighbor, neighbor_conf, parent_conf = self._select_neighbor(t, max_weights)
+            ineighbor, neighbor_conf, parent_conf = self._select_neighbor(
+                t, max_weights
+            )
 
             if ipred is not None and (ineighbor is None or ineighbor >= ipred):
                 logging.info(f"Selecting conf top #{ipred} by predicted score.")
-                return pred_conf
-            
+                return pred_conf, None
+
             if ineighbor is not None and (ipred is None or random.randrange(2)):
                 c = conf_to_string(parent_conf)
-                logging.info(f"Selecting a neighbor or conf #{ineighbor} by median score: {c}")
-                return neighbor_conf
+                logging.info(
+                    f"Selecting a neighbor or conf #{ineighbor} by median score: {c}"
+                )
+                return neighbor_conf, None
             elif ipred is not None:
                 logging.info(f"Selecting conf top #{ipred} by predicted score.")
-                return pred_conf
+                return pred_conf, None
 
-            return self._init_conf._replace(t=t)
+            logging.info("Selecting default configuration")
+            return self._init_conf._replace(t=t), None

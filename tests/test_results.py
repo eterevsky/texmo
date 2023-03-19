@@ -1,19 +1,20 @@
-from unittest import main, TestCase
+import logging
+from unittest import TestCase, main
 
 from texmo import configuration
 from texmo.configuration import Configuration, Template
-from texmo.results import ResultSet
 from texmo.model2 import build_model
+from texmo.results import ResultSet
+from texmo.run import Run
+
+logging.disable(level=logging.ERROR)
 
 
 INIT_CONF = Configuration(
-    id=None,
     model=build_model("dense.1.relu"),
     lr=0.2,
     sample_len=128,
     batch=256,
-    regularization=0.1,
-    init_scale=1.0,
     t=1,
 )
 
@@ -23,8 +24,6 @@ TEMPLATE = Template(
     lr=0.2,
     sample_len=128,
     batch=None,
-    regularization=0.1,
-    init_scale=1.0,
     t=1,
 )
 
@@ -35,7 +34,7 @@ class ResultSetTest(TestCase):
 
     def test_add_run(self):
         results = ResultSet(result_db=None, template=TEMPLATE)
-        results.add_run(INIT_CONF, 1.5)
+        results.add_run_conf(INIT_CONF, Run(loss=1.5), update_scores=True)
 
         conf_id = results.find_conf_id(INIT_CONF)
 
@@ -49,9 +48,11 @@ class ResultSetTest(TestCase):
             result_db=None,
             template=TEMPLATE,
         )
-        results.add_run(INIT_CONF, 1)
-        results.add_run(
-            INIT_CONF._replace(model=build_model("dense.2.relu")), 2
+        results.add_run_conf(INIT_CONF, Run(loss=1), update_scores=True)
+        results.add_run_conf(
+            INIT_CONF._replace(model=build_model("dense.2.relu")),
+            Run(loss=2),
+            update_scores=True,
         )
 
         cur = results._db.execute(
@@ -64,13 +65,17 @@ class ResultSetTest(TestCase):
 
     def test_add_run3(self):
         results = ResultSet(result_db=None, template=TEMPLATE)
-        results.add_run(INIT_CONF, 1)
-        results.add_run(INIT_CONF, 1)
-        results.add_run(
-            INIT_CONF._replace(model=build_model("dense.2.relu")), 2
+        results.add_run_conf(INIT_CONF, Run(loss=1), update_scores=True)
+        results.add_run_conf(INIT_CONF, Run(loss=1), update_scores=True)
+        results.add_run_conf(
+            INIT_CONF._replace(model=build_model("dense.2.relu")),
+            Run(loss=2),
+            update_scores=True,
         )
-        results.add_run(
-            INIT_CONF._replace(model=build_model("dense.2.relu")), 2
+        results.add_run_conf(
+            INIT_CONF._replace(model=build_model("dense.2.relu")),
+            Run(loss=2),
+            update_scores=True,
         )
 
         cur = results._db.execute(
@@ -83,10 +88,12 @@ class ResultSetTest(TestCase):
 
     def test_update_all_scores(self):
         results = ResultSet(result_db=None, template=TEMPLATE)
-        results.add_run(INIT_CONF, 1, False)
-        results.add_run(INIT_CONF, 1.5, False)
-        results.add_run(INIT_CONF, 2, False)
-        results.add_run(INIT_CONF._replace(batch=512), 3, False)
+        results.add_run_conf(INIT_CONF, Run(loss=1), update_scores=False)
+        results.add_run_conf(INIT_CONF, Run(loss=1.5), update_scores=False)
+        results.add_run_conf(INIT_CONF, Run(loss=2), update_scores=False)
+        results.add_run_conf(
+            INIT_CONF._replace(batch=512), Run(loss=3), update_scores=False
+        )
 
         results.update_all_scores()
 
@@ -97,7 +104,7 @@ class ResultSetTest(TestCase):
 
     def test_update_all_neighbors(self):
         results = ResultSet(result_db=None, template=TEMPLATE)
-        results.add_run(INIT_CONF, 1, False)
+        results.add_run_conf(INIT_CONF, Run(loss=1), update_scores=False)
         results.update_all_scores()
         results.update_all_neighbors()
 

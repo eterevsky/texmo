@@ -1,26 +1,36 @@
-from .common import total_size, power2_neighbors
-from .prng import Rng
-
 import jax
 import jax.numpy as jnp
 from jax.numpy import DeviceArray
+from typing import Callable, Optional
+
+from .common import total_size, power2_neighbors
+from .prng import Rng
 
 
-LayerWeights = None | dict[DeviceArray]
-LayerState = None | DeviceArray | dict[DeviceArray]
+LayerWeights = Optional[dict[str, jnp.ndarray]]
+LayerState = Optional[jnp.ndarray | dict[str, jnp.ndarray]]
 
 
 class Layer(object):
+    name = "OVERRIDE"
+
     def __init__(self, input_shape: tuple[int]):
         # If step_batch() is not overridden, we'll vectorize step() and write it
         # here.
         self._step_batch = None
         self._forward_batch = None
-        self._forward_batch_impl = None
-        self._step_batch_impl = None
+        self._forward_batch_impl: Optional[
+            Callable[[LayerWeights, jnp.ndarray], jnp.ndarray]
+        ] = None
+        self._step_batch_impl: Optional[
+            Callable[
+                [LayerWeights, LayerState, jnp.ndarray],
+                tuple[LayerState, jnp.ndarray],
+            ]
+        ] = None
         self.input_shape: tuple[int] = input_shape
         self.input_size = total_size(self.input_shape)
-        self.output_shape: tuple[int] = None
+        self.output_shape: Optional[tuple[int]] = None
         # The number of the output steps from the previous layers on which
         # this layer depends. Should be 1 for dense and various recursive
         # layers, and length of the suffix for suffix and attn layers.
@@ -67,8 +77,8 @@ class Layer(object):
         return None
 
     def step(
-        self, weights: LayerWeights, state: LayerState, input: DeviceArray
-    ) -> tuple[LayerState, DeviceArray]:
+        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray
+    ) -> tuple[LayerState, jnp.ndarray]:
         """Make a single forward step on the input and return the new state and the output.
 
         Args:
@@ -80,8 +90,8 @@ class Layer(object):
         raise NotImplementedError
 
     def _step_batch_from_step(
-        self, weights: LayerWeights, states: LayerState, inputs: DeviceArray
-    ) -> tuple[LayerState, DeviceArray]:
+        self, weights: LayerWeights, states: LayerState, inputs: jnp.ndarray
+    ) -> tuple[LayerState, jnp.ndarray]:
         if self._step_batch_impl is None:
             self._step_batch_impl = jax.vmap(
                 self.step, in_axes=(None, 0, 0), out_axes=0
@@ -90,8 +100,8 @@ class Layer(object):
         return self._step_batch_impl(weights, states, inputs)
 
     def step_batch(
-        self, weights: LayerWeights, states: LayerState, inputs: DeviceArray
-    ) -> tuple[LayerState, DeviceArray]:
+        self, weights: LayerWeights, states: LayerState, inputs: jnp.ndarray
+    ) -> tuple[LayerState, jnp.ndarray]:
         """One character step on a batch of inputs.
 
         Args:
@@ -108,8 +118,8 @@ class Layer(object):
         return self._step_batch_from_step(weights, states, inputs)
 
     def _forward_from_step(
-        self, weights: LayerWeights, input: DeviceArray
-    ) -> DeviceArray:
+        self, weights: LayerWeights, input: jnp.ndarray
+    ) -> jnp.ndarray:
         _, out = jax.lax.scan(
             lambda state, v: self.step(weights, state, v),
             self.init_state(weights),
@@ -120,7 +130,7 @@ class Layer(object):
 
         return out
 
-    def forward(self, weights: LayerWeights, input: DeviceArray) -> DeviceArray:
+    def forward(self, weights: LayerWeights, input: jnp.ndarray) -> jnp.ndarray:
         """Make a forward pass on a single full sample.
 
         This method can be reimplemented in the layer class.
@@ -134,8 +144,8 @@ class Layer(object):
         return self._forward_from_step(weights, input)
 
     def _forward_batch_from_forward(
-        self, weights: LayerWeights, inputs: DeviceArray
-    ) -> DeviceArray:
+        self, weights: LayerWeights, inputs: jnp.ndarray
+    ) -> jnp.ndarray:
         if self._forward_batch_impl is None:
             self._forward_batch_impl = jax.vmap(
                 self.forward, in_axes=(None, 0), out_axes=0
@@ -143,8 +153,8 @@ class Layer(object):
         return self._forward_batch_impl(weights, inputs)
 
     def _forward_batch_from_step(
-        self, weights: LayerWeights, inputs: DeviceArray
-    ) -> DeviceArray:
+        self, weights: LayerWeights, inputs: jnp.ndarray
+    ) -> jnp.ndarray:
         batch_size = inputs.shape[0]
 
         init_state = self.init_state(weights)
@@ -169,8 +179,8 @@ class Layer(object):
     use_step_batch = False
 
     def forward_batch(
-        self, weights: LayerWeights, inputs: DeviceArray
-    ) -> DeviceArray:
+        self, weights: LayerWeights, inputs: jnp.ndarray
+    ) -> jnp.ndarray:
         """Make a forward pass on a batch of inputs.
 
         Args:

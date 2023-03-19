@@ -1,7 +1,11 @@
-import numpy as np
+import logging
 from unittest import TestCase
 
+import numpy as np
+
 from texmo.layers.dense import Dense
+
+logging.disable(level=logging.ERROR)
 
 
 class DenseTest(TestCase):

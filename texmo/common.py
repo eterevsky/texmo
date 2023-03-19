@@ -1,4 +1,12 @@
+from collections.abc import Iterable
+import logging
 import math
+
+
+logging.basicConfig(
+        format='[%(asctime)s.%(msecs)03d] %(message)s',
+        level=logging.INFO,
+        datefmt='%H:%M:%S')
 
 
 INF = float("inf")
@@ -7,7 +15,7 @@ NCHAR = 256
 
 def is_power2(x):
     if x <= 0: return False
-    if type(x) is int:
+    if isinstance(x, int):
         return x & (x - 1) == 0
     log = math.log2(x)
     return abs(log - round(log)) < 1E-10
@@ -24,11 +32,9 @@ def total_size(shape):
     return prod
 
 
-def power2_neighbors(x):
+def power2_neighbors(x: int) -> Iterable[int]:
     """Produce neighbor integer powers of 2."""
     if x == 1:
         return (2,)
     else:
         return (x // 2, x * 2)
-
-

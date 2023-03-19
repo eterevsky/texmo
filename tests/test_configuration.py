@@ -1,12 +1,11 @@
+import logging
 from unittest import TestCase
 
-from texmo.configuration import (
-    Configuration,
-    Template,
-    conf_neighbors,
-    conf_is_valid,
-)
+from texmo.configuration import (Configuration, Template, conf_is_valid,
+                                 conf_neighbors)
 from texmo.model2 import build_model
+
+logging.disable(level=logging.ERROR)
 
 
 class ConfigurationTest(TestCase):
@@ -16,19 +15,14 @@ class ConfigurationTest(TestCase):
             lr=None,
             sample_len=(0.2, 0.2),
             batch=(128, 256),
-            regularization=(0.125, 0.125),
-            init_scale=(1.0, 1.0),
             t=(1, 1),
         )
 
         conf = Configuration(
-            id=None,
             model=build_model("dense.1.relu"),
             lr=0.25,
             sample_len=128,
             batch=256,
-            regularization=0.125,
-            init_scale=1.0,
             t=1,
         )
         self.assertEqual(
@@ -49,19 +43,14 @@ class ConfigurationTest(TestCase):
             lr=None,
             sample_len=(128, 128),
             batch=(128, 256),
-            regularization=(0.125, 0.125),
-            init_scale=(1.0, 1.0),
             t=(1, 1),
         )
 
         conf = Configuration(
-            id=None,
             model=build_model("suffix.2"),
             lr=0.25,
             sample_len=128,
             batch=256,
-            regularization=0.125,
-            init_scale=1.0,
             t=1,
         )
         self.assertEqual(
@@ -76,13 +65,10 @@ class ConfigurationTest(TestCase):
 
     def test_conf_is_valid(self):
         conf = Configuration(
-            id=None,
             model=build_model("lstm.64-lstm.32"),
             lr=0.5,
             sample_len=128,
             batch=256,
-            regularization=0.125,
-            init_scale=1.0,
             t=1,
         )
         self.assertTrue(conf_is_valid(conf))

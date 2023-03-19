@@ -1,16 +1,17 @@
 from jax import numpy as jnp
+from jax.random import KeyArray
 import jax.random
-import random
-from typing import Sequence
+from random import randrange
+from typing import Optional, Sequence
 
 
 class Rng(object):
-    def __init__(self, key: jax.random.PRNGKey = None):
+    def __init__(self, key: Optional[KeyArray] = None):
         if key is None:
-            key = jax.random.PRNGKey(random.randrange(2**32))
-        self._key = key
+            key = jax.random.PRNGKey(randrange(2**32))
+        self._key: KeyArray = key
 
-    def gen(self) -> jax.random.PRNGKey:
+    def gen(self) -> KeyArray:
         self._key, out = jax.random.split(self._key)
         return out
 

@@ -1,22 +1,24 @@
 import math
+from io import StringIO
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-from io import StringIO
 
+from texmo.configuration import Template, conf_to_string
 from texmo.results import ResultSet
-from texmo.configuration import Configuration, Template, add_template_args
 
 
-def max_points(result_set, t, maxx):
+def max_points(result_set: ResultSet, t: int, maxx: int):
     x = []
     y = []
     min_loss = 5
 
-    for conf, results in result_set.all_results_by_weights():
-        if conf.t != t or not results.score:
+    for conf_results in result_set.get_results_by_weights():
+        conf = conf_results.conf
+        if conf.t != t or not conf_results.median_score:
             continue
-        if results.score > min_loss:
+        if conf_results.median_score > min_loss:
             continue
 
         weights = conf.model.weights
@@ -30,8 +32,8 @@ def max_points(result_set, t, maxx):
                 y.pop()
 
         x.append(weights)
-        y.append(results.score)
-        min_loss = results.score
+        y.append(conf_results.median_score)
+        min_loss = conf_results.median_score
 
     x.append(maxx)
     y.append(min_loss)
@@ -55,11 +57,13 @@ def draw_weight_loss_graph(result_set: ResultSet, template: Template):
     t = 1
     legends = []
 
-    top_conf = result_set.top_conf_all_t(template.t[0], template.t[1])
+    top_conf_results = result_set.top_conf_all_t(template.t[0], template.t[1])
 
     while t <= template.t[1]:
         if t >= template.t[0]:
-            x, y = max_points(result_set, t, top_conf.model.weights * 4)
+            x, y = max_points(
+                result_set, t, top_conf_results.conf.model.weights * 4
+            )
             ax.plot(x, y)
             legends.append(t)
         t *= 2
@@ -70,11 +74,16 @@ def draw_weight_loss_graph(result_set: ResultSet, template: Template):
     plt.show()
 
 
-def get_top_confs(result_set, template, min_max_weights):
+def get_top_confs(
+    result_set: ResultSet, template: Template, min_max_weights: int
+):
     top_confs = {}  # (weights_limit, planned_time_s) -> (conf, score)
     count = {}  # (weights_limit, planned_time_s) -> count
     tlo, thi = template.t
-    for conf, results in result_set.all_results_by_weights():
+    for conf_results in result_set.get_results_by_weights():
+        if not conf_results.runs:
+            continue
+        conf = conf_results.conf
         if not tlo <= conf.t <= thi:
             continue
         weights = conf.model.weights
@@ -82,18 +91,23 @@ def get_top_confs(result_set, template, min_max_weights):
             2 ** math.ceil(math.log2(weights)), min_max_weights
         )
         try:
-            count[(weights_bucket, conf.t)] += results.num_runs
+            count[(weights_bucket, conf.t)] += len(conf_results.runs)
         except KeyError:
-            count[(weights_bucket, conf.t)] = results.num_runs
+            count[(weights_bucket, conf.t)] = len(conf_results.runs)
 
         while weights_bucket < 2**33:
             key = (weights_bucket, conf.t)
             if key in top_confs:
                 top_conf, top_score = top_confs[key]
-                if results.score < top_score:
-                    top_confs[key] = (conf, results.score)
+                if (
+                    conf_results.median_score is not None
+                    and conf_results.median_score < top_score
+                ):
+                    assert conf_results.median_score is not None
+                    top_confs[key] = (conf, conf_results.median_score)
             else:
-                top_confs[key] = (conf, results.score)
+                assert conf_results.median_score is not None
+                top_confs[key] = (conf, conf_results.median_score)
             weights_bucket *= 2
 
     return top_confs, count
@@ -142,13 +156,9 @@ def print_top_confs(top_confs, run_count) -> str:
                 end="",
             )
             print(f"| {score:.4f} | ", file=out, end="")
-            print(f"B{conf.batch} LR{conf.lr}", file=out, end="")
+            print(f"B{conf.batch} LR{conf.lr:.4f}", file=out, end="")
             if conf.sample_len != 128:
                 print(f" LEN{conf.sample_len}", file=out, end="")
-            if conf.regularization != 0.125:
-                print(f" R{conf.regularization}", file=out, end="")
-            if conf.init_scale != 1.0:
-                print(f" i{conf.init_scale}", file=out, end="")
 
             print(" |", file=out)
 
@@ -162,17 +172,6 @@ def generate_report_by_weight(
     return print_top_confs(top_confs, run_count)
 
 
-def print_conf(conf):
-    extras = ""
-    if conf.sample_len != 128:
-        extras += f"  LEN {conf.sample_len}"
-    if conf.regularization != 0.125:
-        extras += f"  R {conf.regularization}"
-    if conf.init_scale != 1.0:
-        extras += f"  I {conf.init_scale}"
-    return f"{conf.model}   LR{conf.lr:.3f}  B{conf.batch}{extras}"
-
-
 def generate_max_report(result_set: ResultSet, template: Template) -> str:
     out = StringIO()
     lo, hi = template.t
@@ -184,11 +183,12 @@ def generate_max_report(result_set: ResultSet, template: Template) -> str:
         runs = runs_count.get(t, 0)
         print(f"\nT = {t:3}  runs = {runs:5}", file=out)
 
-        for conf, results in result_set.top_confs_by_score(t, limit=5):
-            score = f"{results.score:.4f} ({results.num_runs})"
-            if results.num_runs < 10:
+        for conf_results in result_set.top_confs_by_score(t, limit=5):
+            num_runs = len(conf_results.runs)
+            score = f"{conf_results.median_score:.4f} ({num_runs})"
+            if num_runs < 10:
                 score += " "
-            c = print_conf(conf)
+            c = conf_to_string(conf_results.conf)
             print(f"{score} {c}", file=out)
 
         t *= 2
@@ -196,32 +196,35 @@ def generate_max_report(result_set: ResultSet, template: Template) -> str:
     return out.getvalue()
 
 
-def generate_param_report(result_set: ResultSet, template: Template, extract_param, is_float=True) -> str:
+def generate_param_report(
+    result_set: ResultSet, template: Template, extract_param, is_float=True
+) -> str:
     out = StringIO()
     lo, hi = template.t
 
     t = lo
     while t <= hi:
-        top_confs = {}  # bucket -> (conf, score)
+        top_confs: dict = {}  # bucket -> (conf, score)
         count = {}  # bucket -> count
 
-        for conf, results in result_set.all_results_for_t(t):
+        for conf_results in result_set.all_results_for_t(t):
+            conf = conf_results.conf
             bucket = extract_param(conf)
 
             if bucket not in top_confs:
-                top_confs[bucket] = (conf, results.score)
-                count[bucket] =results.num_runs
+                top_confs[bucket] = (conf, conf_results.median_score)
+                count[bucket] = len(conf_results.runs)
             else:
-                if top_confs[bucket][1] > results.score:
-                    top_confs[bucket] = (conf, results.score)
+                if top_confs[bucket][1] > conf_results.median_score:
+                    top_confs[bucket] = (conf, conf_results.median_score)
 
-                count[bucket] += results.num_runs
+                count[bucket] += len(conf_results.runs)
 
-        print(f'\nT = {t}', file=out)
+        print(f"\nT = {t}", file=out)
         for bucket in sorted(top_confs.keys()):
             conf, score = top_confs[bucket]
             runs = count[bucket]
-            c = print_conf(conf)
+            c = conf_to_string(conf)
             if is_float:
                 b = f"{bucket:.3f}"
             else:

@@ -1,7 +1,7 @@
-from collections.abc import Iterable
 from datetime import datetime
 import math
 import numpy as np
+from typing import Optional
 
 
 def _round_time(t):
@@ -35,6 +35,7 @@ class TrainingRecord(object):
         final_time_s: int,
         loss_model_v: int,
         loss_model_params: np.ndarray,
+        checkpoint_id: Optional[int] = None,
     ):
         assert isinstance(timestamp, datetime)
         self.timestamp = timestamp
@@ -46,7 +47,7 @@ class TrainingRecord(object):
         # this is close to trin_time_s, but if a single optimization step
         # takes a long time, it could diverge.
         self.planned_time_s = planned_time_s
-        
+
         # In case this report is for a checkpoint in the longer optimization,
         # this is an eventual planned optimization time. Otherwise
         # == planned_time_s.
@@ -73,6 +74,8 @@ class TrainingRecord(object):
         self.test_batch = test_batch
         self.test_poisoned = test_poisoned
 
+        self.checkpoint_id: Optional[int] = checkpoint_id
+
     @property
     def train_data(self):
         return self.steps * self.train_sample_len * self.train_batch
@@ -84,7 +87,7 @@ class TrainingRecord(object):
             planned_time = f"{self.planned_time_s} s / {self.final_time_s} s"
 
         if self.loss_model_v == 1:
-            c = self.loss_model_params[0]
+            c = 2**self.loss_model_params[0]
             expected_loss = f" (expected -> {c:.4f})"
         else:
             expected_loss = ""
@@ -95,13 +98,12 @@ class TrainingRecord(object):
 Model: {self.model_spec}, {self.weights:,} weights
 Loss: loss {self.loss:.4f}{expected_loss}
 Training: {self.steps} steps, {self.train_time_s:.1f} s ({planned_time})
-B {self.train_batch}  LEN {self.train_sample_len}  LR {self.learning_rate}  R {self.regularization}  init {self.init_scale}
+B {self.train_batch}  LEN {self.train_sample_len}  LR {self.learning_rate}
 Training data: {train_data:.1f}M / {total_data:.1f}M
         """
 
     @staticmethod
     def from_csv_tuple(row):
-        assert 15 <= len(row) <= 17
         fields = {}
         fields["timestamp"] = datetime.fromisoformat(row[0])
         fields["model_spec"] = row[1]
@@ -124,9 +126,9 @@ Training data: {train_data:.1f}M / {total_data:.1f}M
             else int(row[16])
         )
         fields["final_time_s"] = (
-            fields["planned_time_s"] if len(row < 18) else int(row[17])
+            fields["planned_time_s"] if len(row) < 18 else int(row[17])
         )
-        fields["loss_model_v"] = 0 if len(row < 19) else int(row[18])
+        fields["loss_model_v"] = 0 if len(row) < 19 else int(row[18])
         if fields["loss_model_v"] > 0:
             assert len(row) >= 20
         fields["loss_model_params"] = (
@@ -134,6 +136,7 @@ Training data: {train_data:.1f}M / {total_data:.1f}M
             if fields["loss_model_v"] == 0
             else np.fromiter(map(float, row[19].split(",")), dtype=np.float32)
         )
+        fields["checkpoint_id"] = None if len(row) < 21 else row[20]
 
         return TrainingRecord(**fields)
 
@@ -163,4 +166,5 @@ Training data: {train_data:.1f}M / {total_data:.1f}M
             self.final_time_s,
             self.loss_model_v,
             loss_model_params,
+            self.checkpoint_id
         )

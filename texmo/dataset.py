@@ -34,12 +34,17 @@ class DataSet(object):
                 raise Exception(
                     "Directory with training data is currently not supported"
                 )
-            self._file = open(path, "rb")
+            self._file = os.open(path, os.O_RDONLY)
+            # self.all = mmap.mmap(
+            #     self._file.fileno(),
+            #     0,
+            #     flags=mmap.MAP_PRIVATE,
+            #     prot=mmap.PROT_READ,
+            # )
             self.all = mmap.mmap(
-                self._file.fileno(),
+                self._file,
                 0,
-                flags=mmap.MAP_PRIVATE,
-                prot=mmap.PROT_READ,
+                access=mmap.ACCESS_READ,
             )
 
             total = len(self.all) / 1e9

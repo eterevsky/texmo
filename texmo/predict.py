@@ -1,35 +1,22 @@
+import logging
+import math
 from collections import namedtuple
 from collections.abc import Iterable
-import math
-import numpy as np
-from sklearn.ensemble import HistGradientBoostingRegressor
 from statistics import median
 from typing import List
 
-from texmo.configuration import Configuration, conf_is_valid
-from texmo.confresults import Run
-from texmo.common import NCHAR, total_size
-from texmo import latency
-from texmo.model2 import Model2
-from texmo.results import ResultSet
+import numpy as np
+from sklearn.ensemble import HistGradientBoostingRegressor
 
+from . import latency
+from .common import NCHAR, total_size
+from .configuration import Configuration, conf_is_valid
+from .model2 import Model2
+from .predict_common import MAX_LOSS
+from .results import ResultSet, ConfResults
+from .run import Run
 
-# We aren't differentiating losses above 10 bits per byte.
-MIN_LOSS = 0.1
-MAX_LOSS = 10
 MAX_LOG_LOSS = math.log2(MAX_LOSS)
-
-
-def prediction_score(true_losses, predicted_losses):
-    n = len(true_losses)
-    assert len(predicted_losses) == n
-
-    all_losses = np.concatenate((true_losses, predicted_losses))
-    all_losses = np.minimum(all_losses, MAX_LOSS)
-    all_losses = np.maximum(all_losses, MIN_LOSS)
-    all_losses = np.log2(all_losses)
-
-    return np.average(np.abs(all_losses[:n] - all_losses[n:]))
 
 
 LayerStat = namedtuple(
@@ -71,14 +58,16 @@ def get_layer_stats(model):
 
 
 def encode_loss(loss: np.ndarray):
-    if loss is None: return None
+    if loss is None:
+        return None
     loss = np.minimum(loss, 2**16)
     loss = np.log2(loss)
     return loss
 
 
 def decode_loss(loss):
-    if loss is None: return None
+    if loss is None:
+        return None
     loss = np.minimum(loss, MAX_LOG_LOSS)
     return np.exp2(loss)
 
@@ -93,7 +82,7 @@ class FeatureProvider(object):
         self._conf_loss = {}
         self._spec_features_cache = {}
 
-        for conf_results in self._result_set._confs.values():
+        for conf_results in self._result_set.all_conf_results():
             self._conf_loss[conf_results.conf] = encode_loss(
                 conf_results.median_score
             )
@@ -153,6 +142,10 @@ class FeatureProvider(object):
             conf._replace(lr=conf.lr * 2),
             conf._replace(batch=conf.batch // 2),
             conf._replace(batch=conf.batch * 2),
+            conf._replace(sample_len=conf.sample_len // 2),
+            conf._replace(sample_len=conf.sample_len * 2),
+            conf._replace(sample_len=conf.sample_len // 2, batch=conf.batch * 2),
+            conf._replace(sample_len=conf.sample_len * 2, batch=conf.batch // 2),
             conf._replace(t=conf.t // 2, lr=conf.lr * 2),
             conf._replace(t=conf.t * 2, lr=conf.lr / 2),
             conf._replace(t=conf.t // 2, batch=conf.batch // 2),
@@ -164,12 +157,23 @@ class FeatureProvider(object):
                 lr=conf.lr * 2,
                 model=conf.model.remove_last_layer(),
             ),
-            # conf,
         ]
 
     def _get_neighbor_features(self, conf) -> list:
         neighbors = self._get_neighbors(conf)
         neighbor_scores = [self._conf_loss.get(n) for n in neighbors]
+
+        neighbor_shorter = conf._replace(t=conf.t // 2)
+        results = self._result_set.get_conf_results(neighbor_shorter)
+        if results is None or not results.runs:
+            neighbor_scores.extend((None, None))
+        else:
+            steps = median(len(r.step_loss) for r in results.runs)
+            pred_score = median(
+                r.loss_trend.predict(2 * len(r.step_loss)) for r in results.runs
+            )
+            neighbor_scores.extend((math.log2(steps), pred_score))
+
         return neighbor_scores
 
     def get_dense_features(self, conf) -> np.array:
@@ -188,14 +192,14 @@ class FeatureProvider(object):
         )
 
     def categorical(self) -> list:
-        return [False] * 5 + [True, False, False, False] * 4 + [False] * 13
+        return [False] * 5 + [True, False, False, False] * 4 + [False] * 19
 
-    def add_sample(self, conf_results, run) -> list:
+    def update_conf_results(self, conf_results: ConfResults) -> list:
         """Add a new run.
 
         Returns the list of confs that need to be updated.
         """
-
+        assert isinstance(conf_results, ConfResults)
         self._conf_loss[conf_results.conf] = conf_results.median_score
         for neighbor in self._get_neighbors(conf_results.conf):
             if conf_is_valid(neighbor):
@@ -248,63 +252,20 @@ class _HistPredictor(object):
         return np.sum(error) / np.sum(sample_weight)
 
 
-class AveragePredictor(object):
-    """Predictor based on the previous runs."""
-
-    def __init__(self, result_set):
-        self._result_set = result_set
-
-    def train(self):
-        pass
-
-    def predict(self, confs):
-        with latency.timer("MedianPredictor.predict"):
-            losses = []
-            for conf in confs:
-                conf_results = self._result_set.find_conf_results(conf)
-                if conf_results is None or not conf_results.runs:
-                    losses.append(3)
-                else:
-                    # losses.append(median(r.loss for r in conf_results.runs))
-                    l = [
-                        math.log2(min(r.loss, MAX_LOSS))
-                        for r in conf_results.runs
-                    ]
-                    losses.append(2 ** (sum(l) / len(l)))
-
-            return losses
-
-
-class Predictor3(object):
-    """Predictor based on the previous runs."""
-
-    def __init__(self, result_set):
-        self._result_set = result_set
-
-    def train(self):
-        pass
-
-    def predict(self, confs):
-        with latency.timer("Predictor3.predict"):
-            losses = []
-            for conf in confs:
-                losses.append(3)
-            return losses
-
-
 class Predictor(object):
-    def __init__(self, result_set):
+    def __init__(self, result_set: ResultSet):
+        assert isinstance(result_set, ResultSet)
         self._result_set = result_set
         self._feature_provider = FeatureProvider(result_set)
         categorical_features = self._feature_provider.categorical()
         self._predictor = _HistPredictor(categorical_features)
 
-    def add_sample(self, conf: Configuration, run: Run) -> List[Configuration]:
-        return self._feature_provider.add_sample(conf, run)
+    def update_conf_results(self, conf_results: ConfResults) -> List[Configuration]:
+        return self._feature_provider.update_conf_results(conf_results)
 
     def train(self):
         with latency.timer("Predictor.train"):
-            print("Retraining loss prediction.")
+            logging.info("Retraining loss prediction.")
 
             features = []
             sample_weight = []
@@ -317,23 +278,23 @@ class Predictor(object):
                 losses.append(loss)
 
             features = np.array(features, dtype=np.float32)
-            print(features)
+            logging.info("Features:\n" + str(features))
             sample_weight = np.array(sample_weight, dtype=np.float32)
             losses = np.array(losses, dtype=np.float32)
             losses = encode_loss(losses)
 
-            print("Prepared training data:", features.shape)
+            logging.info(f"Prepared training data: {features.shape}")
             self._predictor.fit(features, losses, sample_weight)
 
-            print("Evaluating")
+            logging.info("Evaluating")
             loss = self._predictor.loss(features, losses, sample_weight)
 
-            print("Loss on the training data:", loss)
+            logging.info(f"Loss on the training data: {loss}")
 
     def predict(self, confs: Iterable[Configuration]):
         with latency.timer("Predictor.predict"):
             if len(confs) > 10000:
-                print("Preparing features")
+                logging.info("Preparing features")
             features = []
             for conf in confs:
                 features.append(self._feature_provider.get_features(conf))
@@ -341,20 +302,22 @@ class Predictor(object):
             features = np.array(features, dtype=np.float32)
 
             if len(confs) > 10000:
-                print("Predicting")
+                logging.info("Predicting")
             pred_losses = decode_loss(self._predictor.predict(features))
 
             if len(confs) > 10000:
-                print("Adjusting losses using existing runs")
+                logging.info("Adjusting losses using existing runs")
             losses = []
             for conf, pred_loss in zip(confs, pred_losses):
                 conf_results = self._result_set.get_conf_results(conf)
                 if conf_results is not None:
-                    losses.append(median([run.loss for run in conf_results.runs] + [pred_loss]))
+                    losses.append(
+                        median(
+                            [run.loss for run in conf_results.runs]
+                            + [pred_loss]
+                        )
+                    )
                 else:
                     losses.append(pred_loss)
 
             return losses
-
-
-# Predictor = AveragePredictor

@@ -5,7 +5,7 @@ import numpy as np
 
 from texmo.common import INF
 from texmo import latency
-from texmo.predict import prediction_score
+from texmo.predict_common import prediction_score
 from texmo.resultdb import ResultDB
 from texmo.steploss import StepLossPredictor
 
@@ -37,7 +37,7 @@ def main(db):
             predictor = StepLossPredictor()
             predictor.fit(step_loss[:len(step_loss) // 2])
             predicted_losses.append(predictor.predict(len(step_loss) - 1))
-    
+
     logging.info("Completed steploss models")
 
     losses = np.stack((true_losses, predicted_losses))

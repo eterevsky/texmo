@@ -1,35 +1,38 @@
-from collections.abc import Iterable
 import csv
 import math
-import numpy as np
 import os
 import sqlite3
+from collections.abc import Iterable
+from typing import Optional
 
-from .configuration import (
-    CONF_FIELDS,
-    Configuration,
-    conf_from_record,
-    conf_from_row,
-    conf_is_valid,
-    INF,
-    Template,
-)
-from .confresults import Run
+import numpy as np
+
 from . import latency
+from .common import INF
+from .configuration import (Configuration, Template, conf_from_dict,
+                            conf_from_record, conf_is_valid, conf_to_dict)
+from .model2 import build_model, Model2
 from .record import TrainingRecord
-from .model2 import build_model
+from .run import Run, build_loss_trend
 
 
-def _pack_step_loss(step_loss):
-    if step_loss is None:
-        return None
-    return np.array(step_loss, dtype=np.float32).tobytes()
+def _pack_ndarray(step_loss):
+    step_loss = np.array(step_loss, dtype=np.float32)
+    return step_loss.tobytes()
 
 
-def _unpack_step_loss(blob):
+def _unpack_ndarray(blob):
     if blob is None:
         return None
-    return np.frombuffer(blob, dtype=np.float32)
+    if len(blob) == 24:
+        return np.frombuffer(blob, dtype=np.float64)
+    else:
+        return np.frombuffer(blob, dtype=np.float32)
+
+
+def _dict_row_factory(cursor, row):
+    fields = [column[0] for column in cursor.description]
+    return {key: value for key, value in zip(fields, row)}
 
 
 class ResultDB(object):
@@ -45,55 +48,44 @@ class ResultDB(object):
             with open(schema_path) as schema:
                 self._db.executescript(schema.read())
                 self._db.commit()
+        self._db.row_factory = _dict_row_factory
 
     def find_or_add_conf(self, conf: Configuration) -> int:
         """Finds the conf in the db and returns the configuration id."""
-        spec = str(conf.model)
 
-        conf_tuple = (
-            spec,
-            conf.lr,
-            conf.sample_len,
-            conf.batch,
-            conf.regularization,
-            conf.init_scale,
-            conf.t,
-            conf.model.weights,
-        )
+        conf_dict = conf_to_dict(conf)
+        conf_dict["weights"] = conf.model.weights
 
         cur = self._db.execute(
             """
             SELECT id FROM conf
-            WHERE spec = ?
-              AND lr = ?
-              AND sample_len = ?
-              AND batch = ?
-              AND regularization = ?
-              AND init_scale = ?
-              AND t = ?
-              AND weights = ?
+            WHERE spec = :spec
+              AND lr = :lr
+              AND sample_len = :sample_len
+              AND batch = :batch
+              AND t = :t
+              AND weights = :weights
             """,
-            conf_tuple,
+            conf_dict,
         )
         rows = cur.fetchall()
         assert len(rows) <= 1
         if rows:
-            return rows[0][0]
+            return rows[0]["id"]
         else:
             cur = self._db.execute(
                 """
-                INSERT INTO conf (spec, lr, sample_len, batch, regularization,
-                                init_scale, t, weights)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO conf (spec, lr, sample_len, batch, t, weights)
+                VALUES (:spec, :lr, :sample_len, :batch, :t, :weights)
                 """,
-                conf_tuple,
+                conf_dict,
             )
             return cur.lastrowid
 
     def add_record(
         self,
         record: TrainingRecord,
-        step_loss: Iterable[float] = None,
+        run: Run,
         commit: bool = True,
         skip_invalid: bool = False,
     ):
@@ -103,21 +95,26 @@ class ResultDB(object):
                 return
             raise Exception(f"Invalid configuration: {conf}")
 
-        id = self.find_or_add_conf(conf)
+        conf_id = self.find_or_add_conf(conf)
         row = {
-            "conf_id": id,
+            "conf_id": conf_id,
             "timestamp": record.timestamp,
             "test_sample_len": record.test_sample_len,
             "test_batch": record.test_batch,
-            "loss": record.loss,
-            "step_loss": _pack_step_loss(step_loss),
+            "loss": run.loss,
+            "step_loss": _pack_ndarray(run.step_loss),
+            "loss_model_v": run.loss_trend.version,
+            "loss_model": _pack_ndarray(run.loss_trend.params()),
+            "checkpoint": run.checkpoint if run.checkpoint else None,
         }
         if math.isnan(record.loss) or record.loss is None:
             row["loss"] = INF
         self._db.execute(
             """
-            INSERT INTO run(conf_id, timestamp, test_sample_len, test_batch, loss, step_loss)
-            VALUES(:conf_id, :timestamp, :test_sample_len, :test_batch, :loss, :step_loss)
+            INSERT INTO run(conf_id, timestamp, test_sample_len, test_batch,
+                            loss, step_loss, loss_model_v, loss_model, checkpoint)
+            VALUES(:conf_id, :timestamp, :test_sample_len, :test_batch,
+                   :loss, :step_loss, :loss_model_v, :loss_model, :checkpoint)
             """,
             row,
         )
@@ -125,7 +122,7 @@ class ResultDB(object):
             with latency.timer("ResultDB.add_record-commit"):
                 self._db.commit()
 
-    def get_confs_runs(self, template=None, load_step_loss=False):
+    def get_confs_runs(self, template=None):
         """Iterates through all confs that match template."""
         if template is None:
             template = Template()
@@ -150,33 +147,54 @@ class ResultDB(object):
         _add_constraint("lr", template.lr)
         _add_constraint("sample_len", template.sample_len)
         _add_constraint("batch", template.batch)
-        _add_constraint("regularization", template.regularization)
-        _add_constraint("init_scale", template.init_scale)
         _add_constraint("t", template.t)
 
         condition = " AND ".join(conditions)
         if condition != "":
-            condition = " AND " + condition
+            condition = "AND " + condition
 
-        query = (
-            f"SELECT conf.id, {CONF_FIELDS}, run.loss, run.step_loss, run.id "
-            + "FROM conf, run "
-            + f"WHERE conf.id = run.conf_id{condition}"
-        )
+        query = f"""
+            SELECT conf.id AS conf_id,
+                   spec,
+                   lr,
+                   sample_len,
+                   batch,
+                   t,
+                   run.id AS run_id,
+                   run.loss AS loss,
+                   run.step_loss AS step_loss,
+                   run.loss_model_v AS loss_model_v,
+                   run.loss_model AS loss_model
+            FROM conf, run
+            WHERE conf.id = run.conf_id {condition}
+        """
 
         cur = self._db.execute(query, bindings)
 
         for row in cur:
             try:
-                model = build_model(row[1])
+                model = build_model(row["spec"])
             except KeyError:
                 continue
             if template.match_model(model):
-                conf = conf_from_row(row[1:8])
-                run = Run(row[8], _unpack_step_loss(row[9]), id=row[10])
+                conf = conf_from_dict(row)
+                step_loss = _unpack_ndarray(row["step_loss"])
+
+                loss_trend = build_loss_trend(
+                    step_loss,
+                    row["loss_model_v"],
+                    _unpack_ndarray(row["loss_model"]),
+                )
+
+                run = Run(
+                    id=row["run_id"],
+                    step_loss=step_loss,
+                    loss=row["loss"],
+                    loss_trend=loss_trend,
+                )
                 assert run.loss > 0.1
                 if conf_is_valid(conf):
-                    yield row[0], conf, run
+                    yield row["conf_id"], conf, run
 
     def get_runs_with_step_loss(self) -> Iterable[Run]:
         cur = self._db.execute(
@@ -188,7 +206,28 @@ class ResultDB(object):
         )
 
         for row in cur:
-            yield Run(row[0], _unpack_step_loss(row[1]))        
+            yield Run(row[0], _unpack_ndarray(row[1]))
+
+    def best_checkpoint_loss(self, model: Model2) -> float:
+        cur = self._db.execute(
+            """
+            SELECT MIN(run.loss) AS loss FROM conf, run
+            WHERE conf.spec = :spec
+              AND run.conf_id = conf.id
+              AND run.checkpoint IS NOT NULL
+            """,
+            {"spec": str(model)}
+        )
+
+        res = cur.fetchall()[0]["loss"]
+        return INF if res is None else res
+
+    # def get_checkpoints(self) -> Iterable[tuple[Configuration, Run]]:
+    #     cur = self._db.execute(
+    #         """
+    #         SELECT
+    #         """
+    #     )
 
 
 def import_from_csv(result_db, filename):

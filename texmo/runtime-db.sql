@@ -5,10 +5,9 @@ CREATE TABLE conf (
     lr REAL NOT NULL,
     sample_len INTEGER NOT NULL,
     batch INTEGER NOT NULL,
-    regularization REAL NOT NULL,
-    init_scale REAL NOT NULL,
     t INTEGER NOT NULL,
     weights INTEGER NOT NULL,
+    checkpoint_id INTEGER,
 
     -- Cached self-score (median of run scores for this conf)
     score REAL,
@@ -33,6 +32,7 @@ CREATE INDEX neighbor_conf2_id ON neighbor(conf2_id);
 CREATE TABLE run (
     conf_id INTEGER NOT NULL,
     loss REAL NOT NULL,
+    checkpoint TEXT,
     FOREIGN KEY (conf_id) REFERENCES conf(id)
 );
 

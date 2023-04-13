@@ -1,9 +1,12 @@
+import logging
 from unittest import TestCase
 
 from texmo.configuration import Configuration
 from texmo.dataset import build_fake_dataset
 from texmo.manager import Manager
 from texmo.model2 import build_model
+
+logging.disable(level=logging.ERROR)
 
 
 class ManagerTest(TestCase):
@@ -14,18 +17,12 @@ class ManagerTest(TestCase):
             lr=0.125,
             sample_len=32,
             batch=8,
-            regularization=0.125,
-            init_scale=1.0,
             t=1,
         )
         manager = Manager(conf)
         manager.init()
 
-        train_time = manager.train(
-            steps=30, time_limit=None, train_set=dataset, quiet=True
-        )
-        self.assertGreater(train_time, 0.9)
-        self.assertLess(train_time, 1.2)
+        manager.train(steps=30, time_limit=None, train_set=dataset, quiet=True)
 
         loss = manager.eval(dataset)
         self.assertLess(loss, 2)

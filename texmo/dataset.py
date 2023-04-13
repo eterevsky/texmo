@@ -14,7 +14,7 @@ def _worker(all, request_queue, data_queues):
         length, batch_size = request_queue.get()
         if length is None or batch_size is None:
             break
-        with latency.timer(f"dataset-worker"):
+        with latency.timer("dataset-worker"):
             batch = []
             for _ in range(batch_size):
                 start = random.randrange(len(all) - length)
@@ -25,7 +25,9 @@ def _worker(all, request_queue, data_queues):
 
 
 class DataSet(object):
-    def __init__(self, path: Optional[str] = None, data: Optional[bytes] = None):
+    def __init__(
+        self, path: Optional[str] = None, data: Optional[bytes] = None
+    ):
         self.all: bytes | mmap.mmap = b""
         if path is not None:
             assert data is None
@@ -79,7 +81,7 @@ class DataSet(object):
             self._data_queues[key] = Queue()
             self._request_queue.put(key)
 
-        with latency.timer(f"DataSet.sample"):
+        with latency.timer("DataSet.sample"):
             self._request_queue.put(key)
             return self._data_queues[key].get()
 

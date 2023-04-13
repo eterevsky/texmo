@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax.numpy import DeviceArray
 
-from ..common import is_power2_int
+from ..common import is_power2_int, total_size
 from ..layer import Layer, LayerState, LayerWeights
 from ..prng import Rng
 from .registry import layer_cls
@@ -12,14 +12,18 @@ from .registry import layer_cls
 class Gru(Layer):
     name = "gru"
 
-    def __init__(self, size, input_shape=None, tanh=False, relu=False):
+    def __init__(self, size, input_shape=None, tanh=False, relu=False, skip=False):
         super().__init__(input_shape=input_shape)
         self.size = size
         self.output_shape = (size,)
         self._no_activation = not tanh and not relu
+        if skip:
+            assert total_size(input_shape) == total_size(self.output_shape)
+        self._skip = skip
 
     def __str__(self) -> str:
-        return f"gru.{self.size}"
+        skip = ".skip" if self._skip else ""
+        return f"gru.{self.size}{skip}"
 
     def is_valid(self) -> bool:
         return self._no_activation and is_power2_int(self.size)
@@ -42,7 +46,7 @@ class Gru(Layer):
         return jnp.zeros((self.size,))
 
     def step(
-        self, weights: LayerWeights, state: LayerState, input: DeviceArray
+        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray
     ) -> tuple[LayerState, DeviceArray]:
         input = input.flatten()
         input_state = jnp.concatenate((input, state))
@@ -56,7 +60,11 @@ class Gru(Layer):
         hc = jnp.tanh(hc)
 
         state = (1 - z) * state + z * hc
-        return state, state
+        if self._skip:
+            out = state + input
+        else:
+            out = state
+        return state, out
 
 
 @layer_cls

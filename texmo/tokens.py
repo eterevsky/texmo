@@ -1,9 +1,13 @@
 from collections import deque
+from collections.abc import Iterable
 import math
 import mmap
 from operator import itemgetter
 import os
 import sys
+from typing import Self
+
+import numpy as np
 
 
 def _sort_and_prune(substrings: dict[bytes, int], n: int) -> dict[bytes, int]:
@@ -43,98 +47,276 @@ def find_frequent_substrings(data: bytes, n: int) -> dict[bytes, int]:
     return substrings
 
 
-def tokenize(data: bytes, tokens: list[bytes], minimize_non_tokens=True):
-    max_token_len = max(len(t) for t in tokens)
-    print("max_token_len:", max_token_len)
-    tokens = set(tokens)
+# def tokenize(data: bytes, tokens: list[bytes], minimize_non_tokens=True):
+#     max_token_len = max(len(t) for t in tokens)
+#     print("max_token_len:", max_token_len)
+#     tokens = set(tokens)
 
-    # (optimal jump back, total non-token chars, total tokens, best jump forward from lo)
-    state = deque([[None, 0, 0, None]])
-    lo = 0
-    steps_with_same_lo_jump = 0
-    for hi in range(1, len(data) + 1):
-        best_jump = 1
-        if data[hi - 1 : hi] in tokens:
-            best_non_tokens = state[-1][1]
-            best_tokens = state[-1][2] + 1
-        else:
-            best_non_tokens = state[-1][1] + 1
-            best_tokens = state[-1][2]
-        best_lo_forward_jump = 1 if len(state) == 1 else state[-1][3]
+#     letter_tokens = [False for c in range(0, 256)]
+#     for t in tokens:
+#         if len(t) == 1:
+#             letter_tokens[t[0]] = True
 
-        for jump in range(2, min(max_token_len, len(state)) + 1):
-            if data[hi - jump : hi] not in tokens:
-                continue
-            non_tokens = state[-jump][1]
-            ntokens = state[-jump][2] + 1
+#     # (optimal jump back, total non-token chars, total tokens, best jump forward from lo)
+#     state = deque([[None, 0, 0, None]])
+#     lo = 0
+#     steps_with_same_lo_jump = 0
+#     for hi in range(1, len(data) + 1):
+#         _, prev_non_tokens, prev_tokens, prev_lo_jump = state[-1]
 
-            if (
-                minimize_non_tokens
-                and (
-                    non_tokens < best_non_tokens
-                    or (non_tokens == best_non_tokens and ntokens < best_tokens)
-                )
-            ) or (
-                not minimize_non_tokens
-                and non_tokens + ntokens < best_non_tokens + best_tokens
-            ):
-                best_jump = jump
-                best_non_tokens = non_tokens
-                best_tokens = ntokens
-                best_lo_forward_jump = (
-                    jump if jump == len(state) else state[-jump][3]
-                )
+#         best_jump = 1
+#         if letter_tokens[data[hi - 1]]:
+#             best_non_tokens = prev_non_tokens
+#             best_tokens = prev_tokens + 1
+#         else:
+#             best_non_tokens = prev_non_tokens + 1
+#             best_tokens = prev_tokens
+#         best_lo_jump = 1 if len(state) == 1 else prev_lo_jump
 
-        if best_lo_forward_jump == state[-1][3]:
-            steps_with_same_lo_jump += 1
-        else:
-            steps_with_same_lo_jump = 1
+#         for jump in range(2, min(max_token_len, len(state)) + 1):
+#             if data[hi - jump : hi] not in tokens:
+#                 continue
+#             _, back_non_tokens, back_tokens, back_lo_jump = state[-jump]
+#             non_tokens = back_non_tokens
+#             ntokens = back_tokens + 1
 
-        assert best_jump <= max_token_len
-        state.append(
-            [best_jump, best_non_tokens, best_tokens, best_lo_forward_jump]
+#             if (
+#                 minimize_non_tokens
+#                 and (
+#                     non_tokens < best_non_tokens
+#                     or (non_tokens == best_non_tokens and ntokens < best_tokens)
+#                 )
+#             ) or (
+#                 not minimize_non_tokens
+#                 and non_tokens + ntokens < best_non_tokens + best_tokens
+#             ):
+#                 best_jump = jump
+#                 best_non_tokens = non_tokens
+#                 best_tokens = ntokens
+#                 best_lo_jump = jump if jump == len(state) else back_lo_jump
+
+#         if best_lo_jump == prev_lo_jump:
+#             steps_with_same_lo_jump += 1
+#         else:
+#             steps_with_same_lo_jump = 1
+
+#         assert best_jump <= max_token_len
+#         state.append([best_jump, best_non_tokens, best_tokens, best_lo_jump])
+
+#         if steps_with_same_lo_jump >= max_token_len:
+#             yield data[lo : lo + best_lo_jump]
+#             lo += best_lo_jump
+#             for _ in range(best_lo_jump):
+#                 state.popleft()
+#             state[0][3] = None
+#             for pos in range(1, len(state)):
+#                 jump = state[pos][0]
+#                 if jump > pos:
+#                     state[pos][3] = None
+#                 elif jump == pos:
+#                     state[pos][3] = jump
+#                 else:
+#                     state[pos][3] = state[pos - jump][3]
+#             steps_with_same_lo_jump = 0
+#             for pos_state in reversed(state):
+#                 if pos_state[3] == state[-1][3]:
+#                     steps_with_same_lo_jump += 1
+#                 else:
+#                     break
+
+#     jumps = []
+#     pos = len(state) - 1
+#     while pos > 0:
+#         jump = state[pos][0]
+#         pos -= jump
+#         jumps.append(jump)
+
+#         assert pos >= 0
+
+#         if data[lo + pos : lo + pos + jump] in tokens:
+#             assert state[pos][1] == state[pos + jump][1]
+#             assert state[pos][2] + 1 == state[pos + jump][2]
+#         else:
+#             assert state[pos][1] + 1 == state[pos + jump][1]
+#             assert state[pos][2] == state[pos + jump][2]
+
+#     for jump in reversed(jumps):
+#         yield data[lo : lo + jump]
+#         lo += jump
+
+
+class PositionState(object):
+    def __init__(
+        self, last_jump, last_token, lo_jump, lo_token, tokens, non_tokens
+    ):
+        self.last_jump = last_jump
+        self.last_token = last_token
+        self.lo_jump = lo_jump
+        self.lo_token = lo_token
+        self.tokens = tokens
+        self.non_tokens = non_tokens
+
+    def __repr__(self):
+        return (
+            f"PositionState(last_jump={self.last_jump}, "
+            + f"last_token={self.last_token}, lo_jump={self.lo_jump}, "
+            + f"lo_token={self.lo_token}, tokens={self.tokens}, "
+            + f"non_tokens={self.non_tokens})"
         )
 
-        if steps_with_same_lo_jump >= max_token_len:
-            yield data[lo : lo + best_lo_forward_jump]
-            lo += best_lo_forward_jump
-            for _ in range(best_lo_forward_jump):
-                state.popleft()
-            state[0][3] = None
-            for pos in range(1, len(state)):
-                jump = state[pos][0]
-                if jump > pos:
-                    state[pos][3] = None
-                elif jump == pos:
-                    state[pos][3] = jump
-                else:
-                    state[pos][3] = state[pos - jump][3]
-            steps_with_same_lo_jump = 0
-            for pos_state in reversed(state):
-                if pos_state[3] == state[-1][3]:
+    @staticmethod
+    def new_pos(prev_state: Self, last_token: int, init_lo_jump: bool) -> Self:
+        if init_lo_jump:
+            lo_jump = 1
+            lo_token = last_token
+        else:
+            lo_jump = prev_state.lo_jump
+            lo_token = prev_state.lo_token
+
+        if last_token >= 0:
+            tokens = prev_state.tokens + 1
+            non_tokens = prev_state.non_tokens
+        else:
+            tokens = prev_state.tokens
+            non_tokens = prev_state.non_tokens + 1
+
+        return PositionState(
+            1, last_token, lo_jump, lo_token, tokens, non_tokens
+        )
+
+
+class Tokenizer(object):
+    def __init__(self, tokens: list[bytes], minimize_non_tokens: bool):
+        self._tokens = {}
+        self._byte_tokens = [i - 256 for i in range(256)]
+        for i, t in enumerate(tokens):
+            self._tokens[t] = i
+            if len(t) == 1:
+                self._byte_tokens[t[0]] = i
+        self._max_token_len = max(len(t) for t in self._tokens.keys())
+        self._minimize_non_tokens = minimize_non_tokens
+
+    def _tokens_better(
+        self,
+        new_tokens: int,
+        new_non_tokens: int,
+        old_tokens: int,
+        old_non_tokens: int,
+    ) -> bool:
+        if self._minimize_non_tokens:
+            return new_non_tokens < old_non_tokens or (
+                new_non_tokens == old_non_tokens and
+                new_tokens < old_tokens
+            )
+        else:
+            return new_non_tokens + new_tokens < old_non_tokens + old_tokens
+
+    def _consume_lo_token(self, state):
+        lo_jump = state[-1].lo_jump
+        for _ in range(lo_jump):
+            state.popleft()
+        state[0].lo_jump = None
+        state[0].lo_token = None
+
+        steps_with_same_lo_jump = 0
+        for pos in range(1, len(state)):
+            pos_state = state[pos]
+            if pos_state.last_jump > pos:
+                pos_state.lo_jump = None
+                steps_with_same_lo_jump = 0
+            elif pos_state.last_jump == pos:
+                pos_state.lo_jump = pos_state.last_jump
+                pos_state.lo_token = pos_state.last_token
+                steps_with_same_lo_jump = 1
+            else:
+                prev_state = state[pos - pos_state.last_jump]
+                pos_state.lo_jump = prev_state.lo_jump
+                pos_state.lo_token = prev_state.lo_token
+                if pos_state.lo_jump == state[pos - 1].lo_jump:
                     steps_with_same_lo_jump += 1
                 else:
-                    break
+                    steps_with_same_lo_jump = 1
 
-    jumps = []
-    pos = len(state) - 1
-    while pos > 0:
-        jump = state[pos][0]
-        pos -= jump
-        jumps.append(jump)
+        return steps_with_same_lo_jump
 
-        assert pos >= 0
+    def _yield_remaining_tokens(self, state) -> Iterable[int]:
+        tokens = []
+        pos = len(state) - 1
+        while pos > 0:
+            cur_state = state[pos]
+            tokens.append(cur_state.last_token)
 
-        if data[lo + pos : lo + pos + jump] in tokens:
-            assert state[pos][1] == state[pos + jump][1]
-            assert state[pos][2] + 1 == state[pos + jump][2]
+            pos -= cur_state.last_jump
+            assert pos >= 0
+
+            if cur_state.last_token >= 0:
+                assert state[pos].tokens + 1 == cur_state.tokens
+                assert state[pos].non_tokens == cur_state.non_tokens
+            else:
+                assert state[pos].tokens == cur_state.tokens
+                assert state[pos].non_tokens + 1 == cur_state.non_tokens
+
+        return reversed(tokens)
+
+    def tokenize(self, data: bytes) -> Iterable[int]:
+        state = deque([PositionState(None, None, None, None, 0, 0)])
+        lo = 0
+        steps_with_same_lo_jump = 0
+
+        for hi in range(1, len(data) + 1):
+            cur_state = PositionState.new_pos(
+                state[-1], self._byte_tokens[data[hi - 1]], len(state) == 1
+            )
+            for jump in range(2, min(self._max_token_len, len(state)) + 1):
+                token = self._tokens.get(data[hi - jump : hi])
+                if token is None:
+                    continue
+                prev_state = state[-jump]
+                if self._tokens_better(
+                    prev_state.tokens + 1,
+                    prev_state.non_tokens,
+                    cur_state.tokens,
+                    cur_state.non_tokens,
+                ):
+                    cur_state.last_jump = jump
+                    cur_state.last_token = token
+                    if jump == len(state):
+                        assert prev_state.lo_jump is None
+                        cur_state.lo_jump = jump
+                        cur_state.lo_token = token
+                    else:
+                        assert prev_state.lo_jump is not None
+                        cur_state.lo_jump = prev_state.lo_jump
+                        cur_state.lo_token = prev_state.lo_token
+                    cur_state.tokens = prev_state.tokens + 1
+                    cur_state.non_tokens = prev_state.non_tokens
+
+            if cur_state.lo_jump == state[-1].lo_jump:
+                steps_with_same_lo_jump += 1
+            else:
+                steps_with_same_lo_jump = 1
+
+            state.append(cur_state)
+
+            if steps_with_same_lo_jump >= self._max_token_len:
+                assert state[state[-1].lo_jump].last_token == state[-1].lo_token
+                yield state[-1].lo_token
+                lo += state[-1].lo_jump
+                steps_with_same_lo_jump = self._consume_lo_token(state)
+
+        for token in self._yield_remaining_tokens(state):
+            yield token
+
+
+def tokenize(
+    data: bytes, tokens: list[bytes], minimize_non_tokens=True
+) -> Iterable[bytes]:
+    tokenizer = Tokenizer(tokens, minimize_non_tokens)
+    for token_id in tokenizer.tokenize(data):
+        if token_id >= 0:
+            yield tokens[token_id]
         else:
-            assert state[pos][1] + 1 == state[pos + jump][1]
-            assert state[pos][2] == state[pos + jump][2]
-
-    for jump in reversed(jumps):
-        yield data[lo : lo + jump]
-        lo += jump
+            yield bytes([token_id + 256])
 
 
 def calculate_tokens_entropy(
@@ -162,33 +344,37 @@ def calculate_tokens_entropy(
     print(
         f"Tokens entropy = {tokens_entropy:.1f} bytes, non-tokens = {non_tokens_entropy:.1f}, total = {total_entropy:.1f}"
     )
-    print(f"Tokens size = {total_token_size}, grand total = {grand_total}")
+    # print(f"Tokens size = {total_token_size}, grand total = {grand_total}")
 
 
 def tokenize_and_count(data: bytes, tokens: list[str], minimize_non_tokens):
-    tokens = set(tokens)
-    used_tokens = {}
-    used_non_tokens = set()
+    used_tokens = [0] * len(tokens)
+    used_non_tokens = [0] * 256
     tokens_in_text = 0
     non_tokens_in_text = 0
 
-    for token in tokenize(
-        data, tokens, minimize_non_tokens=minimize_non_tokens
-    ):
-        if token in tokens:
-            tokens_in_text += 1
-            try:
-                used_tokens[token] += 1
-            except KeyError:
-                used_tokens[token] = 1
-        else:
-            if len(token) != 1:
-                print(f"Long non-token: {token}")
-                assert False
-            non_tokens_in_text += 1
-            used_non_tokens.add(token)
+    tokenizer = Tokenizer(tokens, minimize_non_tokens)
 
-    return used_tokens, used_non_tokens, tokens_in_text, non_tokens_in_text
+    for token_id in tokenizer.tokenize(data):
+        assert -256 <= token_id < len(tokens)
+        if token_id >= 0:
+            tokens_in_text += 1
+            used_tokens[token_id] += 1
+        else:
+            non_tokens_in_text += 1
+            used_non_tokens[token_id] += 1
+    
+    token_counts = {}
+    for token_id, count in enumerate(used_tokens):
+        if count != 0:
+            token_counts[tokens[token_id]] = count
+    
+    non_tokens = set()
+    for non_token_id, count in enumerate(used_non_tokens):
+        if count != 0:
+            non_tokens.add(non_token_id)
+    
+    return token_counts, non_tokens, tokens_in_text, non_tokens_in_text
 
 
 def sort_by_count(tokens: dict[bytes, int]) -> list[tuple[bytes, int]]:

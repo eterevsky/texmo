@@ -21,6 +21,16 @@ class TokensTest(TestCase):
             [b"ab"],
         )
 
+    def test_tokenize1_3(self):
+        self.assertEqual(
+            list(
+                tokens.tokenize(
+                    b"ab ab ab", [b"a", b"b", b"ab"], minimize_non_tokens=True
+                )
+            ),
+            [b"ab", b" ", b"ab", b" ", b"ab"],
+        )
+
     def test_tokenize2(self):
         self.assertEqual(
             list(
@@ -31,6 +41,16 @@ class TokensTest(TestCase):
             [b"ab"],
         )
 
+    def test_tokenize2_3(self):
+        self.assertEqual(
+            list(
+                tokens.tokenize(
+                    b"ab ab ab", [b"a", b"b", b"ab"], minimize_non_tokens=False
+                )
+            ),
+            [b"ab", b" ", b"ab", b" ", b"ab"],
+        )
+
     def test_tokenize3(self):
         self.assertEqual(
             list(
@@ -39,6 +59,18 @@ class TokensTest(TestCase):
                 )
             ),
             [b"a", b"bc"],
+        )
+
+    def test_tokenize3_3(self):
+        self.assertEqual(
+            list(
+                tokens.tokenize(
+                    b"abc abc abc",
+                    [b"a", b"ab", b"bc"],
+                    minimize_non_tokens=True,
+                )
+            ),
+            [b"a", b"bc", b" ", b"a", b"bc", b" ", b"a", b"bc"],
         )
 
     def test_tokenize4(self):
@@ -53,16 +85,40 @@ class TokensTest(TestCase):
             [b"abcde", b"f"],
         )
 
-    def test_tokenize5(self):
+    def test_tokenize4_3(self):
         self.assertEqual(
             list(
                 tokens.tokenize(
-                    b"abcdef",
+                    b"abcdef abcdef abcdef",
+                    [b"ab", b"cd", b"ef", b"abcde"],
+                    minimize_non_tokens=False,
+                )
+            ),
+            [b"abcde", b"f", b" ", b"abcde", b"f", b" ", b"abcde", b"f"],
+        )
+
+    def test_tokenize5_3(self):
+        self.assertEqual(
+            list(
+                tokens.tokenize(
+                    b"abcdef abcdef abcdef",
                     [b"ab", b"cd", b"ef", b"abcde"],
                     minimize_non_tokens=True,
                 )
             ),
-            [b"ab", b"cd", b"ef"],
+            [
+                b"ab",
+                b"cd",
+                b"ef",
+                b" ",
+                b"ab",
+                b"cd",
+                b"ef",
+                b" ",
+                b"ab",
+                b"cd",
+                b"ef",
+            ],
         )
 
     def test_tokenize6(self):
@@ -75,4 +131,31 @@ class TokensTest(TestCase):
                 )
             ),
             [b"a", b"bc", b"de", b"fg"],
+        )
+
+    def test_tokenize6(self):
+        self.assertEqual(
+            list(
+                tokens.tokenize(
+                    b"abcdefg abcdefg abcdefg",
+                    [b"a", b"ab", b"bc", b"cd", b"de", b"ef", b"fg"],
+                    minimize_non_tokens=True,
+                )
+            ),
+            [
+                b"a",
+                b"bc",
+                b"de",
+                b"fg",
+                b" ",
+                b"a",
+                b"bc",
+                b"de",
+                b"fg",
+                b" ",
+                b"a",
+                b"bc",
+                b"de",
+                b"fg",
+            ],
         )

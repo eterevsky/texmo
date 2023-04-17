@@ -1,0 +1,74 @@
+top 16 characters:
+Using 16 tokens and 106 non-tokens. Encoding 8919694 tokens + 2085514 non-tokens
+
+python texmo/tokens.py 16 16 data20.txt
+Using 16 tokens and 110 non-tokens. Encoding 7306436 tokens + 2947814 non-tokens
+' '   1332671
+'a'   654790
+'e'   620563
+'o'   601014
+'n'   574600
+'i'   515142
+'s'   478740
+'r'   456342
+'t'   405998
+'d'   345541
+'l'   324104
+' t'   260294
+'h'   245973
+'he'   218206
+'e '   177344
+'th'   95114
+
+
+python texmo/tokens.py 256 16 data20.txt
+Using 16 tokens and 108 non-tokens. Encoding 7780797 tokens + 2618591 non-tokens
+' '   1467268
+'e'   713072
+'a'   654790
+'o'   601014
+'n'   574600
+'i'   515142
+'s'   478740
+'t'   458627
+'r'   456342
+'l'   324104
+'e '   303041
+'th'   302779
+'h'   256514
+'\n'   250425
+'u'   221302
+'m'   203037
+
+
+
+top 256 characters (data20.txt):
+Using 117 tokens and 0 non-tokens. Encoding 11035814 tokens + 0 non-tokens
+
+top 256 characters (data20_p.txt):
+Using 112 tokens and 0 non-tokens. Encoding 11834867 tokens + 0 non-tokens
+
+python texmo/tokens.py 256 256 data20.txt
+Using 254 tokens and 77 non-tokens. Encoding 5592026 tokens + 410282 non-tokens
+
+python texmo/tokens.py 256 256 data20_p.txt
+Using 246 tokens and 76 non-tokens. Encoding 5890186 tokens + 249819 non-tokens
+
+
+python texmo/tokens.py 256 256 data20.txt
+Using 256 tokens and 84 non-tokens. Encoding 5548906 tokens + 426015 non-tokens
+
+python texmo/tokens.py 512 256 data20.txt
+Using 256 tokens and 68 non-tokens. Encoding 5555697 tokens + 160608 non-tokens
+
+python texmo/tokens.py 1024 256 data20.txt
+Using 256 tokens and 64 non-tokens. Encoding 5530189 tokens + 147546 non-tokens
+
+python texmo/tokens.py 2048 256 data20.txt
+Using 256 tokens and 62 non-tokens. Encoding 5581408 tokens + 119453 non-tokens
+
+python texmo/tokens.py 4096 256 data20.txt
+Using 256 tokens and 66 non-tokens. Encoding 5525868 tokens + 157558 non-tokens
+
+python texmo/tokens.py 8192 256 data20.txt
+Using 256 tokens and 67 non-tokens. Encoding 5536094 tokens + 162407 non-tokens

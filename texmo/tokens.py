@@ -321,6 +321,18 @@ def maybe_str(s: bytes):
         return s
 
 
+def find_frequent_bytes(data: bytes, n: int) -> list[bytes]:
+    counts = [0] * 256
+    for b in data:
+        counts[b[0]] += 1
+    d = {}
+    for b, c in enumerate(counts):
+        if c != 0:
+            d[bytes([b])] = c
+    d = _sort_and_prune(d, n)
+    return d    
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 4:
         print(
@@ -330,6 +342,7 @@ if __name__ == "__main__":
     file = os.open(sys.argv[3], os.O_RDONLY)
     data = mmap.mmap(file, 0, access=mmap.ACCESS_READ)
     substrings = find_frequent_substrings(data, int(sys.argv[1]))
+    # substrings = find_frequent_bytes(data, int(sys.argv[1]))
 
     pairs = list(substrings.items())
     pairs.sort(key=itemgetter(1), reverse=True)

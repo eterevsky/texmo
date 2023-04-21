@@ -264,17 +264,17 @@ def tokenize_and_count(data: bytes, tokens: list[str], minimize_non_tokens):
             used_tokens[token_id] += 1
         else:
             non_tokens_in_text += 1
-            used_non_tokens[token_id] += 1
+            used_non_tokens[256 + token_id] += 1
     
     token_counts = {}
     for token_id, count in enumerate(used_tokens):
         if count != 0:
             token_counts[tokens[token_id]] = count
     
-    non_tokens = set()
+    non_tokens = {}
     for non_token_id, count in enumerate(used_non_tokens):
         if count != 0:
-            non_tokens.add(non_token_id)
+            non_tokens[bytes([non_token_id])] = count
     
     return token_counts, non_tokens, tokens_in_text, non_tokens_in_text
 
@@ -283,6 +283,24 @@ def sort_by_count(tokens: dict[bytes, int]) -> list[tuple[bytes, int]]:
     pairs = list(tokens.items())
     pairs.sort(key=itemgetter(1), reverse=True)
     return pairs
+
+
+def sort_by_count1(tokens: dict[bytes, int]) -> list[tuple[bytes, int]]:
+    pairs = list(tokens.items())
+    pairs.sort(key=lambda t: 10 * t[1] if len(t[0]) == 1 else t[1], reverse=True)
+    return pairs
+
+
+def sort_by_count_chars_first(tokens: dict[bytes, int]) -> list[tuple[bytes, int]]:
+    pairs = list(tokens.items())
+    pairs.sort(key=lambda t: (len(t[0]) == 1, t[1]), reverse=True)
+    return pairs
+
+
+checkpoints = []
+for n in range(2, 20):
+    checkpoints.append(2**n - 1)
+    checkpoints.append(round(2**n * math.sqrt(2)) - 1)
 
 
 def iteratively_prune(data, tokens, n_final_tokens, minimize_non_tokens=True):
@@ -302,14 +320,17 @@ def iteratively_prune(data, tokens, n_final_tokens, minimize_non_tokens=True):
             + f"Encoding {tokens_in_text} tokens "
             + f"+ {non_tokens_in_text} non-tokens"
         )
-        calculate_tokens_entropy(len(data), token_counts, non_tokens_in_text)
+        # calculate_tokens_entropy(len(data), token_counts, non_tokens_in_text)
         # bits_per_item = math.log2(len(token_counts) + len(used_non_tokens))
         # total_size = bits_per_item * (tokens_in_text + non_tokens_in_text) / 8
         # print(f"Entropy: {total_size} bytes")
         if ntokens <= n_final_tokens:
             break
-        new_ntokens = max(n_final_tokens, 3 * ntokens // 4)
-        pairs = sort_by_count(token_counts)
+        new_ntokens = max(x for x in checkpoints if x < ntokens)
+        new_ntokens = max(n_final_tokens, new_ntokens)
+        for non_token, count in used_non_tokens.items():
+            token_counts[non_token] = count
+        pairs = sort_by_count1(token_counts)
         tokens = [token for token, _ in pairs[:new_ntokens]]
     return token_counts
 

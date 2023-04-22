@@ -107,8 +107,7 @@ class Tokenizer(object):
     ) -> bool:
         if self._minimize_non_tokens:
             return new_non_tokens < old_non_tokens or (
-                new_non_tokens == old_non_tokens and
-                new_tokens < old_tokens
+                new_non_tokens == old_non_tokens and new_tokens < old_tokens
             )
         else:
             return new_non_tokens + new_tokens < old_non_tokens + old_tokens
@@ -249,7 +248,35 @@ def calculate_tokens_entropy(
     # print(f"Tokens size = {total_token_size}, grand total = {grand_total}")
 
 
-def tokenize_and_count(data: bytes, tokens: list[str], minimize_non_tokens):
+def calculate_entropy(
+    total_size: int,
+    token_counts: dict[bytes, int],
+    non_token_counts: dict[bytes, int],
+    non_token_mult: float = 2.0,
+) -> float:
+    total = 0
+    for count in token_counts.values():
+        p = -math.log2(
+            count / total_size
+        )  # Yes, I know that I can just take count and subtract log(total_size)
+        total += count * p
+
+    total_non_tokens = sum(non_token_counts.values())
+
+    if total_non_tokens > 0:
+        p = -math.log2(total_non_tokens / total_size)
+        total += total_non_tokens * p
+
+        for count in non_token_counts.values():
+            p = -math.log2(count / total_non_tokens)
+            total += non_token_mult * count * p
+
+    return total / total_size
+
+
+def tokenize_and_count(
+    data: bytes, tokens: list[str], minimize_non_tokens
+) -> tuple[dict[bytes, int], dict[bytes, int], int, int]:
     used_tokens = [0] * len(tokens)
     used_non_tokens = [0] * 256
     tokens_in_text = 0
@@ -265,17 +292,17 @@ def tokenize_and_count(data: bytes, tokens: list[str], minimize_non_tokens):
         else:
             non_tokens_in_text += 1
             used_non_tokens[256 + token_id] += 1
-    
+
     token_counts = {}
     for token_id, count in enumerate(used_tokens):
         if count != 0:
             token_counts[tokens[token_id]] = count
-    
+
     non_tokens = {}
     for non_token_id, count in enumerate(used_non_tokens):
         if count != 0:
             non_tokens[bytes([non_token_id])] = count
-    
+
     return token_counts, non_tokens, tokens_in_text, non_tokens_in_text
 
 
@@ -287,11 +314,15 @@ def sort_by_count(tokens: dict[bytes, int]) -> list[tuple[bytes, int]]:
 
 def sort_by_count1(tokens: dict[bytes, int]) -> list[tuple[bytes, int]]:
     pairs = list(tokens.items())
-    pairs.sort(key=lambda t: 10 * t[1] if len(t[0]) == 1 else t[1], reverse=True)
+    pairs.sort(
+        key=lambda t: 10 * t[1] if len(t[0]) == 1 else t[1], reverse=True
+    )
     return pairs
 
 
-def sort_by_count_chars_first(tokens: dict[bytes, int]) -> list[tuple[bytes, int]]:
+def sort_by_count_chars_first(
+    tokens: dict[bytes, int]
+) -> list[tuple[bytes, int]]:
     pairs = list(tokens.items())
     pairs.sort(key=lambda t: (len(t[0]) == 1, t[1]), reverse=True)
     return pairs
@@ -307,18 +338,20 @@ def iteratively_prune(data, tokens, n_final_tokens, minimize_non_tokens=True):
     while True:
         (
             token_counts,
-            used_non_tokens,
+            non_token_counts,
             tokens_in_text,
             non_tokens_in_text,
         ) = tokenize_and_count(
             data, tokens, minimize_non_tokens=minimize_non_tokens
         )
         ntokens = len(token_counts)
-        n_non_tokens = len(used_non_tokens)
+        n_non_tokens = len(non_token_counts)
+        entropy = calculate_entropy(len(data), token_counts, non_token_counts)
         print(
             f"Using {ntokens} tokens and {n_non_tokens} non-tokens. "
             + f"Encoding {tokens_in_text} tokens "
-            + f"+ {non_tokens_in_text} non-tokens"
+            + f"+ {non_tokens_in_text} non-tokens."
+            + f"Entropy per byte: {entropy}"
         )
         # calculate_tokens_entropy(len(data), token_counts, non_tokens_in_text)
         # bits_per_item = math.log2(len(token_counts) + len(used_non_tokens))
@@ -328,10 +361,51 @@ def iteratively_prune(data, tokens, n_final_tokens, minimize_non_tokens=True):
             break
         new_ntokens = max(x for x in checkpoints if x < ntokens)
         new_ntokens = max(n_final_tokens, new_ntokens)
-        for non_token, count in used_non_tokens.items():
+        for non_token, count in non_token_counts.items():
             token_counts[non_token] = count
         pairs = sort_by_count1(token_counts)
         tokens = [token for token, _ in pairs[:new_ntokens]]
+    return token_counts
+
+
+def tokenize_and_prune(data, tokens, n_final_tokens):
+    (
+        token_counts,
+        non_token_counts,
+        tokens_in_text,
+        non_tokens_in_text,
+    ) = tokenize_and_count(data, tokens, minimize_non_tokens=True)
+
+    ntokens = len(token_counts)
+    n_non_tokens = len(non_token_counts)
+
+    print(
+        f"Using {ntokens} tokens and {n_non_tokens} non-tokens. "
+        + f"Encoding {tokens_in_text} tokens "
+        + f"+ {non_tokens_in_text} non-tokens."
+    )
+
+    pairs = sort_by_count1(token_counts)
+    tokens = [token for token, _ in pairs[:n_final_tokens]]
+
+    (
+        token_counts,
+        non_token_counts,
+        tokens_in_text,
+        non_tokens_in_text,
+    ) = tokenize_and_count(data, tokens, minimize_non_tokens=True)
+
+    ntokens = len(token_counts)
+    n_non_tokens = len(non_token_counts)
+    entropy = calculate_entropy(len(data), token_counts, non_token_counts)
+    full_entropy = entropy * len(data)
+    print(
+        f"Using {ntokens} tokens and {n_non_tokens} non-tokens. "
+        + f"Encoding {tokens_in_text} tokens "
+        + f"+ {non_tokens_in_text} non-tokens."
+    )
+    print(f"Entropy per byte: {entropy}, full: {full_entropy}")
+
     return token_counts
 
 
@@ -351,7 +425,7 @@ def find_frequent_bytes(data: bytes, n: int) -> list[bytes]:
         if c != 0:
             d[bytes([b])] = c
     d = _sort_and_prune(d, n)
-    return d    
+    return d
 
 
 if __name__ == "__main__":
@@ -369,8 +443,11 @@ if __name__ == "__main__":
     pairs.sort(key=itemgetter(1), reverse=True)
     tokens = [s for s, _ in pairs]
 
-    token_counts = iteratively_prune(
-        data, tokens, int(sys.argv[2]), minimize_non_tokens=True
+    # token_counts = iteratively_prune(
+    #     data, tokens, int(sys.argv[2]), minimize_non_tokens=True
+    # )
+    token_counts = tokenize_and_prune(
+        data, tokens, int(sys.argv[2])
     )
     pairs = sort_by_count(token_counts)
 

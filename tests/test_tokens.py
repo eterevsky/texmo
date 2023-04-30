@@ -2,6 +2,7 @@ import logging
 from unittest import TestCase
 
 from texmo import tokens
+from texmo.tokens import Tokenizer2
 
 logging.disable(level=logging.ERROR)
 
@@ -159,3 +160,15 @@ class TokensTest(TestCase):
                 b"fg",
             ],
         )
+    
+    def test_tokenizer2(self):
+        tokenizer = Tokenizer2([b"a", b"b", b"ab"])
+        self.assertEqual(tokenizer._tokens[b"ab"].suffix_token.string, b"b")
+        self.assertEqual(tokenizer._tokens[b"a"].suffix_token, None)
+        self.assertEqual(tokenizer._tokens[b"b"].suffix_token, None)
+    
+    def test_tokenizer2_abc(self):
+        tokenizer = Tokenizer2([b"a", b"b", b"c", b"bc", b"abc"])
+        self.assertEqual(tokenizer._tokens[b"abc"].suffix_token.string, b"bc")
+        self.assertEqual(tokenizer._tokens[b"a"].suffix_token, None)
+        self.assertEqual(tokenizer._tokens[b"b"].suffix_token, None)

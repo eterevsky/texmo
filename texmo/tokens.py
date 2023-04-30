@@ -9,6 +9,8 @@ from typing import Self
 
 import numpy as np
 
+INF = float("inf")
+
 
 def _sort_and_prune(substrings: dict[bytes, int], n: int) -> dict[bytes, int]:
     pairs = list(substrings.items())
@@ -209,15 +211,200 @@ class Tokenizer(object):
             yield token
 
 
+class Token(object):
+    def __init__(self, id: int, string: bytes, literal: bool, cost: float):
+        self.id = id
+        self.len = len(string)
+        self.string = string
+        self.literal = literal
+        self.cost = cost
+        # In case any suffix of a current token are also tokens, this is
+        # the longest one of them. This way all tokens that are suffixes of
+        # this one are stored in a linked list.
+        self.suffix_token = None
+
+    def __repr__(self) -> str:
+        return f"Token({self.id}, {self.string})"
+
+
+class TokenizerState(object):
+    def __init__(self, suffix: bytes, token: Token = None):
+        self.suffix: bytes = suffix
+        self.last_token: Token = token
+        # Next byte -> next TokenizerState
+        self.next: list[TokenizerState] = [None] * 256
+
+
+class DynState(object):
+    def __init__(
+        self,
+        tok_state: TokenizerState,
+        first_token: Token,
+        last_token: Token,
+        cost: float,
+    ):
+        self.tok_state = tok_state
+        self.first_token = first_token
+        self.last_token = last_token
+        self.cost = cost
+
+    def __repr__(self):
+        first = self.first_token.string if self.first_token else "?"
+        last = self.last_token.string if self.last_token else "?"
+        return f"DynamicState(first={first}, last={last}, cost={self.cost}"
+
+
+class Tokenizer2(object):
+    """New tokenizer implementation with a finite automaton."""
+
+    def __init__(self, tokens: list[bytes], non_token_penalty: float = 10):
+        self._non_token_penalty = non_token_penalty
+
+        self._tokens: dict[bytes, Token] = {}
+        self._init_tokens(tokens)
+
+        self._max_token_len = max(token.len for token in self._tokens.values())
+
+        self._states: dict[bytes, TokenizerState] = {}
+        self._init_states()
+
+    def _init_tokens(self, tokens: list[bytes]):
+        for token_str in tokens:
+            id = len(self._tokens)
+            token = Token(id=id, string=token_str, literal=False, cost=1)
+            self._tokens[token_str] = token
+
+        for b in range(256):
+            token_str = bytes([b])
+            id = b - 256
+            if token_str not in self._tokens:
+                token = Token(
+                    id=id,
+                    string=token_str,
+                    literal=True,
+                    cost=self._non_token_penalty,
+                )
+                self._tokens[token_str] = token
+
+        for token_str, token in self._tokens.items():
+            assert token.string == token_str
+
+        for token in self._tokens.values():
+            for start in range(1, len(token.string)):
+                token_suffix = token.string[start:]
+                if token_suffix in self._tokens:
+                    token.suffix_token = self._tokens[token_suffix]
+                    break
+
+    def _init_states(self):
+        self._states[b""] = TokenizerState(b"", token=None)
+        for token in self._tokens.values():
+            for prefix_len in range(1, len(token.string) + 1):
+                prefix = token.string[:prefix_len]
+                if prefix not in self._states:
+                    prefix_token = None
+                    for token_start in range(len(prefix)):
+                        prefix_token = self._tokens.get(prefix[token_start:])
+                        if prefix_token is not None:
+                            break
+                    # Since we should have all literals among tokens
+                    assert prefix_token is not None
+                    self._states[prefix] = TokenizerState(prefix, prefix_token)
+
+        for state in self._states.values():
+            for b in range(256):
+                new_suffix = state.suffix + bytes([b])
+                for next_start in range(len(new_suffix)):
+                    next_state = self._states.get(new_suffix[next_start:])
+                    if next_state is not None:
+                        state.next[b] = next_state
+                        break
+
+    def _consume_first_token(self, state: deque[DynState]):
+        first_token = state[-1].first_token
+
+        for _ in range(first_token.len):
+            state.popleft()
+
+        for i, dyn_state in enumerate(state):
+            last_token = dyn_state.last_token
+            last_token_len = last_token.len
+            if last_token_len > i:
+                dyn_state.first_token = None
+            elif last_token_len == i:
+                dyn_state.first_token = dyn_state.last_token
+            else:
+                dyn_state.first_token = state[i - last_token_len].first_token
+
+        return first_token
+
+    def tokenize(self, data: Iterable[int]) -> Iterable[Token]:
+        tok_state: TokenizerState = self._states[b""]
+        state: deque[DynState] = deque(
+            [DynState(tok_state, last_token=None, first_token=None, cost=0)]
+        )
+        steps_with_same_first_token = 0
+
+        for b in data:
+            if type(b) is bytes:
+                b = b[0]
+            tok_state = tok_state.next[b]
+
+            dyn_state = DynState(
+                tok_state, last_token=None, first_token=None, cost=INF
+            )
+
+            last_token = tok_state.last_token
+            while last_token is not None:
+                if last_token.len <= len(state):
+                    prev_state = state[-last_token.len]
+
+                    cost = prev_state.cost + last_token.cost
+                    if cost < dyn_state.cost:
+                        dyn_state.last_token = last_token
+                        dyn_state.cost = cost
+                        if prev_state.first_token is None:
+                            dyn_state.first_token = last_token
+                        else:
+                            dyn_state.first_token = prev_state.first_token
+                last_token = last_token.suffix_token
+
+            assert dyn_state.first_token is not None
+
+            if dyn_state.first_token == state[-1].first_token:
+                steps_with_same_first_token += 1
+            else:
+                steps_with_same_first_token = 1
+
+            state.append(dyn_state)
+
+            if steps_with_same_first_token >= self._max_token_len:
+                yield self._consume_first_token(state)
+                first_token = state[-1].first_token
+                steps_with_same_first_token = 0
+                for dyn_state in reversed(state):
+                    if dyn_state.first_token == first_token:
+                        steps_with_same_first_token += 1
+                    else:
+                        break
+
+        while len(state) > 1:
+            yield self._consume_first_token(state)
+
+
 def tokenize(
     data: bytes, tokens: list[bytes], minimize_non_tokens=True
 ) -> Iterable[bytes]:
-    tokenizer = Tokenizer(tokens, minimize_non_tokens)
-    for token_id in tokenizer.tokenize(data):
-        if token_id >= 0:
-            yield tokens[token_id]
-        else:
-            yield bytes([token_id + 256])
+    # tokenizer = Tokenizer(tokens, minimize_non_tokens)
+    # for token_id in tokenizer.tokenize(data):
+    #     if token_id >= 0:
+    #         yield tokens[token_id]
+    #     else:
+    #         yield bytes([token_id + 256])
+    non_token_cost = 10 if minimize_non_tokens else 1
+    tokenizer = Tokenizer2(tokens, non_token_cost)
+    for token in tokenizer.tokenize(data):
+        yield token.string
 
 
 def calculate_tokens_entropy(
@@ -252,7 +439,7 @@ def calculate_entropy(
     total_size: int,
     token_counts: dict[bytes, int],
     non_token_counts: dict[bytes, int],
-    non_token_mult: float = 2.0,
+    non_token_mult: float = 10.0,
 ) -> float:
     total = 0
     for count in token_counts.values():
@@ -282,9 +469,11 @@ def tokenize_and_count(
     tokens_in_text = 0
     non_tokens_in_text = 0
 
-    tokenizer = Tokenizer(tokens, minimize_non_tokens)
+    non_token_cost = 10 if minimize_non_tokens else 1
+    tokenizer2 = Tokenizer2(tokens, non_token_cost)
 
-    for token_id in tokenizer.tokenize(data):
+    for token in tokenizer2.tokenize(data):
+        token_id = token.id
         assert -256 <= token_id < len(tokens)
         if token_id >= 0:
             tokens_in_text += 1
@@ -409,6 +598,60 @@ def tokenize_and_prune(data, tokens, n_final_tokens):
     return token_counts
 
 
+def tokenize_and_prune1(data, tokens, n_final_tokens):
+    (token_counts, _, _, _) = tokenize_and_count(data, tokens, minimize_non_tokens=True)
+    tokens = list(token_counts.keys())
+
+    while len(tokens) > n_final_tokens:
+        min_entropy = INF
+        useless_token = None
+        best_pairs = None
+        for t in tokens:
+            fewer_tokens = list(tokens)
+            fewer_tokens.remove(t)
+
+            (
+                token_counts,
+                non_token_counts,
+                tokens_in_text,
+                non_tokens_in_text,
+            ) = tokenize_and_count(data, fewer_tokens, minimize_non_tokens=True)
+            entropy = calculate_entropy(len(data), token_counts, non_token_counts)
+            ntokens = len(token_counts)
+            print(f"{ntokens} (removed {t}): {tokens_in_text} tokens + {non_tokens_in_text} non-tokens, entropy: {entropy}")
+
+            if entropy < min_entropy:
+                min_entropy = entropy
+                useless_token = t
+                best_pairs = sort_by_count(token_counts)
+        
+        print(f"Removing {useless_token}")
+        tokens.remove(useless_token)
+
+        for token, count in best_pairs[:200]:
+            print(repr(maybe_str(token)), " ", count)
+
+    (
+        token_counts,
+        non_token_counts,
+        tokens_in_text,
+        non_tokens_in_text,
+    ) = tokenize_and_count(data, tokens, minimize_non_tokens=True)
+
+    ntokens = len(token_counts)
+    n_non_tokens = len(non_token_counts)
+    entropy = calculate_entropy(len(data), token_counts, non_token_counts)
+    full_entropy = entropy * len(data)
+    print(
+        f"Using {ntokens} tokens and {n_non_tokens} non-tokens. "
+        + f"Encoding {tokens_in_text} tokens "
+        + f"+ {non_tokens_in_text} non-tokens."
+    )
+    print(f"Entropy per byte: {entropy}, full: {full_entropy}")
+
+    return token_counts
+
+
 def maybe_str(s: bytes):
     try:
         return s.decode("utf-8")
@@ -446,10 +689,8 @@ if __name__ == "__main__":
     # token_counts = iteratively_prune(
     #     data, tokens, int(sys.argv[2]), minimize_non_tokens=True
     # )
-    token_counts = tokenize_and_prune(
-        data, tokens, int(sys.argv[2])
-    )
+    token_counts = tokenize_and_prune1(data, tokens, int(sys.argv[2]))
     pairs = sort_by_count(token_counts)
 
-    for token, count in pairs:
+    for token, count in pairs[:200]:
         print(repr(maybe_str(token)), " ", count)

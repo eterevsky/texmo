@@ -3,18 +3,18 @@
     "\n",
     "\u0011",
     "\u0012",
-    "\u0014",
-    "\u0016",
     " ",
+    "\"",
     "'",
     ",",
     ".",
+    "I",
     "a",
     "b",
     "c",
     "d",
     "e",
-    "e\u0016",
+    "e ",
     "f",
     "g",
     "h",
@@ -36,10 +36,13 @@
   "config": {
     "fallback16": false
   },
+  "type": "fallback2",
   "stats": {
     "ntokens": 32,
-    "scanned_bytes": 114769772055,
-    "total_tokens": 140177701865,
-    "bytes_per_token": 0.8187448540533968
-  }
+    "initial_size": 108362047381,
+    "processed_size": 108362047381,
+    "total_tokens": 150075544522,
+    "bytes_per_token": 0.722050003057726
+  },
+  "processing": []
 }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Read, Write, BufRead};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -384,7 +384,14 @@ fn optimize_bpe(token_set: &TokenSet, ntokens: usize, filename: &str) -> (TokenS
         if new_token_set.ntokens() > 256 + ntokens {
             let stats = tokenize_file(&new_token_set, filename);
             let mut token_ids: Vec<usize> = (0..new_token_set.tokens.len()).collect();
-            token_ids.sort_unstable_by_key(|&i| stats.token_count[i]);
+            token_ids.sort_unstable_by_key(|&i| {
+                let token = &new_token_set.tokens[i];
+                if token.string.len() == 1 {
+                    stats.token_count[i] * (new_token_set.literal_cost - 1)
+                } else {
+                    stats.token_count[i]
+                }
+            });
 
             let mut token_strs = Vec::new();
 
@@ -416,7 +423,7 @@ fn optimize_bpe(token_set: &TokenSet, ntokens: usize, filename: &str) -> (TokenS
                 // }
 
                 if stats.cost < initial_stats.cost
-                    // && stats.token_to_add(&new_token_set) != token_str
+                // && stats.token_to_add(&new_token_set) != token_str
                 {
                     // Found a token to remove.
                     found = true;
@@ -506,8 +513,7 @@ fn filter_text(filename: &str, caps: bool, words: bool, output: &str) {
             } else {
                 if !word.is_empty() {
                     if caps {
-                        if word[0].is_uppercase() && word[1..].iter().all(|&c|
-                        c.is_lowercase()) {
+                        if word[0].is_uppercase() && word[1..].iter().all(|&c| c.is_lowercase()) {
                             out_line.push('\x14');
                             word[0] = word[0].to_lowercase().next().unwrap();
                         } else if word.iter().all(|&c| c.is_uppercase()) {
@@ -543,8 +549,7 @@ fn filter_text(filename: &str, caps: bool, words: bool, output: &str) {
 
         if !word.is_empty() {
             if caps {
-                if word[0].is_uppercase() && word[1..].iter().all(|&c|
-                c.is_lowercase()) {
+                if word[0].is_uppercase() && word[1..].iter().all(|&c| c.is_lowercase()) {
                     out_line.push('\x14');
                     word[0] = word[0].to_lowercase().next().unwrap();
                 } else if word.iter().all(|&c| c.is_uppercase()) {
@@ -653,7 +658,9 @@ fn main() {
         } => optimize_tokens(filename, input_tokens, output_tokens, *ntokens, *fallback2),
 
         Command::FilterText {
-            caps, words, output
+            caps,
+            words,
+            output,
         } => filter_text(filename, *caps, *words, output.as_str()),
 
         Command::CountHexDigits => count_hex_digits(filename),

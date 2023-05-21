@@ -27,7 +27,7 @@ impl Token {
 pub struct TokenSet {
     pub tokens: Vec<Token>,
     pub tokens_by_string: HashMap<Vec<u8>, usize>,
-    literal_cost: usize,
+    pub literal_cost: usize,
     pub fallback16: bool,
 }
 

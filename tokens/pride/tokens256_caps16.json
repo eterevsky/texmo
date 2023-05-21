@@ -268,5 +268,5 @@
     "total_tokens": 324541,
     "bytes_per_token": 2.2195038531341186
   },
-  "processing": []
+  "processing": ["caps"]
 }

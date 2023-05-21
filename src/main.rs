@@ -457,6 +457,11 @@ fn optimize_tokens(
     initial_size: Option<usize>,
     processing: &Option<String>,
 ) {
+    println!(
+        "Using {} threads",
+        std::thread::available_parallelism().unwrap().get()
+    );
+
     let token_set = if let Some(tokens_file) = input_tokens {
         TokenSet::from_json(tokens_file.as_str())
     } else {
@@ -486,9 +491,9 @@ fn optimize_tokens(
     tokens_json["stats"]["ntokens"] = (token_set.ntokens() - 256).into();
     let initial_size = match initial_size {
         Some(x) => x,
-        None => token_stats.scanned_bytes
+        None => token_stats.scanned_bytes,
     };
-    tokens_json["stats"]["initial_size"] = initial_size.into();   
+    tokens_json["stats"]["initial_size"] = initial_size.into();
     tokens_json["stats"]["processed_size"] = token_stats.scanned_bytes.into();
     tokens_json["stats"]["total_tokens"] = token_stats.cost.into();
     tokens_json["stats"]["bytes_per_token"] =

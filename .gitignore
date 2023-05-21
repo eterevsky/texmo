@@ -3,7 +3,8 @@ __pycache__
 .vscode
 checkpoints
 config.py
-data
+data/books3
+data/gutenberg*
 data.txt
 models
 out

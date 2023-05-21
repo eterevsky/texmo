@@ -454,6 +454,8 @@ fn optimize_tokens(
     output_tokens: &Option<String>,
     ntokens: usize,
     fallback2: bool,
+    initial_size: Option<usize>,
+    processing: &Option<String>,
 ) {
     let token_set = if let Some(tokens_file) = input_tokens {
         TokenSet::from_json(tokens_file.as_str())
@@ -475,11 +477,33 @@ fn optimize_tokens(
 
     let mut tokens_json = token_set.to_json();
 
+    if token_set.fallback16 {
+        tokens_json["type"] = "fallback16".into();
+    } else {
+        tokens_json["type"] = "fallback2".into();
+    }
+
     tokens_json["stats"]["ntokens"] = (token_set.ntokens() - 256).into();
-    tokens_json["stats"]["scanned_bytes"] = token_stats.scanned_bytes.into();
+    let initial_size = match initial_size {
+        Some(x) => x,
+        None => token_stats.scanned_bytes
+    };
+    tokens_json["stats"]["initial_size"] = initial_size.into();   
+    tokens_json["stats"]["processed_size"] = token_stats.scanned_bytes.into();
     tokens_json["stats"]["total_tokens"] = token_stats.cost.into();
     tokens_json["stats"]["bytes_per_token"] =
-        (token_stats.scanned_bytes as f64 / token_stats.cost as f64).into();
+        (initial_size as f64 / token_stats.cost as f64).into();
+
+    let mut processing_json: Vec<json::JsonValue> = Vec::new();
+    if let Some(processing) = processing {
+        for stage in processing.split(",") {
+            if !stage.is_empty() {
+                processing_json.push(stage.into());
+            }
+        }
+    }
+
+    tokens_json["processing"] = processing_json.into();
 
     let tokens_json_str = json::stringify_pretty(tokens_json, 2);
     println!("{}", &tokens_json_str);
@@ -624,8 +648,21 @@ enum Command {
         #[arg(short, long)]
         ntokens: usize,
 
-        #[arg(short, long)]
+        /// If true, the tokens that are not present will be encoded by bits
+        /// rather then as hexadecimal. Only taken into account if
+        /// --input_tokens is not specified.
+        #[arg(long)]
         fallback2: bool,
+
+        /// If the input is pre-processed, this argument specifies the size
+        /// of the input before pre-processing.
+        #[arg(long)]
+        initial_size: Option<usize>,
+
+        /// A comma-separated list of the processing stages applied to the input
+        /// for the purposes of including it into the output.
+        #[arg(long)]
+        processing: Option<String>,
     },
 
     FilterText {
@@ -655,7 +692,17 @@ fn main() {
             output_tokens,
             ntokens,
             fallback2,
-        } => optimize_tokens(filename, input_tokens, output_tokens, *ntokens, *fallback2),
+            initial_size,
+            processing,
+        } => optimize_tokens(
+            filename,
+            input_tokens,
+            output_tokens,
+            *ntokens,
+            *fallback2,
+            *initial_size,
+            processing,
+        ),
 
         Command::FilterText {
             caps,

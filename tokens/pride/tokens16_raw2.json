@@ -1,0 +1,32 @@
+{
+  "tokens": [
+    "\u0011",
+    "\u0012",
+    " ",
+    "a",
+    "d",
+    "e",
+    "h",
+    "i",
+    "l",
+    "m",
+    "n",
+    "o",
+    "r",
+    "s",
+    "t",
+    "u"
+  ],
+  "config": {
+    "fallback16": false
+  },
+  "type": "fallback2",
+  "stats": {
+    "ntokens": 16,
+    "initial_size": 720320,
+    "processed_size": 720320,
+    "total_tokens": 1717554,
+    "bytes_per_token": 0.4193871051506969
+  },
+  "processing": []
+}

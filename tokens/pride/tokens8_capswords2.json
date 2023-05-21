@@ -1,0 +1,27 @@
+{
+  "tokens": [
+    "\u0011",
+    "\u0012",
+    "\u0016",
+    "a",
+    "e",
+    "i",
+    "o",
+    "t"
+  ],
+  "config": {
+    "fallback16": false
+  },
+  "type": "fallback2",
+  "stats": {
+    "ntokens": 8,
+    "initial_size": 720320,
+    "processed_size": 754838,
+    "total_tokens": 3432933,
+    "bytes_per_token": 0.2098264079141655
+  },
+  "processing": [
+    "caps",
+    "words"
+  ]
+}

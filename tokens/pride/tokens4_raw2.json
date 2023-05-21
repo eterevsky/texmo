@@ -1,0 +1,20 @@
+{
+  "tokens": [
+    "\u0011",
+    "\u0012",
+    " ",
+    "e"
+  ],
+  "config": {
+    "fallback16": false
+  },
+  "type": "fallback2",
+  "stats": {
+    "ntokens": 4,
+    "initial_size": 720320,
+    "processed_size": 720320,
+    "total_tokens": 4396797,
+    "bytes_per_token": 0.16382835050151282
+  },
+  "processing": []
+}

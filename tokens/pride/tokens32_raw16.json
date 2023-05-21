@@ -1,0 +1,48 @@
+{
+  "tokens": [
+    "\u0010",
+    " ",
+    ",",
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h",
+    "i",
+    "l",
+    "m",
+    "n",
+    "o",
+    "r",
+    "s",
+    "t",
+    "u",
+    "w",
+    "y"
+  ],
+  "config": {
+    "fallback16": true
+  },
+  "type": "fallback16",
+  "stats": {
+    "ntokens": 32,
+    "initial_size": 720320,
+    "processed_size": 720320,
+    "total_tokens": 847310,
+    "bytes_per_token": 0.8501256918955282
+  },
+  "processing": []
+}

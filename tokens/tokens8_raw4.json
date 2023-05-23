@@ -1,0 +1,21 @@
+{
+    "tokens": [
+      "\u0018",
+      "\u0019",
+      "\u001a",
+      "\u001b",
+      " ",
+      "a",
+      "e",
+      "t"
+    ],
+    "type": "fallback4",
+    "stats": {
+      "ntokens": 8,
+      "initial_size": 108362047381,
+      "processed_size": 108362047381,
+      "total_tokens": 308254489702,
+      "bytes_per_token": 0.351534368520495
+    },
+    "processing": []
+  }

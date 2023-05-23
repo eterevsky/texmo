@@ -453,7 +453,7 @@ fn optimize_tokens(
     input_tokens: &Option<String>,
     output_tokens: &Option<String>,
     ntokens: usize,
-    fallback2: bool,
+    fallback: Option<usize>,
     initial_size: Option<usize>,
     processing: &Option<String>,
 ) {
@@ -465,8 +465,10 @@ fn optimize_tokens(
     let token_set = if let Some(tokens_file) = input_tokens {
         TokenSet::from_json(tokens_file.as_str())
     } else {
-        if fallback2 {
+        if fallback.unwrap() == 2 {
             TokenSet::build_with_bin_literals()
+        } else if fallback.unwrap() == 4 {
+            TokenSet::build_with_quad_literals()
         } else {
             TokenSet::build_with_hex_literals()
         }
@@ -482,10 +484,12 @@ fn optimize_tokens(
 
     let mut tokens_json = token_set.to_json();
 
-    if token_set.fallback16 {
-        tokens_json["type"] = "fallback16".into();
-    } else {
+    if token_set.fallback == 2 {
         tokens_json["type"] = "fallback2".into();
+    } else if token_set.fallback == 4 {
+        tokens_json["type"] = "fallback4".into();
+    } else {
+        tokens_json["type"] = "fallback16".into();
     }
 
     tokens_json["stats"]["ntokens"] = (token_set.ntokens() - 256).into();
@@ -627,6 +631,23 @@ fn count_hex_digits(filename: &str) {
     }
 }
 
+fn count_bytes(filename: &str) {
+    let input = File::open(filename).unwrap();
+    let reader = BufReader::new(input);
+
+    let mut counts: [usize; 256] = [0; 256];
+
+    for byte in reader.bytes() {
+        let byte = byte.unwrap();
+        counts[byte as usize] += 1;
+    }
+
+    for c in counts.iter() {
+        print!(" {}", c);
+    }
+    println!();
+}
+
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(short, long)]
@@ -653,11 +674,10 @@ enum Command {
         #[arg(short, long)]
         ntokens: usize,
 
-        /// If true, the tokens that are not present will be encoded by bits
-        /// rather then as hexadecimal. Only taken into account if
-        /// --input_tokens is not specified.
+        /// Fallback encoding for bytes that aren't tokens. Possible values:
+        /// 2, 4, 16
         #[arg(long)]
-        fallback2: bool,
+        fallback: Option<usize>,
 
         /// If the input is pre-processed, this argument specifies the size
         /// of the input before pre-processing.
@@ -682,6 +702,7 @@ enum Command {
     },
 
     CountHexDigits,
+    CountBytes,
 }
 
 fn main() {
@@ -696,7 +717,7 @@ fn main() {
             input_tokens,
             output_tokens,
             ntokens,
-            fallback2,
+            fallback,
             initial_size,
             processing,
         } => optimize_tokens(
@@ -704,7 +725,7 @@ fn main() {
             input_tokens,
             output_tokens,
             *ntokens,
-            *fallback2,
+            *fallback,
             *initial_size,
             processing,
         ),
@@ -716,5 +737,7 @@ fn main() {
         } => filter_text(filename, *caps, *words, output.as_str()),
 
         Command::CountHexDigits => count_hex_digits(filename),
+
+        Command::CountBytes => count_bytes(filename),
     }
 }

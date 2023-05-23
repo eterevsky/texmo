@@ -1,0 +1,13 @@
+\uE000        -- other
+\uE010  \x10  -- hexadecimal encoding
+\uE011  \x11  -- bit 0
+\uE012  \x12  -- bit 1
+\uE013  \x13  -- end of the fragment
+\uE014  \x14  -- capitalize the next word
+\uE015  \x15  -- next word in all caps
+\x16          -- end of the word
+
+\x18          -- 00 bits
+\x19          -- 01 bits
+\x1a          -- 10 bits
+\x1b          -- 11 bits

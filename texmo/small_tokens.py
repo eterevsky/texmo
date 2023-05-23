@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 from typing import Self
 
 from .common import INF
@@ -86,7 +87,6 @@ def optimize_bits(counts, ntokens):
                     continue
 
                 if len(new_tokens) <= ntokens:
-                    print(f"add {token} {total}")
                     best_total = total
                     best_add = token
                 else:
@@ -106,22 +106,26 @@ def optimize_bits(counts, ntokens):
         if best_remove is not None:
             tokens.remove(best_remove)
 
+    return tokens
 
 
 def main(args):
-    path = args.data
     ntokens = args.ntokens
 
-    counts = [0] * 256
-    total = 0
-    with open(path, "rb") as data:
-        while True:
-            chunk = data.read(2**20)
-            if not chunk:
-                break
-            for b in chunk:
-                counts[b] += 1
-                total += 1
+    if args.load_counts:
+        counts = list(map(int, open(args.load_counts).read().strip().split()))
+    else:
+        path = args.data
+        counts = [0] * 256
+        total = 0
+        with open(path, "rb") as data:
+            while True:
+                chunk = data.read(2**20)
+                if not chunk:
+                    break
+                for b in chunk:
+                    counts[b] += 1
+                    total += 1
 
     # print(total)
     # print()
@@ -148,14 +152,40 @@ def main(args):
     #     print(i, counts4[i])
     # print()
 
-    optimize_bits(counts, ntokens)
+    tokens = optimize_bits(counts, ntokens)
+    total = count_tokens(counts, tokens)
+
+    tokens.sort(key=lambda t: 256 * t.bits + t.value)
+    out = {
+        "type": "bits",
+        "tokens": []
+    }
+    for t in tokens:
+        out["tokens"].append({"bits": t.bits, "value": t.value})
+    if args.initial_size:
+        initial_size = args.initial_size
+    else:
+        initial_size = sum(counts)
+    out["stats"] = {
+        "ntokens": ntokens,
+        "initial_size": initial_size,
+        "processed_size": sum(counts),
+        "total_tokens": total,
+        "bytes_per_token": initial_size / total
+    }
+
+    print(json.dumps(out, indent=2))
 
 
 def init_args(parser):
     parser.add_argument(
-        "-d", "--data", type=str, help="training data file", required=True
+        "-d", "--data", type=str, help="training data file"
     )
     parser.add_argument(
         "-n", "--ntokens", type=int, help="number of bit tokens"
     )
+    parser.add_argument(
+        "-l", "--load-counts", type=str, help="file with pre-computed byte counts"
+    )
+    parser.add_argument("--initial-size", type=int)
     parser.set_defaults(func=main)

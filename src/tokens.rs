@@ -28,7 +28,7 @@ pub struct TokenSet {
     pub tokens: Vec<Token>,
     pub tokens_by_string: HashMap<Vec<u8>, usize>,
     pub literal_cost: usize,
-    pub fallback16: bool,
+    pub fallback: usize,
 }
 
 impl TokenSet {
@@ -89,7 +89,7 @@ impl TokenSet {
             tokens: Vec::new(),
             tokens_by_string: HashMap::new(),
             literal_cost: 3,
-            fallback16: true,
+            fallback: 16,
         };
 
         for i in 0..=255 {
@@ -111,7 +111,7 @@ impl TokenSet {
             tokens: Vec::new(),
             tokens_by_string: HashMap::new(),
             literal_cost: 8,
-            fallback16: false,
+            fallback: 2,
         };
 
         for i in 0..=255 {
@@ -123,14 +123,35 @@ impl TokenSet {
         token_set
     }
 
+    pub fn build_with_quad_literals() -> Self {
+        let mut token_set = TokenSet {
+            tokens: Vec::new(),
+            tokens_by_string: HashMap::new(),
+            literal_cost: 4,
+            fallback: 4,
+        };
+
+        for i in 0..=255 {
+            token_set.add_literal(i);
+        }
+        token_set.add_mandatory_token(&[0x18]);
+        token_set.add_mandatory_token(&[0x19]);
+        token_set.add_mandatory_token(&[0x1a]);
+        token_set.add_mandatory_token(&[0x1b]);
+
+        token_set
+    }
+
     pub fn from_json(filename: &str) -> Self {
         let contents = std::fs::read_to_string(filename).unwrap();
         let parsed = json::parse(&contents).unwrap();
 
-        let mut token_set = if parsed["config"]["fallback16"].as_bool().unwrap() {
-            TokenSet::build_with_hex_literals()
-        } else {
+        let mut token_set = if parsed["type"].as_str().unwrap() == "fallback2" {
             TokenSet::build_with_bin_literals()
+        } else if parsed["type"].as_str().unwrap() == "fallback4" {
+            TokenSet::build_with_quad_literals()
+        } else {
+            TokenSet::build_with_hex_literals()
         };
 
         for token_str in parsed["tokens"].members() {
@@ -184,8 +205,6 @@ impl TokenSet {
 
             out["tokens"].push(value).unwrap();
         }
-
-        out["config"]["fallback16"] = self.fallback16.into();
 
         out
     }

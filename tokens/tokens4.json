@@ -1,0 +1,28 @@
+{
+    "type": "bits",
+    "tokens": [
+      {
+        "bits": 2,
+        "value": 0
+      },
+      {
+        "bits": 2,
+        "value": 1
+      },
+      {
+        "bits": 2,
+        "value": 2
+      },
+      {
+        "bits": 2,
+        "value": 3
+      }
+    ],
+    "stats": {
+      "ntokens": 4,
+      "initial_size": 108362047381,
+      "processed_size": 108362047381,
+      "total_tokens": 433448189524,
+      "bytes_per_token": 0.25
+    }
+  }

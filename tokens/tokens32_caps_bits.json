@@ -1,0 +1,143 @@
+{
+    "type": "bits",
+    "tokens": [
+      {
+        "bits": 2,
+        "value": 0
+      },
+      {
+        "bits": 2,
+        "value": 1
+      },
+      {
+        "bits": 2,
+        "value": 2
+      },
+      {
+        "bits": 2,
+        "value": 3
+      },
+      {
+        "bits": 4,
+        "value": 2
+      },
+      {
+        "bits": 4,
+        "value": 3
+      },
+      {
+        "bits": 4,
+        "value": 6
+      },
+      {
+        "bits": 4,
+        "value": 7
+      },
+      {
+        "bits": 8,
+        "value": 10
+      },
+      {
+        "bits": 8,
+        "value": 20
+      },
+      {
+        "bits": 8,
+        "value": 32
+      },
+      {
+        "bits": 8,
+        "value": 44
+      },
+      {
+        "bits": 8,
+        "value": 46
+      },
+      {
+        "bits": 8,
+        "value": 97
+      },
+      {
+        "bits": 8,
+        "value": 99
+      },
+      {
+        "bits": 8,
+        "value": 100
+      },
+      {
+        "bits": 8,
+        "value": 101
+      },
+      {
+        "bits": 8,
+        "value": 102
+      },
+      {
+        "bits": 8,
+        "value": 103
+      },
+      {
+        "bits": 8,
+        "value": 104
+      },
+      {
+        "bits": 8,
+        "value": 105
+      },
+      {
+        "bits": 8,
+        "value": 108
+      },
+      {
+        "bits": 8,
+        "value": 109
+      },
+      {
+        "bits": 8,
+        "value": 110
+      },
+      {
+        "bits": 8,
+        "value": 111
+      },
+      {
+        "bits": 8,
+        "value": 112
+      },
+      {
+        "bits": 8,
+        "value": 114
+      },
+      {
+        "bits": 8,
+        "value": 115
+      },
+      {
+        "bits": 8,
+        "value": 116
+      },
+      {
+        "bits": 8,
+        "value": 117
+      },
+      {
+        "bits": 8,
+        "value": 119
+      },
+      {
+        "bits": 8,
+        "value": 121
+      }
+    ],
+    "stats": {
+      "ntokens": 32,
+      "initial_size": 108362047381,
+      "processed_size": 111192723250,
+      "total_tokens": 123624743999,
+      "bytes_per_token": 0.8765401154794427
+    },
+    "processing": [
+      "caps"
+    ]
+}

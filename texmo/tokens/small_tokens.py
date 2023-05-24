@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import json
 from typing import Self
 
-from .common import INF
+from ..common import INF
 
 
 class Token(object):

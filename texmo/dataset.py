@@ -1,3 +1,5 @@
+import argparse
+import logging
 import mmap
 import numpy as np
 import os
@@ -9,9 +11,9 @@ from typing import Optional
 from . import latency
 
 
-def _worker(all, request_queue, data_queues):
+def _worker(all, request_queue, data_queues, debug):
     while True:
-        length, batch_size = request_queue.get()
+        length, batch_size, ntokens = request_queue.get()
         if length is None or batch_size is None:
             break
         with latency.timer("dataset-worker"):
@@ -19,15 +21,23 @@ def _worker(all, request_queue, data_queues):
             for _ in range(batch_size):
                 start = random.randrange(len(all) - length)
                 sample = all[start : start + length]
+                if debug:
+                    try:
+                        s = sample.decode("utf-8")
+                    except UnicodeDecodeError:
+                        s = sample
+                    print(f"=== Sample:\n{s}\n===")
                 batch.append(np.frombuffer(sample, dtype=np.ubyte))
             batch = np.array(batch, dtype=np.ubyte)
-            data_queues[(length, batch_size)].put(batch)
+            data_queues[(length, batch_size, ntokens)].put(batch)
 
 
 class DataSet(object):
     def __init__(
-        self, path: Optional[str] = None, data: Optional[bytes] = None
+        self, path: Optional[str] = None, data: Optional[bytes] = None,
+        debug: bool=False
     ):
+        self._debug: bool = debug
         self.all: bytes | mmap.mmap = b""
         if path is not None:
             assert data is None
@@ -37,20 +47,24 @@ class DataSet(object):
                     "Directory with training data is currently not supported"
                 )
             self._file = os.open(path, os.O_RDONLY)
-            # self.all = mmap.mmap(
-            #     self._file.fileno(),
-            #     0,
-            #     flags=mmap.MAP_PRIVATE,
-            #     prot=mmap.PROT_READ,
-            # )
-            self.all = mmap.mmap(
-                self._file,
-                0,
-                access=mmap.ACCESS_READ,
-            )
+            try:
+                self.all = mmap.mmap(
+                    self._file,
+                    0,
+                    flags=mmap.MAP_PRIVATE,
+                    prot=mmap.PROT_READ,
+                    access=mmap.ACCESS_READ,
+                )
+            except AttributeError:
+                # Windows
+                self.all = mmap.mmap(
+                    self._file,
+                    0,
+                    access=mmap.ACCESS_READ,
+                )
 
             total = len(self.all) / 1e9
-            print(f"Dataset mmap'ed: {total:.2f} GB")
+            logging.info(f"Dataset mmap'ed: {total:.2f} GB")
         else:
             assert data is not None
             self.all = data
@@ -64,19 +78,20 @@ class DataSet(object):
 
         self._worker_thread = Thread(
             target=_worker,
-            args=[self.all, self._request_queue, self._data_queues],
+            args=[self.all, self._request_queue, self._data_queues, debug],
         )
         self._worker_thread.start()
 
     def __del__(self):
         self.join()
+        os.close(self._file)
 
     def join(self):
-        self._request_queue.put((None, None))
+        self._request_queue.put((None, None, None))
         self._worker_thread.join()
 
-    def sample(self, length, batch_size):
-        key = (length, batch_size)
+    def sample(self, bytes_length, batch_size, ntokens=None):
+        key = (bytes_length, batch_size, ntokens)
         if key not in self._data_queues:
             self._data_queues[key] = Queue()
             self._request_queue.put(key)
@@ -106,3 +121,30 @@ def build_fake_dataset():
     for c in range(ord("c"), ord("o")):
         s = s + bytes([c]) + s
     return DataSet(data=s)
+
+
+def dataset_sample(args: argparse.Namespace):
+    logging.getLogger().setLevel(logging.INFO)
+    dataset = DataSet(args.data, debug=True)
+    sample = dataset.sample(args.length, args.batch, args.ntokens)
+    print(f"Prepared sample:\n{sample}")
+
+
+def init_args(parser: argparse.ArgumentParser):
+    parser.add_argument(
+        "-d", "--data", type=str, help="training data file", required=True
+    )
+    parser.add_argument(
+        "-b", "--batch", type=int, help="batch size", default=1
+    )
+    parser.add_argument(
+        "-t", "--tokens", type=str, help="path to token set definition", required=True
+    )
+    length_group = parser.add_mutually_exclusive_group()
+    length_group.add_argument(
+        "-n", "--ntokens", type=int, help="length of the sample in tokens", default=256
+    )
+    length_group.add_argument(
+        "-l", "--length", type=int, help="length in bytes", default=None
+    )
+    parser.set_defaults(func=dataset_sample)

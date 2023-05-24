@@ -33,7 +33,7 @@ pub struct TokenSet {
 
 impl TokenSet {
     pub fn ntokens(&self) -> usize {
-        self.tokens.len()
+        self.tokens.len() - 256 + (1 << self.fallback)
     }
 
     fn add_mandatory_token(&mut self, string: &[u8]) {
@@ -78,10 +78,25 @@ impl TokenSet {
         self.tokens.remove(token_id);
 
         self.tokens_by_string.clear();
-        for i in 0..self.ntokens() {
+        for i in 0..self.tokens.len() {
             let token = &self.tokens[i];
             self.tokens_by_string.insert(token.string.clone(), i);
         }
+    }
+
+    pub fn build_with_fallback_bits(bits: usize) -> Self {
+        let mut token_set = TokenSet {
+            tokens: Vec::new(),
+            tokens_by_string: HashMap::new(),
+            literal_cost: 8 / bits,
+            fallback: bits,
+        };
+
+        for i in 0..=255 {
+            token_set.add_literal(i);
+        }
+
+        token_set
     }
 
     pub fn build_with_hex_literals() -> Self {
@@ -146,24 +161,27 @@ impl TokenSet {
         let contents = std::fs::read_to_string(filename).unwrap();
         let parsed = json::parse(&contents).unwrap();
 
-        let mut token_set = if parsed["type"].as_str().unwrap() == "fallback2" {
-            TokenSet::build_with_bin_literals()
-        } else if parsed["type"].as_str().unwrap() == "fallback4" {
-            TokenSet::build_with_quad_literals()
-        } else {
-            TokenSet::build_with_hex_literals()
-        };
+        assert!(parsed["type"].as_str().unwrap() == "str_with_fallback_bits");
+        let mut token_set = TokenSet::build_with_fallback_bits(parsed["fallback_bits"].as_usize().unwrap());
+
+        // let mut token_set = if parsed["type"].as_str().unwrap() == "fallback2" {
+        //     TokenSet::build_with_bin_literals()
+        // } else if parsed["type"].as_str().unwrap() == "fallback4" {
+        //     TokenSet::build_with_quad_literals()
+        // } else {
+        //     TokenSet::build_with_hex_literals()
+        // };
 
         for token_str in parsed["tokens"].members() {
             if token_str.is_string() {
                 token_set.add_token(token_str.as_str().unwrap().as_bytes());
-            } else {
+            } else if token_str.is_array() {
                 let mut s = vec![];
                 for b in token_str.members() {
                     s.push(b.as_u8().unwrap());
                 }
                 token_set.add_token(&s);
-            }
+            }  // Skip fallback values
         }
 
         token_set
@@ -196,6 +214,10 @@ impl TokenSet {
         }
 
         token_strs.sort_unstable();
+
+        for x in 0..(1 << self.fallback) {
+            out["tokens"].push(x).unwrap();
+        }
 
         for token_str in token_strs.iter() {
             let value: json::JsonValue = match std::str::from_utf8(&token_str) {

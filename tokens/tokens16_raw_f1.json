@@ -1,0 +1,30 @@
+{
+  "tokens": [
+    0,
+    1,
+    " ",
+    "a",
+    "c",
+    "d",
+    "e",
+    "h",
+    "i",
+    "l",
+    "n",
+    "o",
+    "r",
+    "s",
+    "t",
+    "u"
+  ],
+  "type": "str_with_fallback_bits",
+  "fallback_bits": 1,
+  "stats": {
+    "ntokens": 16,
+    "initial_size": 108362047381,
+    "processed_size": 108362047381,
+    "total_tokens": 273052436629,
+    "bytes_per_token": 0.39685435046394759
+  },
+  "processing": []
+}

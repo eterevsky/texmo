@@ -93,8 +93,8 @@ impl TokenStats {
             }
         }
 
-        let ifirst = top_pair / token_set.ntokens();
-        let isecond = top_pair % token_set.ntokens();
+        let ifirst = top_pair / token_set.tokens.len();
+        let isecond = top_pair % token_set.tokens.len();
 
         let mut token_str = token_set.tokens[ifirst].string.clone();
         token_str.extend(token_set.tokens[isecond].string.clone());
@@ -244,7 +244,7 @@ impl Tokenizer {
             let token = &self.token_set.tokens[token_id];
             token_stats.token_count[token_id] += 1;
 
-            token_stats.pair_count[token_id * self.token_set.ntokens() + next_token_id] += 1;
+            token_stats.pair_count[token_id * self.token_set.tokens.len() + next_token_id] += 1;
 
             next_token_id = token_id;
             pos = pos.checked_sub(token.string.len()).unwrap();
@@ -379,7 +379,7 @@ fn optimize_bpe(token_set: &TokenSet, ntokens: usize, filename: &str) -> (TokenS
             format_token(&new_token_str)
         );
 
-        if new_token_set.ntokens() > 256 + ntokens {
+        if new_token_set.ntokens() > ntokens {
             let stats = tokenize_file(&new_token_set, filename);
             let mut token_ids: Vec<usize> = (0..new_token_set.tokens.len()).collect();
             token_ids.sort_unstable_by_key(|&i| {
@@ -451,7 +451,7 @@ fn optimize_tokens(
     input_tokens: &Option<String>,
     output_tokens: &Option<String>,
     ntokens: usize,
-    fallback: Option<usize>,
+    fallback_bits: Option<usize>,
     initial_size: Option<usize>,
     processing: &Option<String>,
 ) {
@@ -463,13 +463,14 @@ fn optimize_tokens(
     let token_set = if let Some(tokens_file) = input_tokens {
         TokenSet::from_json(tokens_file.as_str())
     } else {
-        if fallback.unwrap() == 2 {
-            TokenSet::build_with_bin_literals()
-        } else if fallback.unwrap() == 4 {
-            TokenSet::build_with_quad_literals()
-        } else {
-            TokenSet::build_with_hex_literals()
-        }
+        TokenSet::build_with_fallback_bits(fallback_bits.unwrap())
+        // if fallback.unwrap() == 2 {
+        //     TokenSet::build_with_bin_literals()
+        // } else if fallback.unwrap() == 4 {
+        //     TokenSet::build_with_quad_literals()
+        // } else {
+        //     TokenSet::build_with_hex_literals()
+        // }
     };
 
     let tokens_json = token_set.to_json();
@@ -482,15 +483,18 @@ fn optimize_tokens(
 
     let mut tokens_json = token_set.to_json();
 
-    if token_set.fallback == 2 {
-        tokens_json["type"] = "fallback2".into();
-    } else if token_set.fallback == 4 {
-        tokens_json["type"] = "fallback4".into();
-    } else {
-        tokens_json["type"] = "fallback16".into();
-    }
+    tokens_json["type"] = "str_with_fallback_bits".into();
+    tokens_json["fallback_bits"] = token_set.fallback.into();
 
-    tokens_json["stats"]["ntokens"] = (token_set.ntokens() - 256).into();
+    // if token_set.fallback == 2 {
+    //     tokens_json["type"] = "fallback2".into();
+    // } else if token_set.fallback == 4 {
+    //     tokens_json["type"] = "fallback4".into();
+    // } else {
+    //     tokens_json["type"] = "fallback16".into();
+    // }
+
+    tokens_json["stats"]["ntokens"] = token_set.ntokens().into();
     let initial_size = match initial_size {
         Some(x) => x,
         None => token_stats.scanned_bytes,
@@ -672,10 +676,15 @@ enum Command {
         #[arg(short, long)]
         ntokens: usize,
 
-        /// Fallback encoding for bytes that aren't tokens. Possible values:
-        /// 2, 4, 16
-        #[arg(long)]
-        fallback: Option<usize>,
+        /// Add tokens for 1, 2 or 4-bit blocks to encode bytes that aren't
+        /// tokens.        
+        #[arg(short, long)]
+        fallback_bits: Option<usize>,
+
+        // /// Fallback encoding for bytes that aren't tokens. Possible values:
+        // /// 2, 4, 16
+        // #[arg(long)]
+        // fallback: Option<usize>,
 
         /// If the input is pre-processed, this argument specifies the size
         /// of the input before pre-processing.
@@ -715,7 +724,7 @@ fn main() {
             input_tokens,
             output_tokens,
             ntokens,
-            fallback,
+            fallback_bits,
             initial_size,
             processing,
         } => optimize_tokens(
@@ -723,7 +732,7 @@ fn main() {
             input_tokens,
             output_tokens,
             *ntokens,
-            *fallback,
+            *fallback_bits,
             *initial_size,
             processing,
         ),

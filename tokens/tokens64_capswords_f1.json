@@ -71,10 +71,8 @@
       226
     ]
   ],
-  "config": {
-    "fallback16": false
-  },
-  "type": "fallback2",
+  "type": "str_with_fallback_bits",
+  "fallback_bits": 1,
   "stats": {
     "ntokens": 64,
     "initial_size": 108362047381,

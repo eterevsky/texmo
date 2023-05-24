@@ -204,26 +204,24 @@ impl Tokenizer {
         for &byte in bytes.iter() {
             state = &self.suffix_states[state.next[byte as usize]];
 
+            let token_id = state.token_id;
+            let mut token = &self.token_set.tokens[token_id];
+            let prev_cost = self.cost_array[self.cost_array.len() - token.string.len()].cost;
+            let new_cost = prev_cost + token.cost;
+
             let mut best_dyn_state = DynState {
-                cost: std::usize::MAX,
-                token_id: 0,
+                cost: new_cost,
+                token_id: token_id,
             };
 
-            let mut token_id = state.token_id;
-            loop {
-                let token = &self.token_set.tokens[token_id];
+            while let Some(token_id) = token.suffix {
+                token = &self.token_set.tokens[token_id];
                 let prev_cost = self.cost_array[self.cost_array.len() - token.string.len()].cost;
                 let new_cost = prev_cost + token.cost;
 
                 if new_cost < best_dyn_state.cost {
                     best_dyn_state.cost = new_cost;
                     best_dyn_state.token_id = token_id;
-                }
-
-                if let Some(t) = token.suffix {
-                    token_id = t;
-                } else {
-                    break;
                 }
             }
 

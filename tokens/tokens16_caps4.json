@@ -1,0 +1,31 @@
+{
+  "tokens": [
+    "\u0018",
+    "\u0019",
+    "\u001a",
+    "\u001b",
+    " ",
+    "a",
+    "d",
+    "e",
+    "h",
+    "i",
+    "l",
+    "n",
+    "o",
+    "r",
+    "s",
+    "t"
+  ],
+  "type": "fallback4",
+  "stats": {
+    "ntokens": 16,
+    "initial_size": 108362047381,
+    "processed_size": 111192723250,
+    "total_tokens": 198008263099,
+    "bytes_per_token": 0.5472602288664147
+  },
+  "processing": [
+    "caps"
+  ]
+}

@@ -1,12 +1,16 @@
 {
   "tokens": [
+    0,
+    1,
     "\n",
-    "\u0011",
-    "\u0012",
+    "\u0014",
+    "\u0015",
     " ",
-    " the ",
+    " \u0014",
     "\"",
     "'",
+    "(",
+    ")",
     "*",
     ", ",
     "-",
@@ -14,22 +18,10 @@
     "0",
     "1",
     "2",
-    "A",
-    "B",
-    "C",
-    "D",
-    "E",
-    "H",
-    "I",
-    "M",
-    "P",
-    "R",
-    "S",
-    "T",
-    "W",
     "_",
     "a",
     "an",
+    "ar",
     "b",
     "c",
     "d",
@@ -43,24 +35,32 @@
     "h",
     "i",
     "in",
+    "j",
     "k",
     "l",
     "m",
     "n",
     "o",
+    "o ",
     "on",
+    "or",
+    "ou",
     "p",
+    "q",
     "r",
     "s",
     "s ",
     "t",
     "t ",
     "th",
+    "the ",
     "u",
     "v",
     "w",
     "x",
     "y",
+    "y ",
+    "z",
     [
       128
     ],
@@ -71,16 +71,16 @@
       226
     ]
   ],
-  "config": {
-    "fallback16": false
-  },
-  "type": "fallback2",
+  "type": "str_with_fallback_bits",
+  "fallback_bits": 1,
   "stats": {
     "ntokens": 64,
     "initial_size": 108362047381,
-    "processed_size": 108362047381,
-    "total_tokens": 109828203851,
-    "bytes_per_token": 0.9866504557245689
+    "processed_size": 111192723250,
+    "total_tokens": 98961735323,
+    "bytes_per_token": 1.094989361568069
   },
-  "processing": []
+  "processing": [
+    "caps"
+  ]
 }

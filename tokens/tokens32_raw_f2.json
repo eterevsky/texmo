@@ -1,12 +1,12 @@
 {
   "tokens": [
+    0,
+    1,
+    2,
+    3,
     "\n",
-    "\u0011",
-    "\u0012",
-    "\u0014",
     " ",
-    "\"",
-    "'",
+    " t",
     ",",
     ".",
     "a",
@@ -33,18 +33,14 @@
     "w",
     "y"
   ],
-  "config": {
-    "fallback16": false
-  },
-  "type": "fallback2",
+  "type": "str_with_fallback_bits",
+  "fallback_bits": 2,
   "stats": {
     "ntokens": 32,
     "initial_size": 108362047381,
-    "processed_size": 111192723250,
-    "total_tokens": 134325175180,
-    "bytes_per_token": 0.8067143574225115
+    "processed_size": 108362047381,
+    "total_tokens": 126071320366,
+    "bytes_per_token": 0.8595297254475651
   },
-  "processing": [
-    "caps"
-  ]
+  "processing": []
 }

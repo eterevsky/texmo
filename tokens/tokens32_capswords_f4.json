@@ -1,5 +1,4 @@
 {
-  "type": "fallback16a",
   "tokens": [
     0,
     1,
@@ -17,16 +16,16 @@
     13,
     14,
     15,
+    "\u0014",
+    "\u0016",
     " ",
     "a",
     "c",
     "d",
     "e",
-    "f",
     "h",
     "i",
     "l",
-    "m",
     "n",
     "o",
     "r",
@@ -34,11 +33,13 @@
     "t",
     "u"
   ],
+  "type": "str_with_fallback_bits",
+  "fallback_bits": 4,
   "stats": {
     "ntokens": 16,
     "initial_size": 108362047381,
-    "processed_size": 108362047381,
-    "total_tokens": 128284187075,
-    "bytes_per_token": 0.8447030756615955
+    "processed_size": 114769772055,
+    "total_tokens": 136160511356,
+    "bytes_per_token": 0.7958404848941907
   }
 }

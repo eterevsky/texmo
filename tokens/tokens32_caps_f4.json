@@ -1,5 +1,6 @@
 {
-  "type": "fallback16a",
+  "type": "str_with_fallback_bits",
+  "fallback_bits": 4,
   "tokens": [
     0,
     1,

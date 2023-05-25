@@ -35,8 +35,10 @@ def _worker(all, request_queue, data_queues, debug):
 class DataSet(object):
     def __init__(
         self, path: Optional[str] = None, data: Optional[bytes] = None,
+        warmup_queues: bool = True,
         debug: bool=False
     ):
+        self._warmup_queues = warmup_queues
         self._debug: bool = debug
         self.all: bytes | mmap.mmap = b""
         if path is not None:
@@ -94,7 +96,8 @@ class DataSet(object):
         key = (bytes_length, batch_size, ntokens)
         if key not in self._data_queues:
             self._data_queues[key] = Queue()
-            self._request_queue.put(key)
+            if self._warmup_queues:
+                self._request_queue.put(key)
 
         with latency.timer("DataSet.sample"):
             self._request_queue.put(key)
@@ -125,7 +128,7 @@ def build_fake_dataset():
 
 def dataset_sample(args: argparse.Namespace):
     logging.getLogger().setLevel(logging.INFO)
-    dataset = DataSet(args.data, debug=True)
+    dataset = DataSet(args.data, debug=True, warmup_queues=False)
     sample = dataset.sample(args.length, args.batch, args.ntokens)
     print(f"Prepared sample:\n{sample}")
 

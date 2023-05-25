@@ -1,28 +1,28 @@
 {
   "tokens": [
+    0,
+    1,
+    2,
+    3,
     "\n\n",
-    "\u0010",
     " ",
     " th",
     " the ",
     "\"",
     "'",
     ", ",
+    "-",
     ".",
     ". ",
-    "0",
     "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
+    "A",
+    "C",
     "I",
+    "S",
     "T",
+    "_",
     "a",
+    "a ",
     "al",
     "an",
     "ar",
@@ -65,16 +65,14 @@
     "y",
     "y "
   ],
-  "config": {
-    "fallback16": true
-  },
-  "type": "fallback16",
+  "type": "str_with_fallback_bits",
+  "fallback_bits": 2,
   "stats": {
     "ntokens": 64,
     "initial_size": 108362047381,
     "processed_size": 108362047381,
-    "total_tokens": 92681097010,
-    "bytes_per_token": 1.169192541703602
+    "total_tokens": 96386004935,
+    "bytes_per_token": 1.124250843824021
   },
   "processing": []
 }

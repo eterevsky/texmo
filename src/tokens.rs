@@ -24,11 +24,23 @@ impl Token {
 }
 
 #[derive(Clone)]
+enum Fallback {
+    Bits(usize),
+    Distribution([f32; 256]),
+    HexLiteral,
+}
+
+#[derive(Clone)]
 pub struct TokenSet {
     pub tokens: Vec<Token>,
     pub tokens_by_string: HashMap<Vec<u8>, usize>,
     pub literal_cost: usize,
-    pub fallback: usize,
+    fallback: Fallback,
+
+    /// Number of tokens that are not added to the token set since they don't
+    /// have a string representation.
+    reserved_tokens: usize,
+    byte_counts: Option<[usize; 256]>,
 }
 
 impl TokenSet {
@@ -89,7 +101,8 @@ impl TokenSet {
             tokens: Vec::new(),
             tokens_by_string: HashMap::new(),
             literal_cost: 8 / bits,
-            fallback: bits,
+            fallback: Fallback::Bits(bits),
+            byte_counts: None,
         };
 
         for i in 0..=255 {
@@ -99,12 +112,18 @@ impl TokenSet {
         token_set
     }
 
+    pub fn build_with_dist_fallback(byte_counts: [usize; 256]) -> Self {
+
+
+    }
+
     pub fn build_with_hex_literals() -> Self {
         let mut token_set = TokenSet {
             tokens: Vec::new(),
             tokens_by_string: HashMap::new(),
             literal_cost: 3,
-            fallback: 16,
+            fallback: Fallback::HexLiteral,
+            byte_counts: None,
         };
 
         for i in 0..=255 {
@@ -117,42 +136,6 @@ impl TokenSet {
         for i in ('a' as u8)..=('f' as u8) {
             token_set.add_mandatory_token(&[i]);
         }
-
-        token_set
-    }
-
-    pub fn build_with_bin_literals() -> Self {
-        let mut token_set = TokenSet {
-            tokens: Vec::new(),
-            tokens_by_string: HashMap::new(),
-            literal_cost: 8,
-            fallback: 2,
-        };
-
-        for i in 0..=255 {
-            token_set.add_literal(i);
-        }
-        token_set.add_mandatory_token(&[0x11]);
-        token_set.add_mandatory_token(&[0x12]);
-
-        token_set
-    }
-
-    pub fn build_with_quad_literals() -> Self {
-        let mut token_set = TokenSet {
-            tokens: Vec::new(),
-            tokens_by_string: HashMap::new(),
-            literal_cost: 4,
-            fallback: 4,
-        };
-
-        for i in 0..=255 {
-            token_set.add_literal(i);
-        }
-        token_set.add_mandatory_token(&[0x18]);
-        token_set.add_mandatory_token(&[0x19]);
-        token_set.add_mandatory_token(&[0x1a]);
-        token_set.add_mandatory_token(&[0x1b]);
 
         token_set
     }

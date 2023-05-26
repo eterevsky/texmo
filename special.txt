@@ -11,3 +11,6 @@
 \x19          -- 01 bits
 \x1a          -- 10 bits
 \x1b          -- 11 bits
+
+\x1c          -- stands for any byte not covered by tokens, sampled from a
+                 distribution

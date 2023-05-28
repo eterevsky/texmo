@@ -9,12 +9,15 @@ from threading import Thread
 from typing import Optional
 
 from . import latency
+from .tokens import TokenSet
 
 
 def _worker(all, request_queue, data_queues, debug):
     while True:
         length, batch_size, ntokens = request_queue.get()
+        logging.info(f"job: {length}, {batch_size}, {ntokens}")
         if length is None or batch_size is None:
+            logging.info("Stopping the worker")
             break
         with latency.timer("dataset-worker"):
             batch = []
@@ -35,9 +38,10 @@ def _worker(all, request_queue, data_queues, debug):
 class DataSet(object):
     def __init__(
         self, path: Optional[str] = None, data: Optional[bytes] = None,
-        warmup_queues: bool = True,
+        warmup_queues: bool = True, token_sets: dict[int, TokenSet] = None,
         debug: bool=False
     ):
+        logging.info("Createing DataSet")
         self._warmup_queues = warmup_queues
         self._debug: bool = debug
         self.all: bytes | mmap.mmap = b""
@@ -93,6 +97,8 @@ class DataSet(object):
         self._worker_thread.join()
 
     def sample(self, bytes_length, batch_size, ntokens=None):
+        print("sample()")
+        assert bytes_length is not None
         key = (bytes_length, batch_size, ntokens)
         if key not in self._data_queues:
             self._data_queues[key] = Queue()
@@ -126,8 +132,14 @@ def build_fake_dataset():
     return DataSet(data=s)
 
 
-def dataset_sample(args: argparse.Namespace):
+def sample(args: argparse.Namespace):
     logging.getLogger().setLevel(logging.INFO)
+
+    if args.tokens is None:
+        token_set = None
+    else:
+        token_set = TokenSet.from_json_file(args.tokens)
+
     dataset = DataSet(args.data, debug=True, warmup_queues=False)
     sample = dataset.sample(args.length, args.batch, args.ntokens)
     print(f"Prepared sample:\n{sample}")
@@ -141,7 +153,7 @@ def init_args(parser: argparse.ArgumentParser):
         "-b", "--batch", type=int, help="batch size", default=1
     )
     parser.add_argument(
-        "-t", "--tokens", type=str, help="path to token set definition", required=True
+        "-t", "--tokens", type=str, help="path to token set definition", default=None
     )
     length_group = parser.add_mutually_exclusive_group()
     length_group.add_argument(
@@ -150,4 +162,4 @@ def init_args(parser: argparse.ArgumentParser):
     length_group.add_argument(
         "-l", "--length", type=int, help="length in bytes", default=None
     )
-    parser.set_defaults(func=dataset_sample)
+    parser.set_defaults(func=sample)

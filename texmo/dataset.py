@@ -1,4 +1,5 @@
 import argparse
+from collections import namedtuple
 import logging
 import mmap
 import numpy as np
@@ -12,18 +13,29 @@ from . import latency
 from .tokens import TokenSet
 
 
-def _worker(all, request_queue, data_queues, debug):
+Request = namedtuple("Request", ["length", "batch", "ntokens", "token_set_size"])
+
+
+def _worker(all, request_queue, data_queues, tokenizers, debug):
     while True:
-        length, batch_size, ntokens = request_queue.get()
-        logging.info(f"job: {length}, {batch_size}, {ntokens}")
-        if length is None or batch_size is None:
+        request = request_queue.get()
+        logging.info(f"Request: {request}")
+        if request is None:
             logging.info("Stopping the worker")
             break
         with latency.timer("dataset-worker"):
             batch = []
-            for _ in range(batch_size):
-                start = random.randrange(len(all) - length)
-                sample = all[start : start + length]
+            for _ in range(request.batch):
+                start = random.randrange(len(all) - request.length)
+                paragraph = all.rfind(b"\n\n", 0, start)
+                doc_end = all.find(b"\x13", paragraph, start)
+                if doc_end >= 0:
+                    start = doc_end + 1
+                elif paragraph >= 0:
+                    start = paragraph + 2
+                else:
+                    start = 0
+                sample = all[start : start + request.length]
                 if debug:
                     try:
                         s = sample.decode("utf-8")
@@ -32,7 +44,7 @@ def _worker(all, request_queue, data_queues, debug):
                     print(f"=== Sample:\n{s}\n===")
                 batch.append(np.frombuffer(sample, dtype=np.ubyte))
             batch = np.array(batch, dtype=np.ubyte)
-            data_queues[(length, batch_size, ntokens)].put(batch)
+            data_queues[request].put(batch)
 
 
 class DataSet(object):
@@ -44,6 +56,7 @@ class DataSet(object):
         logging.info("Createing DataSet")
         self._warmup_queues = warmup_queues
         self._debug: bool = debug
+        self._token_sets = token_sets
         self.all: bytes | mmap.mmap = b""
         if path is not None:
             assert data is None
@@ -59,7 +72,6 @@ class DataSet(object):
                     0,
                     flags=mmap.MAP_PRIVATE,
                     prot=mmap.PROT_READ,
-                    access=mmap.ACCESS_READ,
                 )
             except AttributeError:
                 # Windows
@@ -73,33 +85,42 @@ class DataSet(object):
             logging.info(f"Dataset mmap'ed: {total:.2f} GB")
         else:
             assert data is not None
+            self._file = None
             self.all = data
 
         # A queue of (length, batch_size) tuples.
-        self._request_queue: Queue = Queue()
+        self._request_queue: Queue[Request] = Queue()
 
         # Queues of training batches, with (length, batch_size) as key. Each
         # queue should have at least one batch ready at any time.
         self._data_queues: dict[tuple[int, int], Queue] = {}
 
+        self._token_sets = token_sets
+        self._tokenizers = {}
+
         self._worker_thread = Thread(
             target=_worker,
-            args=[self.all, self._request_queue, self._data_queues, debug],
+            args=[self.all, self._request_queue, self._data_queues, self._tokenizers, debug],
         )
         self._worker_thread.start()
 
     def __del__(self):
         self.join()
-        os.close(self._file)
+        if self._file is not None:
+            os.close(self._file)
 
     def join(self):
-        self._request_queue.put((None, None, None))
+        self._request_queue.put(None)
         self._worker_thread.join()
 
-    def sample(self, bytes_length, batch_size, ntokens=None):
-        print("sample()")
+    def sample(self, bytes_length, batch_size, ntokens=None, token_set_size=None):
         assert bytes_length is not None
-        key = (bytes_length, batch_size, ntokens)
+
+        if token_set_size is not None and token_set_size not in self._tokenizers:
+            logging.error(f"Need to initialize a tokenizer with {token_set_size} token")
+
+        key = Request(bytes_length, batch_size, ntokens, token_set_size)
+
         if key not in self._data_queues:
             self._data_queues[key] = Queue()
             if self._warmup_queues:
@@ -137,11 +158,13 @@ def sample(args: argparse.Namespace):
 
     if args.tokens is None:
         token_set = None
+        token_sets = {}
     else:
         token_set = TokenSet.from_json_file(args.tokens)
+        token_sets = {token_set.ntokens: token_set}
 
-    dataset = DataSet(args.data, debug=True, warmup_queues=False)
-    sample = dataset.sample(args.length, args.batch, args.ntokens)
+    dataset = DataSet(args.data, debug=True, warmup_queues=False, token_sets=token_sets)
+    sample = dataset.sample(args.length, args.batch, args.ntokens, token_set.ntokens)
     print(f"Prepared sample:\n{sample}")
 
 

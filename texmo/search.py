@@ -56,7 +56,7 @@ class Search(object):
         conf: Configuration,
         run: Run,
         weights: Weights,
-        parent_checkpoint: Optional[Checkpoint],
+        parent_checkpoint: Optional[Checkpoint] = None,
     ):
         assert isinstance(record, TrainingRecord)
         assert isinstance(conf, Configuration)

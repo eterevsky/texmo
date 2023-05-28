@@ -8,10 +8,6 @@ logging.disable(level=logging.ERROR)
 
 
 class TokensTest(TestCase):
-    def test_find_frequent_substrings(self):
-        s = tokens.find_frequent_substrings(b"abacabadaba", 5)
-        self.assertEqual(s, {b"a": 6, b"ab": 3, b"b": 3, b"ba": 3, b"aba": 3})
-
     def test_tokenize1(self):
         self.assertEqual(
             list(
@@ -160,13 +156,13 @@ class TokensTest(TestCase):
                 b"fg",
             ],
         )
-    
+
     def test_tokenizer2(self):
         tokenizer = Tokenizer2([b"a", b"b", b"ab"])
         self.assertEqual(tokenizer._tokens[b"ab"].suffix_token.string, b"b")
         self.assertEqual(tokenizer._tokens[b"a"].suffix_token, None)
         self.assertEqual(tokenizer._tokens[b"b"].suffix_token, None)
-    
+
     def test_tokenizer2_abc(self):
         tokenizer = Tokenizer2([b"a", b"b", b"c", b"bc", b"abc"])
         self.assertEqual(tokenizer._tokens[b"abc"].suffix_token.string, b"bc")

@@ -103,8 +103,8 @@ class ResultDB(object):
             "test_batch": record.test_batch,
             "loss": run.loss,
             "step_loss": _pack_ndarray(run.step_loss),
-            "loss_model_v": run.loss_trend.version,
-            "loss_model": _pack_ndarray(run.loss_trend.params()),
+            "loss_model_v": run.loss_trend.version if run.loss_trend is not None else None,
+            "loss_model": _pack_ndarray(run.loss_trend.params()) if run.loss_trend is not None else None,
             "checkpoint": run.checkpoint if run.checkpoint else None,
         }
         if math.isnan(record.loss) or record.loss is None:

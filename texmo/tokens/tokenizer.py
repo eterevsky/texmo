@@ -1,5 +1,7 @@
 from typing import Self
 
+import regex
+
 from ..common import INF
 from .tokenset import Token, TokenSet
 
@@ -57,6 +59,12 @@ def _populate_suffix_states(token_set: TokenSet):
     return states
 
 
+WORD_BOUNDARY = regex.compile(r"(?<=\P{L})(?=\p{L})|(?<=\p{L})(?=\P{L})")
+CAPITALIZED_MARKER = "\x14"
+ALLCAPS_MARKER = "\x15"
+WORD_MARKER = "\x16"
+
+
 class Tokenizer(object):
     def __init__(self, token_set: TokenSet):
         self._token_set: TokenSet = token_set
@@ -64,6 +72,8 @@ class Tokenizer(object):
             token_set
         )
         self._literals = token_set.literal_encodings()
+        self._mark_caps = "caps" in token_set.processing
+        self._mark_words = "words" in token_set.processing
 
     def tokenize(
         self, string: bytes, start=0, max_tokens=None, max_bytes=None
@@ -119,8 +129,49 @@ class Tokenizer(object):
             tokens = tokens[:max_tokens]
         return tokens
 
+    def _process(self, s: str) -> str:
+        out = []
+        i = 0
+        words = WORD_BOUNDARY.split(s)
+
+        for i, word in enumerate(words):
+            if not word:
+                continue
+            if word.isalpha():
+                if (
+                    self._mark_caps
+                    and word[0].isupper()
+                    and (len(word) == 1 or word[1:].islower())
+                ):
+                    out.append(CAPITALIZED_MARKER)
+                    out.append(word.lower())
+                elif self._mark_caps and word.isupper():
+                    out.append(ALLCAPS_MARKER)
+                    out.append(word.lower())
+                else:
+                    out.append(word)
+                if self._mark_words:
+                    out.append(WORD_MARKER)
+            else:
+                if (
+                    self._mark_words
+                    and word == " "
+                    and out[-1] == WORD_MARKER
+                    and i < len(words) - 1
+                    and words[i + 1].isalpha()
+                ):
+                    pass
+                else:
+                    out.append(word)
+
+        # print("_process")
+        # print(words)
+        # print(out)
+
+        return "".join(out)
+
     def _iterate_bytes(
-        self, string: bytes, start: int, max_tokens: int, max_bytes: int
+        self, data: bytes, start: int, max_tokens: int, max_bytes: int
     ):
         if max_bytes is not None:
             assert max_tokens is None
@@ -130,7 +181,13 @@ class Tokenizer(object):
             l = 5 * (max_tokens + 100)
 
         end = start + l
-        while end < len(string) and 128 <= string[end] < 192:
+        while end < len(data) and 128 <= data[end] < 192:
             end += 1
 
-        return string[start:end]
+        string = data[start:end]
+
+        if self._mark_caps or self._mark_words:
+            string = string.decode("utf-8")
+            string = self._process(string).encode("utf-8")
+
+        return string

@@ -174,7 +174,9 @@ class Tokenizer(object):
     def _iterate_bytes(
         self, data: bytes, start: int, max_tokens: int, max_bytes: int
     ):
-        if max_bytes is not None:
+        if max_bytes is None and max_tokens is None:
+            l = len(data) - start
+        elif max_bytes is not None:
             assert max_tokens is None
             l = max_bytes
         else:

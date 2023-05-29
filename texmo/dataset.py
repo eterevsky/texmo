@@ -63,7 +63,7 @@ def _worker(data, request_queue, data_queues, tokenizers, debug):
 
                     samples.append([token.id for token in tokens])
                 else:
-                    sample = data[start : start + request.length]
+                    sample = list(data[start : start + request.length])
                     if debug:
                         try:
                             s = sample.decode("utf-8")
@@ -196,7 +196,7 @@ class DataSet(object):
             return self._execute_request(request)
 
     def sample(self, length, batch_size):
-        batch, _ = self.sample(length, batch_size, None)
+        batch, _ = self.sample_bytes(length, batch_size, None)
         return batch
 
     @property

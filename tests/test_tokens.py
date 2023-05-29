@@ -2,169 +2,80 @@ import logging
 from unittest import TestCase
 
 from texmo import tokens
-from texmo.tokens import Tokenizer2
+from texmo.tokens import TokenSet, Tokenizer
 
 logging.disable(level=logging.ERROR)
 
 
+def tokenize(string, tokens, fallback_bits=4):
+    token_set = TokenSet.build_with_fallback_bits(fallback_bits)
+    for s in tokens:
+        token_set.add_token(s)
+    tokenizer = Tokenizer(token_set)
+    out = tokenizer.tokenize(string)
+    result = [t.string or t.value for t in out]
+    return result
+
+
 class TokensTest(TestCase):
     def test_tokenize1(self):
-        self.assertEqual(
-            list(
-                tokens.tokenize(
-                    b"ab", [b"a", b"b", b"ab"], minimize_non_tokens=True
-                )
-            ),
-            [b"ab"],
-        )
+        self.assertEqual(tokenize(b"ab", [b"a", b"b", b"ab"]), [b"ab"])
 
     def test_tokenize1_3(self):
         self.assertEqual(
-            list(
-                tokens.tokenize(
-                    b"ab ab ab", [b"a", b"b", b"ab"], minimize_non_tokens=True
-                )
-            ),
-            [b"ab", b" ", b"ab", b" ", b"ab"],
-        )
-
-    def test_tokenize2(self):
-        self.assertEqual(
-            list(
-                tokens.tokenize(
-                    b"ab", [b"a", b"b", b"ab"], minimize_non_tokens=False
-                )
-            ),
-            [b"ab"],
-        )
-
-    def test_tokenize2_3(self):
-        self.assertEqual(
-            list(
-                tokens.tokenize(
-                    b"ab ab ab", [b"a", b"b", b"ab"], minimize_non_tokens=False
-                )
-            ),
-            [b"ab", b" ", b"ab", b" ", b"ab"],
+            tokenize(b"ab ab ab", [b"a", b"b", b"ab"]),
+            [b"ab", 2, 0, b"ab", 2, 0, b"ab"]
         )
 
     def test_tokenize3(self):
         self.assertEqual(
-            list(
-                tokens.tokenize(
-                    b"abc", [b"a", b"ab", b"bc"], minimize_non_tokens=True
-                )
-            ),
+            tokenize(b"abc", [b"a", b"ab", b"bc"]),
             [b"a", b"bc"],
         )
 
     def test_tokenize3_3(self):
         self.assertEqual(
-            list(
-                tokens.tokenize(
-                    b"abc abc abc",
-                    [b"a", b"ab", b"bc"],
-                    minimize_non_tokens=True,
-                )
-            ),
-            [b"a", b"bc", b" ", b"a", b"bc", b" ", b"a", b"bc"],
+            tokenize(b"abc abc abc", [b"a", b"ab", b"bc"]),
+            [b"a", b"bc", 2, 0, b"a", b"bc", 2, 0, b"a", b"bc"]
         )
 
     def test_tokenize4(self):
         self.assertEqual(
-            list(
-                tokens.tokenize(
-                    b"abcdef",
-                    [b"ab", b"cd", b"ef", b"abcde"],
-                    minimize_non_tokens=False,
-                )
-            ),
-            [b"abcde", b"f"],
+            tokenize(b"abcdefgh", [b"ab", b"cd", b"ef", b"gh", b"abcdefg"]),
+            [b"abcdefg", 6, 8],
         )
 
-    def test_tokenize4_3(self):
+    def test_tokenize5(self):
         self.assertEqual(
-            list(
-                tokens.tokenize(
-                    b"abcdef abcdef abcdef",
-                    [b"ab", b"cd", b"ef", b"abcde"],
-                    minimize_non_tokens=False,
-                )
-            ),
-            [b"abcde", b"f", b" ", b"abcde", b"f", b" ", b"abcde", b"f"],
-        )
-
-    def test_tokenize5_3(self):
-        self.assertEqual(
-            list(
-                tokens.tokenize(
-                    b"abcdef abcdef abcdef",
-                    [b"ab", b"cd", b"ef", b"abcde"],
-                    minimize_non_tokens=True,
-                )
-            ),
-            [
-                b"ab",
-                b"cd",
-                b"ef",
-                b" ",
-                b"ab",
-                b"cd",
-                b"ef",
-                b" ",
-                b"ab",
-                b"cd",
-                b"ef",
-            ],
+            tokenize(b"abcdefgh", [b"ab", b"cd", b"ef", b"gh", b"abcdefg"], 1),
+            [b"ab", b"cd", b"ef", b"gh"],
         )
 
     def test_tokenize6(self):
         self.assertEqual(
-            list(
-                tokens.tokenize(
-                    b"abcdefg",
-                    [b"a", b"ab", b"bc", b"cd", b"de", b"ef", b"fg"],
-                    minimize_non_tokens=True,
-                )
-            ),
+            tokenize(b"abcdefg",
+                    [b"a", b"ab", b"bc", b"cd", b"de", b"ef", b"fg"]),
             [b"a", b"bc", b"de", b"fg"],
         )
 
-    def test_tokenize6(self):
+    def test_tokenize6_3(self):
         self.assertEqual(
-            list(
-                tokens.tokenize(
-                    b"abcdefg abcdefg abcdefg",
-                    [b"a", b"ab", b"bc", b"cd", b"de", b"ef", b"fg"],
-                    minimize_non_tokens=True,
-                )
-            ),
+            tokenize(b"abcdefg abcdefg abcdefg",
+                    [b"a", b"ab", b"bc", b"cd", b"de", b"ef", b"fg"]),
             [
                 b"a",
                 b"bc",
                 b"de",
                 b"fg",
-                b" ",
+                2, 0,
                 b"a",
                 b"bc",
                 b"de",
                 b"fg",
-                b" ",
+                2, 0,
                 b"a",
                 b"bc",
                 b"de",
                 b"fg",
             ],
         )
-
-    def test_tokenizer2(self):
-        tokenizer = Tokenizer2([b"a", b"b", b"ab"])
-        self.assertEqual(tokenizer._tokens[b"ab"].suffix_token.string, b"b")
-        self.assertEqual(tokenizer._tokens[b"a"].suffix_token, None)
-        self.assertEqual(tokenizer._tokens[b"b"].suffix_token, None)
-
-    def test_tokenizer2_abc(self):
-        tokenizer = Tokenizer2([b"a", b"b", b"c", b"bc", b"abc"])
-        self.assertEqual(tokenizer._tokens[b"abc"].suffix_token.string, b"bc")
-        self.assertEqual(tokenizer._tokens[b"a"].suffix_token, None)
-        self.assertEqual(tokenizer._tokens[b"b"].suffix_token, None)

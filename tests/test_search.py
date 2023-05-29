@@ -2,7 +2,7 @@ import logging
 from unittest import TestCase
 from datetime import datetime
 
-from texmo.configuration import Configuration, Template, conf_to_string
+from texmo.configuration import Configuration, Template, conf_to_string, conf_from_record
 from texmo.model2 import build_model
 from texmo.search import Search
 from texmo.record import TrainingRecord
@@ -73,7 +73,7 @@ class SearchTest(TestCase):
         record = create_record("dense.1.relu", 4.5)
         step_loss = [4.5 + (122 - s) * 0.01 for s in range(0, 123)]
         run = Run(loss=4.5, step_loss=step_loss)
-        search.add_record(record, run)
+        search.add_run(record, INIT_CONF, run, None)
 
         i, neighbor, conf = search._select_neighbor(1, 1024)
 
@@ -89,7 +89,7 @@ class SearchTest(TestCase):
         record = create_record("dense.1.relu", 4.5)
         step_loss = [4.5 + (122 - s) * 0.01 for s in range(0, 123)]
         run = Run(loss=4.5, step_loss=step_loss)
-        search.add_record(record, run)
+        search.add_run(record, INIT_CONF, run, None)
 
         i, conf = search._select_by_pred_score(1, 1024)
 

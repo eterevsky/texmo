@@ -2,9 +2,9 @@
 
 cargo build --release
 
-target/release/texmo -d data/books3.txt optimize-tokens -n 64 --fallback-dist --initial-size=108362047381 --processing= -i tokens/tokens32_raw_dist.json -o tokens/tokens64_raw_dist.json
-target/release/texmo -d data/books3_caps.txt optimize-tokens -n 64 --fallback-dist --initial-size=108362047381 --processing=caps -i tokens/tokens32_caps_dist.json -o tokens/tokens64_caps_dist.json
-target/release/texmo -d data/books3_caps_words.txt optimize-tokens -n 64 --fallback-dist --initial-size=108362047381 --processing=caps,words -i tokens/tokens32_capswords_dist.json -o tokens/tokens64_capswords_dist.json
+target/release/texmo -d data/books3_caps_words.txt optimize-tokens -n 128 --fallback-dist --initial-size=108362047381 --processing=caps,words -o tokens/tokens128_capswords_dist.json
+target/release/texmo -d data/books3_caps.txt optimize-tokens -n 128 --fallback-dist --initial-size=108362047381 --processing=caps -o tokens/tokens128_caps_dist.json
+target/release/texmo -d data/books3.txt optimize-tokens -n 128 --fallback-dist --initial-size=108362047381 --processing= -o tokens/tokens128_raw_dist.json
 
 # target/release/texmo -d data/books3.txt optimize-tokens -n 128 -f 1 --processing= --initial-size=108362047381 -i tokens/tokens64_raw_f1.json -o tokens/tokens128_raw_f1.json
 # target/release/texmo -d data/books3.txt optimize-tokens -n 128 -f 2 --processing= --initial-size=108362047381 -i tokens/tokens64_raw_f2.json -o tokens/tokens128_raw_f2.json

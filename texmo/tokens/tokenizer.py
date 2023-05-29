@@ -1,0 +1,136 @@
+from typing import Self
+
+from ..common import INF
+from .tokenset import Token, TokenSet
+
+
+class SuffixState(object):
+    def __init__(self, suffix: bytes):
+        self.suffix: bytes = suffix
+        # The longest token which is a suffix of the current suffix.
+        self.token: Token | int = None
+        self.next: list[Self] = [None] * 256
+
+
+def _populate_suffix_states(token_set: TokenSet):
+    states = {}
+
+    states[b""] = SuffixState(b"")
+
+    # Add empty states for literals
+    for i in range(256):
+        s = bytes([i])
+        states[s] = SuffixState(s)
+
+    # Add states for all prefixes of all tokens (except len 1, since it's
+    # already covered)
+    for token in token_set.tokens:
+        if token.string is not None:
+            for l in range(2, len(token.string) + 1):
+                s = token.string[:l]
+                if s not in states:
+                    states[s] = SuffixState(s)
+
+    for state in states.values():
+        # Looking for the suffix token
+        for start in range(len(state.suffix)):
+            s = state.suffix[start:]
+            token = token_set.tokens_by_str.get(s)
+            if token is not None:
+                state.token = token
+                break
+        if state.token is None and state.suffix:
+            state.token = state.suffix[-1]
+
+        # Populating next
+        for byte in range(256):
+            s = state.suffix + bytes([byte])
+
+            for start in range(len(s)):
+                next_state = states.get(s[start:])
+                if next_state is not None:
+                    state.next[byte] = next_state
+                    break
+
+            assert state.next[byte] is not None
+
+    return states
+
+
+class Tokenizer(object):
+    def __init__(self, token_set: TokenSet):
+        self._token_set: TokenSet = token_set
+        self._suffix_states: dict[bytes, SuffixState] = _populate_suffix_states(
+            token_set
+        )
+        self._literals = token_set.literal_encodings()
+
+    def tokenize(
+        self, string: bytes, start=0, max_tokens=None, max_bytes=None
+    ) -> list[int]:
+        suffix_state = self._suffix_states[b""]
+        cost_state = [(0, None)]
+
+        for byte in self._iterate_bytes(string, start, max_tokens, max_bytes):
+            if max_bytes is not None and len(cost_state) - 1 >= max_bytes:
+                break
+            suffix_state = suffix_state.next[byte]
+            token = suffix_state.token
+
+            if isinstance(token, int):
+                best_cost = cost_state[-1][0] + len(self._literals[token])
+                best_token = token
+            else:
+                best_cost = cost_state[-len(token.string)][0] + 1
+                best_token = token
+
+                token = token.suffix
+                while isinstance(token, Token):
+                    cost = cost_state[-len(token.string)][0] + 1
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_token = token
+                    token = token.suffix
+
+                if token is not None:
+                    cost = cost_state[-1][0] + len(self._literals[token])
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_token = token
+
+            cost_state.append((best_cost, best_token))
+            if max_tokens is not None and best_cost >= max_tokens + 10:
+                break
+
+        tokens = []
+        pos = len(cost_state) - 1
+        while pos > 0:
+            token = cost_state[pos][1]
+
+            if isinstance(token, Token):
+                tokens.append(token)
+                pos -= len(token.string)
+            else:
+                tokens.extend(self._literals[token])
+                pos -= 1
+
+        tokens.reverse()
+        if max_tokens is not None and len(tokens) > max_tokens:
+            tokens = tokens[:max_tokens]
+        return tokens
+
+    def _iterate_bytes(
+        self, string: bytes, start: int, max_tokens: int, max_bytes: int
+    ):
+        if max_bytes is not None:
+            assert max_tokens is None
+            l = max_bytes
+        else:
+            assert max_tokens is not None
+            l = 5 * (max_tokens + 100)
+
+        end = start + l
+        while end < len(string) and 128 <= string[end] < 192:
+            end += 1
+
+        return string[start:end]

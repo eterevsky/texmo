@@ -3,10 +3,26 @@ from typing import Self
 
 
 class Token(object):
-    def __init__(self, string: bytes, value: int = None):
+    def __init__(self, id: int, string: bytes, value: int = None):
+        self.id: int = id
         self.string: bytes = string
         self.value: int = value
         self.suffix: Self | int = None
+
+    def __str__(self):
+        if self.string:
+            try:
+                return repr(self.string.decode("utf-8"))[1:-1]
+            except UnicodeDecodeError:
+                return repr(self.string)
+        else:
+            return f"\{self.value}"
+
+    def __repr__(self):
+        if self.string is not None:
+            return f"Token({id}, {self.string})"
+        else:
+            return f"Token({id}, {self.value})"
 
 
 class TokenSet(object):
@@ -51,11 +67,11 @@ class TokenSet(object):
 
     def _add_special_token(self, n: int):
         assert n == len(self.tokens)
-        self.tokens.append(Token(None, n))
+        self.tokens.append(Token(len(self.tokens), None, n))
 
     def add_token(self, string: bytes):
         assert isinstance(string, bytes)
-        new_token = Token(string)
+        new_token = Token(len(self.tokens), string)
 
         if len(string) > 1:
             new_token.suffix = string[-1]  # int
@@ -79,3 +95,29 @@ class TokenSet(object):
 
         self.tokens.append(new_token)
         self.tokens_by_str[string] = new_token
+
+    def literal_encodings(self):
+        match self.type:
+            case "fallback_distribution":
+                return [[self.tokens[0]] for _ in range(256)]
+            case "fallback16":
+                fallbacks = []
+                for i in range(256):
+                    s = f"{i:02x}".encode("utf-8")
+                    fallbacks.append([self.tokens_by_str[s[1:]],
+                                      self.tokens_by_str[s[:1]],
+                                      self.tokens_by_str[bytes([0x10])]])
+                return fallbacks
+            case "str_with_fallback_bits":
+                fallbacks = []
+                for value in range(256):
+                    literal = []
+                    for i in range(8 // self.fallback_bits):
+                        digit = value % 2**self.fallback_bits
+                        literal.append(self.tokens[digit])
+                        value //= 2**self.fallback_bits
+                    # print(literal)
+                    fallbacks.append(literal)
+                # print(fallbacks)
+                return fallbacks
+

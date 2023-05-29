@@ -156,6 +156,7 @@ class Tokenizer(object):
                 if (
                     self._mark_words
                     and word == " "
+                    and len(out) > 0
                     and out[-1] == WORD_MARKER
                     and i < len(words) - 1
                     and words[i + 1].isalpha()

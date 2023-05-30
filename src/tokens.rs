@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use crate::stats::TokenStats;
 
-
 #[derive(Clone, Copy, Debug)]
 pub enum TokenIdx {
     Token(u32),
@@ -111,7 +110,14 @@ impl TokenSet {
         }
     }
 
+    /// A cost of a literal in tokens:
+    /// The number of tokens to represent a literal + in case literal can
+    /// represent different tokens, the entropy of literal / average expected
+    /// entropy of a token in the model.
     pub fn dist_entropy(&self) -> f64 {
+        if !self.has_dist_fallback() {
+            return 0.0;
+        }
         let total_literals: u64 = self.literal_count.iter().sum();
         if total_literals == 0 {
             return 0.0;
@@ -140,15 +146,20 @@ impl TokenSet {
             }
         }
 
+        if !self.has_dist_fallback() {
+            return;
+        }
+
         if total_tokens == 0 {
             self.literal_cost = 8.0;
-            return
+            return;
         }
 
         // Suppose 1 byte has entropy 1 bit
         // Then 1 token = 1 / log2(ntokens) bits of entropy
 
-        let bytes_per_token = (stats.scanned_bytes - total_literals) as f64 / (total_tokens as f64 + 1.0);
+        let bytes_per_token =
+            (stats.scanned_bytes - total_literals) as f64 / (total_tokens as f64 + 1.0);
 
         self.literal_cost = 1.0 + self.dist_entropy() / bytes_per_token
     }
@@ -157,7 +168,8 @@ impl TokenSet {
         assert!(!self.tokens_by_string.contains_key(string));
         let index = self.tokens.len();
         let token = Token::new(string, true);
-        self.tokens_by_string.insert(token.string.clone(), index as u32);
+        self.tokens_by_string
+            .insert(token.string.clone(), index as u32);
         self.tokens.push(token);
     }
 
@@ -170,7 +182,8 @@ impl TokenSet {
 
         let index = self.tokens.len();
         let token = Token::new(string, false);
-        self.tokens_by_string.insert(token.string.clone(), index as u32);
+        self.tokens_by_string
+            .insert(token.string.clone(), index as u32);
         self.tokens.push(token);
     }
 
@@ -192,7 +205,9 @@ impl TokenSet {
         let parsed = json::parse(&contents).unwrap();
 
         let mut token_set = match parsed["type"].as_str().unwrap() {
-            "str_with_fallback_bits" => TokenSet::build_with_fallback_bits(parsed["fallback_bits"].as_usize().unwrap()),
+            "str_with_fallback_bits" => {
+                TokenSet::build_with_fallback_bits(parsed["fallback_bits"].as_usize().unwrap())
+            }
             "fallback16" => TokenSet::build_with_hex_literals(),
             "fallback_distribution" => {
                 let mut counts = [0; 256];
@@ -202,10 +217,9 @@ impl TokenSet {
                     i += 1;
                 }
                 TokenSet::build_with_dist_fallback(counts)
-            },
-            _ => unimplemented!()
-        }
-        ;
+            }
+            _ => unimplemented!(),
+        };
 
         for token_str in parsed["tokens"].members() {
             if token_str.is_string() {
@@ -216,11 +230,10 @@ impl TokenSet {
                     s.push(b.as_u8().unwrap());
                 }
                 token_set.add_token(&s);
-            }  // Skip fallback values
+            } // Skip fallback values
         }
 
         token_set
-
     }
 
     pub fn generate_suffixes(&mut self) {
@@ -242,9 +255,16 @@ impl TokenSet {
         }
     }
 
-    pub fn to_json(&self) -> json::JsonValue {
+    pub fn to_json(&self, stats: &TokenStats, initial_size: u64) -> json::JsonValue {
+        let tokens_in_literal: u64 = match self.fallback {
+            Fallback::Distribution => 1,
+            Fallback::HexLiteral => 3,
+            Fallback::Bits(b) => 8 / b as u64,
+        };
+
         let mut out = json::object! {
             tokens: [],
+            stats: stats.to_json(initial_size, self.literal_cost, self.dist_entropy(), tokens_in_literal)
         };
 
         let mut token_strs = vec![];
@@ -271,11 +291,11 @@ impl TokenSet {
         match self.fallback {
             Fallback::HexLiteral => {
                 out["type"] = "fallback16".into();
-            },
+            }
             Fallback::Bits(b) => {
                 out["type"] = "str_with_fallback_bits".into();
                 out["fallback_bits"] = b.into();
-            },
+            }
             Fallback::Distribution => {
                 out["type"] = "fallback_distribution".into();
                 out["literal_count"] = json::JsonValue::new_array();

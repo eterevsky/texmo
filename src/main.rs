@@ -10,7 +10,7 @@ mod tokens;
 
 use self::optimizer::optimize_bpe;
 use self::tokens::TokenSet;
-use self::tokenizer::CHUNK_SIZE;
+use self::tokenizer::{CHUNK_SIZE, tokenize_file};
 
 
 fn optimize_tokens(
@@ -45,32 +45,10 @@ fn optimize_tokens(
         // }
     };
 
-    let tokens_json = token_set.to_json();
-    println!(
-        "Initial token set:\n{}",
-        json::stringify_pretty(tokens_json, 2)
-    );
-
     let (token_set, token_stats) = optimize_bpe(&token_set, ntokens, data_filename);
 
-    let mut tokens_json = token_set.to_json();
-
-    tokens_json["stats"]["cost"] = token_set.ntokens().into();
-    let initial_size = match initial_size {
-        Some(x) => x,
-        None => token_stats.scanned_bytes,
-    };
-    tokens_json["stats"]["initial_size"] = initial_size.into();
-    tokens_json["stats"]["processed_size"] = token_stats.scanned_bytes.into();
-    tokens_json["stats"]["total_cost"] = token_stats.cost(token_set.literal_cost).into();
-    tokens_json["stats"]["bytes_per_token"] =
-        (initial_size as f64 / token_stats.cost(token_set.literal_cost) as f64).into();
-    tokens_json["stats"]["total_tokens"] = token_stats.total_tokens().into();
-    tokens_json["stats"]["total_literals"] = token_stats.total_literals().into();
-    tokens_json["stats"]["literal_cost"] = token_set.literal_cost.into();
-    if token_set.has_dist_fallback() {
-        tokens_json["stats"]["dist_entropy"] = token_set.dist_entropy().into();
-    }
+    let initial_size = initial_size.unwrap_or(token_stats.scanned_bytes);
+    let mut tokens_json = token_set.to_json(&token_stats, initial_size);
 
     let mut processing_json: Vec<json::JsonValue> = Vec::new();
     if let Some(processing) = processing {
@@ -227,6 +205,13 @@ fn count_bytes_command(filename: &str) {
     println!();
 }
 
+fn tokenize(filename: &str, tokens_file: &str, initial_size: u64) {
+    let token_set = TokenSet::from_json(tokens_file);
+    let stats = tokenize_file(&token_set, filename);
+    let token_set_json = token_set.to_json(&stats, initial_size);
+    println!("{}", json::stringify_pretty(token_set_json, 2));
+}
+
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(short, long)]
@@ -238,10 +223,15 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    // Tokenize {
-    //     #[arg(short, long)]
-    //     tokens: String,
-    // },
+    Tokenize {
+        #[arg(short, long)]
+        tokens: String,
+
+        /// If the input is pre-processed, this argument specifies the size
+        /// of the input before pre-processing.
+        #[arg(long)]
+        initial_size:u64,
+    },
 
     OptimizeTokens {
         #[arg(short, long)]
@@ -297,9 +287,8 @@ fn main() {
     let filename = args.data.as_str();
 
     match &args.command {
-        // Command::Tokenize { tokens } => {
-        //     unimplemented!();
-        // }
+        Command::Tokenize { tokens, initial_size } => tokenize(filename, tokens, *initial_size),
+
         Command::OptimizeTokens {
             input_tokens,
             output_tokens,

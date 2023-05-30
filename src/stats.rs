@@ -1,3 +1,5 @@
+use json::JsonValue;
+
 pub struct TokenStats {
     pub token_count: Vec<u64>,
     pub pair_count: Vec<u64>,
@@ -6,7 +8,7 @@ pub struct TokenStats {
 }
 
 impl TokenStats {
-    pub fn new(ntokens: usize, literal_cost: f64) -> Self {
+    pub fn new(ntokens: usize) -> Self {
         let mut token_count = Vec::new();
         token_count.resize(ntokens, 0);
 
@@ -45,5 +47,21 @@ impl TokenStats {
     pub fn cost(&self, literal_cost: f64) -> f64 {
         self.token_count.iter().sum::<u64>() as f64
             + literal_cost * self.literal_count.iter().sum::<u64>() as f64
+    }
+
+    pub fn to_json(&self, initial_size: u64, literal_cost: f64, literal_dist_entropy: f64, tokens_in_literal: u64) -> JsonValue {
+        let total_cost = self.cost(literal_cost);
+        json::object! {
+            ntokens: self.token_count.len(),
+            initial_size: initial_size,
+            processed_size: self.scanned_bytes,
+            total_cost: total_cost,
+            bytes_per_token: initial_size as f64 / total_cost,
+            total_tokens: self.total_tokens() + self.total_literals() * tokens_in_literal,
+            total_literals: self.total_literals(),
+            literal_dist_entropy: literal_dist_entropy,
+            literal_cost: literal_cost,
+            literal_entropy_per_input_byte: literal_dist_entropy * self.total_literals() as f64 / initial_size as f64
+        }
     }
 }

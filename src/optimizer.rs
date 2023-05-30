@@ -1,7 +1,6 @@
 use crate::stats::TokenStats;
-use crate::tokens::TokenSet;
 use crate::tokenizer::tokenize_file;
-
+use crate::tokens::TokenSet;
 
 fn format_token(s: &[u8]) -> String {
     match String::from_utf8(s.to_vec()) {
@@ -43,7 +42,11 @@ fn token_to_add(token_set: &TokenSet, stats: &TokenStats) -> Vec<u8> {
     }
 }
 
-pub fn optimize_bpe(token_set: &TokenSet, ntokens: usize, filename: &str) -> (TokenSet, TokenStats) {
+pub fn optimize_bpe(
+    token_set: &TokenSet,
+    ntokens: usize,
+    filename: &str,
+) -> (TokenSet, TokenStats) {
     let mut token_set = token_set.clone();
     let mut prev_stats = None;
 
@@ -54,8 +57,14 @@ pub fn optimize_bpe(token_set: &TokenSet, ntokens: usize, filename: &str) -> (To
         };
         token_set.update_stats(&initial_stats);
 
-        let bytes_per_token = (initial_stats.scanned_bytes - initial_stats.total_literals()) as f64 / (initial_stats.total_tokens() as f64 + 1.0);
-        println!("Literal entropy: {}, bytes per token: {}, cost: {}", token_set.dist_entropy(), bytes_per_token, token_set.literal_cost);
+        let bytes_per_token = (initial_stats.scanned_bytes - initial_stats.total_literals()) as f64
+            / (initial_stats.total_tokens() as f64 + 1.0);
+        println!(
+            "Literal entropy: {}, bytes per token: {}, cost: {}",
+            token_set.dist_entropy(),
+            bytes_per_token,
+            token_set.literal_cost
+        );
 
         let new_token_str = token_to_add(&token_set, &initial_stats);
         let mut new_token_set = token_set.clone();
@@ -103,7 +112,8 @@ pub fn optimize_bpe(token_set: &TokenSet, ntokens: usize, filename: &str) -> (To
                 //     println!("Cost after removing {} would be {}, but it would be added on the next iteration.", format_token(&token_str), stats.cost);
                 // }
 
-                if stats.cost(new_token_set.literal_cost) < initial_stats.cost(token_set.literal_cost)
+                if stats.cost(new_token_set.literal_cost)
+                    < initial_stats.cost(token_set.literal_cost)
                 // && stats.token_to_add(&new_token_set) != token_str
                 {
                     // Found a token to remove.

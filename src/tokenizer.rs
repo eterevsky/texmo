@@ -187,7 +187,7 @@ impl Tokenizer {
 
     fn get_stats(&self, cost_array: &[DynState]) -> TokenStats {
         let mut token_stats =
-            TokenStats::new(self.token_set.tokens.len(), self.token_set.literal_cost);
+            TokenStats::new(self.token_set.tokens.len());
 
         let mut pos = cost_array.len() - 1;
         token_stats.scanned_bytes = pos as u64;
@@ -253,7 +253,7 @@ pub fn tokenize_file(token_set: &TokenSet, filename: &str) -> TokenStats {
     let (results_tx, results_rx) = mpsc::channel::<TokenStats>();
     let mut file = File::open(filename).unwrap();
 
-    let mut total_stats = TokenStats::new(token_set.tokens.len(), token_set.literal_cost);
+    let mut total_stats = TokenStats::new(token_set.tokens.len());
 
     std::thread::scope(|s| {
         let mut join_handles = Vec::new();

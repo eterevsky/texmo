@@ -33,6 +33,21 @@ class TokenSet(object):
         return TokenSet.from_json(tokens_dict)
 
     @staticmethod
+    def build_with_fallback_bits(fallback_bits: int) -> Self:
+        token_set = TokenSet("str_with_fallback_bits", [], fallback_bits, None)
+        for i in range(2**fallback_bits):
+            token_set._add_special_token(i)
+        return token_set
+
+    @staticmethod
+    def build_with_fallback_dist() -> Self:
+        token_set = TokenSet(
+            "str_with_fallback_distribution", [], None, [1] * 256
+        )
+        token_set._add_special_token(0)
+        return token_set
+
+    @staticmethod
     def from_json(tokens_dict: dict) -> Self:
         token_set = TokenSet(
             tokens_dict["type"],
@@ -104,9 +119,13 @@ class TokenSet(object):
                 fallbacks = []
                 for i in range(256):
                     s = f"{i:02x}".encode("utf-8")
-                    fallbacks.append([self.tokens_by_str[s[1:]],
-                                      self.tokens_by_str[s[:1]],
-                                      self.tokens_by_str[bytes([0x10])]])
+                    fallbacks.append(
+                        [
+                            self.tokens_by_str[s[1:]],
+                            self.tokens_by_str[s[:1]],
+                            self.tokens_by_str[bytes([0x10])],
+                        ]
+                    )
                 return fallbacks
             case "str_with_fallback_bits":
                 fallbacks = []
@@ -120,4 +139,3 @@ class TokenSet(object):
                     fallbacks.append(literal)
                 # print(fallbacks)
                 return fallbacks
-

@@ -316,7 +316,7 @@ class Manager(object):
 
         while time.time() < finish_time and self.step < steps:
             batch = train_set.sample(
-                bytes_length=self.conf.sample_len, batch_size=self.conf.batch
+                length=self.conf.sample_len, batch_size=self.conf.batch
             )
             try:
                 loss = self.train_step(batch)

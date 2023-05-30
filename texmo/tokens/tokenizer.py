@@ -156,6 +156,7 @@ class Tokenizer(object):
                 if (
                     self._mark_words
                     and word == " "
+                    and len(out) > 0
                     and out[-1] == WORD_MARKER
                     and i < len(words) - 1
                     and words[i + 1].isalpha()
@@ -173,7 +174,9 @@ class Tokenizer(object):
     def _iterate_bytes(
         self, data: bytes, start: int, max_tokens: int, max_bytes: int
     ):
-        if max_bytes is not None:
+        if max_bytes is None and max_tokens is None:
+            l = len(data) - start
+        elif max_bytes is not None:
             assert max_tokens is None
             l = max_bytes
         else:

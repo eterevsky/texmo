@@ -60,7 +60,7 @@ class SearchTest(TestCase):
             init_conf=INIT_CONF,
             min_max_weights=1024,
         )
-        conf = search.select_conf()
+        conf, _ = search.select_conf()
         self.assertEqual(conf, INIT_CONF)
 
     def test_select_neighbor(self):

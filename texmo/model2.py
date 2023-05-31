@@ -16,14 +16,15 @@ State = list[LayerState]
 
 
 class Model2(object):
-    def __init__(self, spec: str):
+    def __init__(self, ntokens: int, spec: str):
+        self.ntokens = ntokens
         self.layers: list[Layer] = []
-        shape = (NCHAR,)
+        shape = (ntokens,)
         for layer_spec in spec.split("-"):
             layer = build_layer(layer_spec, shape)
             self.layers.append(layer)
             shape = layer.output_shape
-        self.out_layer: Layer = Dense(NCHAR, input_shape=shape)
+        self.out_layer: Layer = Dense(ntokens, input_shape=shape)
 
     def __str__(self):
         return "-".join(map(str, self.layers))
@@ -114,7 +115,7 @@ class Model2(object):
 
     def neighbors(self):
         for spec in self._gen_neighbors():
-            model = build_model(spec)
+            model = build_model(self.ntokens, spec)
             if model.is_valid() and model != self:
                 yield model
 
@@ -186,10 +187,10 @@ class Model2(object):
             if layer.name in ("suffix", "attn"):
                 prefix_len += layer.length - 1
         batch_size, sample_len, n = batch.shape
-        assert n == NCHAR
-        prefix = jnp.ones((batch_size, prefix_len, NCHAR)) / NCHAR
+        assert n == self.ntokens
+        prefix = jnp.ones((batch_size, prefix_len, self.ntokens)) / self.ntokens
         v = jnp.concatenate([prefix, batch], axis=1)[:, :-1, :]
-        assert v.shape == (batch_size, prefix_len + sample_len - 1, NCHAR)
+        assert v.shape == (batch_size, prefix_len + sample_len - 1, self.ntokens)
 
         for layer, layer_weights in zip(self.layers, weights):
             v = layer.forward_batch(layer_weights, v)
@@ -204,9 +205,9 @@ class Model2(object):
 _cache: dict[str, Model2] = {}
 
 
-def build_model(spec):
-    model = _cache.get(spec)
+def build_model(ntokens: int, spec: str):
+    model = _cache.get((ntokens, spec))
     if model is None:
-        model = Model2(spec)
-        _cache[spec] = model
+        model = Model2(ntokens, spec)
+        _cache[(ntokens, spec)] = model
     return model

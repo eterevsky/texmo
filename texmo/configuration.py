@@ -1,13 +1,12 @@
 import argparse
-from collections import namedtuple
 import math
 import re
+from collections import namedtuple
 from typing import Any
 
 from .common import INF, is_power2, power2_neighbors
-from .model2 import build_model, Model2
+from .model2 import Model2, build_model
 from .record import TrainingRecord
-
 
 Configuration = namedtuple(
     "Configuration",
@@ -22,7 +21,7 @@ Configuration = namedtuple(
 
 
 def conf_from_record(record: TrainingRecord) -> Configuration:
-    model = build_model(record.model_spec)
+    model = build_model(record.ntokens, record.model_spec)
     return Configuration(
         model,
         record.learning_rate,
@@ -34,6 +33,7 @@ def conf_from_record(record: TrainingRecord) -> Configuration:
 
 def conf_to_dict(conf: Configuration) -> dict[str, Any]:
     return {
+        "ntokens": conf.model.ntokens,
         "spec": str(conf.model),
         "lr": conf.lr,
         "sample_len": conf.sample_len,
@@ -43,7 +43,7 @@ def conf_to_dict(conf: Configuration) -> dict[str, Any]:
 
 
 def conf_from_dict(conf_dict: dict) -> Configuration:
-    model = build_model(conf_dict["spec"])
+    model = build_model(conf_dict["ntokens"], conf_dict["spec"])
     return Configuration(
         model,
         conf_dict["lr"],

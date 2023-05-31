@@ -5,11 +5,11 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-import config
-from texmo.configuration import Configuration
-from texmo.dataset import DataSet
-from texmo.manager import Manager
-from texmo.model2 import build_model
+from .configuration import Configuration
+from .dataset import DataSet
+from .manager import Manager
+from .model2 import build_model
+from .tokens import TokenSet
 
 
 def show_loss_graph(manager, output_dir):
@@ -39,75 +39,68 @@ def parse_lr(x: str) -> float:
     return float(x)
 
 
-def main(
-    data,
-    steps,
-    lr,
-    output_dir,
-    model_path,
-    spec,
-    temp_dir,
-    sample_len,
-    batch,
-    temp_steps,
-    time,
-    log,
-    prefix,
-    add_layers,
-):
-    print(f"Training data: {data}")
-    train_set = DataSet(data)
-    lr = parse_lr(lr)
+def train(args: argparse.Namespace):
+    if args.tokens:
+        token_set = TokenSet.from_json_file(args.tokens)
+        ntokens = token_set.ntokens
+        token_sets = {ntokens: token_set}
+        logging.info(f"Loaded token set {args.tokens} with {token_set.ntokens} tokens")
+    else:
+        token_set = None
+        ntokens = 256
+        token_sets = {}
+        logging.info(f"No token set")
+    logging.info(f"Training data: {args.data}")
+    train_set = DataSet(args.data, token_sets=token_sets)
+    lr = parse_lr(args.lr)
 
     try:
-        if model_path is not None:
-            manager = Manager.load(model_path)
-            manager.update_conf(lr, sample_len, batch, time)
-            if add_layers:
-                manager.add_layers(add_layers)
+        if args.model_path is not None:
+            manager = Manager.load(args.model_path, token_set)
+            manager.update_conf(lr, args.sample_len, args.batch, args.time)
+            if args.add_layers:
+                manager.add_layers(args.add_layers)
             manager.init()
         else:
             conf = Configuration(
-                build_model(spec),
+                build_model(ntokens, args.spec),
                 lr,
-                sample_len,
-                batch,
-                t=time,
+                args.sample_len,
+                args.batch,
+                t=args.time,
             )
-            manager = Manager(conf)
+            manager = Manager(conf, token_set)
             manager.init()
 
         manager.train_and_eval(
-            steps,
-            time,
+            args.steps,
+            args.time,
             train_set,
-            temp_steps,
-            temp_dir,
-            output_dir,
-            log,
+            args.temp_steps,
+            args.temp_dir,
+            args.output_dir,
+            args.log,
         )
     finally:
         train_set.join()
 
-    if prefix is not None:
-        s = manager.continue_prefix(prefix, 256)
+    if args.prefix is not None:
+        s = manager.continue_prefix(args.prefix, 256)
         print()
         print(s)
         print()
 
-    show_loss_graph(manager, output_dir)
+    show_loss_graph(manager, args.output_dir)
 
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-
+def init_args(parser: argparse.ArgumentParser):
     # Data
     parser.add_argument(
         "-d",
         "--data",
         type=str,
-        default=config.DATA,
-        help="directory with training data",
+        required=True,
+        help="a file with",
     )
 
     # Model
@@ -147,26 +140,31 @@ def parse_args():
 
     # Configuration
     parser.add_argument(
+        "--tokens",
+        type=str,
+        help="path to the token set definition",
+    )
+    parser.add_argument(
         "-b",
         "--batch",
         type=int,
-        metavar="BATCH",
-        default=config.DEFAULT_BATCH,
+        metavar="N",
+        default=32,
         help="batch size",
     )
     parser.add_argument(
         "-l",
         "--lr",
         type=str,
-        default=str(config.DEFAULT_LR),
+        default="0.0625",
         help="learning rate, could be written as a float or as 2^-10",
     )
     parser.add_argument(
         "--sample-len",
         type=int,
         default=128,
-        metavar="LEN",
-        help="length of text fragments used for training",
+        metavar="NTOKENS",
+        help="length in tokens of text fragments used for training",
     )
     parser.add_argument(
         "-t",
@@ -186,7 +184,7 @@ def parse_args():
     )
     parser.add_argument(
         "--temp-steps",
-        metavar="N",
+        metavar="STEPS",
         type=int,
         default=1000,
         help="save intermediate model every N steps",
@@ -194,8 +192,8 @@ def parse_args():
 
     parser.add_argument(
         "--log",
-        default=config.LOG,
-        metavar="LOG",
+        default="log-mac.csv",
+        metavar="PATH",
         help="path to a CSV file for logging",
     )
 
@@ -204,14 +202,8 @@ def parse_args():
         "-p",
         "--prefix",
         type=str,
-        default="Roses are red\nViolets are blu",
+        default="Roses are red\nViolets are",
         help="text prefix to be continued",
     )
 
-    return parser.parse_args()
-
-
-if __name__ == "__main__":
-    logging.getLogger().setLevel(logging.INFO)
-    args = parse_args()
-    main(**vars(args))
+    parser.set_defaults(func=train)

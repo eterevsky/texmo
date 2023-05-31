@@ -12,7 +12,7 @@ logging.disable(level=logging.ERROR)
 
 
 INIT_CONF = Configuration(
-    model=build_model("dense.1.relu"),
+    model=build_model(256, "dense.1.relu"),
     lr=1.0,
     sample_len=128,
     batch=256,
@@ -31,6 +31,7 @@ TEMPLATE = Template(
 def create_record(spec, loss, batch=256):
     return TrainingRecord(
         timestamp=datetime.fromisoformat("2022-02-02T02:02:02"),
+        ntokens=32,
         model_spec=spec,
         weights=1024,
         steps=123,
@@ -60,7 +61,7 @@ class SearchTest(TestCase):
             init_conf=INIT_CONF,
             min_max_weights=1024,
         )
-        conf = search.select_conf()
+        conf, _ = search.select_conf()
         self.assertEqual(conf, INIT_CONF)
 
     def test_select_neighbor(self):

@@ -211,7 +211,7 @@ class Search(object):
 
     def print_top_confs(self, t, max_weights):
         with latency.timer("Search.print_top_confs"):
-            print(f"\nT = {t}  W ≤ {max_weights}\n")
+            logging.info(f"\nT = {t}  W ≤ {max_weights}\n")
 
             for i, conf_results in enumerate(
                 self._result_set.top_pred_confs(t, max_weights, limit=20)
@@ -228,10 +228,10 @@ class Search(object):
                 if num_runs < 10:
                     score += " "
                 conf = conf_results.conf
-                print(
+                logging.info(
                     f"{score}  LEN{conf.sample_len:4}  B{conf.batch:4}  LR{conf.lr:7.4f}  {conf.model}"
                 )
-            print()
+            logging.info("")
 
     def _select_checkpoint(self, t):
         pass

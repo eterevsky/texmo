@@ -16,6 +16,7 @@ logging.disable(level=logging.ERROR)
 def create_record(spec, loss, batch=256, reg=0.125):
     return TrainingRecord(
         timestamp=datetime.fromisoformat("2022-02-02T02:02:02"),
+        ntokens=256,
         model_spec=spec,
         weights=1024,
         steps=123,
@@ -110,8 +111,8 @@ class ResultDBTest(TestCase):
         conf_runs = self.db.get_confs_runs(Template(sample_len=128))
         all = set((conf, run.loss) for _, conf, run in conf_runs)
 
-        spec_tanh = build_model("dense.16.tanh")
-        spec_relu = build_model("dense.16.relu")
+        spec_tanh = build_model(256, "dense.16.tanh")
+        spec_relu = build_model(256, "dense.16.relu")
 
         conf = Configuration(
             spec_relu,

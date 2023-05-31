@@ -60,6 +60,7 @@ class ResultDB(object):
             """
             SELECT id FROM conf
             WHERE spec = :spec
+              AND ntokens = :ntokens
               AND lr = :lr
               AND sample_len = :sample_len
               AND batch = :batch
@@ -75,8 +76,8 @@ class ResultDB(object):
         else:
             cur = self._db.execute(
                 """
-                INSERT INTO conf (spec, lr, sample_len, batch, t, weights)
-                VALUES (:spec, :lr, :sample_len, :batch, :t, :weights)
+                INSERT INTO conf (ntokens, spec, lr, sample_len, batch, t, weights)
+                VALUES (:ntokens, :spec, :lr, :sample_len, :batch, :t, :weights)
                 """,
                 conf_dict,
             )
@@ -155,6 +156,7 @@ class ResultDB(object):
 
         query = f"""
             SELECT conf.id AS conf_id,
+                   ntokens,
                    spec,
                    lr,
                    sample_len,
@@ -173,7 +175,7 @@ class ResultDB(object):
 
         for row in cur:
             try:
-                model = build_model(row["spec"])
+                model = build_model(row["ntokens"], row["spec"])
             except KeyError:
                 continue
             if template.match_model(model):

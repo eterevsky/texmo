@@ -14,13 +14,14 @@ import optax
 from jaxlib.xla_extension import XlaRuntimeError
 
 from . import latency
-from .common import INF, NCHAR
+from .common import INF
 from .configuration import (Configuration, conf_from_dict, conf_to_dict,
                             conf_to_string)
 from .model2 import Model2, Weights
 from .prng import Rng
 from .record import TrainingRecord
 from .run import Run
+from .tokens import TokenSet, Tokenizer
 
 LOG2 = 1 / math.log(2)
 
@@ -68,12 +69,22 @@ class Manager(object):
     def __init__(
         self,
         conf: Configuration,
+        token_set: TokenSet = None,
         weights: Optional[Weights] = None,
         test_sample_len: int = 1024,
         test_batch: int = 1024,
         pre_training: Optional[list] = None,
     ):
         self._rng: Rng = Rng()
+        self.token_set: TokenSet = token_set
+        if token_set:
+            self.ntokens = token_set.ntokens
+            self.token_set_size = token_set.ntokens
+            self.tokenizer = Tokenizer(token_set)
+        else:
+            self.ntokens = 256
+            self.token_set_size = None
+            self.tokenizer = None
         self.conf: Configuration = conf
         self.model: Model2 = self.conf.model
         if weights is None:
@@ -134,14 +145,14 @@ class Manager(object):
             json.dump(data, f, indent=2)
 
     @staticmethod
-    def load(path, training=True):
+    def load(path, token_set=None, training=True):
         with open(path) as f:
             spec = json.load(f)
 
         conf = conf_from_dict(spec["conf"])
         weights = deserialize_weights(spec["weights"])
 
-        manager = Manager(conf, weights=weights, pre_training=spec["training"])
+        manager = Manager(conf, token_set=token_set, weights=weights, pre_training=spec["training"])
 
         return manager
 
@@ -206,7 +217,7 @@ class Manager(object):
         """Loss of the model for a given string."""
 
         sarray = jnp.array(list(s))
-        soh = jax.nn.one_hot(sarray, NCHAR)
+        soh = jax.nn.one_hot(sarray, self.token_set.ntokens)
 
         state = self.model.init_state(self.weights)
         _, r = self.model.step(self.weights, state, soh[0])
@@ -216,10 +227,10 @@ class Manager(object):
         print("Sample loss:", jnp.average(loss))
 
     def batch_loss(self, xs):
-        xs = jax.nn.one_hot(xs, NCHAR)
+        xs = jax.nn.one_hot(xs, self.ntokens)
         return self.model.loss_batch(self.weights, xs)
 
-    def _eval(self, xs):
+    def _eval(self, xs, lengths):
         shards = 4
         while shards <= xs.shape[0]:
             logging.info(f"Evaluating with {shards} batches")
@@ -230,7 +241,7 @@ class Manager(object):
             for i in range(shards):
                 shard = xs[i * shard_size : (i + 1) * shard_size]
                 try:
-                    shard = jax.nn.one_hot(shard, NCHAR)
+                    shard = jax.nn.one_hot(shard, self.ntokens)
                     loss += self.model.loss_batch(self.weights, shard).item()
                 except (XlaRuntimeError, ValueError):
                     evaluation_failed = True
@@ -252,15 +263,15 @@ class Manager(object):
     def eval(self, dataset) -> float:
         """Evaluate a model on a random sample from the training data."""
         with latency.timer("Manager.eval"):
-            batch = dataset.sample(self.test_sample_len, self.test_batch)
-            return self._eval(batch)
+            batch, lengths = dataset.sample_bytes(length=self.test_sample_len, batch_size=self.test_batch, token_set_size=self.token_set_size)
+            return self._eval(batch, lengths)
 
     def sample(self, prefix, l, temperature=0.05):
         """Sample from the distribution to continue the given prefix."""
         self._rng = Rng()
         prefix = jnp.array(list(prefix))
         c_selected = prefix[-1]
-        prefix = jax.nn.one_hot(prefix, 256)
+        prefix = jax.nn.one_hot(prefix, self.ntokens)
         c = prefix[-1, :]
 
         state = self.model.init_state(self.weights)
@@ -271,13 +282,15 @@ class Manager(object):
         out = []
         while len(out) < l and c_selected != 0:
             state, c = self.model.step_prob(self.weights, state, c)
-            c_selected = jax.random.choice(self._rng.gen(), NCHAR, p=c)
-            c = jax.nn.one_hot(c_selected, NCHAR)
-            out.append(c_selected)
-        return bytes(out)
+            c_selected = jax.random.choice(self._rng.gen(), self.ntokens, p=c)
+            c = jax.nn.one_hot(c_selected, self.ntokens)
+            if self.token_set:
+                out.append(c_selected)
+        # return bytes(out)
+        return out
 
     def train_step(self, xs):
-        xs = jax.nn.one_hot(xs, NCHAR)
+        xs = jax.nn.one_hot(xs, self.ntokens)
         trainable_weights = self.weights[self.train_from:]
         loss, grads = self._loss_grad(trainable_weights, xs)
 
@@ -315,8 +328,8 @@ class Manager(object):
         logging.info(f"Training for{t}{s}")
 
         while time.time() < finish_time and self.step < steps:
-            batch = train_set.sample(
-                length=self.conf.sample_len, batch_size=self.conf.batch
+            batch = train_set.sample_tokens(
+                ntokens=self.conf.sample_len, batch_size=self.conf.batch, token_set_size=self.token_set_size
             )
             try:
                 loss = self.train_step(batch)
@@ -382,6 +395,7 @@ class Manager(object):
 
         report = TrainingRecord(
             timestamp=datetime.now(),
+            ntokens=self.conf.model.ntokens,
             model_spec=str(self.conf.model),
             weights=self.conf.model.weights,
             steps=self.step,
@@ -412,12 +426,19 @@ class Manager(object):
 
     def continue_prefix(self, prefix: str, length: int) -> str | bytes:
         prefix_bytes: bytes = prefix.encode()  # convert str to bytes (?)
-        out = self.sample(prefix_bytes, length)
+        if self.token_set:
+            prefix_tokens = [t.id for t in self.tokenizer.tokenize(prefix_bytes)]
+        else:
+            prefix_tokens = prefix_bytes
 
-        try:
-            s = (prefix_bytes + out).decode("utf-8")
-        except UnicodeDecodeError:
-            s = prefix_bytes + out
+        out = self.sample(prefix_tokens, length)
+
+        # try:
+        #     s = (prefix_tokens + out).decode("utf-8")
+        # except UnicodeDecodeError:
+        #     s = prefix_tokens + out
+        s = prefix_tokens + out
+        s = "|".join(str(self.token_set.tokens[c]) for c in s)
         return s
 
     def serialize_weights(self, weights):

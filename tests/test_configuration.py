@@ -19,7 +19,7 @@ class ConfigurationTest(TestCase):
         )
 
         conf = Configuration(
-            model=build_model("dense.1.relu"),
+            model=build_model(256, "dense.1.relu"),
             lr=0.25,
             sample_len=128,
             batch=256,
@@ -28,9 +28,9 @@ class ConfigurationTest(TestCase):
         self.assertEqual(
             set(conf_neighbors(conf, template)),
             {
-                conf._replace(model=build_model("dense.2.relu")),
-                conf._replace(model=build_model("rec.1.relu")),
-                conf._replace(model=build_model("dense.1.relu-suffix.2")),
+                conf._replace(model=build_model(256, "dense.2.relu")),
+                conf._replace(model=build_model(256, "rec.1.relu")),
+                conf._replace(model=build_model(256, "dense.1.relu-suffix.2")),
                 conf._replace(lr=0.125),
                 conf._replace(lr=0.5),
                 conf._replace(batch=128),
@@ -47,7 +47,7 @@ class ConfigurationTest(TestCase):
         )
 
         conf = Configuration(
-            model=build_model("suffix.2"),
+            model=build_model(256, "suffix.2"),
             lr=0.25,
             sample_len=128,
             batch=256,
@@ -56,7 +56,7 @@ class ConfigurationTest(TestCase):
         self.assertEqual(
             set(conf_neighbors(conf, template)),
             {
-                conf._replace(model=build_model("suffix.4")),
+                conf._replace(model=build_model(256, "suffix.4")),
                 conf._replace(lr=0.125),
                 conf._replace(lr=0.5),
                 conf._replace(batch=128),
@@ -65,7 +65,7 @@ class ConfigurationTest(TestCase):
 
     def test_conf_is_valid(self):
         conf = Configuration(
-            model=build_model("lstm.64-lstm.32"),
+            model=build_model(256, "lstm.64-lstm.32"),
             lr=0.5,
             sample_len=128,
             batch=256,

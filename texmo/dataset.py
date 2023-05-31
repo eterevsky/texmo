@@ -301,7 +301,7 @@ def init_args(parser: argparse.ArgumentParser):
         "-t",
         "--tokens",
         type=str,
-        help="path to token set definition",
+        help="path to the token set definition",
         default=None,
     )
     parser.add_argument(

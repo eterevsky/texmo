@@ -77,7 +77,7 @@ class Tokenizer(object):
 
     def tokenize(
         self, string: bytes, start=0, max_tokens=None, max_bytes=None
-    ) -> list[int]:
+    ) -> list[Token]:
         suffix_state = self._suffix_states[b""]
         cost_state = [(0, None)]
 
@@ -164,16 +164,12 @@ class Tokenizer(object):
                 else:
                     out.append(word)
 
-        # print("_process")
-        # print(words)
-        # print(out)
-
         return "".join(out)
 
     def _iterate_bytes(
         self, data: bytes, start: int, max_tokens: int, max_bytes: int
     ):
-        while True:
+        while start < len(data):
             if max_bytes is None and max_tokens is None:
                 l = len(data) - start
             elif max_bytes is not None:

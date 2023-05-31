@@ -13,7 +13,7 @@ class ManagerTest(TestCase):
     def test_train(self):
         dataset = build_fake_dataset()
         conf = Configuration(
-            build_model("gru.16"),
+            build_model(256, "gru.16"),
             lr=0.125,
             sample_len=32,
             batch=8,

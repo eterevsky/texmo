@@ -2,7 +2,7 @@ import argparse
 import logging
 
 from texmo.tokens import small_tokens
-from texmo import dataset
+from texmo import dataset, train
 
 
 def help(parser):
@@ -22,6 +22,11 @@ def parse_args():
         "small-tokens", help="generate a set of sub-byte tokens"
     )
     small_tokens.init_args(parser_count_bytes)
+
+    parser_train = subparsers.add_parser(
+        "train", help="train a model"
+    )
+    train.init_args(parser_train)
 
     parser_help = subparsers.add_parser("help", help="Display help information")
     parser_help.set_defaults(func=lambda _: help(parser), parser=parser)

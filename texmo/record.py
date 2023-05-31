@@ -17,6 +17,7 @@ class TrainingRecord(object):
     def __init__(
         self,
         timestamp: datetime,
+        ntokens: int,
         model_spec: str,
         weights: int,
         steps: int,
@@ -39,6 +40,8 @@ class TrainingRecord(object):
     ):
         assert isinstance(timestamp, datetime)
         self.timestamp = timestamp
+
+        self.ntokens = ntokens
 
         self.model_spec = model_spec
         self.weights = weights
@@ -95,7 +98,7 @@ class TrainingRecord(object):
         train_data = self.train_data / 1e6
         total_data = self.total_data / 1e6
         return f"""
-Model: {self.model_spec}, {self.weights:,} weights
+Tokens: {self.ntokens} Model: {self.model_spec}, {self.weights:,} weights
 Loss: loss {self.loss:.4f}{expected_loss}
 Training: {self.steps} steps, {self.train_time_s:.1f} s ({planned_time})
 B {self.train_batch}  LEN {self.train_sample_len}  LR {self.learning_rate}
@@ -119,24 +122,18 @@ Training data: {train_data:.1f}M / {total_data:.1f}M
         fields["test_sample_len"] = int(row[12])
         fields["test_batch"] = int(row[13])
         fields["test_poisoned"] = bool(int(row[14]))
-        fields["init_scale"] = 1.0 if len(row < 16) else float(row[15])
-        fields["planned_time_s"] = (
-            _round_time(fields["train_time_s"])
-            if len(row < 17)
-            else int(row[16])
+        fields["init_scale"] = float(row[15])
+        fields["planned_time_s"] = int(row[16]
         )
-        fields["final_time_s"] = (
-            fields["planned_time_s"] if len(row) < 18 else int(row[17])
-        )
-        fields["loss_model_v"] = 0 if len(row) < 19 else int(row[18])
-        if fields["loss_model_v"] > 0:
-            assert len(row) >= 20
+        fields["final_time_s"] = int(row[17])
+        fields["loss_model_v"] = int(row[18])
         fields["loss_model_params"] = (
             None
             if fields["loss_model_v"] == 0
             else np.fromiter(map(float, row[19].split(",")), dtype=np.float32)
         )
-        fields["checkpoint_id"] = None if len(row) < 21 else row[20]
+        fields["checkpoint_id"] = row[20]
+        fields["ntokens"] = row[21]
 
         return TrainingRecord(**fields)
 
@@ -166,5 +163,6 @@ Training data: {train_data:.1f}M / {total_data:.1f}M
             self.final_time_s,
             self.loss_model_v,
             loss_model_params,
-            self.checkpoint_id
+            self.checkpoint_id,
+            self.ntokens,
         )

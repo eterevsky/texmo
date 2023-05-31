@@ -11,7 +11,7 @@ logging.disable(level=logging.ERROR)
 
 
 INIT_CONF = Configuration(
-    model=build_model("dense.1.relu"),
+    model=build_model(256, "dense.1.relu"),
     lr=0.2,
     sample_len=128,
     batch=256,
@@ -50,7 +50,7 @@ class ResultSetTest(TestCase):
         )
         results.add_run_conf(INIT_CONF, Run(loss=1), update_scores=True)
         results.add_run_conf(
-            INIT_CONF._replace(model=build_model("dense.2.relu")),
+            INIT_CONF._replace(model=build_model(256, "dense.2.relu")),
             Run(loss=2),
             update_scores=True,
         )
@@ -68,12 +68,12 @@ class ResultSetTest(TestCase):
         results.add_run_conf(INIT_CONF, Run(loss=1), update_scores=True)
         results.add_run_conf(INIT_CONF, Run(loss=1), update_scores=True)
         results.add_run_conf(
-            INIT_CONF._replace(model=build_model("dense.2.relu")),
+            INIT_CONF._replace(model=build_model(256, "dense.2.relu")),
             Run(loss=2),
             update_scores=True,
         )
         results.add_run_conf(
-            INIT_CONF._replace(model=build_model("dense.2.relu")),
+            INIT_CONF._replace(model=build_model(256, "dense.2.relu")),
             Run(loss=2),
             update_scores=True,
         )

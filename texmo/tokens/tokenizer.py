@@ -81,36 +81,42 @@ class Tokenizer(object):
         suffix_state = self._suffix_states[b""]
         cost_state = [(0, None)]
 
-        for byte in self._iterate_bytes(string, start, max_tokens, max_bytes):
-            if max_bytes is not None and len(cost_state) - 1 >= max_bytes:
-                break
-            suffix_state = suffix_state.next[byte]
-            token = suffix_state.token
+        finished = False
 
-            if isinstance(token, int):
-                best_cost = cost_state[-1][0] + len(self._literals[token])
-                best_token = token
-            else:
-                best_cost = cost_state[-len(token.string)][0] + 1
-                best_token = token
+        for chunk in self._iterate_bytes(string, start, max_tokens, max_bytes):
+            if finished: break
+            for byte in chunk:
+                if max_bytes is not None and len(cost_state) - 1 >= max_bytes:
+                    finished = True
+                    break
+                suffix_state = suffix_state.next[byte]
+                token = suffix_state.token
 
-                token = token.suffix
-                while isinstance(token, Token):
-                    cost = cost_state[-len(token.string)][0] + 1
-                    if cost < best_cost:
-                        best_cost = cost
-                        best_token = token
+                if isinstance(token, int):
+                    best_cost = cost_state[-1][0] + len(self._literals[token])
+                    best_token = token
+                else:
+                    best_cost = cost_state[-len(token.string)][0] + 1
+                    best_token = token
+
                     token = token.suffix
+                    while isinstance(token, Token):
+                        cost = cost_state[-len(token.string)][0] + 1
+                        if cost < best_cost:
+                            best_cost = cost
+                            best_token = token
+                        token = token.suffix
 
-                if token is not None:
-                    cost = cost_state[-1][0] + len(self._literals[token])
-                    if cost < best_cost:
-                        best_cost = cost
-                        best_token = token
+                    if token is not None:
+                        cost = cost_state[-1][0] + len(self._literals[token])
+                        if cost < best_cost:
+                            best_cost = cost
+                            best_token = token
 
-            cost_state.append((best_cost, best_token))
-            if max_tokens is not None and best_cost >= max_tokens + 10:
-                break
+                cost_state.append((best_cost, best_token))
+                if max_tokens is not None and best_cost >= max_tokens + 10:
+                    finished = True
+                    break
 
         tokens = []
         pos = len(cost_state) - 1
@@ -153,14 +159,7 @@ class Tokenizer(object):
                 if self._mark_words:
                     out.append(WORD_MARKER)
             else:
-                if (
-                    self._mark_words
-                    and word == " "
-                    and len(out) > 0
-                    and out[-1] == WORD_MARKER
-                    and i < len(words) - 1
-                    and words[i + 1].isalpha()
-                ):
+                if self._mark_words and word == " " and 0 < i < len(words) - 1:
                     pass
                 else:
                     out.append(word)
@@ -174,23 +173,26 @@ class Tokenizer(object):
     def _iterate_bytes(
         self, data: bytes, start: int, max_tokens: int, max_bytes: int
     ):
-        if max_bytes is None and max_tokens is None:
-            l = len(data) - start
-        elif max_bytes is not None:
-            assert max_tokens is None
-            l = max_bytes
-        else:
-            assert max_tokens is not None
-            l = 5 * (max_tokens + 100)
+        while True:
+            if max_bytes is None and max_tokens is None:
+                l = len(data) - start
+            elif max_bytes is not None:
+                assert max_tokens is None
+                l = max_bytes
+            else:
+                assert max_tokens is not None
+                l = max_tokens // 2
 
-        end = start + l
-        while end < len(data) and 128 <= data[end] < 192:
-            end += 1
+            end = start + l
+            while end < len(data) and 128 <= data[end] < 192:
+                end += 1
 
-        string = data[start:end]
+            string = data[start:end]
 
-        if self._mark_caps or self._mark_words:
-            string = string.decode("utf-8")
-            string = self._process(string).encode("utf-8")
+            if self._mark_caps or self._mark_words:
+                string = string.decode("utf-8")
+                string = self._process(string).encode("utf-8")
 
-        return string
+            yield string
+
+            start = end

@@ -19,7 +19,7 @@ def parse_args():
     dataset.init_args(parser_sample)
 
     parser_count_bytes = subparsers.add_parser(
-        "small_tokens", help="generate a set of sub-byte tokens"
+        "small-tokens", help="generate a set of sub-byte tokens"
     )
     small_tokens.init_args(parser_count_bytes)
 

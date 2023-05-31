@@ -52,7 +52,7 @@ pub struct TokenSet {
 
 impl TokenSet {
     pub fn build_with_fallback_bits(bits: usize) -> Self {
-        let mut token_set = TokenSet {
+        let token_set = TokenSet {
             tokens: Vec::new(),
             tokens_by_string: HashMap::new(),
             literal_cost: 8.0 / bits as f64,
@@ -65,7 +65,7 @@ impl TokenSet {
     }
 
     pub fn build_with_dist_fallback(literal_count: [u64; 256]) -> Self {
-        let mut token_set = TokenSet {
+        let token_set = TokenSet {
             tokens: Vec::new(),
             tokens_by_string: HashMap::new(),
             literal_cost: 8.0,
@@ -256,15 +256,9 @@ impl TokenSet {
     }
 
     pub fn to_json(&self, stats: &TokenStats, initial_size: u64) -> json::JsonValue {
-        let tokens_in_literal: u64 = match self.fallback {
-            Fallback::Distribution => 1,
-            Fallback::HexLiteral => 3,
-            Fallback::Bits(b) => 8 / b as u64,
-        };
-
         let mut out = json::object! {
             tokens: [],
-            stats: stats.to_json(initial_size, self.literal_cost, self.dist_entropy(), tokens_in_literal)
+            stats: stats.to_json(initial_size, self.literal_cost, self.dist_entropy())
         };
 
         let mut token_strs = vec![];

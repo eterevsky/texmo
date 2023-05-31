@@ -1,6 +1,7 @@
 use crate::stats::TokenStats;
 use crate::tokenizer::tokenize_file;
 use crate::tokens::TokenSet;
+use crate::sampler::Sampler;
 
 fn format_token(s: &[u8]) -> String {
     match String::from_utf8(s.to_vec()) {
@@ -42,21 +43,18 @@ fn token_to_add(token_set: &TokenSet, stats: &TokenStats) -> Vec<u8> {
     }
 }
 
-pub const CHUNK_SIZE: usize = 16 * 1024 * 1024;
-
-pub fn optimize_bpe(
+pub fn optimize_bpe<'a, S: Sampler<'a>>(
     token_set: &TokenSet,
     ntokens: usize,
-    filename: &str,
-    in_memory: bool,
+    sampler: &'a S,
 ) -> (TokenSet, TokenStats) {
     let mut token_set = token_set.clone();
     let mut prev_stats = None;
 
     loop {
-        let mut initial_stats = match prev_stats {
+        let initial_stats = match prev_stats {
             Some(s) => s,
-            None => tokenize_file(&token_set, filename, CHUNK_SIZE, None),
+            None => tokenize_file(&token_set, sampler),
         };
         token_set.update_stats(&initial_stats);
 
@@ -81,7 +79,7 @@ pub fn optimize_bpe(
         );
 
         if new_token_set.ntokens() > ntokens {
-            let stats = tokenize_file(&new_token_set, filename, CHUNK_SIZE, None);
+            let stats = tokenize_file(&new_token_set, sampler);
             new_token_set.update_stats(&stats);
             let mut token_ids: Vec<usize> = (0..new_token_set.tokens.len()).collect();
             token_ids.sort_unstable_by_key(|&i| stats.token_count[i]);
@@ -106,7 +104,7 @@ pub fn optimize_bpe(
                 tries += 1;
 
                 new_token_set.remove_token(token_str);
-                let stats = tokenize_file(&new_token_set, filename, CHUNK_SIZE, None);
+                let stats = tokenize_file(&new_token_set, sampler);
                 new_token_set.update_stats(&stats);
 
                 // if stats.cost < initial_stats.cost

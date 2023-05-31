@@ -1,9 +1,8 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::Read;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
+use crate::sampler::{Sample, Sampler};
 use crate::stats::TokenStats;
 use crate::tokens::{TokenIdx, TokenSet};
 
@@ -84,7 +83,9 @@ impl Tokenizer {
         // Add literals, not covered by tokens
         for literal in 0..=255 {
             let suffix = vec![literal];
-            if state_by_str.contains_key(&suffix) { continue; }
+            if state_by_str.contains_key(&suffix) {
+                continue;
+            }
             let suffix_state = SuffixState::new(suffix, TokenIdx::Literal(literal));
             state_by_str.insert(suffix_state.suffix.clone(), suffix_states.len());
             suffix_states.push(suffix_state);
@@ -186,8 +187,7 @@ impl Tokenizer {
     }
 
     fn get_stats(&self, cost_array: &[DynState]) -> TokenStats {
-        let mut token_stats =
-            TokenStats::new(self.token_set.tokens.len());
+        let mut token_stats = TokenStats::new(self.token_set.tokens.len());
 
         let mut pos = cost_array.len() - 1;
         token_stats.scanned_bytes = pos as u64;
@@ -221,20 +221,24 @@ impl Tokenizer {
     }
 }
 
-struct Job {
-    data: Vec<u8>,
-}
-
-fn worker(token_set: TokenSet, jobs_rx: Arc<Mutex<Receiver<Job>>>, results_tx: Sender<TokenStats>) {
+fn worker(
+    token_set: TokenSet,
+    jobs_rx: Arc<Mutex<Receiver<Sample>>>,
+    results_tx: Sender<TokenStats>,
+) {
     let mut tokenizer = Tokenizer::new(token_set);
 
     loop {
+        let job = jobs_rx.lock().unwrap().recv();
         let data = {
-            match jobs_rx.lock().unwrap().recv() {
-                Ok(Job { data }) => data,
+            match job {
+                Ok(Sample::Data(ref data)) => data.as_slice(),
+                Ok(Sample::Ref(data_ref)) => data_ref,
                 Err(_) => break,
             }
         };
+
+        // println!("got sample {}", data.len());
 
         assert!(!data.is_empty());
 
@@ -242,14 +246,12 @@ fn worker(token_set: TokenSet, jobs_rx: Arc<Mutex<Receiver<Job>>>, results_tx: S
     }
 }
 
-pub fn tokenize_file(token_set: &TokenSet, filename: &str, chunk_size: usize, nchunks: Option<usize>) -> TokenStats {
+pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S) -> TokenStats {
     let nthreads = std::thread::available_parallelism().unwrap().get();
-    // let nthreads = 1;
 
-    let (jobs_tx, jobs_rx) = mpsc::sync_channel::<Job>(2);
+    let (jobs_tx, jobs_rx) = mpsc::sync_channel::<Sample>(2);
     let jobs_rx_shared = Arc::new(Mutex::new(jobs_rx));
     let (results_tx, results_rx) = mpsc::channel::<TokenStats>();
-    let mut file = File::open(filename).unwrap();
 
     let mut total_stats = TokenStats::new(token_set.tokens.len());
 
@@ -266,19 +268,9 @@ pub fn tokenize_file(token_set: &TokenSet, filename: &str, chunk_size: usize, nc
         let start = std::time::Instant::now();
         let mut jobs_in_flight = 0;
 
-        loop {
-            let mut buffer = Vec::new();
-            buffer.resize(chunk_size, 0);
-
-            let read_bytes = file.read(&mut buffer).unwrap();
-
-            if read_bytes == 0 {
-                break;
-            }
-
-            buffer.truncate(read_bytes);
-
-            jobs_tx.send(Job { data: buffer }).unwrap();
+        for sample in sampler.iter() {
+            // println!("sending sample");
+            jobs_tx.send(sample).unwrap();
             jobs_in_flight += 1;
 
             for result in results_rx.try_iter() {

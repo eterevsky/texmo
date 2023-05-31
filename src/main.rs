@@ -10,7 +10,7 @@ mod tokens;
 
 use self::optimizer::optimize_bpe;
 use self::tokens::TokenSet;
-use self::tokenizer::{CHUNK_SIZE, tokenize_file};
+use self::tokenizer::tokenize_file;
 
 
 fn optimize_tokens(
@@ -22,6 +22,7 @@ fn optimize_tokens(
     fallback_bits: Option<usize>,
     initial_size: Option<u64>,
     processing: &Option<String>,
+    in_memory: bool,
 ) {
     println!(
         "Using {} threads",
@@ -45,7 +46,7 @@ fn optimize_tokens(
         // }
     };
 
-    let (token_set, token_stats) = optimize_bpe(&token_set, ntokens, data_filename);
+    let (token_set, token_stats) = optimize_bpe(&token_set, ntokens, data_filename, in_memory);
 
     let initial_size = initial_size.unwrap_or(token_stats.scanned_bytes);
     let mut tokens_json = token_set.to_json(&token_stats, initial_size);
@@ -178,6 +179,8 @@ fn count_hex_digits(filename: &str) {
     }
 }
 
+pub const CHUNK_SIZE: usize = 16 * 1024 * 1024;
+
 fn count_bytes(filename: &str) -> [u64; 256] {
     let mut file = File::open(filename).unwrap();
     let mut buffer = Vec::new();
@@ -205,9 +208,9 @@ fn count_bytes_command(filename: &str) {
     println!();
 }
 
-fn tokenize(filename: &str, tokens_file: &str, initial_size: u64) {
+fn tokenize(filename: &str, tokens_file: &str, initial_size: u64, chunk_size: usize, nchunks: Option<usize>) {
     let token_set = TokenSet::from_json(tokens_file);
-    let stats = tokenize_file(&token_set, filename);
+    let stats = tokenize_file(&token_set, filename, chunk_size, nchunks);
     let token_set_json = token_set.to_json(&stats, initial_size);
     println!("{}", json::stringify_pretty(token_set_json, 2));
 }
@@ -230,7 +233,13 @@ enum Command {
         /// If the input is pre-processed, this argument specifies the size
         /// of the input before pre-processing.
         #[arg(long)]
-        initial_size:u64,
+        initial_size: u64,
+
+        #[arg(long, default_value_t = 16 * 1024 * 1024)]
+        chunk_size: usize,
+
+        #[arg(long)]
+        nchunks: Option<usize>,
     },
 
     OptimizeTokens {
@@ -265,6 +274,9 @@ enum Command {
         /// for the purposes of including it into the output.
         #[arg(long)]
         processing: Option<String>,
+
+        #[arg(long)]
+        in_memory: bool,
     },
 
     FilterText {
@@ -287,7 +299,7 @@ fn main() {
     let filename = args.data.as_str();
 
     match &args.command {
-        Command::Tokenize { tokens, initial_size } => tokenize(filename, tokens, *initial_size),
+        Command::Tokenize { tokens, initial_size , chunk_size, nchunks} => tokenize(filename, tokens, *initial_size, *chunk_size, *nchunks),
 
         Command::OptimizeTokens {
             input_tokens,
@@ -297,6 +309,7 @@ fn main() {
             fallback_bits,
             initial_size,
             processing,
+            in_memory,
         } => optimize_tokens(
             filename,
             input_tokens,
@@ -306,6 +319,7 @@ fn main() {
             *fallback_bits,
             *initial_size,
             processing,
+            *in_memory,
         ),
 
         Command::FilterText {

@@ -42,10 +42,13 @@ fn token_to_add(token_set: &TokenSet, stats: &TokenStats) -> Vec<u8> {
     }
 }
 
+pub const CHUNK_SIZE: usize = 16 * 1024 * 1024;
+
 pub fn optimize_bpe(
     token_set: &TokenSet,
     ntokens: usize,
     filename: &str,
+    in_memory: bool,
 ) -> (TokenSet, TokenStats) {
     let mut token_set = token_set.clone();
     let mut prev_stats = None;
@@ -53,7 +56,7 @@ pub fn optimize_bpe(
     loop {
         let mut initial_stats = match prev_stats {
             Some(s) => s,
-            None => tokenize_file(&token_set, filename),
+            None => tokenize_file(&token_set, filename, CHUNK_SIZE, None),
         };
         token_set.update_stats(&initial_stats);
 
@@ -78,7 +81,7 @@ pub fn optimize_bpe(
         );
 
         if new_token_set.ntokens() > ntokens {
-            let stats = tokenize_file(&new_token_set, filename);
+            let stats = tokenize_file(&new_token_set, filename, CHUNK_SIZE, None);
             new_token_set.update_stats(&stats);
             let mut token_ids: Vec<usize> = (0..new_token_set.tokens.len()).collect();
             token_ids.sort_unstable_by_key(|&i| stats.token_count[i]);
@@ -103,7 +106,7 @@ pub fn optimize_bpe(
                 tries += 1;
 
                 new_token_set.remove_token(token_str);
-                let stats = tokenize_file(&new_token_set, filename);
+                let stats = tokenize_file(&new_token_set, filename, CHUNK_SIZE, None);
                 new_token_set.update_stats(&stats);
 
                 // if stats.cost < initial_stats.cost

@@ -57,7 +57,7 @@ impl TokenStats {
             processed_size: self.scanned_bytes,
             total_cost: total_cost,
             bytes_per_token: initial_size as f64 / total_cost,
-            total_tokens: self.total_tokens() + self.total_literals() * tokens_in_literal,
+            total_tokens: self.total_tokens(),
             total_literals: self.total_literals(),
             literal_dist_entropy: literal_dist_entropy,
             literal_cost: literal_cost,

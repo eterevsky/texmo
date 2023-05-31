@@ -221,8 +221,6 @@ impl Tokenizer {
     }
 }
 
-pub const CHUNK_SIZE: usize = 16 * 1024 * 1024;
-
 struct Job {
     data: Vec<u8>,
 }
@@ -244,7 +242,7 @@ fn worker(token_set: TokenSet, jobs_rx: Arc<Mutex<Receiver<Job>>>, results_tx: S
     }
 }
 
-pub fn tokenize_file(token_set: &TokenSet, filename: &str) -> TokenStats {
+pub fn tokenize_file(token_set: &TokenSet, filename: &str, chunk_size: usize, nchunks: Option<usize>) -> TokenStats {
     let nthreads = std::thread::available_parallelism().unwrap().get();
     // let nthreads = 1;
 
@@ -270,7 +268,7 @@ pub fn tokenize_file(token_set: &TokenSet, filename: &str) -> TokenStats {
 
         loop {
             let mut buffer = Vec::new();
-            buffer.resize(CHUNK_SIZE, 0);
+            buffer.resize(chunk_size, 0);
 
             let read_bytes = file.read(&mut buffer).unwrap();
 

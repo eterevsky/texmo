@@ -30,7 +30,8 @@ fn token_to_add(token_set: &TokenSet, stats: &TokenStats) -> Vec<u8> {
         }
     }
 
-    if top_literal_count as f64 * (token_set.literal_cost - 1.0) > top_pair_count as f64 {
+    if top_literal_count as f64 * (token_set.literal_cost - 1.0) >
+    top_pair_count as f64 {
         vec![top_literal as u8]
     } else {
         let ifirst = top_pair / token_set.tokens.len();
@@ -47,6 +48,7 @@ pub fn optimize_bpe<'a, S: Sampler<'a>>(
     token_set: &TokenSet,
     ntokens: usize,
     sampler: &'a S,
+    initial_size: u64,
 ) -> (TokenSet, TokenStats) {
     let mut token_set = token_set.clone();
     let mut prev_stats = None;
@@ -60,12 +62,6 @@ pub fn optimize_bpe<'a, S: Sampler<'a>>(
 
         let bytes_per_token = (initial_stats.scanned_bytes - initial_stats.total_literals()) as f64
             / (initial_stats.total_tokens() as f64 + 1.0);
-        println!(
-            "Literal entropy: {}, bytes per token: {}, cost: {}",
-            token_set.dist_entropy(),
-            bytes_per_token,
-            token_set.literal_cost
-        );
 
         let new_token_str = token_to_add(&token_set, &initial_stats);
         let mut new_token_set = token_set.clone();
@@ -73,9 +69,12 @@ pub fn optimize_bpe<'a, S: Sampler<'a>>(
         prev_stats = None;
 
         println!(
-            "{} Adding token {}",
-            initial_stats.cost(token_set.literal_cost),
-            format_token(&new_token_str)
+            "{} tokens, bytes/(tokens+literals) = {}  literals/bytes = {}  adding {}",
+            token_set.ntokens(),
+            initial_stats.scanned_bytes as f64 / (initial_stats.total_tokens() +
+                                   initial_stats.total_literals()) as f64,
+            initial_stats.total_literals() as f64 / initial_stats.scanned_bytes as f64,
+            format_token(&new_token_str),
         );
 
         if new_token_set.ntokens() > ntokens {
@@ -121,7 +120,7 @@ pub fn optimize_bpe<'a, S: Sampler<'a>>(
                     found = true;
                     prev_stats = Some(stats);
                     println!(
-                        "Removing token {} after {} tries",
+                        "removing {} after {} tries",
                         format_token(&token_str),
                         tries
                     );

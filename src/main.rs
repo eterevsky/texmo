@@ -9,6 +9,8 @@ mod stats;
 mod tokenizer;
 mod tokens;
 
+use crate::sampler::SelectionSampler;
+
 use self::optimizer::optimize_bpe;
 use self::sampler::{FileSampler, MemorySampler};
 use self::tokenizer::tokenize_file;
@@ -24,6 +26,8 @@ fn optimize_tokens(
     initial_size: Option<u64>,
     processing: &Option<String>,
     in_memory: bool,
+    nchunks: Option<usize>,
+    chunk_size: Option<usize>,
 ) {
     println!(
         "Using {} threads",
@@ -40,15 +44,28 @@ fn optimize_tokens(
         }
     };
 
-    let (token_set, token_stats) = if in_memory {
+    let file_size = std::fs::metadata(data_filename).unwrap().len();
+    let initial_size = initial_size.unwrap_or(file_size);
+
+    let (token_set, token_stats) = if nchunks.is_some() {
+        let nchunks = nchunks.unwrap();
+        let chunk_size = chunk_size.unwrap();
+        println!("Preparing SelectionSampler with {} chunks x {} b", nchunks, chunk_size);
+        let sampler = SelectionSampler::new(data_filename, chunk_size, nchunks);
+        let (token_set, _) = optimize_bpe(&token_set, ntokens, &sampler, initial_size);
+
+        let full_sampler = FileSampler::new(data_filename, 16 * 1024 * 1024);
+        let stats = tokenize_file(&token_set, &full_sampler);
+
+        (token_set, stats)
+    } else if in_memory {
         let sampler = MemorySampler::new(data_filename, 16 * 1024 * 1024);
-        optimize_bpe(&token_set, ntokens, &sampler)
+        optimize_bpe(&token_set, ntokens, &sampler, initial_size)
     } else {
         let sampler = FileSampler::new(data_filename, 16 * 1024 * 1024);
-        optimize_bpe(&token_set, ntokens, &sampler)
+        optimize_bpe(&token_set, ntokens, &sampler, initial_size)
     };
 
-    let initial_size = initial_size.unwrap_or(token_stats.scanned_bytes);
     let mut tokens_json = token_set.to_json(&token_stats, initial_size);
 
     let mut processing_json: Vec<json::JsonValue> = Vec::new();
@@ -225,7 +242,11 @@ fn tokenize(
         tokenize_file(&token_set, &sampler)
     };
 
-    let stats_json = stats.to_json(initial_size, token_set.literal_cost, token_set.dist_entropy());
+    let stats_json = stats.to_json(
+        initial_size,
+        token_set.literal_cost,
+        token_set.dist_entropy(),
+    );
     println!("{}", json::stringify_pretty(stats_json, 2));
 }
 
@@ -249,11 +270,8 @@ enum Command {
         #[arg(long)]
         initial_size: u64,
 
-        #[arg(long, default_value_t = 16 * 1024 * 1024)]
+        #[arg(long, default_value_t = 1024 * 1024)]
         chunk_size: usize,
-
-        // #[arg(long)]
-        // nchunks: Option<usize>,
 
         #[arg(long)]
         in_memory: bool,
@@ -292,6 +310,12 @@ enum Command {
         processing: Option<String>,
 
         #[arg(long)]
+        chunk_size: Option<usize>,
+
+        #[arg(long)]
+        nchunks: Option<usize>,
+
+        #[arg(long)]
         in_memory: bool,
     },
 
@@ -319,7 +343,6 @@ fn main() {
             tokens,
             initial_size,
             chunk_size,
-            // nchunks,
             in_memory,
         } => tokenize(filename, tokens, *initial_size, *chunk_size, *in_memory),
 
@@ -332,6 +355,8 @@ fn main() {
             initial_size,
             processing,
             in_memory,
+            nchunks,
+            chunk_size,
         } => optimize_tokens(
             filename,
             input_tokens,
@@ -342,6 +367,8 @@ fn main() {
             *initial_size,
             processing,
             *in_memory,
+            *nchunks,
+            *chunk_size,
         ),
 
         Command::FilterText {

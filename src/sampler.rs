@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::iter::Iterator;
 
 pub enum Sample<'a> {
@@ -107,13 +107,61 @@ impl<'a> Iterator for MemoryIterator<'a> {
     }
 }
 
-// pub struct SelectionSampler {
-//     chunks: Vec<Vec<u8>>, 
-// }
+pub struct SelectionSampler {
+    chunks: Vec<Vec<u8>>, 
+}
 
-// impl SelectionSampler {
-//     pub fn new(filename: &str, chunk_size: usize, nchunks: usize) -> Self {
-//         let file = File::open(self.filename.as_str()).unwrap();
+impl SelectionSampler {
+    pub fn new(filename: &str, chunk_size: usize, nchunks: usize) -> Self {
+        // Get the metadata of the file
+        let data_len = std::fs::metadata(filename).unwrap().len();
+        let step = std::cmp::max(chunk_size, data_len as usize / nchunks);
+        let skip = step - chunk_size;
+
+        let mut file = File::open(filename).unwrap();
+
+        let mut chunks = Vec::new();
+
+        for _ in 0..nchunks {
+            let mut chunk = Vec::new();
+            chunk.resize(chunk_size, 0);
+            let read_bytes = file.read(&mut chunk).unwrap();
+            chunk.truncate(read_bytes);
+            file.seek(SeekFrom::Current(skip as i64)).unwrap();
+
+            chunks.push(chunk);
+        }
         
-//     }
-// }
+        SelectionSampler { chunks }
+    }
+}
+
+impl<'a> Sampler<'a> for SelectionSampler {
+    type Iter = SelectionIterator<'a>;
+
+    fn iter(&'a self) -> Self::Iter {
+        SelectionIterator {
+            sampler: self,
+            position: 0,
+        }
+    }
+}
+
+pub struct SelectionIterator<'a> {
+    sampler: &'a SelectionSampler,
+    position: usize,
+}
+
+impl<'a> Iterator for SelectionIterator<'a> {
+    type Item = Sample<'a>;
+
+    fn next(&mut self) -> Option<Sample<'a>> {
+        if self.position < self.sampler.chunks.len() {
+            let chunk = &self.sampler.chunks[self.position];
+            self.position += 1;
+            Some(Sample::Ref(chunk))
+        } else {
+            None
+        }
+    }
+}

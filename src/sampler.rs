@@ -51,12 +51,11 @@ impl<'a> Iterator for FileIterator<'a> {
         let mut buffer = Vec::new();
         buffer.resize(self.chunk_size, 0);
         let read_bytes = self.file.read(&mut buffer).unwrap();
-        // println!("read_bytes: {}", read_bytes);
-        buffer.truncate(read_bytes);
 
         if read_bytes == 0 {
             None
         } else {
+            buffer.truncate(read_bytes);
             Some(Sample::Data(buffer))
         }
     }
@@ -114,20 +113,33 @@ pub struct SelectionSampler {
 impl SelectionSampler {
     pub fn new(filename: &str, chunk_size: usize, nchunks: usize) -> Self {
         // Get the metadata of the file
-        let data_len = std::fs::metadata(filename).unwrap().len();
-        let step = std::cmp::max(chunk_size, data_len as usize / nchunks);
-        let skip = step - chunk_size;
+        let data_len = std::fs::metadata(filename).unwrap().len() as usize;
+
+        let (chunk_size, nchunks) = if data_len <= chunk_size {
+            (data_len, 1)
+        } else if data_len <= chunk_size * nchunks {
+            (chunk_size, data_len / chunk_size)
+        } else {
+            (chunk_size, nchunks)
+        };
+
+        println!(
+            "Preparing SelectionSampler with {} chunks x {} bytes",
+            nchunks, chunk_size
+        );
+
+        let step = data_len / nchunks;
 
         let mut file = File::open(filename).unwrap();
 
         let mut chunks = Vec::new();
 
-        for _ in 0..nchunks {
+        for i in 0..nchunks as u64 {
+            file.seek(SeekFrom::Start(i * step as u64)).unwrap();
             let mut chunk = Vec::new();
             chunk.resize(chunk_size, 0);
             let read_bytes = file.read(&mut chunk).unwrap();
             chunk.truncate(read_bytes);
-            file.seek(SeekFrom::Current(skip as i64)).unwrap();
 
             chunks.push(chunk);
         }

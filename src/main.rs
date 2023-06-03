@@ -14,20 +14,20 @@ use crate::sampler::SelectionSampler;
 use self::optimizer::optimize_bpe;
 use self::sampler::{FileSampler, MemorySampler};
 use self::tokenizer::tokenize_file;
-use self::tokens::TokenSet;
+use self::tokens::{LiteralEncoding, TokenSet};
 
 fn optimize_tokens(
     data_filename: &str,
     input_tokens: &Option<String>,
     output_tokens: &Option<String>,
     ntokens: usize,
-    fallback_dist: bool,
-    fallback_bits: Option<usize>,
     initial_size: Option<u64>,
     processing: &Option<String>,
     in_memory: bool,
     nchunks: Option<usize>,
-    chunk_size: Option<usize>,
+    chunk_size: usize,
+    add_block: usize,
+    literal_encoding: LiteralEncoding,
 ) {
     println!(
         "Using {} threads",
@@ -37,11 +37,7 @@ fn optimize_tokens(
     let token_set = if let Some(tokens_file) = input_tokens {
         TokenSet::from_json(tokens_file.as_str())
     } else {
-        if fallback_dist {
-            TokenSet::build_with_dist_fallback([1; 256])
-        } else {
-            TokenSet::build_with_fallback_bits(fallback_bits.unwrap())
-        }
+        TokenSet::new(literal_encoding)
     };
 
     let file_size = std::fs::metadata(data_filename).unwrap().len();
@@ -49,21 +45,19 @@ fn optimize_tokens(
 
     let (token_set, token_stats) = if nchunks.is_some() {
         let nchunks = nchunks.unwrap();
-        let chunk_size = chunk_size.unwrap();
-        println!("Preparing SelectionSampler with {} chunks x {} b", nchunks, chunk_size);
         let sampler = SelectionSampler::new(data_filename, chunk_size, nchunks);
-        let (token_set, _) = optimize_bpe(&token_set, ntokens, &sampler, initial_size);
+        let (token_set, _) = optimize_bpe(&token_set, ntokens, &sampler, add_block);
 
-        let full_sampler = FileSampler::new(data_filename, 16 * 1024 * 1024);
+        let full_sampler = FileSampler::new(data_filename, chunk_size);
         let stats = tokenize_file(&token_set, &full_sampler);
 
         (token_set, stats)
     } else if in_memory {
-        let sampler = MemorySampler::new(data_filename, 16 * 1024 * 1024);
-        optimize_bpe(&token_set, ntokens, &sampler, initial_size)
+        let sampler = MemorySampler::new(data_filename, chunk_size);
+        optimize_bpe(&token_set, ntokens, &sampler, add_block)
     } else {
-        let sampler = FileSampler::new(data_filename, 16 * 1024 * 1024);
-        optimize_bpe(&token_set, ntokens, &sampler, initial_size)
+        let sampler = FileSampler::new(data_filename, chunk_size);
+        optimize_bpe(&token_set, ntokens, &sampler, add_block)
     };
 
     let mut tokens_json = token_set.to_json(&token_stats, initial_size);
@@ -244,7 +238,7 @@ fn tokenize(
 
     let stats_json = stats.to_json(
         initial_size,
-        token_set.literal_cost,
+        token_set.literal_cost(),
         token_set.dist_entropy(),
     );
     println!("{}", json::stringify_pretty(stats_json, 2));
@@ -287,18 +281,9 @@ enum Command {
         #[arg(short, long)]
         ntokens: usize,
 
-        #[arg(long)]
-        fallback_dist: bool,
+        #[arg(long, default_value_t=LiteralEncoding::Dist8)]
+        literals: LiteralEncoding,
 
-        /// Add tokens for 1, 2 or 4-bit blocks to encode bytes that aren't
-        /// tokens.
-        #[arg(short, long)]
-        fallback_bits: Option<usize>,
-
-        // /// Fallback encoding for bytes that aren't tokens. Possible values:
-        // /// 2, 4, 16
-        // #[arg(long)]
-        // fallback: Option<usize>,
         /// If the input is pre-processed, this argument specifies the size
         /// of the input before pre-processing.
         #[arg(long)]
@@ -309,14 +294,23 @@ enum Command {
         #[arg(long)]
         processing: Option<String>,
 
-        #[arg(long)]
-        chunk_size: Option<usize>,
+        #[arg(long, default_value_t=16 * 1024 * 1024)]
+        chunk_size: usize,
 
+        /// Sample this number of training data chunks, keep them in memory
+        /// and train the token set on them. Final stats will be calculated
+        /// the whole dataset.
         #[arg(long)]
         nchunks: Option<usize>,
 
+        /// Use in-memory sampler in case all training data fits in memory.
+        /// Ignored when nchunks is specified.
         #[arg(long)]
         in_memory: bool,
+
+        /// How many tokens will be added after each pass.
+        #[arg(long, default_value_t = 1)]
+        add_block: usize,
     },
 
     FilterText {
@@ -350,25 +344,25 @@ fn main() {
             input_tokens,
             output_tokens,
             ntokens,
-            fallback_dist,
-            fallback_bits,
+            literals,
             initial_size,
             processing,
             in_memory,
             nchunks,
             chunk_size,
+            add_block,
         } => optimize_tokens(
             filename,
             input_tokens,
             output_tokens,
             *ntokens,
-            *fallback_dist,
-            *fallback_bits,
             *initial_size,
             processing,
             *in_memory,
             *nchunks,
             *chunk_size,
+            *add_block,
+            *literals,
         ),
 
         Command::FilterText {

@@ -1,6 +1,66 @@
+use clap::ValueEnum;
 use std::collections::HashMap;
+use std::fmt;
 
 use crate::stats::TokenStats;
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum LiteralEncoding {
+    /// A literal is encoded as 8 single bit tokens.
+    Bits1,
+    /// A literal is encoded as 4 2-bit tokens.
+    Bits2,
+    /// A literal is encoded as 2 4-bit tokens.
+    Bits4,
+    /// All bytes are tokens, so there's no need to encode anything.
+    All,
+    // /// A single token stands for an unknown byte, and its cost is calculated
+    // /// based on the entropy of distribution and estimated entropy of the
+    // /// token in the model.
+    // Dist,
+    /// Same as Dist, but each unknown byte costs 8 tokens.
+    Dist8,
+    /// An unknown byte is encoded as '\x10' and two hexadecimal digits.
+    Hex,
+}
+
+impl fmt::Display for LiteralEncoding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", 
+            match *self {
+                LiteralEncoding::All => "all",
+                LiteralEncoding::Bits1 => "bits1",
+                LiteralEncoding::Bits2 => "bits2",
+                LiteralEncoding::Bits4 => "bits4",
+                LiteralEncoding::Dist8 => "dist8",
+                LiteralEncoding::Hex => "hex",
+            })
+    }
+}
+
+impl LiteralEncoding {
+    fn literal_cost(self) -> u64 {
+        match self {
+            LiteralEncoding::Bits1 => 8,
+            LiteralEncoding::Bits2 => 4,
+            LiteralEncoding::Bits4 => 2,
+            LiteralEncoding::All => 256,  // Shouldn't be used
+            LiteralEncoding::Dist8 => 8,
+            LiteralEncoding::Hex => 3,
+        }
+    }
+
+    fn reserved_tokens(self) -> usize {
+        match self {
+            LiteralEncoding::Bits1 => 2,
+            LiteralEncoding::Bits2 => 4,
+            LiteralEncoding::Bits4 => 16,
+            LiteralEncoding::All => 0,
+            LiteralEncoding::Dist8 => 1,
+            LiteralEncoding::Hex => 0,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum TokenIdx {
@@ -28,22 +88,14 @@ impl Token {
 }
 
 #[derive(Clone)]
-enum Fallback {
-    Bits(usize),
-    Distribution,
-    HexLiteral,
-}
-
-#[derive(Clone)]
 pub struct TokenSet {
     pub tokens: Vec<Token>,
     pub tokens_by_string: HashMap<Vec<u8>, u32>,
-    pub literal_cost: f64,
-    fallback: Fallback,
+    literal_encoding: LiteralEncoding,
 
     /// Number of tokens that are not added to the token set since they don't
     /// have a string representation.
-    reserved_tokens: usize,
+    // reserved_tokens: usize,
 
     /// Number of each literal in the latest tokenization. Smoothed by +1 for
     /// all non-token literals.
@@ -51,69 +103,43 @@ pub struct TokenSet {
 }
 
 impl TokenSet {
-    pub fn build_with_fallback_bits(bits: usize) -> Self {
-        let token_set = TokenSet {
-            tokens: Vec::new(),
-            tokens_by_string: HashMap::new(),
-            literal_cost: 8.0 / bits as f64,
-            fallback: Fallback::Bits(bits),
-            literal_count: [0; 256],
-            reserved_tokens: 1 << bits,
-        };
-
-        token_set
-    }
-
-    pub fn build_with_dist_fallback(literal_count: [u64; 256]) -> Self {
-        let token_set = TokenSet {
-            tokens: Vec::new(),
-            tokens_by_string: HashMap::new(),
-            literal_cost: 8.0,
-            fallback: Fallback::Distribution,
-            literal_count,
-            reserved_tokens: 1,
-        };
-
-        token_set
-    }
-
-    pub fn build_with_hex_literals() -> Self {
+    pub fn new(literal_encoding: LiteralEncoding) -> Self {
         let mut token_set = TokenSet {
             tokens: Vec::new(),
             tokens_by_string: HashMap::new(),
-            literal_cost: 3.0,
-            fallback: Fallback::HexLiteral,
+            literal_encoding,
             literal_count: [0; 256],
-            reserved_tokens: 0,
         };
 
-        token_set.add_mandatory_token(&[0x10]);
-        for i in ('0' as u8)..=('9' as u8) {
-            token_set.add_mandatory_token(&[i]);
-        }
-        for i in ('a' as u8)..=('f' as u8) {
-            token_set.add_mandatory_token(&[i]);
+        if let LiteralEncoding::Hex = literal_encoding  {
+            token_set.add_mandatory_token(&[0x10]);
+            for i in ('0' as u8)..=('9' as u8) {
+                token_set.add_mandatory_token(&[i]);
+            }
+            for i in ('a' as u8)..=('f' as u8) {
+                token_set.add_mandatory_token(&[i]);
+            }    
         }
 
         token_set
     }
 
+    pub fn literal_cost(&self) -> u64 {
+        self.literal_encoding.literal_cost()
+    }
+
     pub fn ntokens(&self) -> usize {
-        self.tokens.len() + self.reserved_tokens
+        self.tokens.len() + self.literal_encoding.reserved_tokens()
     }
 
     pub fn has_dist_fallback(&self) -> bool {
-        if let Fallback::Distribution = self.fallback {
+        if let LiteralEncoding::Dist8 = self.literal_encoding {
             true
         } else {
             false
         }
     }
 
-    /// A cost of a literal in tokens:
-    /// The number of tokens to represent a literal + in case literal can
-    /// represent different tokens, the entropy of literal / average expected
-    /// entropy of a token in the model.
     pub fn dist_entropy(&self) -> f64 {
         if !self.has_dist_fallback() {
             return 0.0;
@@ -137,8 +163,8 @@ impl TokenSet {
 
     pub fn update_stats(&mut self, stats: &TokenStats) {
         self.literal_count = stats.literal_count;
-        let total_literals: u64 = self.literal_count.iter().sum();
-        let total_tokens: u64 = stats.token_count.iter().sum();
+        // let total_literals: u64 = self.literal_count.iter().sum();
+        // let total_tokens: u64 = stats.token_count.iter().sum();
 
         for b in 0..=255 {
             if !self.tokens_by_string.contains_key(&vec![b]) {
@@ -146,22 +172,22 @@ impl TokenSet {
             }
         }
 
-        if !self.has_dist_fallback() {
-            return;
-        }
+        // if !self.has_dist_fallback() {
+        //     return;
+        // }
 
-        if total_tokens == 0 {
-            self.literal_cost = 8.0;
-            return;
-        }
+        // if total_tokens == 0 {
+        //     self.literal_cost = 8.0;
+        //     return;
+        // }
 
-        // Suppose 1 byte has entropy 1 bit
-        // Then 1 token = 1 / log2(ntokens) bits of entropy
+        // // Suppose 1 byte has entropy 1 bit
+        // // Then 1 token = 1 / log2(ntokens) bits of entropy
 
-        let bytes_per_token =
-            (stats.scanned_bytes - total_literals) as f64 / (total_tokens as f64 + 1.0);
+        // let bytes_per_token =
+        //     (stats.scanned_bytes - total_literals) as f64 / (total_tokens as f64 + 1.0);
 
-        self.literal_cost = 1.0 + self.dist_entropy() / bytes_per_token
+        // self.literal_cost = 1.0 + self.dist_entropy() / bytes_per_token
     }
 
     fn add_mandatory_token(&mut self, string: &[u8]) {
@@ -204,22 +230,19 @@ impl TokenSet {
         let contents = std::fs::read_to_string(filename).unwrap();
         let parsed = json::parse(&contents).unwrap();
 
-        let mut token_set = match parsed["type"].as_str().unwrap() {
-            "str_with_fallback_bits" => {
-                TokenSet::build_with_fallback_bits(parsed["fallback_bits"].as_usize().unwrap())
-            }
-            "fallback16" => TokenSet::build_with_hex_literals(),
-            "fallback_distribution" => {
-                let mut counts = [0; 256];
-                let mut i = 0;
-                for v in parsed["literal_count"].members() {
-                    counts[i] = v.as_u64().unwrap();
-                    i += 1;
-                }
-                TokenSet::build_with_dist_fallback(counts)
-            }
-            _ => unimplemented!(),
+        let literal_encoding = match parsed["type"].as_str().unwrap() {
+            "str_with_fallback_bits" | "fallback_bits" => match parsed["fallback_bits"].as_usize().unwrap() {
+                1 => LiteralEncoding::Bits1,
+                2 => LiteralEncoding::Bits2,
+                4 => LiteralEncoding::Bits4,
+                _ => unreachable!(),
+            },
+            "fallback16" => LiteralEncoding::Hex,
+            "fallback_distribution" => LiteralEncoding::Dist8,
+            _ => unreachable!(),
         };
+
+        let mut token_set = Self::new(literal_encoding);
 
         for token_str in parsed["tokens"].members() {
             if token_str.is_string() {
@@ -230,7 +253,10 @@ impl TokenSet {
                     s.push(b.as_u8().unwrap());
                 }
                 token_set.add_token(&s);
-            } // Skip fallback values
+            } else if token_str.is_number() {
+                let v = token_str.as_usize().unwrap();
+                assert!(v < literal_encoding.reserved_tokens())
+            }
         }
 
         token_set
@@ -258,7 +284,7 @@ impl TokenSet {
     pub fn to_json(&self, stats: &TokenStats, initial_size: u64) -> json::JsonValue {
         let mut out = json::object! {
             tokens: [],
-            stats: stats.to_json(initial_size, self.literal_cost, self.dist_entropy())
+            stats: stats.to_json(initial_size, self.literal_cost(), self.dist_entropy())
         };
 
         let mut token_strs = vec![];
@@ -269,7 +295,7 @@ impl TokenSet {
 
         token_strs.sort_unstable();
 
-        for x in 0..self.reserved_tokens {
+        for x in 0..self.literal_encoding.reserved_tokens() {
             out["tokens"].push(x).unwrap();
         }
 
@@ -282,15 +308,26 @@ impl TokenSet {
             out["tokens"].push(value).unwrap();
         }
 
-        match self.fallback {
-            Fallback::HexLiteral => {
+        match self.literal_encoding {
+            LiteralEncoding::Hex => {
                 out["type"] = "fallback16".into();
             }
-            Fallback::Bits(b) => {
-                out["type"] = "str_with_fallback_bits".into();
-                out["fallback_bits"] = b.into();
+            LiteralEncoding::All => {
+                out["type"] = "all_tokens".into();
             }
-            Fallback::Distribution => {
+            LiteralEncoding::Bits1 => {
+                out["type"] = "fallback_bits".into();
+                out["fallback_bits"] = 1.into();
+            }
+            LiteralEncoding::Bits2 => {
+                out["type"] = "fallback_bits".into();
+                out["fallback_bits"] = 1.into();
+            }
+            LiteralEncoding::Bits4 => {
+                out["type"] = "fallback_bits".into();
+                out["fallback_bits"] = 1.into();
+            }
+            LiteralEncoding::Dist8 => {
                 out["type"] = "fallback_distribution".into();
                 out["literal_count"] = json::JsonValue::new_array();
                 for &count in self.literal_count.iter() {

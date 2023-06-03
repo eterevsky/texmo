@@ -44,19 +44,19 @@ impl TokenStats {
         self.token_count.iter().sum()
     }
 
-    pub fn cost(&self, literal_cost: f64) -> f64 {
-        self.token_count.iter().sum::<u64>() as f64
-            + literal_cost * self.literal_count.iter().sum::<u64>() as f64
+    pub fn cost(&self, literal_cost: u64) -> u64 {
+        self.token_count.iter().sum::<u64>()
+            + literal_cost * self.literal_count.iter().sum::<u64>()
     }
 
-    pub fn to_json(&self, initial_size: u64, literal_cost: f64, literal_dist_entropy: f64) -> JsonValue {
+    pub fn to_json(&self, initial_size: u64, literal_cost: u64, literal_dist_entropy: f64) -> JsonValue {
         let total_cost = self.cost(literal_cost);
         json::object! {
             ntokens: self.token_count.len(),
             initial_size: initial_size,
             processed_size: self.scanned_bytes,
             total_cost: total_cost,
-            bytes_per_token: initial_size as f64 / total_cost,
+            bytes_per_token: initial_size as f64 / total_cost as f64,
             total_tokens: self.total_tokens(),
             total_literals: self.total_literals(),
             literal_dist_entropy: literal_dist_entropy,

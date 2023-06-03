@@ -24,7 +24,7 @@ impl SuffixState {
 }
 
 struct DynState {
-    cost: f64,
+    cost: u64,
     token_id: TokenIdx,
 }
 
@@ -120,9 +120,11 @@ impl Tokenizer {
     fn process_slice(&mut self, bytes: &[u8]) -> TokenStats {
         self.cost_array.truncate(0);
         self.cost_array.push(DynState {
-            cost: 0.0,
+            cost: 0,
             token_id: TokenIdx::None,
         });
+
+        let literal_cost = self.token_set.literal_cost();
 
         let mut state = &self.suffix_states[0];
 
@@ -132,7 +134,7 @@ impl Tokenizer {
             let best_dyn_state = match state.token_idx {
                 TokenIdx::Literal(id) => {
                     let prev_cost = self.cost_array.last().unwrap().cost;
-                    let new_cost = prev_cost + self.token_set.literal_cost;
+                    let new_cost = prev_cost + literal_cost;
 
                     DynState {
                         cost: new_cost,
@@ -143,7 +145,7 @@ impl Tokenizer {
                     let mut token = &self.token_set.tokens[id as usize];
                     let prev_cost =
                         self.cost_array[self.cost_array.len() - token.string.len()].cost;
-                    let new_cost = prev_cost + 1.0;
+                    let new_cost = prev_cost + 1;
 
                     let mut best_dyn_state = DynState {
                         cost: new_cost,
@@ -156,7 +158,7 @@ impl Tokenizer {
                                 let prev_cost = self.cost_array
                                     [self.cost_array.len() - token.string.len()]
                                 .cost;
-                                let new_cost = prev_cost + 1.0;
+                                let new_cost = prev_cost + 1;
 
                                 if new_cost < best_dyn_state.cost {
                                     best_dyn_state.cost = new_cost;
@@ -165,7 +167,7 @@ impl Tokenizer {
                             }
                             TokenIdx::Literal(id) => {
                                 let prev_cost = self.cost_array[self.cost_array.len() - 1].cost;
-                                let new_cost = prev_cost + self.token_set.literal_cost;
+                                let new_cost = prev_cost + literal_cost;
 
                                 if new_cost < best_dyn_state.cost {
                                     best_dyn_state.cost = new_cost;
@@ -293,12 +295,13 @@ pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S) -
             total_stats.add(&result);
             jobs_in_flight -= 1;
         }
-        let elapsed = std::time::Instant::now() - start;
+        // let elapsed = std::time::Instant::now() - start;
         if total_stats.scanned_bytes > 100000000 {
-            eprintln!(
-                "\rAvg pace: {:.1} MB / s",
-                total_stats.scanned_bytes as f64 / 1000000.0 / elapsed.as_secs_f64()
-            );
+            // eprintln!(
+            //     "\rAvg pace: {:.1} MB / s",
+            //     total_stats.scanned_bytes as f64 / 1000000.0 / elapsed.as_secs_f64()
+            // );
+            eprint!("\r                     \r");
         }
 
         while !join_handles.is_empty() {

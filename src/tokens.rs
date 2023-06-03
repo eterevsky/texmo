@@ -26,7 +26,9 @@ pub enum LiteralEncoding {
 
 impl fmt::Display for LiteralEncoding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", 
+        write!(
+            f,
+            "{}",
             match *self {
                 LiteralEncoding::All => "all",
                 LiteralEncoding::Bits1 => "bits1",
@@ -34,7 +36,8 @@ impl fmt::Display for LiteralEncoding {
                 LiteralEncoding::Bits4 => "bits4",
                 LiteralEncoding::Dist8 => "dist8",
                 LiteralEncoding::Hex => "hex",
-            })
+            }
+        )
     }
 }
 
@@ -44,7 +47,7 @@ impl LiteralEncoding {
             LiteralEncoding::Bits1 => 8,
             LiteralEncoding::Bits2 => 4,
             LiteralEncoding::Bits4 => 2,
-            LiteralEncoding::All => 256,  // Shouldn't be used
+            LiteralEncoding::All => 256, // Shouldn't be used
             LiteralEncoding::Dist8 => 8,
             LiteralEncoding::Hex => 3,
         }
@@ -111,14 +114,14 @@ impl TokenSet {
             literal_count: [0; 256],
         };
 
-        if let LiteralEncoding::Hex = literal_encoding  {
+        if let LiteralEncoding::Hex = literal_encoding {
             token_set.add_mandatory_token(&[0x10]);
             for i in ('0' as u8)..=('9' as u8) {
                 token_set.add_mandatory_token(&[i]);
             }
             for i in ('a' as u8)..=('f' as u8) {
                 token_set.add_mandatory_token(&[i]);
-            }    
+            }
         }
 
         token_set
@@ -190,6 +193,10 @@ impl TokenSet {
         // self.literal_cost = 1.0 + self.dist_entropy() / bytes_per_token
     }
 
+    pub fn reserved_tokens(&self) -> usize {
+        self.literal_encoding.reserved_tokens()
+    }
+
     fn add_mandatory_token(&mut self, string: &[u8]) {
         assert!(!self.tokens_by_string.contains_key(string));
         let index = self.tokens.len();
@@ -231,12 +238,14 @@ impl TokenSet {
         let parsed = json::parse(&contents).unwrap();
 
         let literal_encoding = match parsed["type"].as_str().unwrap() {
-            "str_with_fallback_bits" | "fallback_bits" => match parsed["fallback_bits"].as_usize().unwrap() {
-                1 => LiteralEncoding::Bits1,
-                2 => LiteralEncoding::Bits2,
-                4 => LiteralEncoding::Bits4,
-                _ => unreachable!(),
-            },
+            "str_with_fallback_bits" | "fallback_bits" => {
+                match parsed["fallback_bits"].as_usize().unwrap() {
+                    1 => LiteralEncoding::Bits1,
+                    2 => LiteralEncoding::Bits2,
+                    4 => LiteralEncoding::Bits4,
+                    _ => unreachable!(),
+                }
+            }
             "fallback16" => LiteralEncoding::Hex,
             "fallback_distribution" => LiteralEncoding::Dist8,
             _ => unreachable!(),
@@ -284,7 +293,7 @@ impl TokenSet {
     pub fn to_json(&self, stats: &TokenStats, initial_size: u64) -> json::JsonValue {
         let mut out = json::object! {
             tokens: [],
-            stats: stats.to_json(initial_size, self.literal_cost(), self.dist_entropy())
+            stats: stats.to_json(initial_size, self.literal_cost(), self.dist_entropy(), self.literal_encoding.reserved_tokens())
         };
 
         let mut token_strs = vec![];

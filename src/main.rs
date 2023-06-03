@@ -43,10 +43,12 @@ fn optimize_tokens(
     let file_size = std::fs::metadata(data_filename).unwrap().len();
     let initial_size = initial_size.unwrap_or(file_size);
 
+    let fast_sampler = SelectionSampler::new(data_filename, 16384, 1024);
+
     let (token_set, token_stats) = if nchunks.is_some() {
         let nchunks = nchunks.unwrap();
         let sampler = SelectionSampler::new(data_filename, chunk_size, nchunks);
-        let (token_set, _) = optimize_bpe(&token_set, ntokens, &sampler, add_block);
+        let (token_set, _) = optimize_bpe(&token_set, ntokens, &sampler, &fast_sampler, add_block);
 
         let full_sampler = FileSampler::new(data_filename, chunk_size);
         let stats = tokenize_file(&token_set, &full_sampler);
@@ -54,10 +56,10 @@ fn optimize_tokens(
         (token_set, stats)
     } else if in_memory {
         let sampler = MemorySampler::new(data_filename, chunk_size);
-        optimize_bpe(&token_set, ntokens, &sampler, add_block)
+        optimize_bpe(&token_set, ntokens, &sampler, &fast_sampler, add_block)
     } else {
         let sampler = FileSampler::new(data_filename, chunk_size);
-        optimize_bpe(&token_set, ntokens, &sampler, add_block)
+        optimize_bpe(&token_set, ntokens, &sampler, &fast_sampler, add_block)
     };
 
     let mut tokens_json = token_set.to_json(&token_stats, initial_size);
@@ -240,6 +242,7 @@ fn tokenize(
         initial_size,
         token_set.literal_cost(),
         token_set.dist_entropy(),
+        token_set.reserved_tokens(),
     );
     println!("{}", json::stringify_pretty(stats_json, 2));
 }

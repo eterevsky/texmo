@@ -12,16 +12,20 @@ pub trait Sampler<'a> {
     type Iter: Iterator<Item=Sample<'a>>;
 
     fn iter(&'a self) -> Self::Iter;
+
+    fn total_size(&'a self) -> u64;
 }
 
 pub struct FileSampler {
     filename: String,
     chunk_size: usize,
+    _total_size: u64,
 }
 
 impl FileSampler {
     pub fn new(filename: &str, chunk_size: usize) -> Self {
-        FileSampler { filename: filename.to_string(), chunk_size }
+        let _total_size = std::fs::metadata(filename).unwrap().len();
+        FileSampler { filename: filename.to_string(), chunk_size, _total_size }
     }
 }
 
@@ -36,6 +40,8 @@ impl<'a> Sampler<'a> for FileSampler {
             chunk_size: self.chunk_size,
         }
     }
+
+    fn total_size(&self) -> u64 { self._total_size }
 }
 
 pub struct FileIterator<'a> {
@@ -85,6 +91,8 @@ impl<'a> Sampler<'a> for MemorySampler {
             position: 0,
         }
     }
+
+    fn total_size(&'a self) -> u64 { self.data.len() as u64 }
 }
 
 pub struct MemoryIterator<'a> {
@@ -108,6 +116,7 @@ impl<'a> Iterator for MemoryIterator<'a> {
 
 pub struct SelectionSampler {
     chunks: Vec<Vec<u8>>, 
+    _total_size: u64,
 }
 
 impl SelectionSampler {
@@ -143,8 +152,10 @@ impl SelectionSampler {
 
             chunks.push(chunk);
         }
+
+        let _total_size = chunks.iter().map(|c| c.len() as u64).sum();
         
-        SelectionSampler { chunks }
+        SelectionSampler { chunks, _total_size }
     }
 }
 
@@ -157,6 +168,8 @@ impl<'a> Sampler<'a> for SelectionSampler {
             position: 0,
         }
     }
+
+    fn total_size(&'a self) -> u64 { self._total_size }
 }
 
 pub struct SelectionIterator<'a> {

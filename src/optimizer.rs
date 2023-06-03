@@ -1,4 +1,4 @@
-use crate::sampler::Sampler;
+use crate::sampler::{Sampler, SelectionSampler};
 use crate::stats::TokenStats;
 use crate::tokenizer::tokenize_file;
 use crate::tokens::TokenSet;
@@ -10,7 +10,12 @@ fn format_token(s: &[u8]) -> String {
     }
 }
 
-fn tokens_to_add(token_set: &TokenSet, stats: &TokenStats, ntokens: usize, literal_cost: u64) -> Vec<Vec<u8>> {
+fn tokens_to_add(
+    token_set: &TokenSet,
+    stats: &TokenStats,
+    ntokens: usize,
+    literal_cost: u64,
+) -> Vec<Vec<u8>> {
     let mut token_values = Vec::new();
 
     for i in 0..256 {
@@ -45,13 +50,15 @@ fn token_to_remove<'a, S: Sampler<'a>>(
     token_set: &TokenSet,
     initial_cost: u64,
     sampler: &'a S,
+    fast_sampler: &'a SelectionSampler,
 ) -> Option<(Vec<u8>, TokenStats)> {
     let mut token_set = token_set.clone();
-    let stats = tokenize_file(&token_set, sampler);
-    token_set.update_stats(&stats);
+    let stats_before = tokenize_file(&token_set, sampler);
+    let fast_stats_before = tokenize_file(&token_set, fast_sampler);
+    token_set.update_stats(&stats_before);
 
     let mut token_ids: Vec<usize> = (0..token_set.tokens.len()).collect();
-    token_ids.sort_unstable_by_key(|&i| stats.token_count[i]);
+    token_ids.sort_unstable_by_key(|&i| stats_before.token_count[i]);
 
     // We construct a list of tokens to remove because the ids will change when we are removing and adding
     // tokens.
@@ -65,6 +72,17 @@ fn token_to_remove<'a, S: Sampler<'a>>(
         token_strs.push(token_to_remove.string.clone());
     }
 
+    let add_token_limit = initial_cost - stats_before.cost(token_set.literal_cost());
+    // Check if removing a token adds > 3/2 the cost that we can afford on a sparser sampler.
+    let fast_add_token_limit =
+        add_token_limit * fast_stats_before.scanned_bytes * 3 / (stats_before.scanned_bytes * 2);
+    let fast_cost_before = fast_stats_before.cost(token_set.literal_cost());
+
+    println!(
+        "Can add up to {:.6}% cost by removing a token.",
+        add_token_limit as f64 / stats_before.cost(token_set.literal_cost()) as f64
+    );
+
     let mut tries = 0;
 
     for token_str in token_strs.iter() {
@@ -72,6 +90,15 @@ fn token_to_remove<'a, S: Sampler<'a>>(
         tries += 1;
 
         token_set.remove_token(token_str);
+        let fast_stats = tokenize_file(&token_set, fast_sampler);
+
+        if fast_stats.cost(token_set.literal_cost()) - fast_cost_before >
+              fast_add_token_limit {
+            println!("Not checking whether we can remove {} since removing it adds {:.6}% tokens on the smaller sample.",
+                     format_token(token_str), (fast_stats.cost(token_set.literal_cost()) - fast_cost_before) as f64 / fast_cost_before as f64);
+            continue;
+        }
+
         let stats = tokenize_file(&token_set, sampler);
         token_set.update_stats(&stats);
 
@@ -103,6 +130,7 @@ pub fn optimize_bpe<'a, S: Sampler<'a>>(
     token_set: &TokenSet,
     ntokens: usize,
     sampler: &'a S,
+    fast_sampler: &'a SelectionSampler,
     add_block: usize,
 ) -> (TokenSet, TokenStats) {
     let mut token_set = token_set.clone();
@@ -125,7 +153,12 @@ pub fn optimize_bpe<'a, S: Sampler<'a>>(
         let new_tokens = if token_set.ntokens() + add_block > ntokens {
             tokens_to_add(&token_set, &initial_stats, 1, token_set.literal_cost())
         } else {
-            tokens_to_add(&token_set, &initial_stats, add_block, token_set.literal_cost())
+            tokens_to_add(
+                &token_set,
+                &initial_stats,
+                add_block,
+                token_set.literal_cost(),
+            )
         };
         let mut new_token_set = token_set.clone();
         for token_str in new_tokens {
@@ -139,6 +172,7 @@ pub fn optimize_bpe<'a, S: Sampler<'a>>(
                 &new_token_set,
                 initial_stats.cost(token_set.literal_cost()),
                 sampler,
+                fast_sampler,
             ) {
                 new_token_set.remove_token(&to_remove);
                 token_set = new_token_set;

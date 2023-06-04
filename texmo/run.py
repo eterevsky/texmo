@@ -8,6 +8,7 @@ from scipy.optimize import minimize
 from . import latency
 from .configuration import Configuration
 from .predict_common import prediction_score
+from .tokens import TokenSet
 
 
 def _pred_log(c1, c2, eps, step):
@@ -110,6 +111,7 @@ class Run(object):
         if step_loss is None:
             step_loss = []
         self.step_loss: list = step_loss
+        self.step_byte_loss: list = []
 
         # A model for loss per step
         self.loss_trend = loss_trend
@@ -119,8 +121,9 @@ class Run(object):
 
         self.checkpoint: str = checkpoint
 
-    def add_step(self, loss: float):
-        self.step_loss.append(loss)
+    def add_step(self, token_loss: float, byte_loss: float):
+        self.step_loss.append(token_loss)
+        self.step_byte_loss.append(byte_loss)
 
     @property
     def steps(self):
@@ -134,16 +137,13 @@ class Run(object):
         self.loss = eval_loss
         self.step_loss = np.array(self.step_loss, dtype=np.float32)
         self.loss_trend = LossTrend()
-        self.loss_trend.fit(self.step_loss)
+        self.loss_trend.fit(self.step_byte_loss)
 
-    def report_recent_loss(self):
+    def report_recent_loss(self, token_set: TokenSet):
         step = len(self.step_loss)
-        last_loss = self.step_loss[-1]
-        if step >= 10:
-            avg_loss = sum(self.step_loss[-10:]) / 10
-            return f"{step}  {avg_loss:.4f}  {last_loss:.4f}"
-        else:
-            return f"{step}  {last_loss:.4f}"
+        loss = sum(self.step_loss[-10:]) / 10 if step >= 10 else self.step_loss[-1]
+        byte_loss = token_set.byte_loss(loss)
+        return f"{step}  {loss:.4f} b/token  {byte_loss:.4f} b/byte"
 
     def to_dict(self):
         d = {

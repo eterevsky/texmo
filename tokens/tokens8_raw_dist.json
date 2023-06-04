@@ -277,7 +277,7 @@
     "total_tokens": 59151377953,
     "total_literals": 49210669428,
     "literal_cost": 5.922180229778908,
-    "dist_entropy": 4.9221802296956949
+    "literal_dist_entropy": 4.9221802296956949
   },
   "processing": []
 }

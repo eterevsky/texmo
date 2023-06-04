@@ -12,7 +12,7 @@ from .model2 import build_model
 from .tokens import TokenSet
 
 
-def show_loss_graph(manager, output_dir):
+def show_loss_graph(manager: Manager, output_dir: str):
     run = manager.run
 
     steps = run.steps
@@ -26,7 +26,10 @@ def show_loss_graph(manager, output_dir):
     plt.xscale("log")
     plt.yscale("log")
     plt.ylim(top=8)
-    plt.plot(range(1, steps + 1), run.step_loss)
+    plt.plot(
+        range(1, steps + 1),
+        list(map(manager.token_set.byte_loss, run.step_loss)),
+    )
     plt.plot(xs, ys)
     if output_dir is not None:
         plt.savefig(os.path.join(output_dir, manager.name() + ".png"))
@@ -44,7 +47,9 @@ def train(args: argparse.Namespace):
         token_set = TokenSet.from_json_file(args.tokens)
         ntokens = token_set.ntokens
         token_sets = {ntokens: token_set}
-        logging.info(f"Loaded token set {args.tokens} with {token_set.ntokens} tokens")
+        logging.info(
+            f"Loaded token set {args.tokens} with {token_set.ntokens} tokens"
+        )
     else:
         token_set = None
         ntokens = 256

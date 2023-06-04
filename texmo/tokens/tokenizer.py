@@ -84,7 +84,8 @@ class Tokenizer(object):
         finished = False
 
         for chunk in self._iterate_bytes(string, start, max_tokens, max_bytes):
-            if finished: break
+            if finished:
+                break
             for byte in chunk:
                 if max_bytes is not None and len(cost_state) - 1 >= max_bytes:
                     finished = True
@@ -134,6 +135,39 @@ class Tokenizer(object):
         if max_tokens is not None and len(tokens) > max_tokens:
             tokens = tokens[:max_tokens]
         return tokens
+
+    def untokenize(self, tokens: list[int]) -> bytes:
+        chunks = []
+        sub_byte_buf = []
+
+        for token_id in tokens:
+            token = self._token_set.tokens[token_id]
+            if token.string is not None:
+                if sub_byte_buf:
+                    chunks.append(b"?")
+                    sub_byte_buf.clear()
+                chunks.append(token.string)
+            elif self._token_set.type in (
+                "fallback_distribution",
+                "str_with_fallback_distribution",
+            ):
+                chunks.append(b"?")
+            elif self._token_set.type in (
+                "str_with_fallback_bits",
+                "fallback_bits",
+            ):
+                sub_byte_buf.append(token.value)
+                if len(sub_byte_buf) == 8 // self._token_set.fallback_bits:
+                    value = 0
+                    for v in sub_byte_buf:
+                        value <<= self._token_set.fallback_bits
+                        value += v
+                    chunks.append(bytes([value]))
+                    sub_byte_buf.clear()
+            else:
+                assert False, "Unsupported TokenSet type"
+
+        return b"".join(chunks)
 
     def _process(self, s: str) -> str:
         out = []

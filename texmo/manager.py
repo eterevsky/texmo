@@ -280,7 +280,7 @@ class Manager(object):
         )
 
         out = []
-        while len(out) < l and c_selected != 0:
+        while len(out) < l:
             state, c = self.model.step_prob(self.weights, state, c)
             c_selected = jax.random.choice(self._rng.gen(), self.ntokens, p=c)
             c = jax.nn.one_hot(c_selected, self.ntokens)
@@ -302,7 +302,7 @@ class Manager(object):
 
         loss = float(loss)
 
-        self.run.add_step(loss)
+        self.run.add_step(loss, self.token_set.byte_loss(loss))
 
         return loss
 
@@ -347,7 +347,7 @@ class Manager(object):
                 or time.time() - last_report > 10
             ):
                 last_report = time.time()
-                logging.info(self.run.report_recent_loss())
+                logging.info(self.run.report_recent_loss(self.token_set))
 
             if (
                 temp_steps is not None
@@ -433,13 +433,13 @@ class Manager(object):
 
         out = self.sample(prefix_tokens, length)
 
-        # try:
-        #     s = (prefix_tokens + out).decode("utf-8")
-        # except UnicodeDecodeError:
-        #     s = prefix_tokens + out
-        s = prefix_tokens + out
-        s = "|".join(str(self.token_set.tokens[c]) for c in s)
-        return s
+        out = self.tokenizer.untokenize(out)
+
+        try:
+            s = (prefix_bytes + out).decode("utf-8")
+        except UnicodeDecodeError:
+            s = prefix_bytes + out
+        return prefix_bytes + out
 
     def serialize_weights(self, weights):
         if weights is None:

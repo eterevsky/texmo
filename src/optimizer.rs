@@ -79,8 +79,8 @@ fn token_to_remove<'a, S: Sampler<'a>>(
     let fast_cost_before = fast_stats_before.cost(token_set.literal_cost());
 
     println!(
-        "Can add up to {:.6}% cost by removing a token.",
-        add_token_limit as f64 / stats_before.cost(token_set.literal_cost()) as f64
+        "Can add up to {:.4}% cost by removing a token.",
+        100.0 * add_token_limit as f64 / stats_before.cost(token_set.literal_cost()) as f64
     );
 
     let mut tries = 0;
@@ -94,8 +94,8 @@ fn token_to_remove<'a, S: Sampler<'a>>(
 
         if fast_stats.cost(token_set.literal_cost()) - fast_cost_before >
               fast_add_token_limit {
-            println!("Not checking whether we can remove {} since removing it adds {:.6}% tokens on the smaller sample.",
-                     format_token(token_str), (fast_stats.cost(token_set.literal_cost()) - fast_cost_before) as f64 / fast_cost_before as f64);
+            println!("Not checking whether we can remove {} since removing it adds {:.4}% tokens on the smaller sample.",
+                     format_token(token_str), 100.0 * (fast_stats.cost(token_set.literal_cost()) - fast_cost_before) as f64 / fast_cost_before as f64);
             continue;
         }
 

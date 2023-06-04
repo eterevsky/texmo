@@ -9,14 +9,19 @@
     "e",
     "t"
   ],
-  "type": "str_with_fallback_bits",
-  "fallback_bits": 2,
   "stats": {
     "ntokens": 8,
     "initial_size": 108362047381,
     "processed_size": 108362047381,
-    "total_tokens": 308254489702,
-    "bytes_per_token": 0.351534368520495
+    "total_cost": 308254489702,
+    "bytes_per_token": 0.351534368520495,
+    "total_tokens": 41731233274,
+    "total_literals": 66630814107,
+    "literal_dist_entropy": 0,
+    "literal_cost": 4,
+    "literal_entropy_per_input_byte": 0
   },
+  "type": "fallback_bits",
+  "fallback_bits": 1,
   "processing": []
 }

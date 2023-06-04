@@ -54,6 +54,7 @@ class TokenSet(object):
             tokens_dict["processing"],
             tokens_dict.get("fallback_bits"),
             tokens_dict.get("literal_count"),
+            tokens_dict.get("stats"),
         )
         for i, token in enumerate(tokens_dict["tokens"]):
             if type(token) is str:
@@ -67,14 +68,43 @@ class TokenSet(object):
         return token_set
 
     def __init__(
-        self, token_set_type, processing, fallback_bits, literal_count
+        self, token_set_type, processing, fallback_bits, literal_count, stats
     ):
         self.type = token_set_type
         self.processing = processing
         self.fallback_bits = fallback_bits
         self.literal_count = literal_count
+        self.stats = stats
         self.tokens = []
         self.tokens_by_str = {}
+
+    @property
+    def tokens_in_literal(self) -> int:
+        match self.type:
+            case "fallback_distribution" | "str_with_fallback_distribution":
+                return 1
+            case "fallback_bits":
+                return 8 // self.fallback_bits
+
+    @property
+    def bytes_per_token(self) -> float:
+        return self.stats["initial_size"] / (
+            self.stats["total_tokens"]
+            + self.tokens_in_literal * self.stats["total_literals"]
+        )
+
+    def byte_loss(self, token_loss: float) -> float:
+        loss = token_loss / self.bytes_per_token
+        if self.type in (
+            "fallback_distribution",
+            "str_with_fallback_distribution",
+        ):
+            loss += (
+                self.stats["literal_dist_entropy"]
+                * self.stats["total_literals"]
+                / (self.stats["total_literals"] + self.stats["total_tokens"])
+            )
+        return loss
 
     @property
     def ntokens(self):
@@ -113,7 +143,7 @@ class TokenSet(object):
 
     def literal_encodings(self):
         match self.type:
-            case "fallback_distribution":
+            case "fallback_distribution" | "str_with_fallback_distribution":
                 return [[self.tokens[0]] for _ in range(256)]
             case "fallback16":
                 fallbacks = []
@@ -127,7 +157,7 @@ class TokenSet(object):
                         ]
                     )
                 return fallbacks
-            case "str_with_fallback_bits":
+            case "str_with_fallback_bits" | "fallback_bits":
                 fallbacks = []
                 for value in range(256):
                     literal = []

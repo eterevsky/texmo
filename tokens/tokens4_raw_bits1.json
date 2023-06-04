@@ -10,14 +10,17 @@
     "initial_size": 108362047381,
     "processed_size": 108362047381,
     "total_cost": 670275496023,
-    "bytes_per_token": 0.1616679231509332,
+    "cost_per_token": 0.1616679231509332,
     "total_tokens": 28088697575,
     "total_literals": 80273349806,
+    "final_tokens": 670275496023,
+    "bytes_per_token": 0.1616679231509332,
     "literal_dist_entropy": 0,
     "literal_cost": 8,
-    "literal_entropy_per_input_byte": 0
+    "literal_entropy_per_input_byte": 0,
+    "literal_entropy_per_token": 0
   },
   "type": "fallback_bits",
   "fallback_bits": 1,
-  "processing": []
+  "processing": "raw"
 }

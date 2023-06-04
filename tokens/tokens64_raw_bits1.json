@@ -4,7 +4,8 @@
     1,
     "\n",
     " ",
-    " the ",
+    " t",
+    " th",
     "\"",
     "'",
     "*",
@@ -56,29 +57,32 @@
     "t",
     "t ",
     "th",
+    "the ",
     "u",
     "v",
     "w",
     "x",
     "y",
     [
-      128
-    ],
-    [
       195
-    ],
-    [
-      226
     ]
   ],
-  "type": "str_with_fallback_bits",
-  "fallback_bits": 1,
   "stats": {
     "ntokens": 64,
     "initial_size": 108362047381,
     "processed_size": 108362047381,
-    "total_tokens": 109828203851,
-    "bytes_per_token": 0.9866504557245689
+    "total_cost": 111307142708,
+    "cost_per_token": 0.9735408235684742,
+    "total_tokens": 86910467148,
+    "total_literals": 3049584445,
+    "final_tokens": 111307142708,
+    "bytes_per_token": 0.9735408235684742,
+    "literal_dist_entropy": 0,
+    "literal_cost": 8,
+    "literal_entropy_per_input_byte": 0,
+    "literal_entropy_per_token": 0
   },
-  "processing": []
+  "type": "fallback_bits",
+  "fallback_bits": 1,
+  "processing": "raw"
 }

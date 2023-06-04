@@ -4,7 +4,7 @@ use std::fmt;
 
 use crate::stats::TokenStats;
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
 pub enum LiteralEncoding {
     /// A literal is encoded as 8 single bit tokens.
     Bits1,
@@ -14,11 +14,11 @@ pub enum LiteralEncoding {
     Bits4,
     /// All bytes are tokens, so there's no need to encode anything.
     All,
-    // /// A single token stands for an unknown byte, and its cost is calculated
-    // /// based on the entropy of distribution and estimated entropy of the
-    // /// token in the model.
-    // Dist,
-    /// Same as Dist, but each unknown byte costs 8 tokens.
+    /// A single token stands for an unknown byte, and its cost is 2 normal tokens.
+    Dist2,
+    /// A single token stands for an unknown byte, and its cost is 4 normal tokens.
+    Dist4,
+    /// A single token stands for an unknown byte, and its cost is 8 normal tokens.
     Dist8,
     /// An unknown byte is encoded as '\x10' and two hexadecimal digits.
     Hex,
@@ -34,6 +34,8 @@ impl fmt::Display for LiteralEncoding {
                 LiteralEncoding::Bits1 => "bits1",
                 LiteralEncoding::Bits2 => "bits2",
                 LiteralEncoding::Bits4 => "bits4",
+                LiteralEncoding::Dist2 => "dist2",
+                LiteralEncoding::Dist4 => "dist4",
                 LiteralEncoding::Dist8 => "dist8",
                 LiteralEncoding::Hex => "hex",
             }
@@ -44,23 +46,40 @@ impl fmt::Display for LiteralEncoding {
 impl LiteralEncoding {
     fn literal_cost(self) -> u64 {
         match self {
+            LiteralEncoding::All => 256, // Shouldn't be used
             LiteralEncoding::Bits1 => 8,
             LiteralEncoding::Bits2 => 4,
             LiteralEncoding::Bits4 => 2,
-            LiteralEncoding::All => 256, // Shouldn't be used
+            LiteralEncoding::Dist2 => 8,
+            LiteralEncoding::Dist4 => 8,
             LiteralEncoding::Dist8 => 8,
             LiteralEncoding::Hex => 3,
         }
     }
 
-    fn reserved_tokens(self) -> usize {
+    pub fn reserved_tokens(self) -> usize {
         match self {
+            LiteralEncoding::All => 0,
             LiteralEncoding::Bits1 => 2,
             LiteralEncoding::Bits2 => 4,
             LiteralEncoding::Bits4 => 16,
-            LiteralEncoding::All => 0,
+            LiteralEncoding::Dist2 => 1,
+            LiteralEncoding::Dist4 => 1,
             LiteralEncoding::Dist8 => 1,
             LiteralEncoding::Hex => 0,
+        }
+    }
+
+    pub fn tokens_in_literal(self) -> u64 {
+        match self {
+            LiteralEncoding::All => 1,
+            LiteralEncoding::Bits1 => 8,
+            LiteralEncoding::Bits2 => 4,
+            LiteralEncoding::Bits4 => 2,
+            LiteralEncoding::Dist2 => 1,
+            LiteralEncoding::Dist4 => 1,
+            LiteralEncoding::Dist8 => 1,
+            LiteralEncoding::Hex => 3,
         }
     }
 }
@@ -94,7 +113,7 @@ impl Token {
 pub struct TokenSet {
     pub tokens: Vec<Token>,
     pub tokens_by_string: HashMap<Vec<u8>, u32>,
-    literal_encoding: LiteralEncoding,
+    pub literal_encoding: LiteralEncoding,
 
     /// Number of tokens that are not added to the token set since they don't
     /// have a string representation.
@@ -293,7 +312,7 @@ impl TokenSet {
     pub fn to_json(&self, stats: &TokenStats, initial_size: u64) -> json::JsonValue {
         let mut out = json::object! {
             tokens: [],
-            stats: stats.to_json(initial_size, self.literal_cost(), self.dist_entropy(), self.literal_encoding.reserved_tokens())
+            stats: stats.to_json(initial_size, self.literal_cost(), self.literal_encoding.tokens_in_literal(), self.dist_entropy(), self.literal_encoding.reserved_tokens()),
         };
 
         let mut token_strs = vec![];
@@ -330,13 +349,13 @@ impl TokenSet {
             }
             LiteralEncoding::Bits2 => {
                 out["type"] = "fallback_bits".into();
-                out["fallback_bits"] = 1.into();
+                out["fallback_bits"] = 2.into();
             }
             LiteralEncoding::Bits4 => {
                 out["type"] = "fallback_bits".into();
-                out["fallback_bits"] = 1.into();
+                out["fallback_bits"] = 4.into();
             }
-            LiteralEncoding::Dist8 => {
+            LiteralEncoding::Dist2 | LiteralEncoding::Dist4 | LiteralEncoding::Dist8 => {
                 out["type"] = "fallback_distribution".into();
                 out["literal_count"] = json::JsonValue::new_array();
                 for &count in self.literal_count.iter() {

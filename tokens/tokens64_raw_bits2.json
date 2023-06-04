@@ -6,12 +6,14 @@
     3,
     "\n\n",
     " ",
+    " a",
+    " t",
     " th",
     " the ",
     "\"",
     "'",
+    ",",
     ", ",
-    "-",
     ".",
     ". ",
     "1",
@@ -22,8 +24,6 @@
     "T",
     "_",
     "a",
-    "a ",
-    "al",
     "an",
     "ar",
     "at",
@@ -65,14 +65,22 @@
     "y",
     "y "
   ],
-  "type": "str_with_fallback_bits",
-  "fallback_bits": 2,
   "stats": {
     "ntokens": 64,
     "initial_size": 108362047381,
     "processed_size": 108362047381,
-    "total_tokens": 96386004935,
-    "bytes_per_token": 1.124250843824021
+    "total_cost": 96911544674,
+    "cost_per_token": 1.1181541656932439,
+    "total_tokens": 76877981558,
+    "total_literals": 5008390779,
+    "final_tokens": 96911544674,
+    "bytes_per_token": 1.1181541656932439,
+    "literal_dist_entropy": 0,
+    "literal_cost": 4,
+    "literal_entropy_per_input_byte": 0,
+    "literal_entropy_per_token": 0
   },
-  "processing": []
+  "type": "fallback_bits",
+  "fallback_bits": 2,
+  "processing": "raw"
 }

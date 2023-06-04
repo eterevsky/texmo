@@ -1,5 +1,7 @@
+use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::path::Path;
 
 use clap::{Parser, Subcommand};
 
@@ -12,9 +14,32 @@ mod tokens;
 use crate::sampler::SelectionSampler;
 
 use self::optimizer::optimize_bpe;
-use self::sampler::{FileSampler, MemorySampler};
+use self::sampler::{FileSampler, MemorySampler, Sampler};
 use self::tokenizer::tokenize_file;
 use self::tokens::{LiteralEncoding, TokenSet};
+use self::stats::TokenStats;
+
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Processing {
+    Raw,
+    Caps,
+    CapsWords,
+}
+
+impl fmt::Display for Processing {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match *self {
+                Processing::Raw => "raw",
+                Processing::Caps => "caps",
+                Processing::CapsWords => "capswords",
+            }
+        )
+    }
+}
 
 fn optimize_tokens(
     data_filename: &str,
@@ -83,24 +108,153 @@ fn optimize_tokens(
     }
 }
 
+fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
+    prev_token_set: Option<TokenSet>,
+    fast_sampler: &'a SelectionSampler,
+    sampler: &'a S1,
+    slow_sampler: &'a S2,
+    ntokens: usize,
+    literal_encoding: LiteralEncoding,
+    add_block: usize,
+) -> (TokenSet, TokenStats) {
+    let token_set = if let Some(ts) = prev_token_set {
+        ts
+    } else {
+        TokenSet::new(literal_encoding)
+    };
+
+    let (token_set, _) = optimize_bpe(&token_set, ntokens, sampler, fast_sampler, add_block);
+
+    let stats = tokenize_file(&token_set, slow_sampler);
+
+    (token_set, stats)
+}
+
+fn optimize_all_for_proc(
+    filename: &str,
+    processing: Processing,
+    initial_size: u64,
+    output_dir: &str,
+    min_tokens: usize,
+    max_tokens: usize,
+) {
+    println!(
+        "Optimizing for proc '{}', initial size {}",
+        processing, initial_size
+    );
+    let fast_sampler = SelectionSampler::new(filename, 16384, 1024);
+    let sampler = SelectionSampler::new(filename, 1 << 20, 1 << 14);
+    let slow_sampler = FileSampler::new(filename, 1 << 24);
+    let output_dir = Path::new(output_dir);
+
+    for &literal_encoding in &[
+        LiteralEncoding::All,
+        LiteralEncoding::Bits1,
+        LiteralEncoding::Bits2,
+        LiteralEncoding::Bits4,
+        LiteralEncoding::Dist2,
+        LiteralEncoding::Dist4,
+        LiteralEncoding::Dist8,
+    ] {
+        let mut ntokens = min_tokens;
+        let mut prev_token_set = None;
+        while ntokens <= max_tokens {
+            if literal_encoding.reserved_tokens() <= ntokens
+                && (literal_encoding != LiteralEncoding::All || ntokens >= 256)
+                && (processing == Processing::Raw || ntokens >= 16)
+            {
+                let mut block = ntokens / 2;
+                while block * block >= ntokens {
+                    block /= 2;
+                }
+
+                println!(
+                    "Optimizing tokens for processing '{}', literals {}, ntokens {}, block {}",
+                    processing, literal_encoding, ntokens, block
+                );
+
+                let (token_set, stats) = optimize_token_set(
+                    prev_token_set,
+                    &fast_sampler,
+                    &sampler,
+                    &slow_sampler,
+                    ntokens,
+                    literal_encoding,
+                    block,
+                );
+
+
+                let mut tokens_json = token_set.to_json(&stats, initial_size);
+                tokens_json["processing"] = processing.to_string().into();
+
+                println!("{}", json::stringify_pretty(tokens_json["stats"].clone(), 2));
+
+                let output_filename = format!("tokens{}_{}_{}.json", ntokens, processing, literal_encoding);
+                let output_path = output_dir.join(output_filename);
+                println!("Writing to {}", output_path.display());
+
+                std::fs::write(&output_path, json::stringify_pretty(tokens_json, 2)).unwrap();
+
+                prev_token_set = Some(token_set);
+            }
+
+            ntokens *= 2;
+        }
+    }
+}
+
+fn optimize_all(
+    filename: &str,
+    filename_caps: &str,
+    filename_caps_words: &str,
+    output_dir: &str,
+    min_tokens: usize,
+    max_tokens: usize,
+) {
+    let initial_size = std::fs::metadata(filename).unwrap().len();
+
+    optimize_all_for_proc(
+        filename,
+        Processing::Raw,
+        initial_size,
+        output_dir,
+        min_tokens,
+        max_tokens,
+    );
+    optimize_all_for_proc(
+        filename_caps,
+        Processing::Caps,
+        initial_size,
+        output_dir,
+        min_tokens,
+        max_tokens,
+    );
+    optimize_all_for_proc(
+        filename_caps_words,
+        Processing::CapsWords,
+        initial_size,
+        output_dir,
+        min_tokens,
+        max_tokens,
+    );
+}
+
 fn filter_text(filename: &str, caps: bool, words: bool, output: &str) {
     let input = File::open(filename).unwrap();
     let mut output = File::create(output).unwrap();
 
-    let reader = BufReader::new(input);
+    let reader = BufReader::with_capacity(1 << 20, input);
     let mut writer = BufWriter::new(&mut output);
 
     let mut word = Vec::new();
 
     for line in reader.lines() {
-        // println!("{:?}", line);
         let line = line.unwrap();
         let mut out_line = Vec::new();
         let mut hanging_space = false;
         word.clear();
 
         for ch in line.chars() {
-            // println!("{:?}", ch);
             if ch.is_alphabetic() {
                 hanging_space = false;
                 word.push(ch);
@@ -241,6 +395,7 @@ fn tokenize(
     let stats_json = stats.to_json(
         initial_size,
         token_set.literal_cost(),
+        token_set.literal_encoding.tokens_in_literal(),
         token_set.dist_entropy(),
         token_set.reserved_tokens(),
     );
@@ -316,6 +471,23 @@ enum Command {
         add_block: usize,
     },
 
+    OptimizeAll {
+        #[arg(long)]
+        filename_caps: String,
+
+        #[arg(long)]
+        filename_caps_words: String,
+
+        #[arg(short, long)]
+        output_dir: String,
+
+        #[arg(long, default_value_t = 2)]
+        min_tokens: usize,
+
+        #[arg(long, default_value_t = 64)]
+        max_tokens: usize,
+    },
+
     FilterText {
         #[arg(short, long)]
         caps: bool,
@@ -366,6 +538,21 @@ fn main() {
             *chunk_size,
             *add_block,
             *literals,
+        ),
+
+        Command::OptimizeAll {
+            filename_caps,
+            filename_caps_words,
+            output_dir,
+            min_tokens,
+            max_tokens,
+        } => optimize_all(
+            filename,
+            filename_caps.as_str(),
+            filename_caps_words.as_str(),
+            output_dir.as_str(),
+            *min_tokens,
+            *max_tokens,
         ),
 
         Command::FilterText {

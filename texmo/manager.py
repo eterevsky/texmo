@@ -257,7 +257,7 @@ class Manager(object):
         else:
             total_entropy0 = 0
 
-        shards = 2
+        shards = 1
         while shards <= xs.shape[0]:
             logging.info(f"Evaluating with {shards} batches")
             shard_size = xs.shape[0] // shards

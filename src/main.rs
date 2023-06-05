@@ -15,10 +15,9 @@ use crate::sampler::SelectionSampler;
 
 use self::optimizer::optimize_bpe;
 use self::sampler::{FileSampler, MemorySampler, Sampler};
+use self::stats::TokenStats;
 use self::tokenizer::tokenize_file;
 use self::tokens::{LiteralEncoding, TokenSet};
-use self::stats::TokenStats;
-
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Processing {
@@ -187,13 +186,16 @@ fn optimize_all_for_proc(
                     block,
                 );
 
-
                 let mut tokens_json = token_set.to_json(&stats, initial_size);
                 tokens_json["processing"] = processing.to_string().into();
 
-                println!("{}", json::stringify_pretty(tokens_json["stats"].clone(), 2));
+                println!(
+                    "{}",
+                    json::stringify_pretty(tokens_json["stats"].clone(), 2)
+                );
 
-                let output_filename = format!("tokens{}_{}_{}.json", ntokens, processing, literal_encoding);
+                let output_filename =
+                    format!("tokens{}_{}_{}.json", ntokens, processing, literal_encoding);
                 let output_path = output_dir.join(output_filename);
                 println!("Writing to {}", output_path.display());
 

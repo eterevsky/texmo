@@ -95,7 +95,8 @@ def train(args: argparse.Namespace):
         print(s)
         print()
 
-    show_loss_graph(manager, args.output_dir)
+    if not args.no_graph:
+        show_loss_graph(manager, args.output_dir)
 
 
 def init_args(parser: argparse.ArgumentParser):
@@ -221,6 +222,12 @@ def init_args(parser: argparse.ArgumentParser):
         type=int,
         default=1024,
         help="Length in bytes of test samples, used for final evaluation"
+    )
+    parser.add_argument(
+        "--no-graph",
+        default=False,
+        action="store_true",
+        help="Don't show trianing loss graph"
     )
 
     parser.set_defaults(func=train)

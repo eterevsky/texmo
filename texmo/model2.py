@@ -216,6 +216,9 @@ class Model2(object):
         self, weights: Weights, batch: jnp.ndarray, lengths: jnp.ndarray
     ) -> DeviceArray:
         # print("loss_batch_masked")
+        # print(batch.shape)
+        # print(batch)
+        # print(lengths)
         entropy = self._loss_batch_unpacked(weights, batch)
         # print(entropy)
 
@@ -226,7 +229,7 @@ class Model2(object):
 
         # print(entropy)
 
-        return np.sum(entropy)
+        return np.sum(entropy) / jnp.log(2)
 
 
 _cache: dict[str, Model2] = {}

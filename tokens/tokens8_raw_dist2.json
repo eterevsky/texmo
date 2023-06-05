@@ -19,10 +19,10 @@
     "total_literals": 49210669428,
     "final_tokens": 108362047381,
     "bytes_per_token": 1,
-    "literal_dist_entropy": 0,
+    "literal_dist_entropy": 4.923880353088569,
     "literal_cost": 2,
-    "literal_entropy_per_input_byte": 0,
-    "literal_entropy_per_token": 0
+    "literal_entropy_per_input_byte": 2.23609145651258,
+    "literal_entropy_per_token": 2.23609145651258
   },
   "type": "fallback_distribution",
   "literal_count": [

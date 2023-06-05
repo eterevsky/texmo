@@ -153,7 +153,7 @@ fn optimize_all_for_proc(
         // LiteralEncoding::Bits4,
         LiteralEncoding::Dist2,
         LiteralEncoding::Dist4,
-        LiteralEncoding::Dist8,
+        // LiteralEncoding::Dist8,
     ] {
         // if processing == Processing::Raw && (literal_encoding == LiteralEncoding::Bits1 || literal_encoding == LiteralEncoding::Bits2) {
         //     continue;

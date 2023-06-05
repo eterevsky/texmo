@@ -155,10 +155,9 @@ impl TokenSet {
     }
 
     pub fn has_dist_fallback(&self) -> bool {
-        if let LiteralEncoding::Dist8 = self.literal_encoding {
-            true
-        } else {
-            false
+        match self.literal_encoding {
+            LiteralEncoding::Dist2 | LiteralEncoding::Dist4 | LiteralEncoding::Dist8 => true,
+            _ => false,
         }
     }
 

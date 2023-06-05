@@ -148,14 +148,18 @@ fn optimize_all_for_proc(
     let output_dir = Path::new(output_dir);
 
     for &literal_encoding in &[
-        LiteralEncoding::All,
-        LiteralEncoding::Bits1,
-        LiteralEncoding::Bits2,
-        LiteralEncoding::Bits4,
+        // LiteralEncoding::All,
+        // LiteralEncoding::Bits1,
+        // LiteralEncoding::Bits2,
+        // LiteralEncoding::Bits4,
         LiteralEncoding::Dist2,
         LiteralEncoding::Dist4,
         LiteralEncoding::Dist8,
     ] {
+        // if processing == Processing::Raw && (literal_encoding == LiteralEncoding::Bits1 || literal_encoding == LiteralEncoding::Bits2) {
+        //     continue;
+        // }
+
         let mut ntokens = min_tokens;
         let mut prev_token_set = None;
         while ntokens <= max_tokens {

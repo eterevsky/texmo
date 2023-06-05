@@ -2,6 +2,7 @@ from itertools import chain
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 from jax.numpy import DeviceArray
 
@@ -175,13 +176,9 @@ class Model2(object):
         out_softmax = jax.nn.softmax(out / temperature)
         return state, out_softmax
 
-    def loss_batch(self, weights: Weights, batch: jnp.ndarray) -> DeviceArray:
-        """Compute the average loss over a batch of training data.
-
-        Args:
-            weights:
-            batch: an array of shape (batch_size, sample_len, NCHAR)
-        """
+    def _loss_batch_unpacked(
+        self, weights: Weights, batch: jnp.ndarray
+    ) -> DeviceArray:
         prefix_len = 1
         for layer in self.layers:
             if layer.name in ("suffix", "attn"):
@@ -190,16 +187,46 @@ class Model2(object):
         assert n == self.ntokens
         prefix = jnp.ones((batch_size, prefix_len, self.ntokens)) / self.ntokens
         v = jnp.concatenate([prefix, batch], axis=1)[:, :-1, :]
-        assert v.shape == (batch_size, prefix_len + sample_len - 1, self.ntokens)
+        assert v.shape == (
+            batch_size,
+            prefix_len + sample_len - 1,
+            self.ntokens,
+        )
 
         for layer, layer_weights in zip(self.layers, weights):
             v = layer.forward_batch(layer_weights, v)
 
         out = self.out_layer.forward_batch(weights[-1], v)
         assert out.shape == batch.shape
-
         entropy = optax.softmax_cross_entropy(out, batch)
+        return entropy
+
+    def loss_batch(self, weights: Weights, batch: jnp.ndarray) -> DeviceArray:
+        """Compute the average loss over a batch of training data.
+
+        Args:
+            weights:
+            batch: an array of shape (batch_size, sample_len, NCHAR)
+        """
+
+        entropy = self._loss_batch_unpacked(weights, batch)
         return jnp.average(entropy) / jnp.log(2)
+
+    def loss_batch_masked(
+        self, weights: Weights, batch: jnp.ndarray, lengths: jnp.ndarray
+    ) -> DeviceArray:
+        # print("loss_batch_masked")
+        entropy = self._loss_batch_unpacked(weights, batch)
+        # print(entropy)
+
+        mask = jnp.arange(entropy.shape[1]) < lengths[:, np.newaxis]
+        # print(lengths)
+        # print(mask)
+        entropy = entropy * mask
+
+        # print(entropy)
+
+        return np.sum(entropy)
 
 
 _cache: dict[str, Model2] = {}

@@ -8,6 +8,7 @@ from copy import copy
 from datetime import datetime
 from typing import Optional
 
+import numpy as np
 import jax
 import jax.numpy as jnp
 import optax
@@ -15,13 +16,17 @@ from jaxlib.xla_extension import XlaRuntimeError
 
 from . import latency
 from .common import INF
-from .configuration import (Configuration, conf_from_dict, conf_to_dict,
-                            conf_to_string)
+from .configuration import (
+    Configuration,
+    conf_from_dict,
+    conf_to_dict,
+    conf_to_string,
+)
 from .model2 import Model2, Weights
 from .prng import Rng
 from .record import TrainingRecord
 from .run import Run
-from .tokens import TokenSet, Tokenizer
+from .tokens import Tokenizer, TokenSet
 
 LOG2 = 1 / math.log(2)
 
@@ -152,7 +157,12 @@ class Manager(object):
         conf = conf_from_dict(spec["conf"])
         weights = deserialize_weights(spec["weights"])
 
-        manager = Manager(conf, token_set=token_set, weights=weights, pre_training=spec["training"])
+        manager = Manager(
+            conf,
+            token_set=token_set,
+            weights=weights,
+            pre_training=spec["training"],
+        )
 
         return manager
 
@@ -179,7 +189,7 @@ class Manager(object):
 
         self.train_from = len(self.weights) - 1
         weights = self.model.init_weights(self._rng, 1.0)
-        weights[:self.train_from] = self.weights[:-1]
+        weights[: self.train_from] = self.weights[:-1]
         self.weights = weights
 
     def init(self, quiet=False, training=True):
@@ -189,7 +199,7 @@ class Manager(object):
             self._loss_avg = self.model.loss_batch
         else:
             self._loss_avg = lambda w, batch: self.model.loss_batch(
-                self.weights[:self.train_from] + w, batch
+                self.weights[: self.train_from] + w, batch
             )
 
         if training:
@@ -206,7 +216,9 @@ class Manager(object):
                 optax.adamw(self.conf.lr, mask=mask_bias, weight_decay=0.01),
             )
 
-            self.opt_state = self.optimizer.init(self.weights[self.train_from:])
+            self.opt_state = self.optimizer.init(
+                self.weights[self.train_from :]
+            )
             self.run = Run()
         else:
             self._loss_grad = None
@@ -231,7 +243,21 @@ class Manager(object):
         return self.model.loss_batch(self.weights, xs)
 
     def _eval(self, xs, lengths):
-        shards = 4
+        # print("_eval")
+        # print(xs)
+        # print(xs[0, 10:20])
+        # print(lengths)
+        lengths = np.array(lengths)
+
+        if self.token_set.entropy0 > 0:
+            zeros = 0
+            for sample, l in zip(xs, lengths):
+                zeros += l - np.count_nonzero(sample[:l])
+            total_entropy0 = zeros * self.token_set.entropy0
+        else:
+            total_entropy0 = 0
+
+        shards = 2
         while shards <= xs.shape[0]:
             logging.info(f"Evaluating with {shards} batches")
             shard_size = xs.shape[0] // shards
@@ -239,16 +265,23 @@ class Manager(object):
             loss = 0
             evaluation_failed = False
             for i in range(shards):
-                shard = xs[i * shard_size : (i + 1) * shard_size]
+                start = i * shard_size
+                end = (i + 1) * shard_size
+                shard = xs[start:end]
+                shard_len = lengths[start:end]
                 try:
                     shard = jax.nn.one_hot(shard, self.ntokens)
-                    loss += self.model.loss_batch(self.weights, shard).item()
+                    loss += self.model.loss_batch_masked(
+                        self.weights, shard, shard_len
+                    ).item()
                 except (XlaRuntimeError, ValueError):
                     evaluation_failed = True
                     break
 
             if not evaluation_failed:
-                return loss / shards
+                return (loss + total_entropy0) / (
+                    self.test_sample_len * self.test_batch
+                )
 
             # Convert weights to numpy arrays and then release all the GPU buffers.
             self.weights = jax.device_get(self.weights)
@@ -263,7 +296,11 @@ class Manager(object):
     def eval(self, dataset) -> float:
         """Evaluate a model on a random sample from the training data."""
         with latency.timer("Manager.eval"):
-            batch, lengths = dataset.sample_bytes(length=self.test_sample_len, batch_size=self.test_batch, token_set_size=self.token_set_size)
+            batch, lengths = dataset.sample_bytes(
+                length=self.test_sample_len,
+                batch_size=self.test_batch,
+                token_set_size=self.token_set_size,
+            )
             return self._eval(batch, lengths)
 
     def sample(self, prefix, l, temperature=0.05):
@@ -291,14 +328,14 @@ class Manager(object):
 
     def train_step(self, xs):
         xs = jax.nn.one_hot(xs, self.ntokens)
-        trainable_weights = self.weights[self.train_from:]
+        trainable_weights = self.weights[self.train_from :]
         loss, grads = self._loss_grad(trainable_weights, xs)
 
         updates, self.opt_state = self.optimizer.update(
             grads, self.opt_state, trainable_weights
         )
         trainable_weights = optax.apply_updates(trainable_weights, updates)
-        self.weights[self.train_from:] = trainable_weights
+        self.weights[self.train_from :] = trainable_weights
 
         loss = float(loss)
 
@@ -329,7 +366,9 @@ class Manager(object):
 
         while time.time() < finish_time and self.step < steps:
             batch = train_set.sample_tokens(
-                ntokens=self.conf.sample_len, batch_size=self.conf.batch, token_set_size=self.token_set_size
+                ntokens=self.conf.sample_len,
+                batch_size=self.conf.batch,
+                token_set_size=self.token_set_size,
             )
             try:
                 loss = self.train_step(batch)
@@ -427,7 +466,9 @@ class Manager(object):
     def continue_prefix(self, prefix: str, length: int) -> str | bytes:
         prefix_bytes: bytes = prefix.encode()  # convert str to bytes (?)
         if self.token_set:
-            prefix_tokens = [t.id for t in self.tokenizer.tokenize(prefix_bytes)]
+            prefix_tokens = [
+                t.id for t in self.tokenizer.tokenize(prefix_bytes)
+            ]
         else:
             prefix_tokens = prefix_bytes
 

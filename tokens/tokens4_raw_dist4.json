@@ -1,22 +1,24 @@
 {
   "tokens": [
     0,
-    " "
+    " ",
+    "e",
+    "t"
   ],
   "stats": {
-    "ntokens": 2,
+    "ntokens": 4,
     "initial_size": 108362047381,
     "processed_size": 108362047381,
-    "total_cost": 741109897843,
-    "cost_per_token": 0.14621589550535986,
-    "total_tokens": 17969497315,
-    "total_literals": 90392550066,
+    "total_cost": 328022677990,
+    "cost_per_token": 0.33034925525577077,
+    "total_tokens": 35141837178,
+    "total_literals": 73220210203,
     "final_tokens": 108362047381,
     "bytes_per_token": 1,
-    "literal_dist_entropy": 4.837591087859347,
-    "literal_cost": 8,
-    "literal_entropy_per_input_byte": 4.035381438214074,
-    "literal_entropy_per_token": 4.035381438214074
+    "literal_dist_entropy": 0,
+    "literal_cost": 4,
+    "literal_entropy_per_input_byte": 0,
+    "literal_entropy_per_token": 0
   },
   "type": "fallback_distribution",
   "literal_count": [
@@ -121,7 +123,7 @@
     180593988,
     356250240,
     527378416,
-    1603966626,
+    0,
     261433089,
     261063048,
     671034731,
@@ -136,7 +138,7 @@
     16062114,
     782450328,
     815999677,
-    1117705524,
+    0,
     377544916,
     127505314,
     235692330,

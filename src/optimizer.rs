@@ -46,12 +46,12 @@ fn tokens_to_add(
         .collect()
 }
 
-fn token_to_remove<'a, S: Sampler<'a>>(
+fn remove_token<'a, S: Sampler<'a>>(
     token_set: &TokenSet,
     initial_cost: u64,
     sampler: &'a S,
     fast_sampler: &'a SelectionSampler,
-) -> Option<(Vec<u8>, TokenStats)> {
+) -> Option<(TokenSet, TokenStats)> {
     let mut token_set = token_set.clone();
     let stats_before = tokenize_file(&token_set, sampler);
     let fast_stats_before = tokenize_file(&token_set, fast_sampler);
@@ -117,7 +117,7 @@ fn token_to_remove<'a, S: Sampler<'a>>(
                 format_token(&token_str),
                 tries
             );
-            return Some((token_str.to_vec(), stats));
+            return Some((token_set, stats));
         }
 
         token_set.add_token(&token_str);
@@ -168,14 +168,13 @@ pub fn optimize_bpe<'a, S: Sampler<'a>>(
         prev_stats = None;
 
         if new_token_set.ntokens() > ntokens {
-            if let Some((to_remove, stats)) = token_to_remove(
+            if let Some((token_set_removed, stats)) = remove_token(
                 &new_token_set,
                 initial_stats.cost(token_set.literal_cost()),
                 sampler,
                 fast_sampler,
             ) {
-                new_token_set.remove_token(&to_remove);
-                token_set = new_token_set;
+                token_set = token_set_removed;
                 prev_stats = Some(stats);
             } else {
                 return (token_set, initial_stats);

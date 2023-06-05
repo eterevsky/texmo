@@ -50,8 +50,8 @@ impl LiteralEncoding {
             LiteralEncoding::Bits1 => 8,
             LiteralEncoding::Bits2 => 4,
             LiteralEncoding::Bits4 => 2,
-            LiteralEncoding::Dist2 => 8,
-            LiteralEncoding::Dist4 => 8,
+            LiteralEncoding::Dist2 => 2,
+            LiteralEncoding::Dist4 => 4,
             LiteralEncoding::Dist8 => 8,
             LiteralEncoding::Hex => 3,
         }

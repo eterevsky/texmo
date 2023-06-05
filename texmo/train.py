@@ -61,7 +61,7 @@ def train(args: argparse.Namespace):
 
     try:
         if args.model_path is not None:
-            manager = Manager.load(args.model_path, token_set)
+            manager = Manager.load(args.model_path, token_set, test_batch=args.test_batch, test_sample_len=args.test_sample_len)
             manager.update_conf(lr, args.sample_len, args.batch, args.time)
             if args.add_layers:
                 manager.add_layers(args.add_layers)
@@ -74,7 +74,7 @@ def train(args: argparse.Namespace):
                 args.batch,
                 t=args.time,
             )
-            manager = Manager(conf, token_set)
+            manager = Manager(conf, token_set, test_batch=args.test_batch, test_sample_len=args.test_sample_len)
             manager.init()
 
         manager.train_and_eval(
@@ -209,6 +209,18 @@ def init_args(parser: argparse.ArgumentParser):
         type=str,
         default="Roses are red\nViolets are",
         help="text prefix to be continued",
+    )
+    parser.add_argument(
+        "--test-batch",
+        type=int,
+        default=1024,
+        help="Size of the test batch, used for final evaluation"
+    )
+    parser.add_argument(
+        "--test-sample-len",
+        type=int,
+        default=1024,
+        help="Length in bytes of test samples, used for final evaluation"
     )
 
     parser.set_defaults(func=train)

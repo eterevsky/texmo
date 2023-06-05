@@ -93,6 +93,10 @@ class TokenSet(object):
             + self.tokens_in_literal * self.stats["total_literals"]
         )
 
+    @property
+    def entropy0(self) -> float:
+        return self.stats["literal_dist_entropy"]
+
     def byte_loss(self, token_loss: float) -> float:
         loss = token_loss / self.bytes_per_token
         if self.type in (

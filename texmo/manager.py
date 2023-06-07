@@ -84,11 +84,11 @@ class Manager(object):
         self.token_set: TokenSet = token_set
         if token_set:
             self.ntokens = token_set.ntokens
-            self.token_set_size = token_set.ntokens
+            self.token_set_name = token_set.ntokens
             self.tokenizer = Tokenizer(token_set)
         else:
             self.ntokens = 256
-            self.token_set_size = None
+            self.token_set_name = None
             self.tokenizer = None
         self.conf: Configuration = conf
         self.model: Model2 = self.conf.model
@@ -249,7 +249,7 @@ class Manager(object):
         # print(lengths)
         lengths = np.array(lengths)
 
-        if self.token_set.entropy0 > 0:
+        if self.token_set is not None and self.token_set.entropy0 > 0:
             zeros = 0
             for sample, l in zip(xs, lengths):
                 zeros += l - np.count_nonzero(sample[:l])
@@ -299,7 +299,7 @@ class Manager(object):
             batch, lengths = dataset.sample_bytes(
                 length=self.test_sample_len,
                 batch_size=self.test_batch,
-                token_set_size=self.token_set_size,
+                token_set_name=self.token_set_name,
             )
             return self._eval(batch, lengths)
 
@@ -321,8 +321,8 @@ class Manager(object):
             state, c = self.model.step_prob(self.weights, state, c)
             c_selected = jax.random.choice(self._rng.gen(), self.ntokens, p=c)
             c = jax.nn.one_hot(c_selected, self.ntokens)
-            if self.token_set:
-                out.append(c_selected)
+            # if self.token_set:
+            out.append(c_selected)
         # return bytes(out)
         return out
 
@@ -339,7 +339,8 @@ class Manager(object):
 
         loss = float(loss)
 
-        self.run.add_step(loss, self.token_set.byte_loss(loss))
+        byte_loss = loss if self.token_set is None else self.token_set.byte_loss(loss)
+        self.run.add_step(loss, byte_loss)
 
         return loss
 
@@ -368,7 +369,7 @@ class Manager(object):
             batch = train_set.sample_tokens(
                 ntokens=self.conf.sample_len,
                 batch_size=self.conf.batch,
-                token_set_size=self.token_set_size,
+                token_set_name=self.token_set_name,
             )
             try:
                 loss = self.train_step(batch)
@@ -474,7 +475,7 @@ class Manager(object):
 
         out = self.sample(prefix_tokens, length)
 
-        out = self.tokenizer.untokenize(out)
+        out = self.tokenizer.untokenize(out) if self.tokenizer else bytes(out)
 
         try:
             s = (prefix_bytes + out).decode("utf-8")

@@ -21,14 +21,14 @@ Request = namedtuple(
 )
 
 
-class SamplerThread(object):
+class SamplerThread(Thread):
     def __init__(
         self,
         data: bytes | mmap.mmap,
         requests_queue: Queue,
         data_queues: dict[str, Queue],
         tokenizers: dict[str, Tokenizer],
-        tokensets_lock: Lock,
+        token_sets_lock: Lock,
         debug: bool,
         *args,
         **kwargs,
@@ -36,7 +36,7 @@ class SamplerThread(object):
         super().__init__(*args, **kwargs)
         self._data: bytes | mmap.mmap = data
         self._requests_queue: Queue = requests_queue
-        self._tokensets_lock = tokensets_lock
+        self._token_sets_lock = token_sets_lock
         self._data_queues: dict[str, Queue] = data_queues
         self._tokenizers: dict[str, Tokenizer] = tokenizers
         self._debug: bool = debug
@@ -93,6 +93,8 @@ class SamplerThread(object):
 
             return [token.id for token in tokens]
         else:
+            if length is None:
+                length = ntokens
             sample = list(self._data[start : start + length])
             if self._debug:
                 try:
@@ -104,13 +106,13 @@ class SamplerThread(object):
 
     def _execute_request(self, request: Request):
         with latency.timer("SamplerThread._execute_request"):
-            with self._tokensets_lock:
+            with self._token_sets_lock:
                 tokenizer = (
                     None
                     if request.token_set_name is None
                     else self._tokenizers[request.token_set_name]
                 )
-                response_queue = self._data_queues[request.token_set_name]
+                response_queue = self._data_queues[request]
 
             samples = [
                 self._get_sample(request.length, request.ntokens, tokenizer)
@@ -136,7 +138,7 @@ class DataSet(object):
         self,
         path: Optional[str] = None,
         data: Optional[bytes] = None,
-        token_sets: dict[int, TokenSet] = None,
+        token_sets: dict[str, TokenSet] = None,
         debug: bool = False,
         in_process: bool = False,
     ):
@@ -197,6 +199,7 @@ class DataSet(object):
                     self._request_queue,
                     self._data_queues,
                     self._tokenizers,
+                    self._token_sets_lock,
                     self._debug,
                 )
                 worker_thread.start()
@@ -234,22 +237,24 @@ class DataSet(object):
                     self._request_queue,
                     self._data_queues,
                     self._tokenizers,
+                    self._token_sets_lock,
                     self._debug)
             worker.run()
         result = self._data_queues[request].get()
         return result
 
-    def sample_bytes(self, length, batch_size, token_set_name=None):
+    def sample_bytes(self, length, batch_size, token_set_name=None) -> tuple[np.ndarray, list]:
         request = Request(length, batch_size, None, token_set_name)
 
         with latency.timer("DataSet.sample_bytes"):
             return self._execute_request(request)
 
-    def sample_tokens(self, ntokens, batch_size, token_set_name):
+    def sample_tokens(self, ntokens, batch_size, token_set_name) -> np.ndarray:
         request = Request(None, batch_size, ntokens, token_set_name)
 
         with latency.timer("DataSet.sample_tokens"):
-            return self._execute_request(request)
+            batch, _lengths = self._execute_request(request)
+            return batch
 
     def sample(self, length, batch_size):
         batch, _ = self.sample_bytes(length, batch_size, None)

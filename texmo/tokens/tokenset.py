@@ -34,10 +34,13 @@ class TokenSet(object):
 
     @staticmethod
     def from_json(tokens_dict: dict) -> Self:
+        fallback_bits = tokens_dict.get("fallback_bits")
+        if fallback_bits is not None:
+            fallback_bits = int(fallback_bits)
         token_set = TokenSet(
             tokens_dict["type"],
             tokens_dict["processing"],
-            tokens_dict.get("fallback_bits"),
+            fallback_bits,
             tokens_dict.get("stats"),
         )
         for i, token in enumerate(tokens_dict["tokens"]):
@@ -52,7 +55,14 @@ class TokenSet(object):
         return token_set
 
     @staticmethod
-    def build(type: str, fallback_bits:int, processing: str, tokens: list[bytes], stats: dict) -> Self:
+    def build(
+        type: str,
+        fallback_bits: Optional[int],
+        processing: str,
+        tokens: list[bytes],
+        stats: dict,
+    ) -> Self:
+        assert isinstance(fallback_bits, Optional[int])
         token_set = TokenSet(type, processing, fallback_bits, stats)
         if type == "fallback_distribution":
             reserved_tokens = 1
@@ -66,9 +76,7 @@ class TokenSet(object):
             token_set.add_token(t)
         return token_set
 
-    def __init__(
-        self, token_set_type, processing, fallback_bits, stats
-    ):
+    def __init__(self, token_set_type, processing, fallback_bits, stats):
         self.type = token_set_type
         self.processing = processing
         self.fallback_bits = fallback_bits

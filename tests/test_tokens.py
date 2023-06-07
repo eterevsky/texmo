@@ -8,7 +8,8 @@ logging.disable(level=logging.ERROR)
 
 
 def tokenize(string, tokens, fallback_bits=4):
-    token_set = TokenSet.build_with_fallback_bits(fallback_bits)
+    stats = {}
+    token_set = TokenSet.build("fallback_bits", "raw", tokens, fallback_bits, stats)
     for s in tokens:
         token_set.add_token(s)
     tokenizer = Tokenizer(token_set)

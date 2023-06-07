@@ -1,5 +1,6 @@
 from typing import Self
 
+import mmap
 import regex
 
 from ..common import INF
@@ -76,7 +77,7 @@ class Tokenizer(object):
         self._mark_words = "words" in token_set.processing
 
     def tokenize(
-        self, string: bytes, start=0, max_tokens=None, max_bytes=None
+        self, string: bytes|mmap.mmap, start=0, max_tokens=None, max_bytes=None
     ) -> list[Token]:
         suffix_state = self._suffix_states[b""]
         cost_state = [(0, None)]
@@ -201,7 +202,7 @@ class Tokenizer(object):
         return "".join(out)
 
     def _iterate_bytes(
-        self, data: bytes, start: int, max_tokens: int, max_bytes: int
+        self, data: bytes|mmap.mmap, start: int, max_tokens: int, max_bytes: int
     ):
         while start < len(data):
             if max_bytes is None and max_tokens is None:

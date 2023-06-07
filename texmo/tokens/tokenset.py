@@ -1,12 +1,12 @@
 import json
-from typing import Self
+from typing import Self, Optional
 
 
 class Token(object):
-    def __init__(self, id: int, string: bytes, value: int = None):
+    def __init__(self, id: int, string: bytes, value: Optional[int] = None):
         self.id: int = id
         self.string: bytes = string
-        self.value: int = value
+        self.value: Optional[int] = value
         self.suffix: Self | int = None
 
     def __str__(self):
@@ -33,27 +33,11 @@ class TokenSet(object):
         return TokenSet.from_json(tokens_dict)
 
     @staticmethod
-    def build_with_fallback_bits(fallback_bits: int) -> Self:
-        token_set = TokenSet("str_with_fallback_bits", [], fallback_bits, None)
-        for i in range(2**fallback_bits):
-            token_set._add_special_token(i)
-        return token_set
-
-    @staticmethod
-    def build_with_fallback_dist() -> Self:
-        token_set = TokenSet(
-            "str_with_fallback_distribution", [], None, [1] * 256
-        )
-        token_set._add_special_token(0)
-        return token_set
-
-    @staticmethod
     def from_json(tokens_dict: dict) -> Self:
         token_set = TokenSet(
             tokens_dict["type"],
             tokens_dict["processing"],
             tokens_dict.get("fallback_bits"),
-            tokens_dict.get("literal_count"),
             tokens_dict.get("stats"),
         )
         for i, token in enumerate(tokens_dict["tokens"]):
@@ -67,13 +51,27 @@ class TokenSet(object):
                 token_set._add_special_token(token)
         return token_set
 
+    @staticmethod
+    def build(type: str, fallback_bits:int, processing: str, tokens: list[bytes], stats: dict) -> Self:
+        token_set = TokenSet(type, processing, fallback_bits, stats)
+        if type == "fallback_distribution":
+            reserved_tokens = 1
+        elif type == "fallback_bits":
+            reserved_tokens = 2**fallback_bits
+        else:
+            reserved_tokens = 0
+        for i in range(reserved_tokens):
+            token_set._add_special_token(i)
+        for t in tokens:
+            token_set.add_token(t)
+        return token_set
+
     def __init__(
-        self, token_set_type, processing, fallback_bits, literal_count, stats
+        self, token_set_type, processing, fallback_bits, stats
     ):
         self.type = token_set_type
         self.processing = processing
         self.fallback_bits = fallback_bits
-        self.literal_count = literal_count
         self.stats = stats
         self.tokens = []
         self.tokens_by_str = {}

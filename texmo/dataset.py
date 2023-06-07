@@ -7,7 +7,7 @@ import time
 from collections import namedtuple
 from itertools import repeat
 from queue import Queue
-from threading import Thread
+from threading import Thread, Lock
 from typing import Optional
 
 import numpy as np
@@ -15,70 +15,110 @@ import numpy as np
 from . import latency
 from .tokens import Tokenizer, TokenSet
 
+
 Request = namedtuple(
-    "Request", ["length", "batch", "ntokens", "token_set_size"]
+    "Request", ["length", "batch", "ntokens", "token_set_name"]
 )
 
 
-def _worker(data, request_queue, data_queues, tokenizers, debug):
-    while True:
-        request = request_queue.get()
-        logging.debug(f"Request: {request}")
-        if request is None:
-            logging.debug("Stopping the worker")
-            break
-        with latency.timer("dataset-worker"):
-            batch = []
-            samples = []
-            for _ in range(request.batch):
-                if request.length is not None:
-                    length_est = request.length
-                else:
-                    length_est = request.ntokens * 5
-                start = random.randrange(len(data) - length_est)
-                paragraph = data.rfind(b"\n\n", 0, start)
-                doc_end = data.find(b"\x13", paragraph, start)
-                if doc_end >= 0:
-                    start = doc_end + 1
-                elif paragraph >= 0:
-                    start = paragraph + 2
-                else:
-                    start = 0
-                if request.token_set_size:
-                    if debug:
-                        end = start + 256
-                        while end < len(data) and 128 <= data[end] < 192:
-                            end += 1
-                        sample = data[start:end]
-                        try:
-                            s = sample.decode("utf-8")
-                        except UnicodeDecodeError:
-                            s = sample
-                        print(f"=== Sample:\n{s}\n...\n===")
+class SamplerThread(object):
+    def __init__(
+        self,
+        data: bytes | mmap.mmap,
+        requests_queue: Queue,
+        data_queues: dict[str, Queue],
+        tokenizers: dict[str, Tokenizer],
+        tokensets_lock: Lock,
+        debug: bool,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self._data: bytes | mmap.mmap = data
+        self._requests_queue: Queue = requests_queue
+        self._tokensets_lock = tokensets_lock
+        self._data_queues: dict[str, Queue] = data_queues
+        self._tokenizers: dict[str, Tokenizer] = tokenizers
+        self._debug: bool = debug
 
-                    tokens = tokenizers[request.token_set_size].tokenize(
-                        data, start, request.ntokens, request.length
-                    )
+    def run(self):
+        while True:
+            request = self._requests_queue.get()
 
-                    if debug:
-                        debug_str = "|".join(str(t) for t in tokens)
-                        print(debug_str + "\n===")
+            if request is None:
+                logging.info("Stopping SamplerThread")
+                break
 
-                    samples.append([token.id for token in tokens])
-                else:
-                    sample = list(data[start : start + request.length])
-                    if debug:
-                        try:
-                            s = sample.decode("utf-8")
-                        except UnicodeDecodeError:
-                            s = sample
-                        print(f"=== Sample:\n{s}\n===")
-                    samples.append(sample)
+            self._execute_request(request)
 
-            if request.ntokens:
-                assert all(len(sample) == request.ntokens for sample in samples)
-                batch = np.array(samples, dtype=np.uint16)
-                data_queues[request].put(batch)
+    def _find_start(self, length: Optional[int], ntokens: Optional[int]) -> int:
+        if length is not None:
+            length_est = length
+        elif ntokens is not None:
+            length_est = ntokens * 5
+        start = random.randrange(len(self._data) - length_est)
+        paragraph = self._data.rfind(b"\n\n", 0, start)
+        doc_end = self._data.find(b"\x13", paragraph, start)
+        if doc_end >= 0:
+            return doc_end + 1
+        elif paragraph >= 0:
+            return paragraph + 2
+        else:
+            return 0
+
+    def _get_sample(
+        self,
+        length: Optional[int],
+        ntokens: Optional[int],
+        tokenizer: Optional[Tokenizer],
+    ) -> list[int]:
+        start = self._find_start(length, ntokens)
+        if tokenizer is not None:
+            if self._debug:
+                end = start + 256
+                while end < len(self._data) and 128 <= self._data[end] < 192:
+                    end += 1
+                sample = self._data[start:end]
+                try:
+                    s: str | bytes = sample.decode("utf-8")
+                except UnicodeDecodeError:
+                    s = sample
+                print(f"=== Sample:\n{s!r}\n...\n===")
+
+            tokens = tokenizer.tokenize(self._data, start, ntokens, length)
+
+            if self._debug:
+                debug_str = "|".join(str(t) for t in tokens)
+                print(debug_str + "\n===")
+
+            return [token.id for token in tokens]
+        else:
+            sample = list(self._data[start : start + length])
+            if self._debug:
+                try:
+                    s = sample.decode("utf-8")
+                except UnicodeDecodeError:
+                    s = sample
+                print(f"=== Sample:\n{s}\n===")
+            return sample
+
+    def _execute_request(self, request: Request):
+        with latency.timer("SamplerThread._execute_request"):
+            with self._tokensets_lock:
+                tokenizer = (
+                    None
+                    if request.token_set_name is None
+                    else self._tokenizers[request.token_set_name]
+                )
+                response_queue = self._data_queues[request.token_set_name]
+
+            samples = [
+                self._get_sample(request.length, request.ntokens, tokenizer)
+                for _ in range(request.batch)
+            ]
+
+            if request.ntokens is not None:
+                lengths = None
             else:
                 lengths = []
                 max_len = max(len(sample) for sample in samples)
@@ -86,8 +126,9 @@ def _worker(data, request_queue, data_queues, tokenizers, debug):
                     l = len(sample)
                     lengths.append(l)
                     sample.extend(repeat(0, max_len - l))
-                batch = np.array(samples, dtype=np.uint16)
-                data_queues[request].put((batch, lengths))
+
+            batch = np.array(samples, dtype=np.uint16)
+            response_queue.put((batch, lengths))
 
 
 class DataSet(object):
@@ -145,19 +186,18 @@ class DataSet(object):
             for token_set_size, token_set in token_sets.items():
                 self._tokenizers[token_set_size] = Tokenizer(token_set)
 
+        self._token_sets_lock = Lock()
+
         self._in_process = in_process
         if not in_process:
             self._worker_threads = []
             for _ in range(1):
-                worker_thread = Thread(
-                    target=_worker,
-                    args=[
-                        self.all,
-                        self._request_queue,
-                        self._data_queues,
-                        self._tokenizers,
-                        debug,
-                    ],
+                worker_thread = SamplerThread(
+                    self.all,
+                    self._request_queue,
+                    self._data_queues,
+                    self._tokenizers,
+                    self._debug,
                 )
                 worker_thread.start()
                 self._worker_threads.append(worker_thread)
@@ -176,6 +216,11 @@ class DataSet(object):
         # self._worker_thread.join()
 
     def _execute_request(self, request: Request):
+        if request.ntokens is not None:
+            # assert request.token_set_name is not None
+            assert request.length is None
+        else:
+            assert request.length is not None
         if request not in self._data_queues:
             self._data_queues[request] = Queue()
             if not self._in_process:
@@ -185,24 +230,23 @@ class DataSet(object):
         self._request_queue.put(request)
         if self._in_process:
             self._request_queue.put(None)
-            _worker(
-                self.all,
-                self._request_queue,
-                self._data_queues,
-                self._tokenizers,
-                self._debug,
-            )
+            worker = SamplerThread(self.all,
+                    self._request_queue,
+                    self._data_queues,
+                    self._tokenizers,
+                    self._debug)
+            worker.run()
         result = self._data_queues[request].get()
         return result
 
-    def sample_bytes(self, length, batch_size, token_set_size=None):
-        request = Request(length, batch_size, None, token_set_size)
+    def sample_bytes(self, length, batch_size, token_set_name=None):
+        request = Request(length, batch_size, None, token_set_name)
 
         with latency.timer("DataSet.sample_bytes"):
             return self._execute_request(request)
 
-    def sample_tokens(self, ntokens, batch_size, token_set_size=None):
-        request = Request(None, batch_size, ntokens, token_set_size)
+    def sample_tokens(self, ntokens, batch_size, token_set_name):
+        request = Request(None, batch_size, ntokens, token_set_name)
 
         with latency.timer("DataSet.sample_tokens"):
             return self._execute_request(request)
@@ -241,7 +285,9 @@ def benchmark(dataset, length, ntokens, batch, token_set_size):
     start = time.time()
     while time.time() - start < 10:
         if length:
-            sample, lengths = dataset.sample_bytes(length, batch, token_set_size)
+            sample, lengths = dataset.sample_bytes(
+                length, batch, token_set_size
+            )
             total_tokens += sum(lengths)
         else:
             sample = dataset.sample_tokens(ntokens, batch, token_set_size)
@@ -279,7 +325,9 @@ def sample(args: argparse.Namespace):
     )
 
     if args.benchmark:
-        benchmark(dataset, args.length, args.ntokens, args.batch, token_set_size)
+        benchmark(
+            dataset, args.length, args.ntokens, args.batch, token_set_size
+        )
     else:
         if args.length:
             sample, lengths = dataset.sample_bytes(
@@ -288,7 +336,9 @@ def sample(args: argparse.Namespace):
             print(f"Prepared sample:\n{sample}")
             print(f"Lengths: {lengths}")
         else:
-            sample = dataset.sample_tokens(args.ntokens, args.batch, token_set_size)
+            sample = dataset.sample_tokens(
+                args.ntokens, args.batch, token_set_size
+            )
             print(f"Prepared sample:\n{sample}")
 
 

@@ -7,11 +7,17 @@ from typing import Any
 from .common import INF, is_power2, power2_neighbors
 from .model2 import Model2, build_model
 from .record import TrainingRecord
+from .tokens import parse_token_set_name
+
+TOKEN_TYPES = ("all", "bits1", "bits2", "bits4", "dist2", "dist4", "dist8")
 
 Configuration = namedtuple(
     "Configuration",
     [
         "model",
+        "ntokens",
+        "token_type",
+        "token_processing",
         "lr",
         "sample_len",
         "batch",
@@ -21,13 +27,19 @@ Configuration = namedtuple(
 
 
 def conf_from_record(record: TrainingRecord) -> Configuration:
-    model = build_model(record.ntokens, record.model_spec)
+    ntokens, token_processing, token_type  = parse_token_set_name(
+        record.token_set_name
+    )
+    model = build_model(ntokens, record.model_spec)
     return Configuration(
         model,
-        record.learning_rate,
-        record.train_sample_len,
-        record.train_batch,
-        record.planned_time_s,
+        ntokens=ntokens,
+        token_type=token_type,
+        token_processing=token_processing,
+        lr=record.learning_rate,
+        sample_len=record.train_sample_len,
+        batch=record.train_batch,
+        t=record.planned_time_s,
     )
 
 
@@ -39,6 +51,9 @@ def conf_to_dict(conf: Configuration) -> dict[str, Any]:
         "sample_len": conf.sample_len,
         "batch": conf.batch,
         "t": conf.t,
+        "ntokens": conf.ntokens,
+        "token_type": conf.token_type,
+        "token_processing": conf.token_processing,
     }
 
 
@@ -46,6 +61,9 @@ def conf_from_dict(conf_dict: dict) -> Configuration:
     model = build_model(conf_dict["ntokens"], conf_dict["spec"])
     return Configuration(
         model,
+        conf_dict["ntokens"],
+        conf_dict["token_type"],
+        conf_dict["token_processing"],
         conf_dict["lr"],
         conf_dict["sample_len"],
         conf_dict["batch"],
@@ -61,13 +79,23 @@ def conf_is_valid(conf: Configuration) -> bool:
         and is_power2(conf.sample_len)
         and is_power2(conf.batch)
         and is_power2(conf.t)
+        and is_power2(conf.ntokens)
+        and conf.ntokens >= 2
+        and conf.token_type in TOKEN_TYPES
+        and conf.token_processing in ("raw", "caps", "capswords")
     )
 
 
 def conf_to_string(conf: Configuration) -> str:
+    tokens = conf_tokens_name(conf)
     return (
-        f"{conf.model} ({conf.model.weights})  LEN{conf.sample_len}  B{conf.batch}  LR{conf.lr:.4f}  T{conf.t}"
+        f"{conf.model} ({conf.model.weights})  {tokens}  LEN{conf.sample_len}  "
+        + f"B{conf.batch}  LR{conf.lr:.4f}  T{conf.t}"
     )
+
+
+def conf_tokens_name(conf: Configuration) -> str:
+    return f"tokens{conf.ntokens}_{conf.token_processing}_{conf.token_type}"
 
 
 def match_bounds(bounds, value):
@@ -99,6 +127,9 @@ class Template(object):
     def __init__(
         self,
         spec_regex=None,
+        ntokens=None,
+        token_type=None,
+        token_processing=None,
         lr=None,
         sample_len=None,
         batch=None,
@@ -111,6 +142,9 @@ class Template(object):
         self.batch = make_bounds(batch)
         self.t = make_bounds(t)
         self.max_weights = max_weights
+        self.ntokens = make_bounds(ntokens)
+        self.token_type = token_type
+        self.token_processing = token_processing
 
     @staticmethod
     def from_args(args: argparse.Namespace):
@@ -121,6 +155,9 @@ class Template(object):
             sample_len=parse_interval(args.sample_len, int),
             t=parse_interval(args.time, int),
             max_weights=args.max_weights,
+            ntokens=parse_interval(args.ntokens, int),
+            token_type=args.token_type.split(","),
+            token_processing=args.token_processing.split(","),
         )
 
     def match_conf(self, conf):
@@ -129,6 +166,9 @@ class Template(object):
             and match_bounds(self.sample_len, conf.sample_len)
             and match_bounds(self.batch, conf.batch)
             and match_bounds(self.t, conf.t)
+            and match_bounds(self.ntokens, conf.ntokens)
+            and conf.token_type in self.token_type
+            and conf.token_processing in self.token_processing
             and self.match_model(conf.model)
         )
 
@@ -146,6 +186,9 @@ class Template(object):
             batch=self.batch,
             t=self.t,
             max_weights=self.max_weights,
+            ntokens=self.ntokens,
+            token_type=self.token_type,
+            token_processing=self.token_processing,
         )
 
 
@@ -156,17 +199,60 @@ def _pick_default_value(interval: tuple[float, float]) -> float:
     return value
 
 
-def default_from_template(template: Template) -> Configuration:
+def default_from_template(template: Template, spec: str) -> Configuration:
     lr = _pick_default_value(template.lr)
     sample_len = _pick_default_value(template.sample_len)
     batch = _pick_default_value(template.batch)
     t = _pick_default_value(template.t)
+    ntokens = _pick_default_value(template.ntokens)
+
+    if ntokens <= 16:
+        if "raw" in template.token_processing:
+            token_processing = "raw"
+        else:
+            token_processing = template.token_processing[0]
+    else:
+        if "capswords" in template.token_processing:
+            token_processing = "capswords"
+        else:
+            token_processing = "capswords"
+
+    if "dist4" in template.token_type:
+        token_type = "dist4"
+    else:
+        token_type = template.token_type[0]
+
+    model = build_model(ntokens, spec)
     return Configuration(
-        model=None, lr=lr, sample_len=sample_len, batch=batch, t=t
+        model=model,
+        lr=lr,
+        sample_len=sample_len,
+        batch=batch,
+        t=t,
+        ntokens=ntokens,
+        token_type=token_type,
+        token_processing=token_processing,
     )
 
 
 _model_neighbors: dict[Model2, list[Model2]] = {}
+
+
+_NEIGHBOR_TOKEN_TYPES = {
+    "all": ["dist8", "bits1"],
+    "dist2": ["dist4", "bits4"],
+    "dist4": ["dist2", "dist8", "bits2"],
+    "dist8": ["dist4", "bits1", "all"],
+    "bits1": ["bits2", "all", "dist8"],
+    "bits2": ["bits1", "bits4", "dist4"],
+    "bits4": ["bits2", "dist2"],
+}
+
+_NEIGHBOR_TOKEN_PROCESSING = {
+    "raw": ["caps"],
+    "caps": ["raw", "capswords"],
+    "capswords": ["caps"]
+}
 
 
 def conf_neighbors(conf: Configuration, template: Template):
@@ -183,7 +269,8 @@ def conf_neighbors(conf: Configuration, template: Template):
                 cache.append(neighbor_model)
 
     for neighbor_model in cache:
-        if not template.match_model(neighbor_model): continue
+        if not template.match_model(neighbor_model):
+            continue
 
         yield conf._replace(model=neighbor_model)
 
@@ -222,3 +309,16 @@ def conf_neighbors(conf: Configuration, template: Template):
     for x in power2_neighbors(conf.t):
         if match_bounds(template.t, x):
             yield conf._replace(t=x)
+
+    for x in power2_neighbors(conf.ntokens):
+        if match_bounds(template.ntokens, x):
+            model = build_model(x, str(conf.model))
+            yield conf._replace(ntokens=x, model=model)
+
+    for x in _NEIGHBOR_TOKEN_TYPES[conf.token_type]:
+        if x in template.token_type:
+            yield conf._replace(token_type=x)
+
+    for x in _NEIGHBOR_TOKEN_PROCESSING[conf.token_processing]:
+        if x in template.token_processing:
+            yield conf._replace(token_processing=x)

@@ -9,7 +9,13 @@ logging.disable(level=logging.ERROR)
 
 class TokenSetTest(TestCase):
     def test_suffix1(self):
-        token_set = TokenSet("fallback_dist", [], None, [1]*256)
+        stats = {
+            "initial_size": 512,
+            "total_tokens": 128,
+            "total_literals": 256,
+        }
+
+        token_set = TokenSet(token_set_type="dist4", processing="raw", fallback_bits=None, stats=stats)
         token_set._add_special_token(0)
         token_set.add_token(b"abc")
         token_set.add_token(b"bc")

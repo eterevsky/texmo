@@ -1,8 +1,10 @@
 import argparse
 import logging
 
+import numpy as np
+
+from texmo import dataset, latency, search_cli, train_cli
 from texmo.tokens import small_tokens
-from texmo import dataset, search_cli, train_cli, latency
 
 
 def help(parser):
@@ -15,10 +17,12 @@ def parse_args():
         "--show-timers",
         default=False,
         action="store_true",
-        help="show runtime timers"
+        help="show runtime timers",
     )
 
-    subparsers = parser.add_subparsers(dest="command", help="command to be executed")
+    subparsers = parser.add_subparsers(
+        dest="command", help="command to be executed"
+    )
 
     parser_sample = subparsers.add_parser(
         "sample", help="generate a typical sample of training data"
@@ -30,9 +34,7 @@ def parse_args():
     )
     small_tokens.init_args(parser_count_bytes)
 
-    parser_train = subparsers.add_parser(
-        "train", help="train a model"
-    )
+    parser_train = subparsers.add_parser("train", help="train a model")
     train_cli.init_args(parser_train)
 
     parser_search = subparsers.add_parser(
@@ -53,6 +55,7 @@ def parse_args():
 
 if __name__ == "__main__":
     logging.getLogger().setLevel(logging.INFO)
+    np.set_printoptions(linewidth=100, edgeitems=6, precision=3)
     args = parse_args()
     args.func(args)
 

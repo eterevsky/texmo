@@ -133,13 +133,18 @@ impl TokenSet {
             literal_count: [0; 256],
         };
 
-        if let LiteralEncoding::Hex = literal_encoding {
-            token_set.add_mandatory_token(&[0x10]);
-            for i in ('0' as u8)..=('9' as u8) {
-                token_set.add_mandatory_token(&[i]);
-            }
-            for i in ('a' as u8)..=('f' as u8) {
-                token_set.add_mandatory_token(&[i]);
+        match literal_encoding {
+            LiteralEncoding::Hex => {
+                token_set.add_mandatory_token(&[0x10]);
+                for i in ('0' as u8)..=('9' as u8) {
+                    token_set.add_mandatory_token(&[i]);
+                }
+                for i in ('a' as u8)..=('f' as u8) {
+                    token_set.add_mandatory_token(&[i]);
+                }
+            },
+            LiteralEncoding::All => {
+                for i in 0..=255
             }
         }
 

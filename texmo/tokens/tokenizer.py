@@ -68,7 +68,7 @@ WORD_MARKER = "\x16"
 
 class Tokenizer(object):
     def __init__(self, token_set: TokenSet):
-        self._token_set: TokenSet = token_set
+        self.token_set: TokenSet = token_set
         self._suffix_states: dict[bytes, SuffixState] = _populate_suffix_states(
             token_set
         )
@@ -133,7 +133,7 @@ class Tokenizer(object):
                 pos -= 1
 
         tokens.reverse()
-        if max_tokens is not None and len(tokens) > max_tokens:
+        if max_tokens is not None:
             tokens = tokens[:max_tokens]
         return tokens
 
@@ -142,26 +142,26 @@ class Tokenizer(object):
         sub_byte_buf = []
 
         for token_id in tokens:
-            token = self._token_set.tokens[token_id]
+            token = self.token_set.tokens[token_id]
             if token.string is not None:
                 if sub_byte_buf:
                     chunks.append(b"?")
                     sub_byte_buf.clear()
                 chunks.append(token.string)
-            elif self._token_set.type in (
+            elif self.token_set.type in (
                 "fallback_distribution",
                 "str_with_fallback_distribution",
             ):
                 chunks.append(b"?")
-            elif self._token_set.type in (
+            elif self.token_set.type in (
                 "str_with_fallback_bits",
                 "fallback_bits",
             ):
                 sub_byte_buf.append(token.value)
-                if len(sub_byte_buf) == 8 // self._token_set.fallback_bits:
+                if len(sub_byte_buf) == 8 // self.token_set.fallback_bits:
                     value = 0
                     for v in sub_byte_buf:
-                        value <<= self._token_set.fallback_bits
+                        value <<= self.token_set.fallback_bits
                         value += v
                     chunks.append(bytes([value]))
                     sub_byte_buf.clear()

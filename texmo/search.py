@@ -249,6 +249,7 @@ class Search(object):
 
             self.print_top_confs(t, max_weights)
 
+            # ipred, pred_conf = None, None
             ipred, pred_conf = self._select_by_pred_score(t, max_weights)
             ineighbor, neighbor_conf, parent_conf = self._select_neighbor(
                 t, max_weights

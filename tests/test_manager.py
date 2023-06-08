@@ -14,6 +14,9 @@ class ManagerTest(TestCase):
         dataset = build_fake_dataset()
         conf = Configuration(
             build_model(256, "gru.16"),
+            ntokens=256,
+            token_type="all",
+            token_processing="raw",
             lr=0.125,
             sample_len=32,
             batch=8,

@@ -12,6 +12,9 @@ logging.disable(level=logging.ERROR)
 
 INIT_CONF = Configuration(
     model=build_model(256, "dense.1.relu"),
+    ntokens=256,
+    token_processing="raw",
+    token_type="all",
     lr=0.2,
     sample_len=128,
     batch=256,
@@ -21,6 +24,9 @@ INIT_CONF = Configuration(
 
 TEMPLATE = Template(
     spec_regex=r"dense\.\d+\.relu",
+    ntokens=256,
+    token_processing=("raw",),
+    token_type=("all",),
     lr=0.2,
     sample_len=128,
     batch=None,

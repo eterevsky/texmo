@@ -1,7 +1,9 @@
 CREATE TABLE conf (
     id INTEGER NOT NULL PRIMARY KEY,
 
-    ntokens INTEGER NOT NULL,  -- TODO: replace by a full spec of TokenSet
+    ntokens INTEGER NOT NULL,
+    token_type TEXT NOT NULL,
+    token_processing TEXT NOT NULL,
     spec TEXT NOT NULL,
     lr REAL NOT NULL,
     sample_len INTEGER NOT NULL,

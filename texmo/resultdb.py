@@ -1,4 +1,5 @@
 import csv
+import logging
 import math
 import os
 import sqlite3
@@ -9,9 +10,15 @@ import numpy as np
 
 from . import latency
 from .common import INF
-from .configuration import (Configuration, Template, conf_from_dict,
-                            conf_from_record, conf_is_valid, conf_to_dict)
-from .model2 import build_model, Model2
+from .configuration import (
+    Configuration,
+    Template,
+    conf_from_dict,
+    conf_from_record,
+    conf_is_valid,
+    conf_to_dict,
+)
+from .model2 import Model2, build_model
 from .record import TrainingRecord
 from .run import Run, build_loss_trend
 
@@ -40,6 +47,7 @@ class ResultDB(object):
         if path is None:
             path = ":memory:"
         exists = path != ":memory:" and os.path.exists(path)
+        logging.info(f"Connecting to results DB {path}")
         self._db = sqlite3.connect(path)
         if not exists:
             schema_path = os.path.join(
@@ -61,6 +69,8 @@ class ResultDB(object):
             SELECT id FROM conf
             WHERE spec = :spec
               AND ntokens = :ntokens
+              AND token_type = :token_type
+              AND token_processing = :token_processing
               AND lr = :lr
               AND sample_len = :sample_len
               AND batch = :batch
@@ -76,8 +86,8 @@ class ResultDB(object):
         else:
             cur = self._db.execute(
                 """
-                INSERT INTO conf (ntokens, spec, lr, sample_len, batch, t, weights)
-                VALUES (:ntokens, :spec, :lr, :sample_len, :batch, :t, :weights)
+                INSERT INTO conf (ntokens, token_type, token_processing, spec, lr, sample_len, batch, t, weights)
+                VALUES (:ntokens, :token_type, :token_processing, :spec, :lr, :sample_len, :batch, :t, :weights)
                 """,
                 conf_dict,
             )
@@ -104,8 +114,12 @@ class ResultDB(object):
             "test_batch": record.test_batch,
             "loss": run.loss,
             "step_loss": _pack_ndarray(run.step_loss),
-            "loss_model_v": run.loss_trend.version if run.loss_trend is not None else None,
-            "loss_model": _pack_ndarray(run.loss_trend.params()) if run.loss_trend is not None else None,
+            "loss_model_v": run.loss_trend.version
+            if run.loss_trend is not None
+            else None,
+            "loss_model": _pack_ndarray(run.loss_trend.params())
+            if run.loss_trend is not None
+            else None,
             "checkpoint": run.checkpoint if run.checkpoint else None,
         }
         if math.isnan(record.loss) or record.loss is None:
@@ -157,6 +171,8 @@ class ResultDB(object):
         query = f"""
             SELECT conf.id AS conf_id,
                    ntokens,
+                   token_type,
+                   token_processing,
                    spec,
                    lr,
                    sample_len,
@@ -218,7 +234,7 @@ class ResultDB(object):
               AND run.conf_id = conf.id
               AND run.checkpoint IS NOT NULL
             """,
-            {"spec": str(model)}
+            {"spec": str(model)},
         )
 
         res = cur.fetchall()[0]["loss"]

@@ -2,6 +2,12 @@ import json
 from typing import Self, Optional
 
 
+def parse_token_set_name(name: str) -> tuple[int, str, str]:
+    tokens_n, token_processing, token_type = name.split("_")
+    ntokens = int(tokens_n.removeprefix("tokens"))
+    return ntokens, token_processing, token_type
+
+
 class Token(object):
     def __init__(self, id: int, string: bytes, value: Optional[int] = None):
         self.id: int = id
@@ -76,7 +82,16 @@ class TokenSet(object):
             token_set.add_token(t)
         return token_set
 
-    def __init__(self, token_set_type, processing, fallback_bits, stats):
+    # TODO: Instead of `stats` argument provide important stats as separate
+    # arguments.
+    def __init__(
+        self,
+        token_set_type,
+        processing,
+        fallback_bits,
+        stats,
+        bytes_per_token=None,
+    ):
         self.type = token_set_type
         self.processing = processing
         self.fallback_bits = fallback_bits
@@ -84,20 +99,41 @@ class TokenSet(object):
         self.tokens = []
         self.tokens_by_str = {}
 
+        if bytes_per_token is not None:
+            self.bytes_per_token = bytes_per_token
+        else:
+            self.bytes_per_token = stats["initial_size"] / (
+                stats["total_tokens"]
+                + self.tokens_in_literal * stats["total_literals"]
+            )
+
+    @property
+    def token_type(self) -> str:
+        if self.type in (
+            "dist",
+            "fallback_distribution",
+            "str_with_fallback_distribution",
+        ):
+            cost = self.stats["literal_cost"]
+            return f"dist{cost}"
+        elif self.type in ("bits", "fallback_bits"):
+            return f"bits{self.fallback_bits}"
+        elif self.type == "all":
+            return "all"
+
     @property
     def tokens_in_literal(self) -> int:
         match self.type:
-            case "fallback_distribution" | "str_with_fallback_distribution":
+            case "fallback_distribution" | "str_with_fallback_distribution" | "all" | "dist2" | "dist4" | "dist8":
                 return 1
             case "fallback_bits":
                 return 8 // self.fallback_bits
-
-    @property
-    def bytes_per_token(self) -> float:
-        return self.stats["initial_size"] / (
-            self.stats["total_tokens"]
-            + self.tokens_in_literal * self.stats["total_literals"]
-        )
+            case "bits1":
+                return 8
+            case "bits2":
+                return 4
+            case "bits4":
+                return 2
 
     @property
     def entropy0(self) -> float:

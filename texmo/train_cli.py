@@ -28,7 +28,7 @@ def show_loss_graph(manager: Manager, output_dir: str):
     plt.ylim(top=8)
     plt.plot(
         range(1, steps + 1),
-        list(map(manager.token_set.byte_loss, run.step_loss)),
+        list(map(manager.tokenizer.token_set.byte_loss, run.step_loss)),
     )
     plt.plot(xs, ys)
     if output_dir is not None:
@@ -43,38 +43,46 @@ def parse_lr(x: str) -> float:
 
 
 def train(args: argparse.Namespace):
-    if args.tokens:
-        token_set = TokenSet.from_json_file(args.tokens)
-        ntokens = token_set.ntokens
-        token_sets = {ntokens: token_set}
-        logging.info(
-            f"Loaded token set {args.tokens} with {token_set.ntokens} tokens"
-        )
-    else:
-        token_set = None
-        ntokens = 256
-        token_sets = {}
-        logging.info(f"No token set")
+    # if args.tokens:
+    #     token_set = TokenSet.from_json_file(args.tokens)
+    #     name =
+    #     ntokens = token_set.ntokens
+    #     token_sets = {ntokens: token_set}
+    #     logging.info(
+    #         f"Loaded token set {args.tokens} with {token_set.ntokens} tokens"
+    #     )
+    # elif args.tokens_dir:
+    #     token_set = None
+    #     name = args.token_set
+    # else:
+    #     token_set = None
+    #     ntokens = 256
+    #     token_sets = {}
+    #     logging.info(f"No token set")
     logging.info(f"Training data: {args.data}")
-    train_set = DataSet(args.data, token_sets=token_sets)
+    train_set = DataSet(args.data, tokens_dir=args.tokens_dir)
     lr = parse_lr(args.lr)
 
     try:
         if args.model_path is not None:
-            manager = Manager.load(args.model_path, token_set, test_batch=args.test_batch, test_sample_len=args.test_sample_len)
+            manager = Manager.load(args.model_path, test_batch=args.test_batch, test_sample_len=args.test_sample_len)
             manager.update_conf(lr, args.sample_len, args.batch, args.time)
             if args.add_layers:
                 manager.add_layers(args.add_layers)
             manager.init()
         else:
+            tokenizer = train_set.get_tokenizer(args.token_set)
             conf = Configuration(
-                build_model(ntokens, args.spec),
-                lr,
-                args.sample_len,
-                args.batch,
+                build_model(tokenizer.token_set.ntokens, args.spec),
+                ntokens=tokenizer.token_set.ntokens,
+                token_type=tokenizer.token_set.token_type,
+                token_processing=tokenizer.token_set.processing,
+                lr=lr,
+                sample_len=args.sample_len,
+                batch=args.batch,
                 t=args.time,
             )
-            manager = Manager(conf, token_set, test_batch=args.test_batch, test_sample_len=args.test_sample_len)
+            manager = Manager(conf, tokenizer=tokenizer, test_batch=args.test_batch, test_sample_len=args.test_sample_len)
             manager.init()
 
         manager.train_and_eval(
@@ -146,8 +154,21 @@ def init_args(parser: argparse.ArgumentParser):
 
     # Configuration
     parser.add_argument(
+        "--tokens-dir",
+        type=str,
+        default="tokens",
+        help="directory with token sets"
+    )
+    parser.add_argument(
+        "--token-set",
+        required=True,
+        type=str,
+        help="token set name"
+    )
+    parser.add_argument(
         "--tokens",
         type=str,
+        default=None,
         help="path to the token set definition",
     )
     parser.add_argument(

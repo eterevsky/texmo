@@ -16,7 +16,7 @@ logging.disable(level=logging.ERROR)
 def create_record(spec, loss, batch=256, reg=0.125):
     return TrainingRecord(
         timestamp=datetime.fromisoformat("2022-02-02T02:02:02"),
-        ntokens=256,
+        token_set_name="tokens256_raw_all",
         model_spec=spec,
         weights=1024,
         steps=123,
@@ -115,7 +115,10 @@ class ResultDBTest(TestCase):
         spec_relu = build_model(256, "dense.16.relu")
 
         conf = Configuration(
-            spec_relu,
+            model=spec_relu,
+            ntokens=256,
+            token_processing="raw",
+            token_type="all",
             lr=0.25,
             sample_len=128,
             batch=256,

@@ -17,7 +17,7 @@ class TrainingRecord(object):
     def __init__(
         self,
         timestamp: datetime,
-        ntokens: int,
+        token_set_name: str,
         model_spec: str,
         weights: int,
         steps: int,
@@ -41,7 +41,8 @@ class TrainingRecord(object):
         assert isinstance(timestamp, datetime)
         self.timestamp = timestamp
 
-        self.ntokens = ntokens
+        assert isinstance(token_set_name, str)
+        self.token_set_name = token_set_name
 
         self.model_spec = model_spec
         self.weights = weights
@@ -98,7 +99,7 @@ class TrainingRecord(object):
         train_data = self.train_data / 1e6
         total_data = self.total_data / 1e6
         return f"""
-Tokens: {self.ntokens} Model: {self.model_spec}, {self.weights:,} weights
+Tokens: {self.token_set_name} Model: {self.model_spec}, {self.weights:,} weights
 Loss: loss {self.loss:.4f}{expected_loss}
 Training: {self.steps} steps, {self.train_time_s:.1f} s ({planned_time})
 B {self.train_batch}  LEN {self.train_sample_len}  LR {self.learning_rate}

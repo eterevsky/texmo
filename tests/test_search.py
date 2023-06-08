@@ -13,6 +13,9 @@ logging.disable(level=logging.ERROR)
 
 INIT_CONF = Configuration(
     model=build_model(256, "dense.1.relu"),
+    ntokens=256,
+    token_processing="raw",
+    token_type="all",
     lr=1.0,
     sample_len=128,
     batch=256,
@@ -21,6 +24,9 @@ INIT_CONF = Configuration(
 
 TEMPLATE = Template(
     spec_regex="dense.1.relu",
+    ntokens=(256, 256),
+    token_processing=("raw",),
+    token_type=("all",),
     lr=(1.0, 1.0),
     sample_len=(128, 128),
     batch=(128, 256),
@@ -31,7 +37,7 @@ TEMPLATE = Template(
 def create_record(spec, loss, batch=256):
     return TrainingRecord(
         timestamp=datetime.fromisoformat("2022-02-02T02:02:02"),
-        ntokens=32,
+        token_set_name="tokens256_raw_all",
         model_spec=spec,
         weights=1024,
         steps=123,

@@ -8,8 +8,14 @@ logging.disable(level=logging.ERROR)
 
 
 def tokenize(string, tokens, fallback_bits=4):
-    stats = {}
-    token_set = TokenSet.build("fallback_bits", fallback_bits, "raw", tokens, stats)
+    stats = {
+        "initial_size": sum(len(t) for t in tokens) + 256,
+        "total_tokens": len(tokens),
+        "total_literals": 256,
+    }
+    token_set = TokenSet.build(
+        "fallback_bits", fallback_bits, "raw", tokens, stats
+    )
     tokenizer = Tokenizer(token_set)
     out = tokenizer.tokenize(string)
     result = [t.string or t.value for t in out]
@@ -23,7 +29,7 @@ class TokensTest(TestCase):
     def test_tokenize1_3(self):
         self.assertEqual(
             tokenize(b"ab ab ab", [b"a", b"b", b"ab"]),
-            [b"ab", 2, 0, b"ab", 2, 0, b"ab"]
+            [b"ab", 2, 0, b"ab", 2, 0, b"ab"],
         )
 
     def test_tokenize3(self):
@@ -35,7 +41,7 @@ class TokensTest(TestCase):
     def test_tokenize3_3(self):
         self.assertEqual(
             tokenize(b"abc abc abc", [b"a", b"ab", b"bc"]),
-            [b"a", b"bc", 2, 0, b"a", b"bc", 2, 0, b"a", b"bc"]
+            [b"a", b"bc", 2, 0, b"a", b"bc", 2, 0, b"a", b"bc"],
         )
 
     def test_tokenize4(self):
@@ -52,26 +58,31 @@ class TokensTest(TestCase):
 
     def test_tokenize6(self):
         self.assertEqual(
-            tokenize(b"abcdefg",
-                    [b"a", b"ab", b"bc", b"cd", b"de", b"ef", b"fg"]),
+            tokenize(
+                b"abcdefg", [b"a", b"ab", b"bc", b"cd", b"de", b"ef", b"fg"]
+            ),
             [b"a", b"bc", b"de", b"fg"],
         )
 
     def test_tokenize6_3(self):
         self.assertEqual(
-            tokenize(b"abcdefg abcdefg abcdefg",
-                    [b"a", b"ab", b"bc", b"cd", b"de", b"ef", b"fg"]),
+            tokenize(
+                b"abcdefg abcdefg abcdefg",
+                [b"a", b"ab", b"bc", b"cd", b"de", b"ef", b"fg"],
+            ),
             [
                 b"a",
                 b"bc",
                 b"de",
                 b"fg",
-                2, 0,
+                2,
+                0,
                 b"a",
                 b"bc",
                 b"de",
                 b"fg",
-                2, 0,
+                2,
+                0,
                 b"a",
                 b"bc",
                 b"de",

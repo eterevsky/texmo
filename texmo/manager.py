@@ -8,9 +8,9 @@ from copy import copy
 from datetime import datetime
 from typing import Optional
 
-import numpy as np
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 from jaxlib.xla_extension import XlaRuntimeError
 
@@ -21,12 +21,13 @@ from .configuration import (
     conf_from_dict,
     conf_to_dict,
     conf_to_string,
+    conf_tokens_name,
 )
 from .model2 import Model2, Weights
 from .prng import Rng
 from .record import TrainingRecord
 from .run import Run
-from .tokens import Tokenizer, TokenSet
+from .tokens import Tokenizer, TokenSet, get_tokenizer
 
 LOG2 = 1 / math.log(2)
 
@@ -74,22 +75,17 @@ class Manager(object):
     def __init__(
         self,
         conf: Configuration,
-        token_set: TokenSet = None,
         weights: Optional[Weights] = None,
         test_sample_len: int = 1024,
         test_batch: int = 1024,
         pre_training: Optional[list] = None,
     ):
         self._rng: Rng = Rng()
-        self.token_set: TokenSet = token_set
-        if token_set:
-            self.ntokens = token_set.ntokens
-            self.token_set_name = token_set.ntokens
-            self.tokenizer = Tokenizer(token_set)
-        else:
-            self.ntokens = 256
-            self.token_set_name = None
-            self.tokenizer = None
+        self.ntokens = conf.ntokens
+        self.token_set_name = conf_tokens_name(conf)
+        self.tokenizer = get_tokenizer(self.token_set_name)
+        self.ntokens = self.tokenizer.token_set.ntokens
+        assert self.ntokens == conf.ntokens
         self.conf: Configuration = conf
         self.model: Model2 = self.conf.model
         if weights is None:
@@ -249,11 +245,11 @@ class Manager(object):
         # print(lengths)
         lengths = np.array(lengths)
 
-        if self.token_set is not None and self.token_set.entropy0 > 0:
+        if self.tokenizer is not None and self.tokenizer.token_set.entropy0 > 0:
             zeros = 0
             for sample, l in zip(xs, lengths):
                 zeros += l - np.count_nonzero(sample[:l])
-            total_entropy0 = zeros * self.token_set.entropy0
+            total_entropy0 = zeros * self.tokenizer.token_set.entropy0
         else:
             total_entropy0 = 0
 
@@ -339,7 +335,9 @@ class Manager(object):
 
         loss = float(loss)
 
-        byte_loss = loss if self.token_set is None else self.token_set.byte_loss(loss)
+        byte_loss = (
+            loss if self.tokenizer is None else self.tokenizer.token_set.byte_loss(loss)
+        )
         self.run.add_step(loss, byte_loss)
 
         return loss
@@ -364,6 +362,7 @@ class Manager(object):
         t = "" if time_limit is None else f" {time_limit} s"
         s = "" if steps > 1e10 else f" {steps} steps"
         logging.info(f"Training for{t}{s}")
+        logging.info(f"token_set_name: {self.token_set_name}")
 
         while time.time() < finish_time and self.step < steps:
             batch = train_set.sample_tokens(
@@ -387,7 +386,7 @@ class Manager(object):
                 or time.time() - last_report > 10
             ):
                 last_report = time.time()
-                logging.info(self.run.report_recent_loss(self.token_set))
+                logging.info(self.run.report_recent_loss(self.tokenizer.token_set))
 
             if (
                 temp_steps is not None
@@ -464,12 +463,12 @@ class Manager(object):
 
         return (report, self.run, self.weights)
 
-    def continue_prefix(self, prefix: str, length: int) -> str | bytes:
+    def continue_prefix(
+        self, prefix: str, length: int
+    ) -> str | bytes:
         prefix_bytes: bytes = prefix.encode()  # convert str to bytes (?)
-        if self.token_set:
-            prefix_tokens = [
-                t.id for t in self.tokenizer.tokenize(prefix_bytes)
-            ]
+        if self.tokenizer:
+            prefix_tokens = [t.id for t in self.tokenizer.tokenize(prefix_bytes)]
         else:
             prefix_tokens = prefix_bytes
 

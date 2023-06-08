@@ -13,7 +13,7 @@ from typing import Optional
 import numpy as np
 
 from . import latency
-from .tokens import Tokenizer, TokenSet
+from .tokens import Tokenizer, TokenSet, get_tokenizer
 
 
 Request = namedtuple(
@@ -138,13 +138,13 @@ class DataSet(object):
         self,
         path: Optional[str] = None,
         data: Optional[bytes] = None,
-        token_sets: dict[str, TokenSet] = None,
+        token_sets: Optional[dict[str, TokenSet]] = None,
+        tokens_dir: str = None,
         debug: bool = False,
         in_process: bool = False,
     ):
-        logging.info("Createing DataSet")
+        logging.info("Creating DataSet")
         self._debug: bool = debug
-        self._token_sets = token_sets
         self.all: bytes | mmap.mmap = b""
         if path is not None:
             assert data is None
@@ -183,10 +183,11 @@ class DataSet(object):
         # queue should have at least one batch ready at any time.
         self._data_queues: dict[tuple[int, int], Queue] = {}
 
+        self._tokens_dir = tokens_dir
         self._tokenizers = {}
         if token_sets is not None:
-            for token_set_size, token_set in token_sets.items():
-                self._tokenizers[token_set_size] = Tokenizer(token_set)
+            for token_set_name, token_set in token_sets.items():
+                self._tokenizers[token_set_name] = Tokenizer(token_set)
 
         self._token_sets_lock = Lock()
 
@@ -216,7 +217,6 @@ class DataSet(object):
             self._request_queue.put(None)
         for th in self._worker_threads:
             th.join()
-        # self._worker_thread.join()
 
     def _execute_request(self, request: Request):
         if request.ntokens is not None:
@@ -225,10 +225,16 @@ class DataSet(object):
         else:
             assert request.length is not None
         if request not in self._data_queues:
-            self._data_queues[request] = Queue()
+            with self._token_sets_lock:
+                if request.token_set_name is not None and request.token_set_name not in self._tokenizers:
+                    tokenizer = get_tokenizer(request.token_set_name)
+                    assert tokenizer is not None
+                    self._tokenizers[request.token_set_name] = tokenizer
+                self._data_queues[request] = Queue()
             if not self._in_process:
-                for th in self._worker_threads:
-                    self._request_queue.put(request)
+                # 1 warmup request per queue
+                self._request_queue.put(request)
+                self._request_queue.put(request)
 
         self._request_queue.put(request)
         if self._in_process:

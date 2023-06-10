@@ -163,6 +163,7 @@ fn optimize_all_for_proc(
                 && !(ntokens >= 128 && literal_encoding == LiteralEncoding::Bits1)
                 && !(ntokens >= 256 && literal_encoding == LiteralEncoding::Bits2)
                 && !(ntokens >= 256 && processing == Processing::Raw)
+                && !(ntokens >= 512 && literal_encoding == LiteralEncoding::Dist2)
                 && !(ntokens < 256 && literal_encoding == LiteralEncoding::All)
             {
                 let mut block = ntokens / 2;

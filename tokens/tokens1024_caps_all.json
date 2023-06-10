@@ -1,0 +1,1301 @@
+{
+  "tokens": [
+    "\u0000",
+    "\u0001",
+    "\u0002",
+    "\u0003",
+    "\u0004",
+    "\u0005",
+    "\u0006",
+    "\u0007",
+    "\b",
+    "\t",
+    "\n",
+    "\n\n",
+    "\n\n\u0014",
+    "\n\n'\u0014",
+    "\n  ",
+    "\u000b",
+    "\f",
+    "\r",
+    "\u000e",
+    "\u000f",
+    "\u0010",
+    "\u0011",
+    "\u0012",
+    "\u0013",
+    "\u0014",
+    "\u0015",
+    "\u0016",
+    "\u0017",
+    "\u0018",
+    "\u0019",
+    "\u001a",
+    "\u001b",
+    "\u001c",
+    "\u001d",
+    "\u001e",
+    "\u001f",
+    " ",
+    " \u0014",
+    " \u0014a",
+    " \u0014b",
+    " \u0014c",
+    " \u0014d",
+    " \u0014g",
+    " \u0014h",
+    " \u0014i",
+    " \u0014i ",
+    " \u0014j",
+    " \u0014k",
+    " \u0014l",
+    " \u0014m",
+    " \u0014p",
+    " \u0014r",
+    " \u0014s",
+    " \u0014t",
+    " \u0014w",
+    "  ",
+    "  \n",
+    "    ",
+    " a",
+    " a ",
+    " a c",
+    " a s",
+    " ab",
+    " about",
+    " about ",
+    " after",
+    " again",
+    " all",
+    " all ",
+    " an ",
+    " and ",
+    " ap",
+    " are",
+    " aro",
+    " as ",
+    " at ",
+    " att",
+    " c",
+    " cl",
+    " co",
+    " com",
+    " comm",
+    " con",
+    " cont",
+    " could ",
+    " s",
+    " sa",
+    " said",
+    " say",
+    " sc",
+    " se",
+    " see",
+    " sh",
+    " she",
+    " she ",
+    " should ",
+    " so",
+    " so ",
+    " some",
+    " some ",
+    " sp",
+    " sta",
+    " sti",
+    " su",
+    " sub",
+    " sur",
+    " t",
+    " that ",
+    " the",
+    " the ",
+    " the \u0014",
+    " the c",
+    " the s",
+    " their ",
+    " them ",
+    " there",
+    " they",
+    " they ",
+    " this ",
+    " tho",
+    " to",
+    " to ",
+    " to \u0014",
+    " to the ",
+    " tr",
+    " tra",
+    " turn",
+    " tw",
+    " two ",
+    " w",
+    " want",
+    " was",
+    " we",
+    " we ",
+    " were ",
+    " wh",
+    " what",
+    " what ",
+    " when",
+    " when ",
+    " whi",
+    " which ",
+    " who",
+    " who ",
+    " wi",
+    " will ",
+    " with",
+    " with ",
+    " with a ",
+    " with the ",
+    " wo",
+    " wor",
+    " work",
+    " worl",
+    " would ",
+    "!",
+    "\"",
+    "\"\u0014",
+    "\" ",
+    "#",
+    "##",
+    "$",
+    "%",
+    "&",
+    "'",
+    "'\u0014",
+    "' ",
+    "'d ",
+    "'s",
+    "'s ",
+    "(",
+    "(\u0014",
+    ")",
+    ") ",
+    "), ",
+    "*",
+    "**",
+    "**\u0014",
+    "** ",
+    "+",
+    ",",
+    ", ",
+    ", \u0014",
+    ", \u0014i ",
+    ", , ",
+    ", a ",
+    ", and",
+    ", and ",
+    ", but ",
+    ", s",
+    ", the ",
+    ",\"",
+    ",\" ",
+    "-",
+    "-\u0014",
+    ".",
+    ".\n\n",
+    ".\n\n\u0014",
+    ".\n\n\"\u0014",
+    ". ",
+    ". \u0014",
+    ". \u0014a",
+    ". \u0014he ",
+    ". \u0014i ",
+    ". \u0014s",
+    ". \u0014she ",
+    ". \u0014t",
+    ". \u0014the",
+    ". \u0014the ",
+    ". \u0014w",
+    ". \"\u0014",
+    ".\"",
+    ".\"\n\n\u0014",
+    ".\"\n\n\"\u0014",
+    ".\" \u0014",
+    ".'",
+    "..",
+    "/",
+    "0",
+    "00",
+    "1",
+    "10",
+    "12",
+    "15",
+    "18",
+    "19",
+    "2",
+    "20",
+    "200",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    ":",
+    ": ",
+    ": \u0014",
+    ";",
+    "; ",
+    "<",
+    "=",
+    ">",
+    "?",
+    "? \u0014",
+    "?\"",
+    "?\"\n\n\"\u0014",
+    "@",
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y",
+    "Z",
+    "[",
+    "\\",
+    "]",
+    "^",
+    "_",
+    "_\u0014",
+    "_ ",
+    "`",
+    "a",
+    "a ",
+    "ac",
+    "acc",
+    "ack ",
+    "ad",
+    "al",
+    "al ",
+    "al \u0014",
+    "alk",
+    "ally",
+    "ally ",
+    "als",
+    "also ",
+    "am",
+    "ame ",
+    "an",
+    "an ",
+    "an \u0014",
+    "ance",
+    "and",
+    "and ",
+    "and \u0014",
+    "and s",
+    "and the ",
+    "ang",
+    "ann",
+    "ans",
+    "ans ",
+    "ant",
+    "ant ",
+    "any",
+    "any ",
+    "ar",
+    "ar ",
+    "ard",
+    "ard ",
+    "are ",
+    "arm",
+    "arr",
+    "art",
+    "ary ",
+    "as",
+    "ash",
+    "ask",
+    "ass",
+    "at",
+    "at the ",
+    "atch",
+    "ate ",
+    "ated ",
+    "b",
+    "ba",
+    "back",
+    "back ",
+    "be",
+    "be ",
+    "becau",
+    "been ",
+    "before",
+    "beg",
+    "ber",
+    "ber ",
+    "betwe",
+    "bi",
+    "bl",
+    "ble",
+    "ble ",
+    "bo",
+    "bod",
+    "br",
+    "brea",
+    "bu",
+    "but",
+    "but ",
+    "by",
+    "by ",
+    "c",
+    "ca",
+    "call",
+    "can ",
+    "cau",
+    "ce",
+    "ce ",
+    "ch",
+    "ch ",
+    "char",
+    "chil",
+    "ci",
+    "ck",
+    "co",
+    "com",
+    "con",
+    "ct",
+    "cu",
+    "d",
+    "d ",
+    "da",
+    "day",
+    "de",
+    "de ",
+    "dec",
+    "der",
+    "des",
+    "di",
+    "did ",
+    "didn't ",
+    "differ",
+    "dis",
+    "do",
+    "do ",
+    "don't ",
+    "down",
+    "dr",
+    "dra",
+    "du",
+    "e",
+    "e ",
+    "ea",
+    "each ",
+    "ear",
+    "ed",
+    "ed ",
+    "ed \u0014",
+    "ed a ",
+    "ed by",
+    "ed in ",
+    "ed the ",
+    "ed to ",
+    "ed, ",
+    "ed. \u0014",
+    "ef",
+    "el",
+    "el ",
+    "em",
+    "en",
+    "en ",
+    "ence",
+    "ence ",
+    "end",
+    "end ",
+    "ens",
+    "ent",
+    "ent ",
+    "enti",
+    "ep",
+    "er",
+    "er ",
+    "ere ",
+    "ers",
+    "ers ",
+    "es",
+    "es ",
+    "ess",
+    "ess ",
+    "est",
+    "et",
+    "et ",
+    "ev",
+    "even ",
+    "ever ",
+    "every",
+    "ex",
+    "expe",
+    "ext",
+    "ey",
+    "f",
+    "f ",
+    "fa",
+    "fe",
+    "fer",
+    "fi",
+    "fin",
+    "fir",
+    "first ",
+    "fl",
+    "fo",
+    "for",
+    "for ",
+    "for the ",
+    "fore",
+    "form",
+    "fr",
+    "fre",
+    "fri",
+    "from",
+    "from ",
+    "from the ",
+    "fu",
+    "ful",
+    "g",
+    "g ",
+    "ga",
+    "ge",
+    "ge ",
+    "gen",
+    "ger",
+    "get",
+    "get ",
+    "gg",
+    "gh",
+    "ght",
+    "ght ",
+    "gi",
+    "gl",
+    "gn",
+    "go",
+    "gr",
+    "gra",
+    "gre",
+    "gro",
+    "gu",
+    "h",
+    "ha",
+    "had",
+    "had ",
+    "had been ",
+    "hand",
+    "happ",
+    "has ",
+    "hat ",
+    "have",
+    "have ",
+    "he",
+    "he ",
+    "head",
+    "hel",
+    "her",
+    "her ",
+    "here",
+    "hi",
+    "high",
+    "him",
+    "him ",
+    "his ",
+    "ho",
+    "hou",
+    "how",
+    "how ",
+    "hu",
+    "i",
+    "i ",
+    "i'",
+    "ic",
+    "ic ",
+    "ical ",
+    "id",
+    "if",
+    "if ",
+    "il",
+    "il ",
+    "im",
+    "in",
+    "in ",
+    "in \u0014",
+    "in a ",
+    "in the ",
+    "inc",
+    "ind",
+    "ine ",
+    "ing",
+    "ing ",
+    "ing the ",
+    "ing to ",
+    "ing, ",
+    "ink",
+    "inn",
+    "ins",
+    "inst",
+    "int",
+    "inter",
+    "into",
+    "into ",
+    "ir",
+    "ir ",
+    "is",
+    "is ",
+    "ish",
+    "ish ",
+    "iss",
+    "it",
+    "it ",
+    "it was ",
+    "it's ",
+    "ite ",
+    "its ",
+    "itu",
+    "ity",
+    "ity ",
+    "j",
+    "ja",
+    "je",
+    "jo",
+    "ju",
+    "just ",
+    "k",
+    "k ",
+    "ke",
+    "ke ",
+    "ki",
+    "king",
+    "king ",
+    "know",
+    "l",
+    "la",
+    "la ",
+    "lar",
+    "le",
+    "le ",
+    "lea",
+    "lef",
+    "li",
+    "lie",
+    "life",
+    "light",
+    "like",
+    "like ",
+    "list",
+    "litt",
+    "ll",
+    "ll ",
+    "llow",
+    "lo",
+    "log",
+    "lon",
+    "look",
+    "los",
+    "lu",
+    "ly",
+    "ly ",
+    "m",
+    "m ",
+    "ma",
+    "man",
+    "man ",
+    "many ",
+    "mar",
+    "may ",
+    "me",
+    "me ",
+    "medi",
+    "men",
+    "ment",
+    "ment ",
+    "mi",
+    "mil",
+    "min",
+    "mo",
+    "mon",
+    "mor",
+    "more ",
+    "most ",
+    "mu",
+    "much ",
+    "my",
+    "my ",
+    "n",
+    "n ",
+    "n't ",
+    "na",
+    "nation",
+    "ne",
+    "new",
+    "new ",
+    "ni",
+    "no",
+    "no ",
+    "nor",
+    "not",
+    "not ",
+    "now",
+    "o",
+    "o ",
+    "ob",
+    "oc",
+    "od",
+    "od ",
+    "of",
+    "of ",
+    "of \u0014",
+    "of a ",
+    "of the ",
+    "of the \u0014",
+    "off",
+    "oft",
+    "ok",
+    "ok ",
+    "ol",
+    "old",
+    "old ",
+    "om",
+    "ome ",
+    "on",
+    "on ",
+    "on \u0014",
+    "on the ",
+    "one",
+    "one ",
+    "ong",
+    "only ",
+    "op",
+    "or",
+    "or ",
+    "ord",
+    "ot",
+    "other",
+    "other ",
+    "ou",
+    "ough",
+    "our",
+    "our ",
+    "ous",
+    "ous ",
+    "out",
+    "out ",
+    "over",
+    "over ",
+    "ow",
+    "ow ",
+    "own",
+    "own ",
+    "p",
+    "p ",
+    "pa",
+    "par",
+    "part",
+    "pe",
+    "people",
+    "per",
+    "ph",
+    "pi",
+    "pl",
+    "pla",
+    "ple",
+    "po",
+    "pon",
+    "por",
+    "port",
+    "pos",
+    "pow",
+    "pp",
+    "pr",
+    "pre",
+    "pres",
+    "pri",
+    "pro",
+    "ps",
+    "pt",
+    "pu",
+    "publ",
+    "q",
+    "qu",
+    "que",
+    "que ",
+    "qui",
+    "r",
+    "ra",
+    "ran",
+    "re",
+    "re ",
+    "rea",
+    "read",
+    "rec",
+    "res",
+    "ret",
+    "ri",
+    "right",
+    "ro",
+    "room",
+    "ros",
+    "ru",
+    "ry",
+    "s",
+    "s ",
+    "s and ",
+    "s of ",
+    "s to ",
+    "s,",
+    "s, ",
+    "s. \u0014",
+    "se",
+    "se ",
+    "sel",
+    "self",
+    "si",
+    "side",
+    "side ",
+    "sign",
+    "sion",
+    "sion ",
+    "so",
+    "son",
+    "st",
+    "st ",
+    "stand",
+    "sto",
+    "stor",
+    "str",
+    "stra",
+    "stu",
+    "t",
+    "t ",
+    "t of ",
+    "ta",
+    "tain",
+    "te",
+    "ter",
+    "th",
+    "th ",
+    "than",
+    "than ",
+    "that",
+    "the",
+    "the ",
+    "the \u0014",
+    "them",
+    "then",
+    "then ",
+    "ther",
+    "ther ",
+    "there ",
+    "thin",
+    "thing",
+    "thing ",
+    "this",
+    "thou",
+    "though",
+    "thre",
+    "through",
+    "ti",
+    "time",
+    "time ",
+    "tion",
+    "tion ",
+    "tions",
+    "tions ",
+    "tive",
+    "tive ",
+    "to",
+    "tt",
+    "tter ",
+    "u",
+    "uc",
+    "ul",
+    "uld",
+    "ult",
+    "um",
+    "un",
+    "unc",
+    "und",
+    "und ",
+    "under",
+    "uni",
+    "unt",
+    "up",
+    "up ",
+    "ur",
+    "ure",
+    "ure ",
+    "urn",
+    "us",
+    "us ",
+    "ush",
+    "ut",
+    "v",
+    "va",
+    "ve",
+    "ve ",
+    "ved ",
+    "ven",
+    "ver",
+    "vers",
+    "very ",
+    "ves",
+    "vi",
+    "vie",
+    "ving ",
+    "vo",
+    "w",
+    "w ",
+    "wa",
+    "was ",
+    "way",
+    "way ",
+    "we",
+    "wh",
+    "wi",
+    "x",
+    "x ",
+    "y",
+    "y ",
+    "y, ",
+    "ye",
+    "year",
+    "you",
+    "you ",
+    "you'",
+    "your ",
+    "ys",
+    "z",
+    "za",
+    "ze",
+    "{",
+    "|",
+    "| ",
+    "}",
+    "~",
+    "",
+    [
+      128
+    ],
+    [
+      129
+    ],
+    [
+      130
+    ],
+    [
+      131
+    ],
+    [
+      132
+    ],
+    [
+      133
+    ],
+    [
+      134
+    ],
+    [
+      135
+    ],
+    [
+      136
+    ],
+    [
+      137
+    ],
+    [
+      138
+    ],
+    [
+      139
+    ],
+    [
+      140
+    ],
+    [
+      141
+    ],
+    [
+      142
+    ],
+    [
+      143
+    ],
+    [
+      144
+    ],
+    [
+      145
+    ],
+    [
+      146
+    ],
+    [
+      147
+    ],
+    [
+      148
+    ],
+    [
+      149
+    ],
+    [
+      150
+    ],
+    [
+      151
+    ],
+    [
+      152
+    ],
+    [
+      153
+    ],
+    [
+      154
+    ],
+    [
+      155
+    ],
+    [
+      156
+    ],
+    [
+      157
+    ],
+    [
+      158
+    ],
+    [
+      159
+    ],
+    [
+      160
+    ],
+    [
+      161
+    ],
+    [
+      162
+    ],
+    [
+      163
+    ],
+    [
+      164
+    ],
+    [
+      165
+    ],
+    [
+      166
+    ],
+    [
+      167
+    ],
+    [
+      168
+    ],
+    [
+      169
+    ],
+    [
+      170
+    ],
+    [
+      171
+    ],
+    [
+      172
+    ],
+    [
+      173
+    ],
+    [
+      174
+    ],
+    [
+      175
+    ],
+    [
+      176
+    ],
+    [
+      177
+    ],
+    [
+      178
+    ],
+    [
+      179
+    ],
+    [
+      180
+    ],
+    [
+      181
+    ],
+    [
+      182
+    ],
+    [
+      183
+    ],
+    [
+      184
+    ],
+    [
+      185
+    ],
+    [
+      186
+    ],
+    [
+      187
+    ],
+    [
+      188
+    ],
+    [
+      189
+    ],
+    [
+      190
+    ],
+    [
+      191
+    ],
+    [
+      192
+    ],
+    [
+      193
+    ],
+    [
+      194
+    ],
+    [
+      195
+    ],
+    "ä",
+    "é",
+    "í",
+    [
+      196
+    ],
+    [
+      197
+    ],
+    [
+      198
+    ],
+    [
+      199
+    ],
+    [
+      200
+    ],
+    [
+      201
+    ],
+    [
+      202
+    ],
+    [
+      203
+    ],
+    [
+      204
+    ],
+    [
+      205
+    ],
+    [
+      206
+    ],
+    [
+      207
+    ],
+    [
+      208
+    ],
+    [
+      209
+    ],
+    [
+      210
+    ],
+    [
+      211
+    ],
+    [
+      212
+    ],
+    [
+      213
+    ],
+    [
+      214
+    ],
+    [
+      215
+    ],
+    [
+      216
+    ],
+    [
+      217
+    ],
+    [
+      218
+    ],
+    [
+      219
+    ],
+    [
+      220
+    ],
+    [
+      221
+    ],
+    [
+      222
+    ],
+    [
+      223
+    ],
+    [
+      224
+    ],
+    [
+      225
+    ],
+    [
+      226
+    ],
+    "–",
+    "—",
+    [
+      227
+    ],
+    [
+      228
+    ],
+    [
+      229
+    ],
+    [
+      230
+    ],
+    [
+      231
+    ],
+    [
+      232
+    ],
+    [
+      233
+    ],
+    [
+      234
+    ],
+    [
+      235
+    ],
+    [
+      236
+    ],
+    [
+      237
+    ],
+    [
+      238
+    ],
+    [
+      239
+    ],
+    [
+      240
+    ],
+    [
+      241
+    ],
+    [
+      242
+    ],
+    [
+      243
+    ],
+    [
+      244
+    ],
+    [
+      245
+    ],
+    [
+      246
+    ],
+    [
+      247
+    ],
+    [
+      248
+    ],
+    [
+      249
+    ],
+    [
+      250
+    ],
+    [
+      251
+    ],
+    [
+      252
+    ],
+    [
+      253
+    ],
+    [
+      254
+    ],
+    [
+      255
+    ]
+  ],
+  "stats": {
+    "ntokens": 1024,
+    "initial_size": 108362047381,
+    "processed_size": 111192723250,
+    "total_cost": 43405871020,
+    "cost_per_token": 2.496483651510422,
+    "total_tokens": 43405871020,
+    "total_literals": 0,
+    "final_tokens": 43405871020,
+    "bytes_per_token": 2.496483651510422,
+    "literal_dist_entropy": 0,
+    "literal_cost": 256,
+    "literal_entropy_per_input_byte": 0,
+    "literal_entropy_per_token": 0
+  },
+  "type": "all_tokens",
+  "processing": "caps"
+}

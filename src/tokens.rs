@@ -144,8 +144,11 @@ impl TokenSet {
                 }
             },
             LiteralEncoding::All => {
-                for i in 0..=255
-            }
+                for i in 0..=255 {
+                    token_set.add_mandatory_token(&[i])
+                }
+            },
+            _ => ()
         }
 
         token_set

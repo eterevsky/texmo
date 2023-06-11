@@ -6,7 +6,6 @@ from typing import Any
 
 from .common import INF, is_power2, power2_neighbors
 from .model2 import Model2, build_model
-from .record import TrainingRecord
 from .tokens import parse_token_set_name
 
 TOKEN_TYPES = ("all", "bits1", "bits2", "bits4", "dist2", "dist4", "dist8")
@@ -24,23 +23,6 @@ Configuration = namedtuple(
         "t",
     ],
 )
-
-
-def conf_from_record(record: TrainingRecord) -> Configuration:
-    ntokens, token_processing, token_type  = parse_token_set_name(
-        record.token_set_name
-    )
-    model = build_model(ntokens, record.model_spec)
-    return Configuration(
-        model,
-        ntokens=ntokens,
-        token_type=token_type,
-        token_processing=token_processing,
-        lr=record.learning_rate,
-        sample_len=record.train_sample_len,
-        batch=record.train_batch,
-        t=record.planned_time_s,
-    )
 
 
 def conf_to_dict(conf: Configuration) -> dict[str, Any]:

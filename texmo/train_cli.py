@@ -9,7 +9,7 @@ from .configuration import Configuration
 from .dataset import DataSet
 from .manager import Manager
 from .model2 import build_model
-from .tokens import TokenSet
+from .tokens import TokenSet, get_tokenizer, set_tokens_dir
 
 
 def show_loss_graph(manager: Manager, output_dir: str):
@@ -21,6 +21,7 @@ def show_loss_graph(manager: Manager, output_dir: str):
 
     steps2 = steps * 2
     loss2 = run.loss_trend.predict([steps2])[0]
+    print(loss2)
     logging.info(f"Expected loss at {steps2} steps: {loss2:.4f}")
 
     plt.xscale("log")
@@ -59,6 +60,8 @@ def train(args: argparse.Namespace):
     #     ntokens = 256
     #     token_sets = {}
     #     logging.info(f"No token set")
+    set_tokens_dir(args.tokens_dir)
+
     logging.info(f"Training data: {args.data}")
     train_set = DataSet(args.data, tokens_dir=args.tokens_dir)
     lr = parse_lr(args.lr)
@@ -71,7 +74,7 @@ def train(args: argparse.Namespace):
                 manager.add_layers(args.add_layers)
             manager.init()
         else:
-            tokenizer = train_set.get_tokenizer(args.token_set)
+            tokenizer = get_tokenizer(args.token_set)
             conf = Configuration(
                 build_model(tokenizer.token_set.ntokens, args.spec),
                 ntokens=tokenizer.token_set.ntokens,
@@ -82,7 +85,7 @@ def train(args: argparse.Namespace):
                 batch=args.batch,
                 t=args.time,
             )
-            manager = Manager(conf, tokenizer=tokenizer, test_batch=args.test_batch, test_sample_len=args.test_sample_len)
+            manager = Manager(conf, test_batch=args.test_batch, test_sample_len=args.test_sample_len)
             manager.init()
 
         manager.train_and_eval(
@@ -219,7 +222,7 @@ def init_args(parser: argparse.ArgumentParser):
 
     parser.add_argument(
         "--log",
-        default="log-mac.csv",
+        default=None,
         metavar="PATH",
         help="path to a CSV file for logging",
     )

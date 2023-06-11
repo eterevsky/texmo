@@ -44,7 +44,6 @@ class LiteralBytesTokenizer(object):
 
 
 _TOKENIZERS = {"tokens256_raw_all": LiteralBytesTokenizer()}
-
 _TOKENS_DIR = None
 
 
@@ -54,6 +53,7 @@ def get_tokenizer(name: str):
         return tokenizer
 
     if _TOKENS_DIR is None:
+        logging.warning(f"Tokens directory not set")
         return None
 
     path = os.path.join(_TOKENS_DIR, name + ".json")
@@ -66,4 +66,5 @@ def get_tokenizer(name: str):
 
 
 def set_tokens_dir(path: str):
+    global _TOKENS_DIR
     _TOKENS_DIR = path

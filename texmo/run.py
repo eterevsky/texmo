@@ -65,8 +65,9 @@ class LossTrend(object):
             self._c1, self._c2, self._eps = res.x
 
     def predict(self, step):
+        step = np.array(step)
         if self._eps > 0 or self._c2 == 0:
-            prediction = self._c1
+            prediction = np.array([self._c1] * step)
         else:
             prediction = _pred_log(self._c1, self._c2, self._eps, step)
         return 2**prediction

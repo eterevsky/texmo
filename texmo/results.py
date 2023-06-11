@@ -9,7 +9,7 @@ from typing import Optional
 
 from . import latency
 from .common import INF
-from .configuration import (Configuration, Template, conf_from_record,
+from .configuration import (Configuration, Template,
                             conf_is_valid, conf_neighbors)
 from .record import TrainingRecord
 from .resultdb import ResultDB

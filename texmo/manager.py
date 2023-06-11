@@ -434,32 +434,25 @@ class Manager(object):
 
         report = TrainingRecord(
             timestamp=datetime.now(),
-            ntokens=self.conf.model.ntokens,
-            model_spec=str(self.conf.model),
-            weights=self.conf.model.weights,
-            steps=self.step,
+            conf=self.conf,
             train_time_s=train_time,
-            learning_rate=self.conf.lr,
             regularization=1e-4,
-            train_sample_len=self.conf.sample_len,
-            train_batch=self.conf.batch,
             total_data=train_set.total_size,
             loss=eval_loss,
             test_sample_len=self.test_sample_len,
             test_batch=self.test_batch,
             test_poisoned=True,
-            init_scale=1.0,
             planned_time_s=time_limit,
             final_time_s=time_limit,
             loss_model_v=self.run.loss_trend.version,
             loss_model_params=self.run.loss_trend.params(),
+            steps=self.step,
         )
 
         logging.info(str(report))
         if log is not None:
             with open(log, "a", newline="") as logfile:
-                writer = csv.writer(logfile)
-                writer.writerow(report.csv_tuple())
+                log.write(report.jsonl() + "\n")
 
         return (report, self.run, self.weights)
 

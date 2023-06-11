@@ -14,7 +14,6 @@ from .configuration import (
     Configuration,
     Template,
     conf_from_dict,
-    conf_from_record,
     conf_is_valid,
     conf_to_dict,
 )

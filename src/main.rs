@@ -163,7 +163,10 @@ fn optimize_all_for_proc(
                 && !(ntokens >= 128 && literal_encoding == LiteralEncoding::Bits1)
                 && !(ntokens >= 256 && literal_encoding == LiteralEncoding::Bits2)
                 && !(ntokens >= 256 && processing == Processing::Raw)
-                && !(ntokens >= 512 && literal_encoding == LiteralEncoding::Dist2)
+                // && !(ntokens >= 512 && literal_encoding == LiteralEncoding::Dist2)
+                && !(processing == Processing::Raw && literal_encoding == LiteralEncoding::Bits1)
+                && !(processing == Processing::Raw && literal_encoding == LiteralEncoding::Bits2)
+                && !(processing == Processing::Raw && literal_encoding == LiteralEncoding::Bits4)
                 && !(ntokens < 256 && literal_encoding == LiteralEncoding::All)
             {
                 let mut block = ntokens / 2;
@@ -400,9 +403,8 @@ fn tokenize(
 
     let stats_json = stats.to_json(
         initial_size,
-        token_set.literal_cost(),
         token_set.literal_encoding.tokens_in_literal(),
-        token_set.dist_entropy(),
+        token_set.dist_entropy(&stats),
         token_set.reserved_tokens(),
     );
     println!("{}", json::stringify_pretty(stats_json, 2));

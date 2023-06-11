@@ -4,8 +4,7 @@
     1,
     "\n",
     " ",
-    " t",
-    " th",
+    " the ",
     "\"",
     "'",
     "*",
@@ -57,26 +56,31 @@
     "t",
     "t ",
     "th",
-    "the ",
     "u",
     "v",
     "w",
     "x",
     "y",
     [
+      128
+    ],
+    [
       195
+    ],
+    [
+      226
     ]
   ],
   "stats": {
     "ntokens": 64,
     "initial_size": 108362047381,
     "processed_size": 108362047381,
-    "total_cost": 111307142708,
-    "cost_per_token": 0.9735408235684742,
-    "total_tokens": 86910467148,
-    "total_literals": 3049584445,
-    "final_tokens": 111307142708,
-    "bytes_per_token": 0.9735408235684742,
+    "total_cost": 109828203851,
+    "cost_per_token": 0.9866504557245689,
+    "total_tokens": 87276183019,
+    "total_literals": 2819002604,
+    "final_tokens": 109828203851,
+    "bytes_per_token": 0.9866504557245689,
     "literal_dist_entropy": 0,
     "literal_cost": 8,
     "literal_entropy_per_input_byte": 0,

@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::cmp::min;
+
 use crate::sampler::{Sampler, SelectionSampler};
 use crate::stats::TokenStats;
 use crate::tokenizer::tokenize_file;
@@ -10,17 +13,59 @@ fn format_token(s: &[u8]) -> String {
     }
 }
 
-fn tokens_to_add(
-    token_set: &TokenSet,
-    stats: &TokenStats,
-    ntokens: usize,
-    literal_cost: u64,
+struct TokenizerCache<'a, S: Sampler<'a>> {
+    sampler: &'a S,
+    cache: HashMap<Vec<u8>, TokenStats>,
+}
+
+impl<'a, S: Sampler<'a>> TokenizerCache<'a, S> {
+    fn new(sampler: &'a S) -> Self {
+        TokenizerCache {
+            sampler,
+            cache: HashMap::new(),
+        }
+    }
+
+    fn get_stats(&mut self, token_set: &TokenSet) -> TokenStats {
+        let mut tokens = token_set
+            .tokens
+            .iter()
+            .map(|t| t.string.clone())
+            .collect::<Vec<_>>();
+        tokens.sort_unstable();
+
+        let mut key = Vec::new();
+        for token in tokens {
+            key.extend(token);
+            key.push(0);
+        }
+
+        if let Some(cached) = self.cache.get(&key) {
+            return cached.clone();
+        }
+
+        let stats = tokenize_file(token_set, self.sampler);
+        self.cache.insert(key, stats.clone());
+
+        stats
+    }
+}
+
+fn add_tokens<'a, S: Sampler<'a>>(
+    tokenizer: &mut TokenizerCache<'a, S>,
+    token_set: &mut TokenSet,
+    tokens_to_add: usize,
 ) -> Vec<Vec<u8>> {
+    let stats = tokenizer.get_stats(token_set);
+
     let mut token_values = Vec::new();
 
     for i in 0..256 {
         if stats.literal_count[i] > 0 {
-            token_values.push((vec![i as u8], stats.literal_count[i] * (literal_cost - 1)))
+            token_values.push((
+                vec![i as u8],
+                stats.literal_count[i] * (token_set.literal_cost() - 1),
+            ))
         }
     }
 
@@ -39,29 +84,34 @@ fn tokens_to_add(
 
     token_values.sort_unstable_by_key(|&(_, value)| -(value as i64));
 
-    token_values
-        .iter()
-        .take(ntokens)
-        .map(|&(ref t, _)| t.clone())
-        .collect()
+    let mut added = Vec::new();
+
+    for (token_str, _) in token_values.iter().take(tokens_to_add) {
+        token_set.add_token(token_str.as_slice());
+        added.push(token_str.clone());
+    }
+
+    added
 }
 
-fn remove_token<'a, S: Sampler<'a>>(
+fn add_and_remove_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
+    tokenizer: &mut TokenizerCache<'a, S1>,
+    fast_tokenizer: &mut TokenizerCache<'a, S2>,
     token_set: &TokenSet,
-    initial_cost: u64,
-    sampler: &'a S,
-    fast_sampler: &'a SelectionSampler,
-) -> Option<(TokenSet, TokenStats)> {
+) -> Option<TokenSet> {
     let mut token_set = token_set.clone();
-    let stats_before = tokenize_file(&token_set, sampler);
-    let fast_stats_before = tokenize_file(&token_set, fast_sampler);
-    token_set.update_stats(&stats_before);
+    let initial_stats = tokenizer.get_stats(&token_set);
+
+    add_tokens(tokenizer, &mut token_set, 1);
+
+    let stats_before = tokenizer.get_stats(&token_set);
+    let fast_stats_before = fast_tokenizer.get_stats(&token_set);
 
     let mut token_ids: Vec<usize> = (0..token_set.tokens.len()).collect();
     token_ids.sort_unstable_by_key(|&i| stats_before.token_count[i]);
 
-    // We construct a list of tokens to remove because the ids will change when we are removing and adding
-    // tokens.
+    // We construct a list of tokens to remove because the ids will change when
+    // we are removing and adding tokens.
     let mut token_strs: Vec<Vec<u8>> = Vec::new();
 
     for &token_id_to_remove in token_ids.iter() {
@@ -72,15 +122,15 @@ fn remove_token<'a, S: Sampler<'a>>(
         token_strs.push(token_to_remove.string.clone());
     }
 
-    let add_token_limit = initial_cost - stats_before.cost(token_set.literal_cost());
+    let add_token_limit = initial_stats.cost() - stats_before.cost();
     // Check if removing a token adds > 3/2 the cost that we can afford on a sparser sampler.
     let fast_add_token_limit =
         add_token_limit * fast_stats_before.scanned_bytes * 3 / (stats_before.scanned_bytes * 2);
-    let fast_cost_before = fast_stats_before.cost(token_set.literal_cost());
+    let fast_cost_before = fast_stats_before.cost();
 
     println!(
         "Can add up to {:.4}% cost by removing a token.",
-        100.0 * add_token_limit as f64 / stats_before.cost(token_set.literal_cost()) as f64
+        100.0 * add_token_limit as f64 / stats_before.cost() as f64
     );
 
     let mut tries = 0;
@@ -90,17 +140,16 @@ fn remove_token<'a, S: Sampler<'a>>(
         tries += 1;
 
         token_set.remove_token(token_str);
-        let fast_stats = tokenize_file(&token_set, fast_sampler);
+        let fast_stats = fast_tokenizer.get_stats(&token_set);
 
-        if fast_stats.cost(token_set.literal_cost()) - fast_cost_before >
-              fast_add_token_limit {
+        if fast_stats.cost() - fast_cost_before > fast_add_token_limit {
             println!("Not checking whether we can remove {} since removing it adds {:.4}% tokens on the smaller sample.",
-                     format_token(token_str), 100.0 * (fast_stats.cost(token_set.literal_cost()) - fast_cost_before) as f64 / fast_cost_before as f64);
+                     format_token(token_str), 100.0 * (fast_stats.cost() - fast_cost_before) as f64 / fast_cost_before as f64);
             continue;
         }
 
-        let stats = tokenize_file(&token_set, sampler);
-        token_set.update_stats(&stats);
+        let stats = tokenizer.get_stats(&token_set);
+        // token_set.update_stats(&stats);
 
         // if stats.cost < initial_stats.cost
         //     && stats.token_to_add(&new_token_set) == token_str
@@ -108,19 +157,65 @@ fn remove_token<'a, S: Sampler<'a>>(
         //     println!("Cost after removing {} would be {}, but it would be added on the next iteration.", format_token(&token_str), stats.cost);
         // }
 
-        if stats.cost(token_set.literal_cost()) < initial_cost
-        // && stats.token_to_add(&new_token_set) != token_str
-        {
+        if stats.cost() < initial_stats.cost() {
             // Found a token to remove.
             println!(
                 "removing {} after {} tries",
                 format_token(&token_str),
                 tries
             );
-            return Some((token_set, stats));
+            return Some(token_set);
         }
 
         token_set.add_token(&token_str);
+    }
+
+    None
+}
+
+fn remove_and_add_token<'a, S: Sampler<'a>>(
+    tokenizer: &mut TokenizerCache<'a, S>,
+    token_set: &TokenSet,
+) -> Option<TokenSet> {
+    let initial_stats = tokenizer.get_stats(token_set);
+
+    let mut token_ids: Vec<usize> = (0..token_set.tokens.len()).collect();
+    token_ids.sort_unstable_by_key(|&i| initial_stats.token_count[i]);
+
+    // We construct a list of tokens to remove because the ids will change when
+    // we are removing and adding tokens.
+    let mut token_strs: Vec<Vec<u8>> = Vec::new();
+
+    for &token_id_to_remove in token_ids.iter() {
+        let token_to_remove = &token_set.tokens[token_id_to_remove];
+        if token_to_remove.is_mandatory {
+            continue;
+        }
+        token_strs.push(token_to_remove.string.clone());
+    }
+
+    let mut tries = 0;
+
+    for token_str in token_strs.iter() {
+        println!("Trying to remove {}       ", format_token(token_str));
+        let token_str = token_str.as_slice();
+        tries += 1;
+
+        let mut new_token_set = token_set.clone();
+
+        new_token_set.remove_token(token_str);
+
+        let added = add_tokens(tokenizer, &mut new_token_set, 1);
+        let stats = tokenizer.get_stats(&new_token_set);
+        if stats.cost() < initial_stats.cost() {
+            println!(
+                "Replacing {} -> {} after {} tries",
+                format_token(&token_str),
+                format_token(added[0].as_slice()),
+                tries
+            );
+            return Some(new_token_set);
+        }
     }
 
     None
@@ -134,53 +229,47 @@ pub fn optimize_bpe<'a, S: Sampler<'a>>(
     add_block: usize,
 ) -> (TokenSet, TokenStats) {
     let mut token_set = token_set.clone();
-    let mut prev_stats = None;
+
+    let mut tokenizer = TokenizerCache::new(sampler);
+    let mut fast_tokenizer = TokenizerCache::new(fast_sampler);
+
+    while token_set.ntokens() < ntokens {
+        let tokens_to_add = min(add_block, ntokens - token_set.ntokens());
+        let added = add_tokens(&mut tokenizer, &mut token_set, tokens_to_add);
+        for token_str in added.iter() {
+            println!("Added {}", format_token(token_str.as_slice()));
+        }
+        let stats = tokenizer.get_stats(&token_set);
+        println!(
+            "{} tokens, bytes/cost = {:.3}  literals/bytes = {:.5}",
+            token_set.ntokens(),
+            stats.scanned_bytes as f64 / stats.cost() as f64,
+            stats.total_literals() as f64 / stats.scanned_bytes as f64,
+        );
+    }
 
     loop {
-        let initial_stats = match prev_stats {
-            Some(s) => s,
-            None => tokenize_file(&token_set, sampler),
-        };
-        token_set.update_stats(&initial_stats);
-
+        let stats = tokenizer.get_stats(&token_set);
         println!(
-            "{} tokens, bytes/(tokens+literals) = {:.3}  literals/bytes = {:.5}",
+            "{} tokens, bytes/cost = {:.3}  literals/bytes = {:.5}",
             token_set.ntokens(),
-            initial_stats.scanned_bytes as f64
-                / (initial_stats.total_tokens() + initial_stats.total_literals()) as f64,
-            initial_stats.total_literals() as f64 / initial_stats.scanned_bytes as f64,
+            stats.scanned_bytes as f64 / stats.cost() as f64,
+            stats.total_literals() as f64 / stats.scanned_bytes as f64,
         );
-        let new_tokens = if token_set.ntokens() + add_block > ntokens {
-            tokens_to_add(&token_set, &initial_stats, 1, token_set.literal_cost())
-        } else {
-            tokens_to_add(
-                &token_set,
-                &initial_stats,
-                add_block,
-                token_set.literal_cost(),
-            )
-        };
-        let mut new_token_set = token_set.clone();
-        for token_str in new_tokens {
-            println!("adding {}", format_token(&token_str));
-            new_token_set.add_token(&token_str);
-        }
-        prev_stats = None;
-
-        if new_token_set.ntokens() > ntokens {
-            if let Some((token_set_removed, stats)) = remove_token(
-                &new_token_set,
-                initial_stats.cost(token_set.literal_cost()),
-                sampler,
-                fast_sampler,
-            ) {
-                token_set = token_set_removed;
-                prev_stats = Some(stats);
-            } else {
-                return (token_set, initial_stats);
-            }
-        } else {
+        // if let Some(new_token_set) =
+        //     add_and_remove_token(&mut tokenizer, &mut fast_tokenizer, &token_set)
+        // {
+        //     token_set = new_token_set;
+        //     continue;
+        // }
+        if let Some(new_token_set) = remove_and_add_token(&mut tokenizer, &token_set) {
             token_set = new_token_set;
+            continue;
+        } else {
+            break;
         }
     }
+
+    let stats = tokenizer.get_stats(&token_set);
+    (token_set, stats)
 }

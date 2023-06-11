@@ -189,7 +189,7 @@ impl Tokenizer {
     }
 
     fn get_stats(&self, cost_array: &[DynState]) -> TokenStats {
-        let mut token_stats = TokenStats::new(self.token_set.tokens.len());
+        let mut token_stats = TokenStats::new(self.token_set.tokens.len(), self.token_set.literal_cost());
 
         let mut pos = cost_array.len() - 1;
         token_stats.scanned_bytes = pos as u64;
@@ -255,7 +255,7 @@ pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S) -
     let jobs_rx_shared = Arc::new(Mutex::new(jobs_rx));
     let (results_tx, results_rx) = mpsc::channel::<TokenStats>();
 
-    let mut total_stats = TokenStats::new(token_set.tokens.len());
+    let mut total_stats = TokenStats::new(token_set.tokens.len(), token_set.literal_cost());
 
     std::thread::scope(|s| {
         let mut join_handles = Vec::new();
@@ -301,7 +301,7 @@ pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S) -
             //     "\rAvg pace: {:.1} MB / s",
             //     total_stats.scanned_bytes as f64 / 1000000.0 / elapsed.as_secs_f64()
             // );
-            eprint!("\r                     \r");
+            eprint!("\r                                          \r");
         }
 
         while !join_handles.is_empty() {

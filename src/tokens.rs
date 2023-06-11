@@ -115,13 +115,13 @@ pub struct TokenSet {
     pub tokens_by_string: HashMap<Vec<u8>, u32>,
     pub literal_encoding: LiteralEncoding,
 
-    /// Number of tokens that are not added to the token set since they don't
-    /// have a string representation.
+    // Number of tokens that are not added to the token set since they don't
+    // have a string representation.
     // reserved_tokens: usize,
 
-    /// Number of each literal in the latest tokenization. Smoothed by +1 for
-    /// all non-token literals.
-    literal_count: [u64; 256],
+    // Number of each literal in the latest tokenization. Smoothed by +1 for
+    // all non-token literals.
+    // literal_count: [u64; 256],
 }
 
 impl TokenSet {
@@ -130,7 +130,7 @@ impl TokenSet {
             tokens: Vec::new(),
             tokens_by_string: HashMap::new(),
             literal_encoding,
-            literal_count: [0; 256],
+            // literal_count: [0; 256],
         };
 
         match literal_encoding {
@@ -142,13 +142,13 @@ impl TokenSet {
                 for i in ('a' as u8)..=('f' as u8) {
                     token_set.add_mandatory_token(&[i]);
                 }
-            },
+            }
             LiteralEncoding::All => {
                 for i in 0..=255 {
                     token_set.add_mandatory_token(&[i])
                 }
-            },
-            _ => ()
+            }
+            _ => (),
         }
 
         token_set
@@ -169,11 +169,11 @@ impl TokenSet {
         }
     }
 
-    pub fn dist_entropy(&self) -> f64 {
+    pub fn dist_entropy(&self, stats: &TokenStats) -> f64 {
         if !self.has_dist_fallback() {
             return 0.0;
         }
-        let total_literals: u64 = self.literal_count.iter().sum();
+        let total_literals: u64 = stats.literal_count.iter().sum();
         if total_literals == 0 {
             return 0.0;
         }
@@ -181,8 +181,8 @@ impl TokenSet {
         let mut entropy: f64 = 0.0;
 
         for b in 0..256 {
-            if self.literal_count[b] > 0 {
-                let fraction = self.literal_count[b] as f64 / total_literals as f64;
+            if stats.literal_count[b] > 0 {
+                let fraction = stats.literal_count[b] as f64 / total_literals as f64;
                 entropy -= fraction * fraction.log2();
             }
         }
@@ -190,34 +190,34 @@ impl TokenSet {
         entropy
     }
 
-    pub fn update_stats(&mut self, stats: &TokenStats) {
-        self.literal_count = stats.literal_count;
-        // let total_literals: u64 = self.literal_count.iter().sum();
-        // let total_tokens: u64 = stats.token_count.iter().sum();
+    // pub fn update_stats(&mut self, stats: &TokenStats) {
+    //     self.literal_count = stats.literal_count;
+    //     // let total_literals: u64 = self.literal_count.iter().sum();
+    //     // let total_tokens: u64 = stats.token_count.iter().sum();
 
-        for b in 0..=255 {
-            if !self.tokens_by_string.contains_key(&vec![b]) {
-                self.literal_count[b as usize] += 1;
-            }
-        }
+    //     for b in 0..=255 {
+    //         if !self.tokens_by_string.contains_key(&vec![b]) {
+    //             self.literal_count[b as usize] += 1;
+    //         }
+    //     }
 
-        // if !self.has_dist_fallback() {
-        //     return;
-        // }
+    //     // if !self.has_dist_fallback() {
+    //     //     return;
+    //     // }
 
-        // if total_tokens == 0 {
-        //     self.literal_cost = 8.0;
-        //     return;
-        // }
+    //     // if total_tokens == 0 {
+    //     //     self.literal_cost = 8.0;
+    //     //     return;
+    //     // }
 
-        // // Suppose 1 byte has entropy 1 bit
-        // // Then 1 token = 1 / log2(ntokens) bits of entropy
+    //     // // Suppose 1 byte has entropy 1 bit
+    //     // // Then 1 token = 1 / log2(ntokens) bits of entropy
 
-        // let bytes_per_token =
-        //     (stats.scanned_bytes - total_literals) as f64 / (total_tokens as f64 + 1.0);
+    //     // let bytes_per_token =
+    //     //     (stats.scanned_bytes - total_literals) as f64 / (total_tokens as f64 + 1.0);
 
-        // self.literal_cost = 1.0 + self.dist_entropy() / bytes_per_token
-    }
+    //     // self.literal_cost = 1.0 + self.dist_entropy() / bytes_per_token
+    // }
 
     pub fn reserved_tokens(&self) -> usize {
         self.literal_encoding.reserved_tokens()
@@ -319,7 +319,8 @@ impl TokenSet {
     pub fn to_json(&self, stats: &TokenStats, initial_size: u64) -> json::JsonValue {
         let mut out = json::object! {
             tokens: [],
-            stats: stats.to_json(initial_size, self.literal_cost(), self.literal_encoding.tokens_in_literal(), self.dist_entropy(), self.literal_encoding.reserved_tokens()),
+            stats: stats.to_json(initial_size, self.literal_encoding.tokens_in_literal(),
+                                 self.dist_entropy(stats), self.literal_encoding.reserved_tokens()),
         };
 
         let mut token_strs = vec![];
@@ -365,7 +366,7 @@ impl TokenSet {
             LiteralEncoding::Dist2 | LiteralEncoding::Dist4 | LiteralEncoding::Dist8 => {
                 out["type"] = "fallback_distribution".into();
                 out["literal_count"] = json::JsonValue::new_array();
-                for &count in self.literal_count.iter() {
+                for &count in stats.literal_count.iter() {
                     out["literal_count"].push(count).unwrap();
                 }
             }

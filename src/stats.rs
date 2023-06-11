@@ -1,6 +1,8 @@
 use json::JsonValue;
 
+#[derive(Clone)]
 pub struct TokenStats {
+    literal_cost: u64,
     pub token_count: Vec<u64>,
     pub pair_count: Vec<u64>,
     pub literal_count: [u64; 256],
@@ -8,7 +10,7 @@ pub struct TokenStats {
 }
 
 impl TokenStats {
-    pub fn new(ntokens: usize) -> Self {
+    pub fn new(ntokens: usize, literal_cost: u64) -> Self {
         let mut token_count = Vec::new();
         token_count.resize(ntokens, 0);
 
@@ -16,6 +18,7 @@ impl TokenStats {
         pair_count.resize(ntokens * ntokens, 0);
 
         TokenStats {
+            literal_cost,
             token_count,
             pair_count,
             literal_count: [0; 256],
@@ -44,19 +47,18 @@ impl TokenStats {
         self.token_count.iter().sum()
     }
 
-    pub fn cost(&self, literal_cost: u64) -> u64 {
-        self.token_count.iter().sum::<u64>() + literal_cost * self.literal_count.iter().sum::<u64>()
+    pub fn cost(&self) -> u64 {
+        self.token_count.iter().sum::<u64>() + self.literal_cost * self.literal_count.iter().sum::<u64>()
     }
 
     pub fn to_json(
         &self,
         initial_size: u64,
-        literal_cost: u64,
         tokens_in_literal: u64,
         literal_dist_entropy: f64,
         reserved_tokens: usize,
     ) -> JsonValue {
-        let total_cost = self.cost(literal_cost);
+        let total_cost = self.cost();
         let final_tokens = self.total_tokens() + tokens_in_literal * self.total_literals();
         json::object! {
             ntokens: self.token_count.len() + reserved_tokens,
@@ -69,7 +71,7 @@ impl TokenStats {
             final_tokens: final_tokens,
             bytes_per_token: initial_size as f64 / final_tokens as f64,
             literal_dist_entropy: literal_dist_entropy,
-            literal_cost: literal_cost,
+            literal_cost: self.literal_cost,
             literal_entropy_per_input_byte: literal_dist_entropy * self.total_literals() as f64 / initial_size as f64,
             literal_entropy_per_token: literal_dist_entropy * self.total_literals() as f64 / final_tokens as f64,
         }

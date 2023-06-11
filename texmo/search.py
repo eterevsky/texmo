@@ -6,7 +6,7 @@ from typing import Optional
 from . import latency
 from .common import INF
 from .configuration import (Configuration, conf_neighbors, conf_to_dict,
-                            conf_to_string)
+                            conf_to_string, conf_tokens_name)
 from .model2 import Weights
 from .predict import Predictor
 from .pretrained import Checkpoint
@@ -67,7 +67,9 @@ class Search(object):
                 > 0.1
             ):
                 logging.warn("Bad training time, skipping")
-                record.loss = INF
+                # continue
+                record.invalidate()
+                # record.loss = INF
 
             if parent_checkpoint is None:
                 checkpoint = Checkpoint(conf, run)
@@ -228,8 +230,9 @@ class Search(object):
                 if num_runs < 10:
                     score += " "
                 conf = conf_results.conf
+                tokens = conf_tokens_name(conf)
                 logging.info(
-                    f"{score}  LEN{conf.sample_len:4}  B{conf.batch:4}  LR{conf.lr:7.4f}  {conf.model}"
+                    f"{score}  LEN{conf.sample_len:4}  B{conf.batch:4}  LR{conf.lr:7.4f}  {tokens}  {conf.model}"
                 )
             logging.info("")
 

@@ -6,7 +6,7 @@ from typing import Any
 
 from .common import INF, is_power2, power2_neighbors
 from .model2 import Model2, build_model
-from .tokens import parse_token_set_name
+from .tokens import parse_token_set_name, get_tokenizer
 
 TOKEN_TYPES = ("all", "bits1", "bits2", "bits4", "dist2", "dist4", "dist8")
 
@@ -54,8 +54,10 @@ def conf_from_dict(conf_dict: dict) -> Configuration:
 
 
 def conf_is_valid(conf: Configuration) -> bool:
+    tokenizer = get_tokenizer(conf_tokens_name(conf))
     return (
-        conf.model is not None
+        tokenizer is not None
+        and conf.model is not None
         and conf.model.is_valid()
         and is_power2(conf.lr)
         and is_power2(conf.sample_len)
@@ -186,7 +188,8 @@ def default_from_template(template: Template, spec: str) -> Configuration:
     sample_len = _pick_default_value(template.sample_len)
     batch = _pick_default_value(template.batch)
     t = _pick_default_value(template.t)
-    ntokens = _pick_default_value(template.ntokens)
+    # ntokens = _pick_default_value(template.ntokens)
+    ntokens = 2
 
     if ntokens <= 16:
         if "raw" in template.token_processing:
@@ -203,6 +206,8 @@ def default_from_template(template: Template, spec: str) -> Configuration:
         token_type = "dist4"
     else:
         token_type = template.token_type[0]
+
+    token_type = "bits1"
 
     model = build_model(ntokens, spec)
     return Configuration(
@@ -295,12 +300,18 @@ def conf_neighbors(conf: Configuration, template: Template):
     for x in power2_neighbors(conf.ntokens):
         if match_bounds(template.ntokens, x):
             model = build_model(x, str(conf.model))
-            yield conf._replace(ntokens=x, model=model)
+            conf = conf._replace(ntokens=x, model=model)
+            if get_tokenizer(conf_tokens_name(conf)):
+                yield conf
 
     for x in _NEIGHBOR_TOKEN_TYPES[conf.token_type]:
         if x in template.token_type:
-            yield conf._replace(token_type=x)
+            conf = conf._replace(token_type=x)
+            if get_tokenizer(conf_tokens_name(conf)):
+                yield conf
 
     for x in _NEIGHBOR_TOKEN_PROCESSING[conf.token_processing]:
         if x in template.token_processing:
-            yield conf._replace(token_processing=x)
+            conf = conf._replace(token_processing=x)
+            if get_tokenizer(conf_tokens_name(conf)):
+                yield conf

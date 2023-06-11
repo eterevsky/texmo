@@ -99,7 +99,7 @@ class ResultDB(object):
         commit: bool = True,
         skip_invalid: bool = False,
     ):
-        conf = conf_from_record(record)
+        conf = record.conf
         if not conf_is_valid(conf):
             if skip_invalid:
                 return

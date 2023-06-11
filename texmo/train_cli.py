@@ -21,7 +21,7 @@ def show_loss_graph(manager: Manager, output_dir: str):
 
     steps2 = steps * 2
     loss2 = run.loss_trend.predict([steps2])[0]
-    print(loss2)
+    # print(loss2)
     logging.info(f"Expected loss at {steps2} steps: {loss2:.4f}")
 
     plt.xscale("log")

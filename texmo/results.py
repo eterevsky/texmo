@@ -208,7 +208,7 @@ class ResultSet(object):
     def add_record(
         self, record: TrainingRecord, run: Run, update_scores=True
     ) -> tuple[ConfResults, float]:
-        conf = conf_from_record(record)
+        conf = record.conf
         assert conf_is_valid(conf)
 
         self._result_db.add_record(record, run)

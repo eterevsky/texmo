@@ -7,6 +7,7 @@ import numpy as np
 
 from .configuration import (Configuration, conf_from_dict, conf_to_dict,
                             conf_to_string)
+from .common import INF
 
 
 def _round_time(t):
@@ -72,6 +73,33 @@ class TrainingRecord(object):
     @property
     def conf(self):
         return conf_from_dict(self._dict["conf"])
+
+    @property
+    def planned_time_s(self):
+        return self._dict["planned_time_s"]
+
+    @property
+    def train_time_s(self):
+        return self._dict["train_time_s"]
+
+    @property
+    def timestamp(self) -> datetime:
+        return datetime.fromisoformat(self._dict["timestamp"])
+
+    @property
+    def loss(self) -> float:
+        return self._dict["loss"]
+
+    @property
+    def test_sample_len(self) -> int:
+        return self._dict["test_sample_len"]
+
+    @property
+    def test_batch(self) -> int:
+        return self._dict["test_batch"]
+
+    def invalidate(self):
+        self._dict["loss"] = INF
 
     def __str__(self) -> str:
         planned_time_s = self._dict["planned_time_s"]

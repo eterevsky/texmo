@@ -48,9 +48,8 @@ _TOKENS_DIR = None
 
 
 def get_tokenizer(name: str):
-    tokenizer = _TOKENIZERS.get(name)
-    if tokenizer is not None:
-        return tokenizer
+    if name in _TOKENIZERS:
+        return _TOKENIZERS[name]
 
     if _TOKENS_DIR is None:
         logging.warning(f"Tokens directory not set")
@@ -58,8 +57,11 @@ def get_tokenizer(name: str):
 
     path = os.path.join(_TOKENS_DIR, name + ".json")
     logging.info(f"Loading token set from {path}")
-    token_set = TokenSet.from_json_file(path)
-    tokenizer = Tokenizer(token_set)
+    try:
+        token_set = TokenSet.from_json_file(path)
+        tokenizer = Tokenizer(token_set)
+    except FileNotFoundError:
+        tokenizer = None
     _TOKENIZERS[name] = tokenizer
 
     return tokenizer

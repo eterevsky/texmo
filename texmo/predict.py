@@ -10,11 +10,12 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 
 from . import latency
 from .common import NCHAR, total_size
-from .configuration import Configuration, conf_is_valid
+from .configuration import Configuration, conf_is_valid, conf_tokens_name
 from .model2 import Model2
 from .predict_common import MAX_LOSS
 from .results import ResultSet, ConfResults
 from .run import Run
+from .tokens import get_tokenizer
 
 MAX_LOG_LOSS = math.log2(MAX_LOSS)
 
@@ -86,6 +87,15 @@ class FeatureProvider(object):
             self._conf_loss[conf_results.conf] = encode_loss(
                 conf_results.median_score
             )
+
+    @staticmethod
+    def _get_tokenset_features(conf) -> list:
+        token_set = get_tokenizer(conf_tokens_name(conf)).token_set
+        return [
+            math.log2(token_set.ntokens),
+            token_set.entropy0,
+            token_set.bytes_per_token,
+        ]
 
     @staticmethod
     def _get_metaparameter_features(conf) -> list:
@@ -186,13 +196,14 @@ class FeatureProvider(object):
     def get_features(self, conf) -> np.array:
         return np.array(
             self._get_metaparameter_features(conf)
+            + self._get_tokenset_features(conf)
             + self._get_layer_features(conf.model)
             + self._get_neighbor_features(conf),
             dtype=np.float32,
         )
 
     def categorical(self) -> list:
-        return [False] * 5 + [True, False, False, False] * 4 + [False] * 19
+        return [False] * 5 + [False] * 3 + [True, False, False, False] * 4 + [False] * 19
 
     def update_conf_results(self, conf_results: ConfResults) -> list:
         """Add a new run.

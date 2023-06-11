@@ -1,25 +1,17 @@
 import argparse
 import logging
 
-from .configuration import (
-    TOKEN_TYPES,
-    Template,
-    conf_to_string,
-    default_from_template,
-    Configuration,
-    conf_tokens_name,
-)
+from .configuration import (TOKEN_TYPES, Configuration, Template,
+                            conf_to_string, conf_tokens_name,
+                            default_from_template)
 from .dataset import DataSet
+from .manager import Manager
 from .model2 import build_model
-from .report import (
-    draw_weight_loss_graph,
-    generate_max_report,
-    generate_param_report,
-    generate_report_by_weight,
-)
+from .report import (draw_weight_loss_graph, generate_max_report,
+                     generate_param_report, generate_report_by_weight)
 from .resultdb import ResultDB
 from .search import Search
-from .manager import Manager
+from .tokens import set_tokens_dir
 
 
 def warmup(dataset):
@@ -33,9 +25,7 @@ def warmup(dataset):
         batch=32,
         t=8,
     )
-    manager = Manager(
-        conf, tokenizer=dataset.get_tokenizer(conf_tokens_name(conf))
-    )
+    manager = Manager(conf)
     manager.init(quiet=True)
     manager.train_and_eval(
         steps=None,
@@ -107,6 +97,7 @@ def search_loop(dataset, search: Search, checkpoints_path: str):
 
 
 def main(args: argparse.Namespace):
+    set_tokens_dir(args.tokens_dir)
     try:
         dataset = DataSet(args.data, tokens_dir=args.tokens_dir)
         template = Template.from_args(args)

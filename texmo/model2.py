@@ -31,13 +31,15 @@ class Model2(object):
         return "-".join(map(str, self.layers))
 
     def __eq__(self, other):
-        return str(self) == str(other)
+        return self.ntokens == other.ntokens and str(self) == str(other)
 
     def __lt__(self, other):
+        if self.ntokens != other.ntokens:
+            return self.ntokens < other.ntokens
         return str(self) < str(other)
 
     def __hash__(self):
-        return hash(str(self))
+        return hash((str(self), self.ntokens))
 
     def is_valid(self):
         for layer1, layer2 in zip(self.layers[:-1], self.layers[1:]):
@@ -131,7 +133,7 @@ class Model2(object):
     def remove_last_layer(self):
         if len(self.layers) == 1:
             return None
-        return build_model("-".join(map(str, self.layers[:-1])))
+        return build_model(self.ntokens, "-".join(map(str, self.layers[:-1])))
 
     def init_weights(self, rng: Rng, init_scale: float) -> Weights:
         return [l.init_weights(rng, init_scale) for l in self.layers] + [

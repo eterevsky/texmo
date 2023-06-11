@@ -188,8 +188,7 @@ def default_from_template(template: Template, spec: str) -> Configuration:
     sample_len = _pick_default_value(template.sample_len)
     batch = _pick_default_value(template.batch)
     t = _pick_default_value(template.t)
-    # ntokens = _pick_default_value(template.ntokens)
-    ntokens = 2
+    ntokens = _pick_default_value(template.ntokens)
 
     if ntokens <= 16:
         if "raw" in template.token_processing:
@@ -206,8 +205,6 @@ def default_from_template(template: Template, spec: str) -> Configuration:
         token_type = "dist4"
     else:
         token_type = template.token_type[0]
-
-    token_type = "bits1"
 
     model = build_model(ntokens, spec)
     return Configuration(

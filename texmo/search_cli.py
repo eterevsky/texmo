@@ -102,8 +102,8 @@ def main(args: argparse.Namespace):
         dataset = DataSet(args.data, tokens_dir=args.tokens_dir)
         template = Template.from_args(args)
         default = default_from_template(template, spec=args.default_spec)
-        assert template.match_conf(default)
         logging.info("Default configuration: " + conf_to_string(default))
+        assert template.match_conf(default)
 
         result_db = ResultDB(args.db)
 

@@ -12,6 +12,11 @@ class Timer(object):
 
     def __enter__(self):
         self.start = perf_counter_ns()
+        return self
+
+    def value(self):
+        now = perf_counter_ns()
+        return now - self.start
 
     def __exit__(self, *args):
         end = perf_counter_ns()

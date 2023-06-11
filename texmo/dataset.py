@@ -13,6 +13,7 @@ from typing import Optional
 import numpy as np
 
 from . import latency
+from .timing import Timing
 from .tokens import Tokenizer, TokenSet, get_tokenizer
 
 
@@ -105,7 +106,7 @@ class SamplerThread(Thread):
             return sample
 
     def _execute_request(self, request: Request):
-        with latency.timer("SamplerThread._execute_request"):
+        with latency.timer("SamplerThread._execute_request") as timer:
             with self._token_sets_lock:
                 tokenizer = (
                     None
@@ -130,7 +131,7 @@ class SamplerThread(Thread):
                     sample.extend(repeat(0, max_len - l))
 
             batch = np.array(samples, dtype=np.uint16)
-            response_queue.put((batch, lengths))
+            response_queue.put((batch, lengths, timer.value()))
 
 
 class DataSet(object):
@@ -142,10 +143,12 @@ class DataSet(object):
         tokens_dir: str = None,
         debug: bool = False,
         in_process: bool = False,
+        timing: Timing = None,
     ):
         logging.info("Creating DataSet")
         self._debug: bool = debug
         self.all: bytes | mmap.mmap = b""
+        self._timing = timing
         if path is not None:
             assert data is None
 
@@ -225,6 +228,7 @@ class DataSet(object):
         else:
             assert request.length is not None
         if request not in self._data_queues:
+            first_request = True
             with self._token_sets_lock:
                 if request.token_set_name is not None and request.token_set_name not in self._tokenizers:
                     tokenizer = get_tokenizer(request.token_set_name)
@@ -235,6 +239,8 @@ class DataSet(object):
                 # 1 warmup request per queue
                 self._request_queue.put(request)
                 self._request_queue.put(request)
+        else:
+            first_request = False
 
         self._request_queue.put(request)
         if self._in_process:
@@ -246,8 +252,10 @@ class DataSet(object):
                     self._token_sets_lock,
                     self._debug)
             worker.run()
-        result = self._data_queues[request].get()
-        return result
+        (batch, lengths, timer) = self._data_queues[request].get()
+        if self._timing is not None and not first_request and request.ntokens is not None:
+            self._timing.register_sample_latency(request.token_set_name, request.ntokens, request.batch, timer / 1E9)
+        return (batch, lengths)
 
     def sample_bytes(self, length, batch_size, token_set_name=None) -> tuple[np.ndarray, list]:
         request = Request(length, batch_size, None, token_set_name)

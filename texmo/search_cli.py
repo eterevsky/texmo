@@ -11,6 +11,7 @@ from .report import (draw_weight_loss_graph, generate_max_report,
                      generate_param_report, generate_report_by_weight)
 from .resultdb import ResultDB
 from .search import Search
+from .timing import Timing
 from .tokens import set_tokens_dir
 
 
@@ -99,7 +100,8 @@ def search_loop(dataset, search: Search, checkpoints_path: str):
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
     try:
-        dataset = DataSet(args.data, tokens_dir=args.tokens_dir)
+        timing = Timing()
+        dataset = DataSet(args.data, tokens_dir=args.tokens_dir, timing=timing)
         template = Template.from_args(args)
         default = default_from_template(template, spec=args.default_spec)
         logging.info("Default configuration: " + conf_to_string(default))
@@ -121,6 +123,9 @@ def main(args: argparse.Namespace):
             print("\nInterrupted\n")
 
         generate_report(result_set, template, args.min_max_weights)
+
+        print()
+        timing.report()
 
     finally:
         dataset.join()

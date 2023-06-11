@@ -7,6 +7,7 @@ import time
 from copy import copy
 from datetime import datetime
 from typing import Optional
+from time import perf_counter_ns
 
 import jax
 import jax.numpy as jnp
@@ -27,6 +28,7 @@ from .model2 import Model2, Weights
 from .prng import Rng
 from .record import TrainingRecord
 from .run import Run
+from .timing import Timing
 from .tokens import Tokenizer, TokenSet, get_tokenizer
 
 LOG2 = 1 / math.log(2)
@@ -79,9 +81,11 @@ class Manager(object):
         test_sample_len: int = 1024,
         test_batch: int = 1024,
         pre_training: Optional[list] = None,
+        timing: Timing = None,
     ):
         self._rng: Rng = Rng()
         self.ntokens = conf.ntokens
+        self._timing = timing
         self.token_set_name = conf_tokens_name(conf)
         self.tokenizer = get_tokenizer(self.token_set_name)
         self.ntokens = self.tokenizer.token_set.ntokens
@@ -353,6 +357,8 @@ class Manager(object):
     ):
         last_report = 0
 
+        timing_key = self._timing.generate_timing_key(self.conf)
+
         start = time.time()
         finish_time = start + time_limit if time_limit else INF
 
@@ -370,6 +376,9 @@ class Manager(object):
                 batch_size=self.conf.batch,
                 token_set_name=self.token_set_name,
             )
+
+            start = perf_counter_ns()
+
             try:
                 loss = self.train_step(batch)
             except (XlaRuntimeError, ValueError):
@@ -377,6 +386,9 @@ class Manager(object):
                     "Internal XLA error, probably OOM. Returning +inf loss."
                 )
                 raise TrainingDiverged
+
+            step_time = (perf_counter_ns() - start) / 1E91
+            self._timing.register_step(timing_key, self.step == 1, step_time)
 
             if math.isnan(loss) or math.isinf(loss):
                 raise TrainingDiverged
@@ -396,7 +408,10 @@ class Manager(object):
             ):
                 self.save(temp_dir)
 
-        return time.time() - start
+        total_time = time.time() - start
+        self._timing.register_training_time(timing_key, self.step, total_time)
+
+        return total_time
 
     def train_and_eval(
         self,

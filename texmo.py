@@ -42,6 +42,11 @@ def parse_args():
     )
     search_cli.init_args(parser_search)
 
+    # parser_loss_train = subparsers.add_parser(
+    #     "loss-train", help="train loss model"
+    # )
+    # lossmodel.init_args(parser_loss_train)
+
     parser_help = subparsers.add_parser("help", help="Display help information")
     parser_help.set_defaults(func=lambda _: help(parser), parser=parser)
 

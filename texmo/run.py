@@ -6,6 +6,7 @@ import numpy as np
 from scipy.optimize import minimize
 
 from . import latency
+from .common import INF
 from .configuration import Configuration
 from .predict_common import prediction_score
 from .tokens import TokenSet
@@ -70,7 +71,10 @@ class LossTrend(object):
             prediction = np.array([self._c1] * step)
         else:
             prediction = _pred_log(self._c1, self._c2, self._eps, step)
-        return 2**prediction
+        if prediction > 10:
+            return INF
+        else:
+            return 2**prediction
 
     def params(self) -> np.ndarray:
         return np.array([self._c1, self._c2, self._eps])
@@ -147,10 +151,11 @@ class Run(object):
         return f"{step}  {loss:.4f} b/token  {byte_loss:.4f} b/byte"
 
     def to_dict(self):
+        loss_trend = self.loss_trend.to_dict() if self.loss_trend else self.loss_trend
         d = {
             "step_loss": self.step_loss,
             "loss": self.loss,
-            "loss_trend": self.loss_trend.to_dict(),
+            "loss_trend": loss_trend
         }
         if self.id is not None:
             d["id"] = self.id

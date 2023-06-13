@@ -67,7 +67,7 @@ def generate_report(result_set, template, min_max_weights):
     draw_weight_loss_graph(result_set, template)
 
 
-def search_loop(dataset, search: Search, checkpoints_path: str):
+def search_loop(dataset, search: Search, timing: Timing, checkpoints_path: str):
     logging.info("Warming up training")
     warmup(dataset)
 
@@ -80,7 +80,7 @@ def search_loop(dataset, search: Search, checkpoints_path: str):
             logging.info(f"Checkpoint: {checkpoint}")
             weights = checkpoint.load_weights(checkpoints_path)
 
-        manager = Manager(conf, weights=weights)
+        manager = Manager(conf, weights=weights, timing=timing)
         manager.init(quiet=True)
 
         record, run, weights = manager.train_and_eval(
@@ -118,7 +118,7 @@ def main(args: argparse.Namespace):
         )
         result_set = search._result_set
         try:
-            search_loop(dataset, search, None)
+            search_loop(dataset, search, timing, None)
         except KeyboardInterrupt:
             print("\nInterrupted\n")
 
@@ -163,7 +163,7 @@ def init_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--ntokens",
         type=str,
-        default="2-64",
+        default="2-1024",
         help="number of tokens in a token set",
     )
     parser.add_argument(

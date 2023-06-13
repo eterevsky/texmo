@@ -243,10 +243,6 @@ class Manager(object):
         return self.model.loss_batch(self.weights, xs)
 
     def _eval(self, xs, lengths):
-        # print("_eval")
-        # print(xs)
-        # print(xs[0, 10:20])
-        # print(lengths)
         lengths = np.array(lengths)
 
         if self.tokenizer is not None and self.tokenizer.token_set.entropy0 > 0:
@@ -357,7 +353,8 @@ class Manager(object):
     ):
         last_report = 0
 
-        timing_key = self._timing.generate_timing_key(self.conf)
+        if self._timing is not None:
+            timing_key = self._timing.generate_timing_key(self.conf)
 
         start = time.time()
         finish_time = start + time_limit if time_limit else INF
@@ -377,7 +374,7 @@ class Manager(object):
                 token_set_name=self.token_set_name,
             )
 
-            start = perf_counter_ns()
+            step_start = perf_counter_ns()
 
             try:
                 loss = self.train_step(batch)
@@ -387,8 +384,9 @@ class Manager(object):
                 )
                 raise TrainingDiverged
 
-            step_time = (perf_counter_ns() - start) / 1E91
-            self._timing.register_step(timing_key, self.step == 1, step_time)
+            step_time = (perf_counter_ns() - step_start) / 1E9
+            if self._timing is not None:
+                self._timing.register_step(timing_key, self.step == 1, step_time)
 
             if math.isnan(loss) or math.isinf(loss):
                 raise TrainingDiverged
@@ -409,7 +407,8 @@ class Manager(object):
                 self.save(temp_dir)
 
         total_time = time.time() - start
-        self._timing.register_training_time(timing_key, self.step, total_time)
+        if self._timing is not None:
+            self._timing.register_training_time(timing_key, self.step, total_time)
 
         return total_time
 

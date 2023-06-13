@@ -1,5 +1,3 @@
-from typing import Self
-
 import mmap
 import regex
 

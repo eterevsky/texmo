@@ -1,5 +1,5 @@
 import json
-from typing import Self, Optional
+from typing import Optional
 
 
 def parse_token_set_name(name: str) -> tuple[int, str, str]:
@@ -13,7 +13,7 @@ class Token(object):
         self.id: int = id
         self.string: bytes = string
         self.value: Optional[int] = value
-        self.suffix: Self | int = None
+        self.suffix = None
 
     def __str__(self):
         if self.string:
@@ -33,13 +33,13 @@ class Token(object):
 
 class TokenSet(object):
     @staticmethod
-    def from_json_file(filename: str) -> Self:
+    def from_json_file(filename: str):
         with open(filename) as file:
             tokens_dict = json.load(file)
         return TokenSet.from_json(tokens_dict)
 
     @staticmethod
-    def from_json(tokens_dict: dict) -> Self:
+    def from_json(tokens_dict: dict):
         fallback_bits = tokens_dict.get("fallback_bits")
         if fallback_bits is not None:
             fallback_bits = int(fallback_bits)
@@ -67,7 +67,7 @@ class TokenSet(object):
         processing: str,
         tokens: list[bytes],
         stats: dict,
-    ) -> Self:
+    ):
         assert isinstance(fallback_bits, Optional[int])
         token_set = TokenSet(type, processing, fallback_bits, stats)
         if type == "fallback_distribution":

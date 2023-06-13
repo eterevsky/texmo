@@ -199,7 +199,7 @@ def default_from_template(template: Template, spec: str) -> Configuration:
         if "capswords" in template.token_processing:
             token_processing = "capswords"
         else:
-            token_processing = "capswords"
+            token_processing = template.token_processing[0]
 
     if "dist4" in template.token_type:
         token_type = "dist4"

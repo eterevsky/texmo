@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 import json
-from typing import Self
 
 from ..common import INF
 
@@ -13,11 +12,11 @@ class Token(object):
     def __repr__(self):
         return f"Token({self.bits}, {self.value})"
 
-    def __add__(self, other: Self):
+    def __add__(self, other):
         assert self.bits == other.bits
         return Token(2 * self.bits, self.value * 2**self.bits + other.value)
 
-    def __eq__(self, other: Self):
+    def __eq__(self, other):
         return self.bits == other.bits and self.value == other.value
 
 

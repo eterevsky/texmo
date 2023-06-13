@@ -14,7 +14,7 @@ import numpy as np
 
 from . import latency
 from .timing import Timing
-from .tokens import Tokenizer, TokenSet, get_tokenizer
+from .tokens import Tokenizer, TokenSet, get_tokenizer, set_tokens_dir
 
 
 Request = namedtuple(
@@ -47,7 +47,7 @@ class SamplerThread(Thread):
             request = self._requests_queue.get()
 
             if request is None:
-                logging.info("Stopping SamplerThread")
+                # logging.info("Stopping SamplerThread")
                 break
 
             self._execute_request(request)
@@ -245,7 +245,8 @@ class DataSet(object):
         self._request_queue.put(request)
         if self._in_process:
             self._request_queue.put(None)
-            worker = SamplerThread(self.all,
+            worker = SamplerThread(
+                    self.all,
                     self._request_queue,
                     self._data_queues,
                     self._tokenizers,
@@ -297,33 +298,6 @@ def build_fake_dataset():
     return DataSet(data=s)
 
 
-def benchmark(dataset, length, ntokens, batch, token_set_size):
-    samples = 0
-    total_tokens = 0
-
-    start = time.time()
-    while time.time() - start < 10:
-        if length:
-            sample, lengths = dataset.sample_bytes(
-                length, batch, token_set_size
-            )
-            total_tokens += sum(lengths)
-        else:
-            sample = dataset.sample_tokens(ntokens, batch, token_set_size)
-            total_tokens += ntokens * batch
-        samples += 1
-        if samples % 100 == 0:
-            print(".", end="", flush=True)
-
-    finish = time.time()
-    print()
-
-    samples_per_sec = samples / (finish - start)
-    tokens_per_sec = total_tokens / (finish - start)
-    print(f"{samples_per_sec:.1f} samples/s")
-    print(f"{tokens_per_sec:.1f} tokens/s")
-
-
 def sample(args: argparse.Namespace):
     logging.getLogger().setLevel(logging.INFO)
 
@@ -361,6 +335,43 @@ def sample(args: argparse.Namespace):
             print(f"Prepared sample:\n{sample}")
 
 
+def benchmark(args: argparse.Namespace):
+    set_tokens_dir(args.tokens_dir)
+
+    if args.in_memory:
+        with open(args.data, "rb") as f:
+            data = f.read(2**35)
+        print(len(data))
+        dataset = DataSet(data=data, in_process=args.in_process)
+    else:
+        dataset = DataSet(
+            path=args.data,
+            in_process=args.in_process,
+        )
+
+    ntokens = args.sample_len
+    batch = args.batch
+    token_set = args.token_set
+
+    samples = 0
+    total_tokens = 0
+    start = time.time()
+    while time.time() - start < 10:
+        sample = dataset.sample_tokens(ntokens, batch, token_set)
+        total_tokens += ntokens * batch
+        samples += 1
+        if samples % 100 == 0:
+            print(".", end="", flush=True)
+
+    finish = time.time()
+    print()
+
+    samples_per_sec = samples / (finish - start)
+    tokens_per_sec = total_tokens / (finish - start)
+    print(f"{samples_per_sec:.1f} samples/s")
+    print(f"{tokens_per_sec:.1f} tokens/s")
+
+
 def init_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "-d", "--data", type=str, help="training data file", required=True
@@ -390,3 +401,53 @@ def init_args(parser: argparse.ArgumentParser):
         "-l", "--length", type=int, help="length in bytes", default=None
     )
     parser.set_defaults(func=sample)
+
+
+
+def benchmark_init_args(parser: argparse.ArgumentParser):
+    parser.add_argument(
+        "-d",
+        "--data",
+        type=str,
+        required=True,
+        help="a file with training data",
+    )
+    parser.add_argument(
+        "--tokens-dir",
+        type=str,
+        required=True,
+        help="directory with token sets",
+    )
+    parser.add_argument(
+        "--token-set",
+        required=True,
+        type=str,
+        help="token set name"
+    )
+    parser.add_argument(
+        "-b",
+        "--batch",
+        type=int,
+        default="1-8192",
+        help='range of acceptable batch sizes, for example "1-256" (default: unrestricted)',
+    )
+    parser.add_argument(
+        "--sample-len",
+        type=int,
+        default="2-1024",
+        help="range of acceptable sample lens (default: 128)",
+    )
+    parser.add_argument(
+        "--in-process",
+        default=False,
+        action="store_true"
+    )
+    parser.add_argument(
+        "--in-memory",
+        default=False,
+        action="store_true",
+        help="Read up to 32G into memory and serve from there"
+    )
+
+    parser.set_defaults(func=benchmark)
+    

@@ -128,7 +128,7 @@ class Model2(object):
             layer = build_layer(layer_spec, shape)
             self.layers.append(layer)
             shape = layer.output_shape
-        self.out_layer = Dense(NCHAR, input_shape=shape)
+        self.out_layer = Dense(self.ntokens, input_shape=shape)
 
     def remove_last_layer(self):
         if len(self.layers) == 1:

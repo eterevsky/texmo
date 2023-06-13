@@ -47,6 +47,11 @@ def parse_args():
     # )
     # lossmodel.init_args(parser_loss_train)
 
+    parser_benchmark_dataset = subparsers.add_parser(
+        "benchmark-dataset"
+    )
+    dataset.benchmark_init_args(parser_benchmark_dataset)
+
     parser_help = subparsers.add_parser("help", help="Display help information")
     parser_help.set_defaults(func=lambda _: help(parser), parser=parser)
 

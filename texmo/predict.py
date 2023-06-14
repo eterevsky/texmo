@@ -179,19 +179,12 @@ class FeatureProvider(object):
             neighbor_scores.extend((None, None))
         else:
             steps = median(len(r.step_loss) for r in results.runs)
-            pred_score = median(
+            pred_score = float(median(
                 r.loss_trend.predict(2 * len(r.step_loss)) for r in results.runs
-            )
+            ))
             neighbor_scores.extend((math.log2(steps), pred_score))
 
         return neighbor_scores
-
-    def get_dense_features(self, conf) -> np.array:
-        return np.array(
-            self._get_metaparameter_features(conf)
-            + self._get_model_features(conf.model),
-            dtype=np.float32,
-        )
 
     def get_features(self, conf) -> np.array:
         return np.array(

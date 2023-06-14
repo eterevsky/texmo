@@ -77,7 +77,9 @@ def create_bytes_sample(
     end = start + length
     while end < len(chunk) and 128 <= chunk[end] < 192:
         end += 1
-    assert end <= len(chunk)
+    if end > len(chunk):
+        return None
+    # assert end <= len(chunk)
     return tokenizer.tokenize_ids(chunk[start:end])
 
 

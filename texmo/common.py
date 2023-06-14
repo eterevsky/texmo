@@ -4,7 +4,7 @@ import math
 
 
 logging.basicConfig(
-        format='[%(asctime)s.%(msecs)03d] %(message)s',
+        format='%(levelname)s [%(asctime)s.%(msecs)03d %(filename)s:%(lineno)d] %(message)s',
         level=logging.INFO,
         datefmt='%H:%M:%S')
 

@@ -365,7 +365,6 @@ class Manager(object):
         t = "" if time_limit is None else f" {time_limit} s"
         s = "" if steps > 1e10 else f" {steps} steps"
         logging.info(f"Training for{t}{s}")
-        logging.info(f"token_set_name: {self.token_set_name}")
 
         while time.time() < finish_time and self.step < steps:
             batch = train_set.sample_tokens(

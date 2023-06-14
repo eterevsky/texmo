@@ -64,6 +64,7 @@ def parse_args():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(format="%(levelname)s [%(filename)s:%(lineno)d] %(message)s", level=logging.INFO)
     logging.getLogger().setLevel(logging.INFO)
     np.set_printoptions(linewidth=100, edgeitems=6, precision=3)
     args = parse_args()

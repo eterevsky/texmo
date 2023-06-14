@@ -17,222 +17,140 @@ from .timing import Timing
 from .tokens import Tokenizer, TokenSet, get_tokenizer, set_tokens_dir
 
 
-Request = namedtuple(
-    "Request", ["length", "batch", "ntokens", "token_set_name"]
+def file_reader(
+    filename: str, request_queue: Queue, data_queue: Queue, chunk_size: int
+):
+    size = os.path.getsize(filename)
+    with open(filename, "rb") as f:
+        while True:
+            request = request_queue.get()
+
+            if request is None:
+                break
+
+            with latency.timer("file_reader"):
+                start = random.randrange(size - chunk_size)
+                f.seek(start)
+                chunk = f.read(chunk_size)
+                data_queue.put(chunk)
+
+
+def mem_reader(
+    data: bytes, request_queue: Queue, data_queue: Queue, chunk_size: int
+):
+    while True:
+        request = request_queue.get()
+
+        if request is None:
+            break
+
+        with latency.timer("mem_reader"):
+            start = random.randrange(len(data) - chunk_size)
+            chunk = data[start : start + chunk_size]
+            data_queue.put(chunk)
+
+
+def create_tokens_sample(
+    chunk: bytes, tokenizer: Tokenizer, ntokens: int
+) -> list[int]:
+    start = chunk.find(b"\n\n")
+    if start < 0:
+        return None
+    end = len(chunk)
+    while end > 0 and 128 <= chunk[end - 1] < 192:
+        end -= 1
+    if start >= end:
+        return None
+    tokens = tokenizer.tokenize_ids(chunk[start:end], max_tokens=ntokens)
+    assert len(tokens) <= ntokens
+    if len(tokens) < ntokens:
+        return None
+    return tokens
+
+
+def create_bytes_sample(
+    chunk: bytes, tokenizer: Tokenizer, length: int
+) -> bytes:
+    start = chunk.find(b"\n\n")
+    if start < 0:
+        return None
+    end = start + length
+    while end < len(chunk) and 128 <= chunk[end - 1] < 192:
+        end += 1
+    assert end <= len(chunk)
+    return tokenizer.tokenize_ids(chunk[start:end])
+
+
+SampleRequest = namedtuple(
+    "SampleRequest", ["token_set_name", "ntokens", "length", "batch"]
 )
 
 
 class SamplerThread(Thread):
     def __init__(
         self,
-        data: bytes | mmap.mmap,
+        reader_request_queue: Queue,
+        reader_data_queue: Queue,
         requests_queue: Queue,
         data_queues: dict[str, Queue],
-        tokenizers: dict[str, Tokenizer],
         token_sets_lock: Lock,
-        debug: bool,
-        *args,
-        **kwargs,
     ):
-        super().__init__(*args, **kwargs)
-        self._data: bytes | mmap.mmap = data
+        super().__init__()
+        self._reader_request_queue: Queue = reader_request_queue
+        self._reader_data_queue: Queue = reader_data_queue
         self._requests_queue: Queue = requests_queue
-        self._token_sets_lock = token_sets_lock
         self._data_queues: dict[str, Queue] = data_queues
-        self._tokenizers: dict[str, Tokenizer] = tokenizers
-        self._debug: bool = debug
+        self._token_sets_lock = token_sets_lock
 
     def run(self):
         while True:
             request = self._requests_queue.get()
-
             if request is None:
-                # logging.info("Stopping SamplerThread")
                 break
 
             self._execute_request(request)
 
-    def _find_start(self, length: Optional[int], ntokens: Optional[int]) -> int:
-        if length is not None:
-            length_est = length
-        elif ntokens is not None:
-            length_est = ntokens * 5
-        start = random.randrange(len(self._data) - length_est)
-        paragraph = self._data.rfind(b"\n\n", 0, start)
-        doc_end = self._data.find(b"\x13", paragraph, start)
-        if doc_end >= 0:
-            return doc_end + 1
-        elif paragraph >= 0:
-            return paragraph + 2
-        else:
-            return 0
-
-    def _get_sample(
-        self,
-        length: Optional[int],
-        ntokens: Optional[int],
-        tokenizer: Optional[Tokenizer],
-    ) -> list[int]:
-        start = self._find_start(length, ntokens)
-        assert tokenizer is not None
-        if self._debug:
-            end = start + 256
-            while end < len(self._data) and 128 <= self._data[end] < 192:
-                end += 1
-            sample = self._data[start:end]
-            try:
-                s: str | bytes = sample.decode("utf-8")
-            except UnicodeDecodeError:
-                s = sample
-            print(f"=== Sample:\n{s!r}\n...\n===")
-
-        tokens = tokenizer.tokenize(self._data, start, ntokens, length)
-
-        if self._debug:
-            debug_str = "|".join(str(t) for t in tokens)
-            print(debug_str + "\n===")
-
-        return [token.id for token in tokens]
-
-    def _execute_request(self, request: Request):
+    def _execute_request(self, request: SampleRequest):
         with latency.timer("SamplerThread._execute_request") as timer:
             with self._token_sets_lock:
-                tokenizer = (
-                    None
-                    if request.token_set_name is None
-                    else self._tokenizers[request.token_set_name]
-                )
+                tokenizer = get_tokenizer(request.token_set_name)
                 response_queue = self._data_queues[request]
 
-            samples = [
-                self._get_sample(request.length, request.ntokens, tokenizer)
-                for _ in range(request.batch)
-            ]
-
-            if request.ntokens is not None:
-                lengths = None
-            else:
-                lengths = []
-                max_len = max(len(sample) for sample in samples)
-                for sample in samples:
-                    l = len(sample)
-                    lengths.append(l)
-                    sample.extend(repeat(0, max_len - l))
-
-            batch = np.array(samples, dtype=np.uint16)
-            response_queue.put((batch, lengths, timer.value()))
-
-
-class FileSamplerThread(Thread):
-    def __init__(
-        self,
-        filename: str,
-        requests_queue: Queue,
-        data_queues: dict[str, Queue],
-        tokenizers: dict[str, Tokenizer],
-        token_sets_lock: Lock,
-        debug: bool,
-        *args,
-        **kwargs,
-    ):
-        super().__init__(*args, **kwargs)
-        self._file = open(filename, "rb")
-        self._size = os.path.getsize(filename)
-        self._requests_queue: Queue = requests_queue
-        self._token_sets_lock = token_sets_lock
-        self._data_queues: dict[str, Queue] = data_queues
-        self._tokenizers: dict[str, Tokenizer] = tokenizers
-        self._debug: bool = debug
-
-    def run(self):
-        while True:
-            request = self._requests_queue.get()
-
-            if request is None:
-                # logging.info("Stopping SamplerThread")
-                break
-
-            self._execute_request(request)
-
-    def _get_chunk(self, length: Optional[int], ntokens: Optional[int]) -> int:
-        if length is not None:
-            length_est = length + 1024
-        elif ntokens is not None:
-            length_est = ntokens * 8 + 2048
-        start = random.randrange(self._size - length_est)
-        self._file.seek(start)
-        chunk = self._file.read(length_est)
-        paragraph = chunk.find(b"\n\n")
-        if paragraph >= 0:
-            start = paragraph + 2
-        else:
-            start = 0
-            while chunk[start] >= 128:
-                start += 1
-        
-        end = len(chunk) - 1
-        while chunk[end] >= 128:
-            end -= 1
-
-        return chunk[start:end]
-
-    def _get_sample(
-        self,
-        length: Optional[int],
-        ntokens: Optional[int],
-        tokenizer: Tokenizer,
-    ) -> list[int]:
-        assert tokenizer is not None
-
-        chunk = self._get_chunk(length, ntokens)
-
-        if self._debug:
-            end = 256
-            while 128 <= chunk[end] < 192:
-                end += 1
-            sample = chunk[:end]
-            try:
-                s: str | bytes = sample.decode("utf-8")
-            except UnicodeDecodeError:
-                s = sample
-            print(f"=== Sample:\n{s!r}\n...\n===")
-
-            tokens = tokenizer.tokenize(chunk, 0, ntokens, length)
-            debug_str = "|".join(str(t) for t in tokens)
-            print(debug_str + "\n===")
-            return [token.id for token in tokens]
-        else:
-            return tokenizer.tokenize_ids(chunk, 0, ntokens, length)
-
-    def _execute_request(self, request: Request):
-        with latency.timer("SamplerThread._execute_request") as timer:
-            with self._token_sets_lock:
-                tokenizer = (
-                    None
-                    if request.token_set_name is None
-                    else self._tokenizers[request.token_set_name]
-                )
-                response_queue = self._data_queues[request]
+            assert (
+                request.length is not None
+                and request.ntokens is None
+                or request.length is None
+                and request.ntokens is not None
+            )
 
             samples = []
-            while len(samples) < request.batch:
-                sample = self._get_sample(request.length, request.ntokens, tokenizer)
-                if request.ntokens is not None and len(sample) < request.ntokens:
-                    continue
-                samples.append(sample)
-            # samples = [
-            #     self._get_sample(request.length, request.ntokens, tokenizer)
-            #     for _ in range(request.batch)
-            # ]
+            lengths = None if request.ntokens is not None else []
 
-            if request.ntokens is not None:
-                lengths = None
-            else:
-                lengths = []
+            while len(samples) < request.batch:
+                self._reader_request_queue.put(True)
+                with latency.timer(
+                    "SamplerThread._execute_request.wait_for_data"
+                ):
+                    chunk = self._reader_data_queue.get()
+
+                if request.ntokens is not None:
+                    sample = create_tokens_sample(
+                        chunk, tokenizer, request.ntokens
+                    )
+                else:
+                    sample = create_bytes_sample(
+                        chunk, tokenizer, request.length
+                    )
+
+                if sample is not None:
+                    samples.append(sample)
+                    if lengths is not None:
+                        lengths.append(len(sample))
+
+            if request.length is not None:
                 max_len = max(len(sample) for sample in samples)
                 for sample in samples:
                     l = len(sample)
-                    lengths.append(l)
                     sample.extend(repeat(0, max_len - l))
 
             batch = np.array(samples, dtype=np.uint16)
@@ -244,90 +162,83 @@ class DataSet(object):
         self,
         path: Optional[str] = None,
         data: Optional[bytes] = None,
-        token_sets: Optional[dict[str, TokenSet]] = None,
         tokens_dir: str = None,
         debug: bool = False,
         in_process: bool = False,
         timing: Timing = None,
     ):
+        set_tokens_dir(tokens_dir)
+
         logging.info("Creating DataSet")
         self._debug: bool = debug
         self._timing = timing
 
+        self._reader_requests_queue: Queue = Queue()
+        self._reader_queue: Queue = Queue()
+
         if path is not None:
             assert data is None
+            assert not os.path.isdir(path)
 
-            if os.path.isdir(path):
-                raise Exception(
-                    "Directory with training data is currently not supported"
-                )
-            self._size = os.path.getsize(path)
-            if self._size < 2**30:
+            self.total_size = os.path.getsize(path)
+            if self.total_size < 2**30:
                 logging.info("Reading training set into memory")
                 with open(path, "rb") as f:
                     data = f.read()
-                assert len(data) == self._size
-                logging.info(f"Read {self._size} bytes")
+                assert len(data) == self.total_size
+                logging.info(f"Read {self.total_size} bytes")
 
-            # self._file = os.open(path, os.O_RDONLY)
-            # try:
-            #     self.all = mmap.mmap(
-            #         self._file,
-            #         0,
-            #         flags=mmap.MAP_PRIVATE,
-            #         prot=mmap.PROT_READ,
-            #     )
-            # except AttributeError:
-            #     # Windows
-            #     self.all = mmap.mmap(
-            #         self._file,
-            #         0,
-            #         access=mmap.ACCESS_READ,
-            #     )
-
-            # total = len(self.all) / 1e9
-            # logging.info(f"Dataset mmap'ed: {total:.2f} GB")
+                self._reader_thread = Thread(
+                    target=mem_reader,
+                    args=(
+                        data,
+                        self._reader_requests_queue,
+                        self._reader_queue,
+                        16384,
+                    ),
+                )
+            else:
+                self._reader_thread = Thread(
+                    target=file_reader,
+                    args=(
+                        path,
+                        self._reader_requests_queue,
+                        self._reader_queue,
+                        16384,
+                    ),
+                )
         else:
             assert data is not None
-            self._size = len(data)
+            self.total_size = len(data)
+            self._reader_thread = Thread(
+                target=mem_reader,
+                args=(data, self._reader_requests_queue, self._reader_queue, 16384),
+            )
+        self._reader_thread.start()
+
+        # Warmup
+        self._reader_requests_queue.put(True)
+        self._reader_requests_queue.put(True)
 
         # A queue of (length, batch_size) tuples.
-        self._request_queue: Queue[Request] = Queue()
+        self._request_queue: Queue[SampleRequest] = Queue()
 
         # Queues of training batches, with (length, batch_size) as key. Each
         # queue should have at least one batch ready at any time.
-        self._data_queues: dict[tuple[int, int], Queue] = {}
-
-        self._tokens_dir = tokens_dir
-        self._tokenizers = {}
-        if token_sets is not None:
-            for token_set_name, token_set in token_sets.items():
-                self._tokenizers[token_set_name] = Tokenizer(token_set)
+        self._data_queues: dict[SampleRequest, Queue] = {}
 
         self._token_sets_lock = Lock()
 
         self._in_process = in_process
         self._worker_threads = []
         for _ in range(1):
-            if data is None:
-                worker_thread = FileSamplerThread(
-                    # self.all,
-                    path,
-                    self._request_queue,
-                    self._data_queues,
-                    self._tokenizers,
-                    self._token_sets_lock,
-                    self._debug,
-                )
-            else:
-                worker_thread = SamplerThread(
-                    data,
-                    self._request_queue,
-                    self._data_queues,
-                    self._tokenizers,
-                    self._token_sets_lock,
-                    self._debug,
-                )
+            worker_thread = SamplerThread(
+                self._reader_requests_queue,
+                self._reader_queue,
+                self._request_queue,
+                self._data_queues,
+                self._token_sets_lock,
+            )
             if not in_process:
                 worker_thread.start()
             self._worker_threads.append(worker_thread)
@@ -335,75 +246,57 @@ class DataSet(object):
     def __del__(self):
         if not self._in_process:
             self.join()
-        # if self._file is not None:
-        #     os.close(self._file)
 
     def join(self):
         for th in self._worker_threads:
             self._request_queue.put(None)
         for th in self._worker_threads:
             th.join()
+        self._reader_requests_queue.put(None)
+        self._reader_thread.join()
 
-    def _execute_request(self, request: Request):
-        if request.ntokens is not None:
-            # assert request.token_set_name is not None
-            assert request.length is None
-        else:
-            assert request.length is not None
-        if request not in self._data_queues:
-            first_request = True
+    def _execute_request(self, request: SampleRequest):
+        first_request = request not in self._data_queues
+        if first_request:
             with self._token_sets_lock:
-                if request.token_set_name is not None and request.token_set_name not in self._tokenizers:
-                    tokenizer = get_tokenizer(request.token_set_name)
-                    assert tokenizer is not None
-                    self._tokenizers[request.token_set_name] = tokenizer
                 self._data_queues[request] = Queue()
             if not self._in_process:
-                # 1 warmup request per queue
+                # Warmup
                 self._request_queue.put(request)
                 self._request_queue.put(request)
-        else:
-            first_request = False
 
         self._request_queue.put(request)
         if self._in_process:
             self._request_queue.put(None)
-            worker = SamplerThread(
-                    self.all,
-                    self._request_queue,
-                    self._data_queues,
-                    self._tokenizers,
-                    self._token_sets_lock,
-                    self._debug)
-            worker.run()
+            self._worker_threads[0].run()
         (batch, lengths, timer) = self._data_queues[request].get()
-        if self._timing is not None and not first_request and request.ntokens is not None:
-            self._timing.register_sample_latency(request.token_set_name, request.ntokens, request.batch, timer / 1E9)
+        if (
+            self._timing is not None
+            and not first_request
+            and request.ntokens is not None
+        ):
+            self._timing.register_sample_latency(
+                request.token_set_name,
+                request.ntokens,
+                request.batch,
+                timer / 1e9,
+            )
         return (batch, lengths)
 
-    def sample_bytes(self, length, batch_size, token_set_name=None) -> tuple[np.ndarray, list]:
-        request = Request(length, batch_size, None, token_set_name)
+    def sample_bytes(
+        self, length, batch_size, token_set_name
+    ) -> tuple[np.ndarray, list]:
+        request = SampleRequest(token_set_name, ntokens=None, length=length, batch=batch_size)
 
         with latency.timer("DataSet.sample_bytes"):
             return self._execute_request(request)
 
     def sample_tokens(self, ntokens, batch_size, token_set_name) -> np.ndarray:
-        request = Request(None, batch_size, ntokens, token_set_name)
+        request = SampleRequest(token_set_name, ntokens=ntokens, length=None, batch=batch_size)
 
         with latency.timer("DataSet.sample_tokens"):
             batch, _lengths = self._execute_request(request)
             return batch
-
-    def sample(self, length, batch_size):
-        batch, _ = self.sample_bytes(length, batch_size, None)
-        return batch
-
-    @property
-    def total_size(self):
-        return self._size
-
-    def warmup(self):
-        _ = self.sample(1024, 1024)
 
 
 def build_dataset(path):
@@ -422,8 +315,6 @@ def build_fake_dataset():
 
 
 def sample(args: argparse.Namespace):
-    logging.getLogger().setLevel(logging.INFO)
-
     if args.tokens is None:
         token_set = None
         token_sets = {}
@@ -492,16 +383,11 @@ def sample_init_args(parser: argparse.ArgumentParser):
 def benchmark(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
 
-    if args.in_memory:
-        with open(args.data, "rb") as f:
-            data = f.read(2**35)
-        print(len(data))
-        dataset = DataSet(data=data, in_process=args.in_process)
-    else:
-        dataset = DataSet(
-            path=args.data,
-            in_process=args.in_process,
-        )
+    dataset = DataSet(
+        path=args.data,
+        tokens_dir=args.tokens_dir,
+        in_process=args.in_process,
+    )
 
     ntokens = args.sample_len
     batch = args.batch
@@ -544,7 +430,7 @@ def benchmark_init_args(parser: argparse.ArgumentParser):
         "--token-set",
         default="tokens256_raw_all",
         type=str,
-        help="token set name"
+        help="token set name",
     )
     parser.add_argument(
         "-b",
@@ -559,17 +445,12 @@ def benchmark_init_args(parser: argparse.ArgumentParser):
         default=256,
         help="range of acceptable sample lens (default: 128)",
     )
-    parser.add_argument(
-        "--in-process",
-        default=False,
-        action="store_true"
-    )
+    parser.add_argument("--in-process", default=False, action="store_true")
     parser.add_argument(
         "--in-memory",
         default=False,
         action="store_true",
-        help="Read up to 32G into memory and serve from there"
+        help="Read up to 32G into memory and serve from there",
     )
 
     parser.set_defaults(func=benchmark)
-    

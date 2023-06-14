@@ -474,20 +474,15 @@ class Manager(object):
         self, prefix: str, length: int
     ) -> str | bytes:
         prefix_bytes: bytes = prefix.encode()  # convert str to bytes (?)
-        if self.tokenizer:
-            prefix_tokens = [t.id for t in self.tokenizer.tokenize(prefix_bytes)]
-        else:
-            prefix_tokens = prefix_bytes
+        prefix_tokens = [t.id for t in self.tokenizer.tokenize(prefix_bytes)]
 
         out = self.sample(prefix_tokens, length)
 
-        out = self.tokenizer.untokenize(out) if self.tokenizer else bytes(out)
+        full_text = prefix_tokens + out
 
-        try:
-            s = (prefix_bytes + out).decode("utf-8")
-        except UnicodeDecodeError:
-            s = prefix_bytes + out
-        return prefix_bytes + out
+        out = self.tokenizer.untokenize(full_text) if self.tokenizer else bytes(out)
+
+        return out
 
     def serialize_weights(self, weights):
         if weights is None:

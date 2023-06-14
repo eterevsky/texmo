@@ -1,5 +1,6 @@
 import logging
 import mmap
+import numpy as np
 import os
 
 from .tokenset import TokenSet, Token
@@ -53,7 +54,9 @@ class LiteralBytesTokenizer(object):
         else:
             l = len(string) - start
 
-        return list(string[start : start + l])
+        return np.frombuffer(string[start : start + l], dtype=np.uint8)
+
+        # return list(string[start : start + l])
 
     def untokenize(self, tokens: list[int]) -> bytes:
         return bytes(tokens)

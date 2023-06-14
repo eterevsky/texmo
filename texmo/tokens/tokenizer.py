@@ -234,7 +234,7 @@ class Tokenizer(object):
         return "".join(out)
 
     def _iterate_bytes(
-        self, data: bytes|mmap.mmap, start: int, max_tokens: int, max_bytes: int
+        self, data: bytes, start: int, max_tokens: int, max_bytes: int
     ):
         while start < len(data):
             if max_bytes is None and max_tokens is None:

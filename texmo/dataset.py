@@ -75,7 +75,7 @@ def create_bytes_sample(
     if start < 0:
         return None
     end = start + length
-    while end < len(chunk) and 128 <= chunk[end - 1] < 192:
+    while end < len(chunk) and 128 <= chunk[end] < 192:
         end += 1
     assert end <= len(chunk)
     return tokenizer.tokenize_ids(chunk[start:end])
@@ -176,6 +176,8 @@ class DataSet(object):
         self._reader_requests_queue: Queue = Queue()
         self._reader_queue: Queue = Queue()
 
+        self._reader_threads: list[Thread] = []
+
         if path is not None:
             assert data is None
             assert not os.path.isdir(path)
@@ -188,7 +190,7 @@ class DataSet(object):
                 assert len(data) == self.total_size
                 logging.info(f"Read {self.total_size} bytes")
 
-                self._reader_thread = Thread(
+                self._reader_threads.append(Thread(
                     target=mem_reader,
                     args=(
                         data,
@@ -196,27 +198,36 @@ class DataSet(object):
                         self._reader_queue,
                         16384,
                     ),
-                )
+                ))
             else:
-                self._reader_thread = Thread(
-                    target=file_reader,
-                    args=(
-                        path,
-                        self._reader_requests_queue,
-                        self._reader_queue,
-                        16384,
-                    ),
-                )
+                for i in range(4):
+                    self._reader_threads.append(Thread(
+                        target=file_reader,
+                        args=(
+                            path,
+                            self._reader_requests_queue,
+                            self._reader_queue,
+                            16384,
+                        ),
+                    ))
         else:
             assert data is not None
             self.total_size = len(data)
-            self._reader_thread = Thread(
+            self._reader_threads.append(Thread(
                 target=mem_reader,
-                args=(data, self._reader_requests_queue, self._reader_queue, 16384),
-            )
-        self._reader_thread.start()
+                args=(
+                    data,
+                    self._reader_requests_queue,
+                    self._reader_queue,
+                    16384,
+                ),
+            ))
+        for th in self._reader_threads:
+            th.start()
 
         # Warmup
+        self._reader_requests_queue.put(True)
+        self._reader_requests_queue.put(True)
         self._reader_requests_queue.put(True)
         self._reader_requests_queue.put(True)
 
@@ -252,8 +263,10 @@ class DataSet(object):
             self._request_queue.put(None)
         for th in self._worker_threads:
             th.join()
-        self._reader_requests_queue.put(None)
-        self._reader_thread.join()
+        for th in self._reader_threads:
+            self._reader_requests_queue.put(None)
+        for th in self._reader_threads:
+            th.join()
 
     def _execute_request(self, request: SampleRequest):
         first_request = request not in self._data_queues

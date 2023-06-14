@@ -71,10 +71,7 @@ class LossTrend(object):
             prediction = np.array([self._c1] * step)
         else:
             prediction = _pred_log(self._c1, self._c2, self._eps, step)
-        if prediction > 10:
-            return INF
-        else:
-            return 2**prediction
+        return np.where(prediction < 10, 2**prediction, INF)
 
     def params(self) -> np.ndarray:
         return np.array([self._c1, self._c2, self._eps])

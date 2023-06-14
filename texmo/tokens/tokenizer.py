@@ -135,6 +135,10 @@ class Tokenizer(object):
             tokens = tokens[:max_tokens]
         return tokens
 
+    def tokenize_ids(self, string: bytes|mmap.mmap, start=0, max_tokens=None, max_bytes=None
+    ) -> list[int]:
+        return [token.id for token in self.tokenize(string, start, max_tokens, max_bytes)]
+
     def untokenize(self, tokens: list[int]) -> bytes:
         chunks = []
         sub_byte_buf = []

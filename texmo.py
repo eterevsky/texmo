@@ -27,7 +27,7 @@ def parse_args():
     parser_sample = subparsers.add_parser(
         "sample", help="generate a typical sample of training data"
     )
-    dataset.init_args(parser_sample)
+    dataset.sample_init_args(parser_sample)
 
     parser_count_bytes = subparsers.add_parser(
         "small-tokens", help="generate a set of sub-byte tokens"
@@ -48,11 +48,11 @@ def parse_args():
     # lossmodel.init_args(parser_loss_train)
 
     parser_benchmark_dataset = subparsers.add_parser(
-        "benchmark-dataset"
+        "benchmark-dataset", help="benchmark sampling the training data"
     )
     dataset.benchmark_init_args(parser_benchmark_dataset)
 
-    parser_help = subparsers.add_parser("help", help="Display help information")
+    parser_help = subparsers.add_parser("help")
     parser_help.set_defaults(func=lambda _: help(parser), parser=parser)
 
     args = parser.parse_args()

@@ -39,6 +39,22 @@ class LiteralBytesTokenizer(object):
 
         return [self.token_set.tokens[b] for b in string[start : start + l]]
 
+    def tokenize_ids(
+        self,
+        string: bytes | mmap.mmap,
+        start=0,
+        max_tokens=None,
+        max_bytes=None,
+    ) -> list[Token]:
+        if max_tokens is not None:
+            l = max_tokens
+        elif max_bytes is not None:
+            l = max_bytes
+        else:
+            l = len(string) - start
+
+        return list(string[start : start + l])
+
     def untokenize(self, tokens: list[int]) -> bytes:
         return bytes(tokens)
 

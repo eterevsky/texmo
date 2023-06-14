@@ -74,36 +74,25 @@ class SamplerThread(Thread):
         tokenizer: Optional[Tokenizer],
     ) -> list[int]:
         start = self._find_start(length, ntokens)
-        if tokenizer is not None:
-            if self._debug:
-                end = start + 256
-                while end < len(self._data) and 128 <= self._data[end] < 192:
-                    end += 1
-                sample = self._data[start:end]
-                try:
-                    s: str | bytes = sample.decode("utf-8")
-                except UnicodeDecodeError:
-                    s = sample
-                print(f"=== Sample:\n{s!r}\n...\n===")
+        assert tokenizer is not None
+        if self._debug:
+            end = start + 256
+            while end < len(self._data) and 128 <= self._data[end] < 192:
+                end += 1
+            sample = self._data[start:end]
+            try:
+                s: str | bytes = sample.decode("utf-8")
+            except UnicodeDecodeError:
+                s = sample
+            print(f"=== Sample:\n{s!r}\n...\n===")
 
-            tokens = tokenizer.tokenize(self._data, start, ntokens, length)
+        tokens = tokenizer.tokenize(self._data, start, ntokens, length)
 
-            if self._debug:
-                debug_str = "|".join(str(t) for t in tokens)
-                print(debug_str + "\n===")
+        if self._debug:
+            debug_str = "|".join(str(t) for t in tokens)
+            print(debug_str + "\n===")
 
-            return [token.id for token in tokens]
-        else:
-            if length is None:
-                length = ntokens
-            sample = list(self._data[start : start + length])
-            if self._debug:
-                try:
-                    s = sample.decode("utf-8")
-                except UnicodeDecodeError:
-                    s = sample
-                print(f"=== Sample:\n{s}\n===")
-            return sample
+        return [token.id for token in tokens]
 
     def _execute_request(self, request: Request):
         with latency.timer("SamplerThread._execute_request") as timer:
@@ -134,6 +123,122 @@ class SamplerThread(Thread):
             response_queue.put((batch, lengths, timer.value()))
 
 
+class FileSamplerThread(Thread):
+    def __init__(
+        self,
+        filename: str,
+        requests_queue: Queue,
+        data_queues: dict[str, Queue],
+        tokenizers: dict[str, Tokenizer],
+        token_sets_lock: Lock,
+        debug: bool,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self._file = open(filename, "rb")
+        self._size = os.path.getsize(filename)
+        self._requests_queue: Queue = requests_queue
+        self._token_sets_lock = token_sets_lock
+        self._data_queues: dict[str, Queue] = data_queues
+        self._tokenizers: dict[str, Tokenizer] = tokenizers
+        self._debug: bool = debug
+
+    def run(self):
+        while True:
+            request = self._requests_queue.get()
+
+            if request is None:
+                # logging.info("Stopping SamplerThread")
+                break
+
+            self._execute_request(request)
+
+    def _get_chunk(self, length: Optional[int], ntokens: Optional[int]) -> int:
+        if length is not None:
+            length_est = length + 1024
+        elif ntokens is not None:
+            length_est = ntokens * 8 + 2048
+        start = random.randrange(self._size - length_est)
+        self._file.seek(start)
+        chunk = self._file.read(length_est)
+        paragraph = chunk.find(b"\n\n")
+        if paragraph >= 0:
+            start = paragraph + 2
+        else:
+            start = 0
+            while chunk[start] >= 128:
+                start += 1
+        
+        end = len(chunk) - 1
+        while chunk[end] >= 128:
+            end -= 1
+
+        return chunk[start:end]
+
+    def _get_sample(
+        self,
+        length: Optional[int],
+        ntokens: Optional[int],
+        tokenizer: Tokenizer,
+    ) -> list[int]:
+        assert tokenizer is not None
+
+        chunk = self._get_chunk(length, ntokens)
+
+        if self._debug:
+            end = 256
+            while 128 <= chunk[end] < 192:
+                end += 1
+            sample = chunk[:end]
+            try:
+                s: str | bytes = sample.decode("utf-8")
+            except UnicodeDecodeError:
+                s = sample
+            print(f"=== Sample:\n{s!r}\n...\n===")
+
+            tokens = tokenizer.tokenize(chunk, 0, ntokens, length)
+            debug_str = "|".join(str(t) for t in tokens)
+            print(debug_str + "\n===")
+            return [token.id for token in tokens]
+        else:
+            return tokenizer.tokenize_ids(chunk, 0, ntokens, length)
+
+    def _execute_request(self, request: Request):
+        with latency.timer("SamplerThread._execute_request") as timer:
+            with self._token_sets_lock:
+                tokenizer = (
+                    None
+                    if request.token_set_name is None
+                    else self._tokenizers[request.token_set_name]
+                )
+                response_queue = self._data_queues[request]
+
+            samples = []
+            while len(samples) < request.batch:
+                sample = self._get_sample(request.length, request.ntokens, tokenizer)
+                if request.ntokens is not None and len(sample) < request.ntokens:
+                    continue
+                samples.append(sample)
+            # samples = [
+            #     self._get_sample(request.length, request.ntokens, tokenizer)
+            #     for _ in range(request.batch)
+            # ]
+
+            if request.ntokens is not None:
+                lengths = None
+            else:
+                lengths = []
+                max_len = max(len(sample) for sample in samples)
+                for sample in samples:
+                    l = len(sample)
+                    lengths.append(l)
+                    sample.extend(repeat(0, max_len - l))
+
+            batch = np.array(samples, dtype=np.uint16)
+            response_queue.put((batch, lengths, timer.value()))
+
+
 class DataSet(object):
     def __init__(
         self,
@@ -147,8 +252,8 @@ class DataSet(object):
     ):
         logging.info("Creating DataSet")
         self._debug: bool = debug
-        self.all: bytes | mmap.mmap = b""
         self._timing = timing
+
         if path is not None:
             assert data is None
 
@@ -156,28 +261,35 @@ class DataSet(object):
                 raise Exception(
                     "Directory with training data is currently not supported"
                 )
-            self._file = os.open(path, os.O_RDONLY)
-            try:
-                self.all = mmap.mmap(
-                    self._file,
-                    0,
-                    flags=mmap.MAP_PRIVATE,
-                    prot=mmap.PROT_READ,
-                )
-            except AttributeError:
-                # Windows
-                self.all = mmap.mmap(
-                    self._file,
-                    0,
-                    access=mmap.ACCESS_READ,
-                )
+            self._size = os.path.getsize(path)
+            if self._size < 2**30:
+                logging.info("Reading training set into memory")
+                with open(path, "rb") as f:
+                    data = f.read()
+                assert len(data) == self._size
+                logging.info(f"Read {self._size} bytes")
 
-            total = len(self.all) / 1e9
-            logging.info(f"Dataset mmap'ed: {total:.2f} GB")
+            # self._file = os.open(path, os.O_RDONLY)
+            # try:
+            #     self.all = mmap.mmap(
+            #         self._file,
+            #         0,
+            #         flags=mmap.MAP_PRIVATE,
+            #         prot=mmap.PROT_READ,
+            #     )
+            # except AttributeError:
+            #     # Windows
+            #     self.all = mmap.mmap(
+            #         self._file,
+            #         0,
+            #         access=mmap.ACCESS_READ,
+            #     )
+
+            # total = len(self.all) / 1e9
+            # logging.info(f"Dataset mmap'ed: {total:.2f} GB")
         else:
             assert data is not None
-            self._file = None
-            self.all = data
+            self._size = len(data)
 
         # A queue of (length, batch_size) tuples.
         self._request_queue: Queue[Request] = Queue()
@@ -195,25 +307,36 @@ class DataSet(object):
         self._token_sets_lock = Lock()
 
         self._in_process = in_process
-        if not in_process:
-            self._worker_threads = []
-            for _ in range(1):
-                worker_thread = SamplerThread(
-                    self.all,
+        self._worker_threads = []
+        for _ in range(1):
+            if data is None:
+                worker_thread = FileSamplerThread(
+                    # self.all,
+                    path,
                     self._request_queue,
                     self._data_queues,
                     self._tokenizers,
                     self._token_sets_lock,
                     self._debug,
                 )
+            else:
+                worker_thread = SamplerThread(
+                    data,
+                    self._request_queue,
+                    self._data_queues,
+                    self._tokenizers,
+                    self._token_sets_lock,
+                    self._debug,
+                )
+            if not in_process:
                 worker_thread.start()
-                self._worker_threads.append(worker_thread)
+            self._worker_threads.append(worker_thread)
 
     def __del__(self):
         if not self._in_process:
             self.join()
-        if self._file is not None:
-            os.close(self._file)
+        # if self._file is not None:
+        #     os.close(self._file)
 
     def join(self):
         for th in self._worker_threads:
@@ -277,7 +400,7 @@ class DataSet(object):
 
     @property
     def total_size(self):
-        return len(self.all)
+        return self._size
 
     def warmup(self):
         _ = self.sample(1024, 1024)
@@ -335,6 +458,37 @@ def sample(args: argparse.Namespace):
             print(f"Prepared sample:\n{sample}")
 
 
+def sample_init_args(parser: argparse.ArgumentParser):
+    parser.add_argument(
+        "-d", "--data", type=str, help="training data file", required=True
+    )
+    parser.add_argument("-b", "--batch", type=int, help="batch size", default=1)
+    parser.add_argument(
+        "-t",
+        "--tokens",
+        type=str,
+        help="path to the token set definition",
+        default=None,
+    )
+    parser.add_argument(
+        "--benchmark",
+        default=False,
+        action="store_true",
+    )
+    length_group = parser.add_mutually_exclusive_group(required=True)
+    length_group.add_argument(
+        "-n",
+        "--ntokens",
+        type=int,
+        help="length of the sample in tokens",
+        default=None,
+    )
+    length_group.add_argument(
+        "-l", "--length", type=int, help="length in bytes", default=None
+    )
+    parser.set_defaults(func=sample)
+
+
 def benchmark(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
 
@@ -372,38 +526,6 @@ def benchmark(args: argparse.Namespace):
     print(f"{tokens_per_sec:.1f} tokens/s")
 
 
-def init_args(parser: argparse.ArgumentParser):
-    parser.add_argument(
-        "-d", "--data", type=str, help="training data file", required=True
-    )
-    parser.add_argument("-b", "--batch", type=int, help="batch size", default=1)
-    parser.add_argument(
-        "-t",
-        "--tokens",
-        type=str,
-        help="path to the token set definition",
-        default=None,
-    )
-    parser.add_argument(
-        "--benchmark",
-        default=False,
-        action="store_true",
-    )
-    length_group = parser.add_mutually_exclusive_group(required=True)
-    length_group.add_argument(
-        "-n",
-        "--ntokens",
-        type=int,
-        help="length of the sample in tokens",
-        default=None,
-    )
-    length_group.add_argument(
-        "-l", "--length", type=int, help="length in bytes", default=None
-    )
-    parser.set_defaults(func=sample)
-
-
-
 def benchmark_init_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "-d",
@@ -415,12 +537,12 @@ def benchmark_init_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--tokens-dir",
         type=str,
-        required=True,
+        default="tokens",
         help="directory with token sets",
     )
     parser.add_argument(
         "--token-set",
-        required=True,
+        default="tokens256_raw_all",
         type=str,
         help="token set name"
     )
@@ -428,13 +550,13 @@ def benchmark_init_args(parser: argparse.ArgumentParser):
         "-b",
         "--batch",
         type=int,
-        default="1-8192",
+        default=256,
         help='range of acceptable batch sizes, for example "1-256" (default: unrestricted)',
     )
     parser.add_argument(
         "--sample-len",
         type=int,
-        default="2-1024",
+        default=256,
         help="range of acceptable sample lens (default: 128)",
     )
     parser.add_argument(

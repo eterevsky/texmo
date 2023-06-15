@@ -151,9 +151,9 @@ fn optimize_all_for_proc(
         LiteralEncoding::Bits1,
         LiteralEncoding::Bits2,
         LiteralEncoding::Bits4,
-        LiteralEncoding::Dist2,
-        LiteralEncoding::Dist4,
-        LiteralEncoding::Dist8,
+        // LiteralEncoding::Dist2,
+        // LiteralEncoding::Dist4,
+        // LiteralEncoding::Dist8,
     ] {
         let mut ntokens = min_tokens;
         let mut prev_token_set = None;
@@ -162,11 +162,7 @@ fn optimize_all_for_proc(
                 && !(ntokens <= 8 && processing != Processing::Raw)
                 && !(ntokens >= 128 && literal_encoding == LiteralEncoding::Bits1)
                 && !(ntokens >= 256 && literal_encoding == LiteralEncoding::Bits2)
-                && !(ntokens >= 256 && processing == Processing::Raw)
-                // && !(ntokens >= 512 && literal_encoding == LiteralEncoding::Dist2)
-                && !(processing == Processing::Raw && literal_encoding == LiteralEncoding::Bits1)
-                && !(processing == Processing::Raw && literal_encoding == LiteralEncoding::Bits2)
-                && !(processing == Processing::Raw && literal_encoding == LiteralEncoding::Bits4)
+                && !(ntokens >= 1024 && processing == Processing::Raw)
                 && !(ntokens < 256 && literal_encoding == LiteralEncoding::All)
             {
                 let mut block = ntokens / 2;
@@ -223,6 +219,14 @@ fn optimize_all(
     let initial_size = std::fs::metadata(filename).unwrap().len();
 
     optimize_all_for_proc(
+        filename_caps_words,
+        Processing::CapsWords,
+        initial_size,
+        output_dir,
+        min_tokens,
+        max_tokens,
+    );
+    optimize_all_for_proc(
         filename,
         Processing::Raw,
         initial_size,
@@ -233,14 +237,6 @@ fn optimize_all(
     optimize_all_for_proc(
         filename_caps,
         Processing::Caps,
-        initial_size,
-        output_dir,
-        min_tokens,
-        max_tokens,
-    );
-    optimize_all_for_proc(
-        filename_caps_words,
-        Processing::CapsWords,
         initial_size,
         output_dir,
         min_tokens,

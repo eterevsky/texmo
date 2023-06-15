@@ -56,8 +56,8 @@ def create_tokens_sample(
     start = chunk.find(b"\n\n")
     if start < 0:
         return None
-    end = len(chunk)
-    while end > 0 and 128 <= chunk[end - 1] < 192:
+    end = len(chunk) - 1
+    while end > 0 and 128 <= chunk[end] < 192:
         end -= 1
     if start >= end:
         return None

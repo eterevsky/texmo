@@ -5,7 +5,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 
-from texmo.configuration import Template, conf_to_string
+from texmo.configuration import Template, conf_to_string, conf_tokens_name
 from texmo.results import ResultSet
 
 
@@ -118,10 +118,10 @@ def print_top_confs(top_confs, run_count) -> str:
     report = ""
     spec_len = 0
     for conf, score in top_confs.values():
-        l = len(str(conf.model))
+        l = len(conf_tokens_name(conf)) + 1 + len(str(conf.model))
         if l > spec_len:
             spec_len = l
-    for log_weights in range(10, 25):
+    for log_weights in range(6, 25):
         weights = 2**log_weights
         first_weight_line = True
         for log_t in range(0, 10):
@@ -149,9 +149,10 @@ def print_top_confs(top_confs, run_count) -> str:
             else:
                 print("|         | ", file=out, end="")
             print(f"{t:>4} | {count:>4} | ", file=out, end="")
+            model_str = conf_tokens_name(conf) + " " + str(conf.model)
             print(
-                conf.model,
-                " " * (spec_len - len(str(conf.model))),
+                model_str,
+                " " * (spec_len - len(model_str)),
                 file=out,
                 end="",
             )

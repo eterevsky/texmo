@@ -219,14 +219,6 @@ fn optimize_all(
     let initial_size = std::fs::metadata(filename).unwrap().len();
 
     optimize_all_for_proc(
-        filename_caps_words,
-        Processing::CapsWords,
-        initial_size,
-        output_dir,
-        min_tokens,
-        max_tokens,
-    );
-    optimize_all_for_proc(
         filename,
         Processing::Raw,
         initial_size,
@@ -237,6 +229,14 @@ fn optimize_all(
     optimize_all_for_proc(
         filename_caps,
         Processing::Caps,
+        initial_size,
+        output_dir,
+        min_tokens,
+        max_tokens,
+    );
+    optimize_all_for_proc(
+        filename_caps_words,
+        Processing::CapsWords,
         initial_size,
         output_dir,
         min_tokens,

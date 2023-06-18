@@ -77,7 +77,7 @@ fn optimize_tokens(
         let sampler = SelectionSampler::new(data_filename, chunk_size, nchunks);
         let (token_set, _) = optimize_bpe(&token_set, ntokens, &sampler, &fast_sampler, add_block);
 
-        let full_sampler = FileSampler::new(data_filename, chunk_size);
+        let full_sampler = FileSampler::new(data_filename, chunk_size, None);
         let stats = tokenize_file(&token_set, &full_sampler);
 
         (token_set, stats)
@@ -85,7 +85,7 @@ fn optimize_tokens(
         let sampler = MemorySampler::new(data_filename, chunk_size);
         optimize_bpe(&token_set, ntokens, &sampler, &fast_sampler, add_block)
     } else {
-        let sampler = FileSampler::new(data_filename, chunk_size);
+        let sampler = FileSampler::new(data_filename, chunk_size, None);
         optimize_bpe(&token_set, ntokens, &sampler, &fast_sampler, add_block)
     };
 
@@ -154,7 +154,7 @@ fn optimize_all_for_proc(
     } else if initial_size < 1 << 32 {
         let fast_sampler = SelectionSampler::new(&filename, 16384, 1024);
         let sampler = MemorySampler::new(&filename, 1 << 24);
-        let slow_sampler = FileSampler::new(&filename, 1 << 24);
+        let slow_sampler = FileSampler::new(&filename, 1 << 24, None);
 
         optimizer::optimize_all(
             initial_size,
@@ -167,9 +167,9 @@ fn optimize_all_for_proc(
             &processing.to_string(),
         );
     } else {
-        let fast_sampler = SelectionSampler::new(&filename, 16384, 1024);
+        let fast_sampler = FileSampler::new(&filename, 65536, Some(2048));
         let sampler = SelectionSampler::new(&filename, 1 << 20, 1 << 14);
-        let slow_sampler = FileSampler::new(&filename, 1 << 24);
+        let slow_sampler = FileSampler::new(&filename, 1 << 24, None);
 
         optimizer::optimize_all(
             initial_size,
@@ -193,16 +193,16 @@ fn optimize_all(
 ) {
     optimize_all_for_proc(
         filename,
-        filename_caps_words,
-        Processing::CapsWords,
+        Some(filename),
+        Processing::Raw,
         tokens_dir,
         min_tokens,
         max_tokens,
     );
     optimize_all_for_proc(
         filename,
-        Some(filename),
-        Processing::Raw,
+        filename_caps_words,
+        Processing::CapsWords,
         tokens_dir,
         min_tokens,
         max_tokens,
@@ -278,7 +278,7 @@ fn tokenize(
         let sampler = MemorySampler::new(filename, chunk_size);
         tokenize_file(&token_set, &sampler)
     } else {
-        let sampler = FileSampler::new(filename, chunk_size);
+        let sampler = FileSampler::new(filename, chunk_size, None);
         tokenize_file(&token_set, &sampler)
     };
 

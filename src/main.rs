@@ -207,15 +207,6 @@ fn optimize_all(
         min_tokens,
         max_tokens,
     );
-    // optimize_all_for_proc(
-    //     filename,
-    //     filename_caps,
-    //     Processing::Caps,
-    //     initial_size,
-    //     tokens_dir,
-    //     min_tokens,
-    //     max_tokens,
-    // );
 }
 
 fn process(filename: &str, output: &str) {

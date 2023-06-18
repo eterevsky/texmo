@@ -1,2 +1,1 @@
-cargo run --release -- -d data/books3.txt optimize-all --filename-caps data
-/books3_caps.txt --filename-caps-words data/books3_caps_words.txt -o tokens --min-tokens=2 --max-tokens=16384
+cargo run --release -- -d data/books3.txt optimize-all --filename-caps data/books3_caps.txt --filename-caps-words data/books3_caps_words.txt -o tokens --min-tokens=2 --max-tokens=16384

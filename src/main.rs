@@ -129,6 +129,25 @@ fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
     (token_set, stats)
 }
 
+fn load_prev_token_set(tokens_dir: &str, ntokens: usize, processing: Processing, literal_encoding: LiteralEncoding) -> Option<TokenSet> {
+    let tokens_filename = format!(
+        "{}/tokens{}_{}_{}.json",
+        tokens_dir,
+        ntokens,
+        processing,
+        literal_encoding
+    );
+    if Path::new(&tokens_filename).exists() {
+        Some(TokenSet::from_json(&tokens_filename))
+    } else {
+        if ntokens > 2 {
+            load_prev_token_set(tokens_dir, ntokens / 2, processing, literal_encoding)
+        } else {
+            None
+        }
+    }
+}
+
 fn optimize_all_for_proc(
     filename: &str,
     processing: Processing,
@@ -144,26 +163,28 @@ fn optimize_all_for_proc(
     let fast_sampler = SelectionSampler::new(filename, 16384, 1024);
     let sampler = SelectionSampler::new(filename, 1 << 20, 1 << 14);
     let slow_sampler = FileSampler::new(filename, 1 << 24);
-    let output_dir = Path::new(output_dir);
+    let output_dir_path = Path::new(output_dir);
 
     for &literal_encoding in &[
-        LiteralEncoding::All,
         LiteralEncoding::Bits1,
         LiteralEncoding::Bits2,
         LiteralEncoding::Bits4,
+        LiteralEncoding::All,
         // LiteralEncoding::Dist2,
         // LiteralEncoding::Dist4,
         // LiteralEncoding::Dist8,
     ] {
         let mut ntokens = min_tokens;
-        let mut prev_token_set = None;
         while ntokens <= max_tokens {
             if literal_encoding.reserved_tokens() <= ntokens
-                && !(ntokens <= 8 && processing != Processing::Raw)
                 && !(ntokens >= 128 && literal_encoding == LiteralEncoding::Bits1)
                 && !(ntokens >= 256 && literal_encoding == LiteralEncoding::Bits2)
                 && !(ntokens >= 1024 && processing == Processing::Raw)
+                && !(ntokens >= 2048 && processing == Processing::Caps)
                 && !(ntokens < 256 && literal_encoding == LiteralEncoding::All)
+                && !(ntokens < 2048
+                    && literal_encoding == LiteralEncoding::All
+                    && processing == Processing::CapsWords)
             {
                 let mut block = ntokens / 2;
                 while block * block >= ntokens {
@@ -173,6 +194,13 @@ fn optimize_all_for_proc(
                 println!(
                     "Optimizing tokens for processing '{}', literals {}, ntokens {}, block {}",
                     processing, literal_encoding, ntokens, block
+                );
+
+                let prev_token_set = load_prev_token_set(
+                    output_dir,
+                    ntokens,
+                    processing,
+                    literal_encoding
                 );
 
                 let (token_set, stats) = optimize_token_set(
@@ -195,12 +223,10 @@ fn optimize_all_for_proc(
 
                 let output_filename =
                     format!("tokens{}_{}_{}.json", ntokens, processing, literal_encoding);
-                let output_path = output_dir.join(output_filename);
+                let output_path = output_dir_path.join(output_filename);
                 println!("Writing to {}", output_path.display());
 
                 std::fs::write(&output_path, json::stringify_pretty(tokens_json, 2)).unwrap();
-
-                prev_token_set = Some(token_set);
             }
 
             ntokens *= 2;

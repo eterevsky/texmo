@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::cmp::min;
+use std::collections::HashMap;
 
 use crate::sampler::{Sampler, SelectionSampler};
 use crate::stats::TokenStats;
@@ -179,20 +179,19 @@ fn add_and_remove_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
 
 fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
     tokenizer: &mut TokenizerCache<'a, S1>,
-    fast_tokenizer: &mut TokenizerCache<'a, S2>,
+    _fast_tokenizer: &mut TokenizerCache<'a, S2>,
     token_set: &TokenSet,
     last_token_check: &mut HashMap<Vec<u8>, usize>,
     step: usize,
 ) -> Option<TokenSet> {
     let initial_stats = tokenizer.get_stats(token_set);
-    // let initial_fast_stats = fast_tokenizer.get_stats(token_set);
-
-    // let fast_slow_scale = initial_stats.cost() as f64 / initial_fast_stats.cost() as f64;
-    let initial_cost_f64 = initial_stats.cost() as f64;
 
     let mut token_ids: Vec<usize> = (0..token_set.tokens.len()).collect();
-    // token_ids.sort_unstable_by_key(|&i| initial_stats.token_count[i]);
-    token_ids.sort_unstable_by_key(|&i| last_token_check.get(&token_set.tokens[i].string).unwrap_or(&0));
+    token_ids.sort_unstable_by_key(|&i| {
+        last_token_check
+            .get(&token_set.tokens[i].string)
+            .unwrap_or(&0)
+    });
 
     // We construct a list of tokens to remove because the ids will change when
     // we are removing and adding tokens.
@@ -218,35 +217,16 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
 
         new_token_set.remove_token(token_str);
 
-        // let stats_without = fast_tokenizer.get_stats(&new_token_set);
-        // dbg!(stats_without.cost());
-        let added = add_tokens(fast_tokenizer, &mut new_token_set, 1);
+        let added = add_tokens(tokenizer, &mut new_token_set, 1);
 
         if added[0] == token_str {
             println!("Same token added again, skipping.");
             continue;
         }
 
-        // let stats = fast_tokenizer.get_stats(&new_token_set);
-        // dbg!(stats.cost());
+        let new_stats = tokenizer.get_stats(&new_token_set);
 
-        // let decrease = (stats.cost() - stats_without.cost()) as f64 * 1.5;
-        // dbg!(decrease);
-
-        // let projected_fast_cost = stats_without.cost() as f64 - decrease;
-        // let projected_cost = projected_fast_cost * fast_slow_scale;
-        // if projected_cost > initial_cost_f64 {
-        //     println!(
-        //         "Not checking whether we can remove {} since removing it removes <{:.4}% tokens on the smaller sample.",
-        //         format_token(token_str),
-        //         100.0 * decrease / stats_without.cost() as f64
-        //     );
-        //     continue;
-        // }
-
-        let slow_stats = tokenizer.get_stats(&new_token_set);
-
-        if slow_stats.cost() < initial_stats.cost() {
+        if new_stats.cost() < initial_stats.cost() {
             println!(
                 "Replacing {} -> {} after {} tries",
                 format_token(&token_str),
@@ -305,7 +285,13 @@ pub fn optimize_bpe<'a, S: Sampler<'a>>(
         //     token_set = new_token_set;
         //     continue;
         // }
-        if let Some(new_token_set) = remove_and_add_token(&mut tokenizer, &mut fast_tokenizer, &token_set, &mut last_token_check, step) {
+        if let Some(new_token_set) = remove_and_add_token(
+            &mut tokenizer,
+            &mut fast_tokenizer,
+            &token_set,
+            &mut last_token_check,
+            step,
+        ) {
             token_set = new_token_set;
             continue;
         } else {

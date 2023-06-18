@@ -407,7 +407,7 @@ fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
 
     let stats = tokenize_file(&token_set, slow_sampler);
     let cost = stats.cost();
-    if cost < best_cost {
+    if cost <= best_cost {
         println!(
             "Slow stats: bytes/cost = {:.3}  literals/bytes = {:.5}",
             stats.scanned_bytes as f64 / stats.cost() as f64,

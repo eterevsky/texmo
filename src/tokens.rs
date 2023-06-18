@@ -263,8 +263,6 @@ impl TokenSet {
         let contents = std::fs::read_to_string(filename).unwrap();
         let parsed = json::parse(&contents).unwrap();
 
-        dbg!(&parsed["type"]);
-
         let literal_encoding = match parsed["type"].as_str().unwrap() {
             "str_with_fallback_bits" | "fallback_bits" => {
                 match parsed["fallback_bits"].as_usize().unwrap() {

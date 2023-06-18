@@ -1,0 +1,30 @@
+{
+  "tokens": [
+    0,
+    1,
+    "\u0016",
+    "a",
+    "e",
+    "h",
+    "o",
+    "t"
+  ],
+  "stats": {
+    "ntokens": 8,
+    "initial_size": 9732266,
+    "processed_size": 10360436,
+    "total_cost": 47472560,
+    "cost_per_token": 0.20500824054990927,
+    "total_tokens": 5058704,
+    "total_literals": 5301732,
+    "final_tokens": 47472560,
+    "bytes_per_token": 0.20500824054990927,
+    "literal_dist_entropy": 0,
+    "literal_cost": 8,
+    "literal_entropy_per_input_byte": 0,
+    "literal_entropy_per_token": 0
+  },
+  "type": "fallback_bits",
+  "fallback_bits": 1,
+  "processing": "capswords"
+}

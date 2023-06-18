@@ -1,10 +1,12 @@
 use std::cmp::min;
 use std::collections::HashMap;
+use std::path::Path;
+use std::time::{Duration, Instant};
 
 use crate::sampler::{Sampler, SelectionSampler};
 use crate::stats::TokenStats;
 use crate::tokenizer::tokenize_file;
-use crate::tokens::TokenSet;
+use crate::tokens::{LiteralEncoding, TokenSet};
 
 fn format_token(s: &[u8]) -> String {
     match String::from_utf8(s.to_vec()) {
@@ -207,8 +209,11 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
 
     let mut tries = 0;
 
-    for token_str in token_strs.iter() {
-        println!("Trying to remove {}         ", format_token(token_str));
+    eprint!("Trying to remove:");
+
+    // Try no more than the first 256 tokens.
+    for token_str in token_strs.iter().take(256) {
+        eprint!(" {} ", format_token(token_str));
         last_token_check.insert(token_str.clone(), step);
         let token_str = token_str.as_slice();
         tries += 1;
@@ -226,8 +231,8 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
         let new_stats = tokenizer.get_stats(&new_token_set);
 
         if new_stats.cost() < initial_stats.cost() {
-            println!(
-                "Replacing {} -> {} after {} tries",
+            eprintln!(
+                "\nReplacing {} -> {} after {} tries",
                 format_token(&token_str),
                 format_token(added[0].as_slice()),
                 tries
@@ -236,24 +241,20 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
         }
     }
 
+    eprintln!("\nNo token to replace after {} tries", tries);
+
     None
 }
 
-pub fn optimize_bpe<'a, S: Sampler<'a>>(
-    token_set: &TokenSet,
+fn add_tokens_bpe<'a, S: Sampler<'a>>(
+    tokenizer: &mut TokenizerCache<'a, S>,
+    token_set: &mut TokenSet,
     ntokens: usize,
-    sampler: &'a S,
-    fast_sampler: &'a SelectionSampler,
     add_block: usize,
-) -> (TokenSet, TokenStats) {
-    let mut token_set = token_set.clone();
-
-    let mut tokenizer = TokenizerCache::new(sampler);
-    let mut fast_tokenizer = TokenizerCache::new(fast_sampler);
-
+) {
     while token_set.ntokens() < ntokens {
         let tokens_to_add = min(add_block, ntokens - token_set.ntokens());
-        let added = add_tokens(&mut tokenizer, &mut token_set, tokens_to_add);
+        let added = add_tokens(tokenizer, token_set, tokens_to_add);
         for token_str in added.iter() {
             println!("Added {}", format_token(token_str.as_slice()));
         }
@@ -265,6 +266,20 @@ pub fn optimize_bpe<'a, S: Sampler<'a>>(
             stats.total_literals() as f64 / stats.scanned_bytes as f64,
         );
     }
+}
+
+pub fn optimize_bpe<'a, S: Sampler<'a>>(
+    token_set: &TokenSet,
+    ntokens: usize,
+    sampler: &'a S,
+    fast_sampler: &'a SelectionSampler,
+    add_block: usize,
+) -> (TokenSet, TokenStats) {
+    let mut token_set = token_set.clone();
+    let mut tokenizer = TokenizerCache::new(sampler);
+    let mut fast_tokenizer = TokenizerCache::new(fast_sampler);
+
+    add_tokens_bpe(&mut tokenizer, &mut token_set, ntokens, add_block);
 
     let mut last_token_check = HashMap::new();
     let mut step = 0;
@@ -302,4 +317,194 @@ pub fn optimize_bpe<'a, S: Sampler<'a>>(
 
     let stats = tokenizer.get_stats(&token_set);
     (token_set, stats)
+}
+
+fn save_token_set(
+    token_set: &TokenSet,
+    stats: &TokenStats,
+    output_path: &Path,
+    processing: &str,
+    initial_size: u64,
+) {
+    let mut tokens_json = token_set.to_json(stats, initial_size);
+    tokens_json["processing"] = processing.into();
+
+    println!("Writing to {}", output_path.display());
+
+    std::fs::write(&output_path, json::stringify_pretty(tokens_json, 2)).unwrap();
+}
+
+fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
+    initial_size: u64,
+    mut token_set: TokenSet,
+    slow_sampler: &'a S1,
+    sampler: &'a S2,
+    fast_sampler: &'a S3,
+    ntokens: usize,
+    processing: &str,
+    block: usize,
+    output_path: &Path,
+) {
+    let mut tokenizer = TokenizerCache::new(sampler);
+    let mut fast_tokenizer = TokenizerCache::new(fast_sampler);
+
+    let mut best_cost = if token_set.ntokens() < ntokens {
+        add_tokens_bpe(&mut tokenizer, &mut token_set, ntokens, block);
+        let stats = tokenize_file(&token_set, slow_sampler);
+
+        save_token_set(&token_set, &stats, output_path, processing, initial_size);
+
+        stats.cost()
+    } else {
+        let stats = tokenize_file(&token_set, slow_sampler);
+        stats.cost()
+    };
+
+    let mut last_update_time = Instant::now();
+
+    let mut last_token_check = HashMap::new();
+    let mut step = 0;
+
+    loop {
+        step += 1;
+        let stats = tokenizer.get_stats(&token_set);
+        println!(
+            "bytes/cost = {:.3}  literals/bytes = {:.5}",
+            stats.scanned_bytes as f64 / stats.cost() as f64,
+            stats.total_literals() as f64 / stats.scanned_bytes as f64,
+        );
+        if let Some(new_token_set) = remove_and_add_token(
+            &mut tokenizer,
+            &mut fast_tokenizer,
+            &token_set,
+            &mut last_token_check,
+            step,
+        ) {
+            token_set = new_token_set;
+
+            if Instant::now() - last_update_time > Duration::from_secs(300) {
+                let stats = tokenize_file(&token_set, slow_sampler);
+                let cost = stats.cost();
+                if cost < best_cost {
+                    println!(
+                        "Slow stats: bytes/cost = {:.3}  literals/bytes = {:.5}",
+                        initial_size as f64 / stats.cost() as f64,
+                        stats.total_literals() as f64 / initial_size as f64,
+                    );
+                    save_token_set(&token_set, &stats, output_path, processing, initial_size);
+                    best_cost = cost;
+                } else {
+                    println!("Cost increased, not saving");
+                }
+                last_update_time = Instant::now();
+            }
+
+            continue;
+        } else {
+            break;
+        }
+    }
+
+    let stats = tokenize_file(&token_set, slow_sampler);
+    let cost = stats.cost();
+    if cost < best_cost {
+        println!(
+            "Slow stats: bytes/cost = {:.3}  literals/bytes = {:.5}",
+            stats.scanned_bytes as f64 / stats.cost() as f64,
+            stats.total_literals() as f64 / stats.scanned_bytes as f64,
+        );
+        save_token_set(&token_set, &stats, output_path, processing, initial_size);
+    } else {
+        println!("Cost increased, not saving");
+    }
+}
+
+fn load_prev_token_set(
+    tokens_dir: &str,
+    ntokens: usize,
+    processing: &str,
+    literal_encoding: LiteralEncoding,
+) -> Option<TokenSet> {
+    let tokens_filename = format!(
+        "{}/tokens{}_{}_{}.json",
+        tokens_dir, ntokens, processing, literal_encoding
+    );
+    if Path::new(&tokens_filename).exists() {
+        Some(TokenSet::from_json(&tokens_filename))
+    } else {
+        if ntokens > 2 {
+            load_prev_token_set(tokens_dir, ntokens / 2, processing, literal_encoding)
+        } else {
+            None
+        }
+    }
+}
+
+pub fn optimize_all<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
+    initial_size: u64,
+    slow_sampler: &'a S1,
+    sampler: &'a S2,
+    fast_sampler: &'a S3,
+    tokens_dir: &str,
+    min_tokens: usize,
+    max_tokens: usize,
+    processing: &str,
+) {
+    let tokens_dir_path = std::path::Path::new(tokens_dir);
+
+    for &literal_encoding in &[
+        LiteralEncoding::Bits1,
+        LiteralEncoding::Bits2,
+        LiteralEncoding::Bits4,
+        LiteralEncoding::All,
+        // LiteralEncoding::Dist2,
+        // LiteralEncoding::Dist4,
+        // LiteralEncoding::Dist8,
+    ] {
+        let mut ntokens = min_tokens;
+        while ntokens <= max_tokens {
+            if literal_encoding.reserved_tokens() <= ntokens
+                && !(ntokens >= 128 && literal_encoding == LiteralEncoding::Bits1)
+                && !(ntokens > 256 && literal_encoding == LiteralEncoding::Bits2)
+                && !(ntokens < 256 && literal_encoding == LiteralEncoding::All)
+                && !(ntokens >= 1024 && processing == "raw")
+            {
+                let mut block = ntokens / 2;
+                while block * block >= ntokens {
+                    block /= 2;
+                }
+
+                println!(
+                    "Optimizing tokens for processing '{}', literals {}, ntokens {}, block {}",
+                    processing, literal_encoding, ntokens, block
+                );
+
+                let token_set = if let Some(prev_token_set) =
+                    load_prev_token_set(tokens_dir, ntokens, processing, literal_encoding)
+                {
+                    prev_token_set
+                } else {
+                    TokenSet::new(literal_encoding)
+                };
+
+                let output_filename =
+                    format!("tokens{}_{}_{}.json", ntokens, processing, literal_encoding);
+                let output_path = tokens_dir_path.join(output_filename);
+
+                optimize_token_set(
+                    initial_size,
+                    token_set,
+                    slow_sampler,
+                    sampler,
+                    fast_sampler,
+                    ntokens,
+                    processing,
+                    block,
+                    &output_path,
+                );
+            }
+
+            ntokens *= 2;
+        }
+    }
 }

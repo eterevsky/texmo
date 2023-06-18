@@ -279,7 +279,7 @@ pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S) -
                 total_stats.add(&result);
                 jobs_in_flight -= 1;
                 let elapsed = std::time::Instant::now() - start;
-                if total_stats.scanned_bytes > 100000000 {
+                if total_stats.scanned_bytes > 1 << 34 {
                     eprint!(
                         "\rAvg pace: {:.1} MB / s",
                         total_stats.scanned_bytes as f64 / 1000000.0 / elapsed.as_secs_f64()
@@ -295,13 +295,13 @@ pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S) -
             total_stats.add(&result);
             jobs_in_flight -= 1;
         }
-        // let elapsed = std::time::Instant::now() - start;
-        if total_stats.scanned_bytes > 100000000 {
-            // eprintln!(
-            //     "\rAvg pace: {:.1} MB / s",
-            //     total_stats.scanned_bytes as f64 / 1000000.0 / elapsed.as_secs_f64()
-            // );
-            eprint!("\r                                          \r");
+        if total_stats.scanned_bytes > 1 << 34 {
+            let elapsed = std::time::Instant::now() - start;
+            eprintln!(
+                "\rAvg pace: {:.1} MB / s",
+                total_stats.scanned_bytes as f64 / 1000000.0 / elapsed.as_secs_f64()
+            );
+            // eprint!("\r                                          \r");
         }
 
         while !join_handles.is_empty() {

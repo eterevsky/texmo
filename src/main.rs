@@ -129,13 +129,15 @@ fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
     (token_set, stats)
 }
 
-fn load_prev_token_set(tokens_dir: &str, ntokens: usize, processing: Processing, literal_encoding: LiteralEncoding) -> Option<TokenSet> {
+fn load_prev_token_set(
+    tokens_dir: &str,
+    ntokens: usize,
+    processing: Processing,
+    literal_encoding: LiteralEncoding,
+) -> Option<TokenSet> {
     let tokens_filename = format!(
         "{}/tokens{}_{}_{}.json",
-        tokens_dir,
-        ntokens,
-        processing,
-        literal_encoding
+        tokens_dir, ntokens, processing, literal_encoding
     );
     if Path::new(&tokens_filename).exists() {
         Some(TokenSet::from_json(&tokens_filename))
@@ -196,12 +198,8 @@ fn optimize_all_for_proc(
                     processing, literal_encoding, ntokens, block
                 );
 
-                let prev_token_set = load_prev_token_set(
-                    output_dir,
-                    ntokens,
-                    processing,
-                    literal_encoding
-                );
+                let prev_token_set =
+                    load_prev_token_set(output_dir, ntokens, processing, literal_encoding);
 
                 let (token_set, stats) = optimize_token_set(
                     prev_token_set,

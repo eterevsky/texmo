@@ -220,7 +220,6 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
         let added = add_tokens(tokenizer, &mut new_token_set, 1);
 
         if added[0] == token_str {
-            println!("Same token added again, skipping.");
             continue;
         }
 

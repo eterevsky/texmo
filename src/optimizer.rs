@@ -1,7 +1,12 @@
 use std::cmp::min;
 use std::collections::HashMap;
+use std::io;
 use std::path::Path;
 use std::time::{Duration, Instant};
+use std::io::Write;
+
+use rand::thread_rng;
+use rand::distributions::{Uniform, Distribution};
 
 use crate::sampler::{Sampler, SelectionSampler};
 use crate::stats::TokenStats;
@@ -213,16 +218,23 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
     last_token_check: &mut HashMap<Vec<u8>, usize>,
     step: usize,
 ) -> Option<TokenSet> {
-    println!("Calculating initial_stats using tokenizer with total {}", tokenizer.sampler.total_size());
     let initial_stats = tokenizer.get_stats(token_set);
     let initial_cost = (initial_stats.cost() as u128 * fast_tokenizer.sampler.total_size() as u128
         / tokenizer.sampler.total_size() as u128) as u64;
 
     let mut token_ids: Vec<usize> = (0..token_set.tokens.len()).collect();
+    let mut rng = thread_rng();
+    let uniform = Uniform::new(0, 65536);
+
+    let mut order_shuffle = Vec::new();
+    for _ in 0..token_set.tokens.len() {
+        order_shuffle.push(uniform.sample(&mut rng))
+    }
+
     token_ids.sort_unstable_by_key(|&i| {
         last_token_check
             .get(&token_set.tokens[i].string)
-            .unwrap_or(&0)
+            .unwrap_or(&0) * 65536 + order_shuffle[i]
     });
 
     // We construct a list of tokens to remove because the ids will change when
@@ -239,11 +251,13 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
 
     let mut tries = 0;
 
-    eprint!("Trying to remove:");
+    print!("Trying to remove:");
+    io::stdout().flush().unwrap();
 
     // Try no more than the first 256 tokens.
     for token_str in token_strs.iter().take(256) {
-        eprint!(" {} ", format_token(token_str));
+        print!(" {} ", format_token(token_str));
+        io::stdout().flush().unwrap();
         last_token_check.insert(token_str.clone(), step);
         let token_str = token_str.as_slice();
         tries += 1;
@@ -263,7 +277,7 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
         if new_stats.cost() < initial_cost {
             let new_full_stats = tokenizer.get_stats(&new_token_set);
             if new_full_stats.cost() < initial_stats.cost() {
-                eprintln!(
+                println!(
                     "\nReplacing {} -> {} after {} tries",
                     format_token(&token_str),
                     format_token(added[0].as_slice()),
@@ -415,7 +429,7 @@ fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
         ) {
             token_set = new_token_set;
 
-            if Instant::now() - last_update_time > Duration::from_secs(300) {
+            if Instant::now() - last_update_time > Duration::from_secs(600) {
                 let stats = tokenize_file(&token_set, slow_sampler);
                 let cost = stats.cost();
                 if cost < best_cost {
@@ -428,7 +442,9 @@ fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
                     best_cost = cost;
                 } else {
                     println!("Cost increased, not saving");
-                    break;
+                    if last_token_check.len() >= ntokens {
+                        break;
+                    }
                 }
                 last_update_time = Instant::now();
             }

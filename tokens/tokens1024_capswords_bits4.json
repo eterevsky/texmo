@@ -77,7 +77,6 @@
     " 3",
     " _",
     " _\u0014",
-    " |",
     " | ",
     " – ",
     "!",
@@ -153,7 +152,6 @@
     "0",
     "0 ",
     "00",
-    "01",
     "1",
     "19",
     "2",
@@ -174,6 +172,7 @@
     "?\"",
     "?\"\n\n\"\u0014",
     "[",
+    "\\",
     "]",
     "_",
     "_\u0014",
@@ -728,7 +727,6 @@
     "poli",
     "pos",
     "posi",
-    "possi",
     "pow",
     "pp",
     "pped\u0016",
@@ -1050,6 +1048,12 @@
       208
     ],
     [
+      209
+    ],
+    [
+      225
+    ],
+    [
       226
     ],
     [
@@ -1065,13 +1069,13 @@
   "stats": {
     "ntokens": 1024,
     "initial_size": 108362047381,
-    "processed_size": 114769772055,
-    "total_cost": 41151821185,
-    "cost_per_token": 2.633226045910658,
-    "total_tokens": 40514132889,
-    "total_literals": 318844148,
-    "final_tokens": 41151821185,
-    "bytes_per_token": 2.633226045910658,
+    "processed_size": 114769787105,
+    "total_cost": 41149360968,
+    "cost_per_token": 2.6333834798860735,
+    "total_tokens": 40554451500,
+    "total_literals": 297454734,
+    "final_tokens": 41149360968,
+    "bytes_per_token": 2.6333834798860735,
     "literal_dist_entropy": 0,
     "literal_cost": 2,
     "literal_entropy_per_input_byte": 0,

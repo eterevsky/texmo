@@ -1,12 +1,12 @@
 use std::cmp::min;
 use std::collections::HashMap;
 use std::io;
+use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant};
-use std::io::Write;
 
+use rand::distributions::{Distribution, Uniform};
 use rand::thread_rng;
-use rand::distributions::{Uniform, Distribution};
 
 use crate::sampler::{Sampler, SelectionSampler};
 use crate::stats::TokenStats;
@@ -54,7 +54,6 @@ impl<'a, S: Sampler<'a>> TokenizerCache<'a, S> {
         self.cache.insert(key, stats_clone);
 
         stats
-
     }
 
     fn get_stats(&mut self, token_set: &TokenSet) -> TokenStats {
@@ -234,7 +233,9 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
     token_ids.sort_unstable_by_key(|&i| {
         last_token_check
             .get(&token_set.tokens[i].string)
-            .unwrap_or(&0) * 65536 + order_shuffle[i]
+            .unwrap_or(&0)
+            * 65536
+            + order_shuffle[i]
     });
 
     // We construct a list of tokens to remove because the ids will change when
@@ -442,7 +443,9 @@ fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
                     best_cost = cost;
                 } else {
                     println!("Cost increased, not saving");
-                    if last_token_check.len() >= ntokens {
+                    if last_token_check.len() >= ntokens
+                        && last_token_check.iter().all(|(k, v)| *v > 0)
+                    {
                         break;
                     }
                 }

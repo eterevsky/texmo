@@ -31,7 +31,6 @@ struct DynState {
 struct Tokenizer {
     token_set: TokenSet,
     suffix_states: Vec<SuffixState>,
-    cost_array: Vec<DynState>,
 }
 
 impl Tokenizer {
@@ -42,7 +41,6 @@ impl Tokenizer {
         Tokenizer {
             token_set,
             suffix_states,
-            cost_array: Vec::new(),
         }
     }
 
@@ -116,12 +114,14 @@ impl Tokenizer {
         suffix_states
     }
 
-    fn process_slice(&mut self, bytes: &[u8]) -> TokenStats {
-        self.cost_array.truncate(0);
-        self.cost_array.push(DynState {
+    fn process_slice(&self, bytes: &[u8], cost_array: &mut Vec<DynState>) -> TokenStats {
+        // let mut cost_array = Vec::with_capacity(bytes.len() + 1);
+        cost_array.clear();
+        cost_array.push(DynState {
             cost: 0,
             token_id: TokenIdx::None,
         });
+
 
         let literal_cost = self.token_set.literal_cost();
 
@@ -132,7 +132,7 @@ impl Tokenizer {
 
             let best_dyn_state = match state.token_idx {
                 TokenIdx::Literal(id) => {
-                    let prev_cost = self.cost_array.last().unwrap().cost;
+                    let prev_cost = cost_array.last().unwrap().cost;
                     let new_cost = prev_cost + literal_cost;
 
                     DynState {
@@ -142,8 +142,7 @@ impl Tokenizer {
                 }
                 TokenIdx::Token(id) => {
                     let mut token = &self.token_set.tokens[id as usize];
-                    let prev_cost =
-                        self.cost_array[self.cost_array.len() - token.string.len()].cost;
+                    let prev_cost = cost_array[cost_array.len() - token.string.len()].cost;
                     let new_cost = prev_cost + 1;
 
                     let mut best_dyn_state = DynState {
@@ -154,9 +153,8 @@ impl Tokenizer {
                         match token.suffix {
                             TokenIdx::Token(id) => {
                                 token = &self.token_set.tokens[id as usize];
-                                let prev_cost = self.cost_array
-                                    [self.cost_array.len() - token.string.len()]
-                                .cost;
+                                let prev_cost =
+                                    cost_array[cost_array.len() - token.string.len()].cost;
                                 let new_cost = prev_cost + 1;
 
                                 if new_cost < best_dyn_state.cost {
@@ -165,7 +163,7 @@ impl Tokenizer {
                                 }
                             }
                             TokenIdx::Literal(id) => {
-                                let prev_cost = self.cost_array[self.cost_array.len() - 1].cost;
+                                let prev_cost = cost_array[cost_array.len() - 1].cost;
                                 let new_cost = prev_cost + literal_cost;
 
                                 if new_cost < best_dyn_state.cost {
@@ -182,13 +180,14 @@ impl Tokenizer {
                 TokenIdx::None => unreachable!(),
             };
 
-            self.cost_array.push(best_dyn_state);
+            cost_array.push(best_dyn_state);
         }
-        self.get_stats(&self.cost_array)
+        self.get_stats(&cost_array)
     }
 
     fn get_stats(&self, cost_array: &[DynState]) -> TokenStats {
-        let mut token_stats = TokenStats::new(self.token_set.tokens.len(), self.token_set.literal_cost());
+        let mut token_stats =
+            TokenStats::new(self.token_set.tokens.len(), self.token_set.literal_cost());
 
         let mut pos = cost_array.len() - 1;
         token_stats.scanned_bytes = pos as u64;
@@ -223,12 +222,11 @@ impl Tokenizer {
 }
 
 fn worker(
-    token_set: TokenSet,
+    tokenizer: &Tokenizer,
     jobs_rx: Arc<Mutex<Receiver<Sample>>>,
     results_tx: Sender<TokenStats>,
 ) {
-    let mut tokenizer = Tokenizer::new(token_set);
-
+    let mut buffer = Vec::new();
     loop {
         let job = jobs_rx.lock().unwrap().recv();
         let data = {
@@ -243,7 +241,7 @@ fn worker(
 
         assert!(!data.is_empty());
 
-        results_tx.send(tokenizer.process_slice(&data)).unwrap();
+        results_tx.send(tokenizer.process_slice(&data, &mut buffer)).unwrap();
     }
 }
 
@@ -255,6 +253,7 @@ pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S) -
     let (results_tx, results_rx) = mpsc::channel::<TokenStats>();
 
     let mut total_stats = TokenStats::new(token_set.tokens.len(), token_set.literal_cost());
+    let tokenizer = Tokenizer::new(token_set.clone());
 
     std::thread::scope(|s| {
         let mut join_handles = Vec::new();
@@ -263,7 +262,7 @@ pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S) -
             let jobs_rx_clone = jobs_rx_shared.clone();
             let results_tx_clone = results_tx.clone();
             join_handles
-                .push(s.spawn(move || worker(token_set.clone(), jobs_rx_clone, results_tx_clone)));
+                .push(s.spawn(|| worker(&tokenizer, jobs_rx_clone, results_tx_clone)));
         }
 
         let start = std::time::Instant::now();
@@ -278,8 +277,8 @@ pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S) -
                 total_stats.add(&result);
                 jobs_in_flight -= 1;
                 let elapsed = std::time::Instant::now() - start;
-                if total_stats.scanned_bytes > 1 << 34 {
-                    eprint!(
+                if sampler.total_size() > 1 << 34 {
+                    print!(
                         "\rAvg pace: {:.1} MB / s",
                         total_stats.scanned_bytes as f64 / 1000000.0 / elapsed.as_secs_f64()
                     );
@@ -296,7 +295,7 @@ pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S) -
         }
         if total_stats.scanned_bytes > 1 << 34 {
             let elapsed = std::time::Instant::now() - start;
-            eprintln!(
+            println!(
                 "\rAvg pace: {:.1} MB / s",
                 total_stats.scanned_bytes as f64 / 1000000.0 / elapsed.as_secs_f64()
             );

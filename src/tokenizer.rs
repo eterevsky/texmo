@@ -31,7 +31,6 @@ struct DynState {
 struct Tokenizer {
     token_set: TokenSet,
     suffix_states: Vec<SuffixState>,
-    // current_state: usize,
     cost_array: Vec<DynState>,
 }
 

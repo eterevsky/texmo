@@ -26,7 +26,11 @@ pub struct FileSampler {
 
 impl FileSampler {
     pub fn new(filename: &str, chunk_size: usize, chunks_selection: Option<usize>) -> Self {
-        let _total_size = std::fs::metadata(filename).unwrap().len();
+        let _total_size = if let Some(cs) = chunks_selection {
+            (chunk_size * cs) as u64
+        } else {
+            std::fs::metadata(filename).unwrap().len()
+        };
         FileSampler {
             filename: filename.to_string(),
             chunk_size,

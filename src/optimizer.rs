@@ -254,8 +254,8 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
     print!("Trying to remove:");
     io::stdout().flush().unwrap();
 
-    // Try no more than the first 256 tokens.
-    for token_str in token_strs.iter().take(256) {
+    // Try no more than the first 512 tokens.
+    for token_str in token_strs.iter().take(512) {
         print!(" {} ", format_token(token_str));
         io::stdout().flush().unwrap();
         last_token_check.insert(token_str.clone(), step);

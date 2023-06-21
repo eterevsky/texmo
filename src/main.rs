@@ -168,8 +168,8 @@ fn optimize_all_for_proc(
         );
     } else {
         let fast_sampler = FileSampler::new(&filename, 65536, Some(2048));
-        let sampler = FileSampler::new(&filename, 1 << 20, Some(4096));
-        // let sampler = SelectionSampler::new(&filename, 1 << 20, 1 << 14);
+        // let sampler = FileSampler::new(&filename, 1 << 20, Some(4096));
+        let sampler = SelectionSampler::new(&filename, 1 << 20, 1 << 14);
         let slow_sampler = FileSampler::new(&filename, 1 << 24, None);
 
         optimizer::optimize_all(

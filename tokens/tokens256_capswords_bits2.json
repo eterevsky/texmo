@@ -23,7 +23,6 @@
     "'s\u0016",
     "'t\u0016",
     ")",
-    "*",
     "**",
     ",",
     ", ",
@@ -257,6 +256,9 @@
       148
     ],
     [
+      164
+    ],
+    [
       169
     ],
     [
@@ -273,17 +275,18 @@
   "stats": {
     "ntokens": 256,
     "initial_size": 108362047381,
-    "processed_size": 114769787105,
-    "total_cost": 58587239627,
-    "cost_per_token": 1.8495844499740047,
-    "total_tokens": 56518689355,
-    "total_literals": 517137568,
-    "final_tokens": 58587239627,
-    "bytes_per_token": 1.8495844499740047,
+    "processed_size": 114769772055,
+    "total_cost": 58580111217,
+    "cost_per_token": 1.8498095194731082,
+    "total_tokens": 56521044473,
+    "total_literals": 514766686,
+    "final_tokens": 58580111217,
+    "bytes_per_token": 1.8498095194731082,
     "literal_dist_entropy": 0,
     "literal_cost": 4,
     "literal_entropy_per_input_byte": 0,
-    "literal_entropy_per_token": 0
+    "literal_entropy_per_token": 0,
+    "average_token_entropy": 7.49077350336201
   },
   "type": "fallback_bits",
   "fallback_bits": 2,

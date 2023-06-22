@@ -35,7 +35,6 @@
     "**",
     "** ",
     ",",
-    ",\n\n",
     ", ",
     ", and ",
     ", the ",
@@ -507,6 +506,9 @@
     "z",
     "| ",
     [
+      164
+    ],
+    [
       194
     ],
     [
@@ -524,16 +526,17 @@
     "ntokens": 512,
     "initial_size": 108362047381,
     "processed_size": 108362047381,
-    "total_cost": 48967208633,
-    "cost_per_token": 2.21295128732277,
-    "total_tokens": 47923439453,
-    "total_literals": 521884590,
-    "final_tokens": 48967208633,
-    "bytes_per_token": 2.21295128732277,
+    "total_cost": 48965375144,
+    "cost_per_token": 2.21303415040369,
+    "total_tokens": 47958199684,
+    "total_literals": 503587730,
+    "final_tokens": 48965375144,
+    "bytes_per_token": 2.21303415040369,
     "literal_dist_entropy": 0,
     "literal_cost": 2,
     "literal_entropy_per_input_byte": 0,
-    "literal_entropy_per_token": 0
+    "literal_entropy_per_token": 0,
+    "average_token_entropy": 8.375686354865366
   },
   "type": "fallback_bits",
   "fallback_bits": 4,

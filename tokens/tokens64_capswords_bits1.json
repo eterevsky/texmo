@@ -85,7 +85,11 @@
     "literal_cost": 8,
     "literal_entropy_per_input_byte": 0,
     "literal_entropy_per_token": 0,
+<<<<<<< HEAD
     "average_token_entropy": 5.402052679575186
+=======
+    "average_token_entropy": 5.402052675704203
+>>>>>>> 49e329a9e9d30f501e078c581e39ec6dec3ca7bb
   },
   "type": "fallback_bits",
   "fallback_bits": 1,

@@ -772,17 +772,18 @@
   "stats": {
     "ntokens": 512,
     "initial_size": 108362047381,
-    "processed_size": 114769772055,
-    "total_cost": 53352095737,
-    "cost_per_token": 2.031073866623205,
-    "total_tokens": 53352095737,
+    "processed_size": 114769787105,
+    "total_cost": 53352111295,
+    "cost_per_token": 2.031073274342104,
+    "total_tokens": 53352111295,
     "total_literals": 0,
-    "final_tokens": 53352095737,
-    "bytes_per_token": 2.031073866623205,
+    "final_tokens": 53352111295,
+    "bytes_per_token": 2.031073274342104,
     "literal_dist_entropy": 0,
     "literal_cost": 256,
     "literal_entropy_per_input_byte": 0,
-    "literal_entropy_per_token": 0
+    "literal_entropy_per_token": 0,
+    "average_token_entropy": null
   },
   "type": "all_tokens",
   "processing": "capswords"

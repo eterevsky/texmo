@@ -265,18 +265,22 @@
   "stats": {
     "ntokens": 256,
     "initial_size": 108362047381,
-    "processed_size": 114769772055,
-    "total_cost": 58059071387,
-    "cost_per_token": 1.8664102747820273,
-    "total_tokens": 55859068673,
-    "total_literals": 1100001357,
-    "final_tokens": 58059071387,
-    "bytes_per_token": 1.8664102747820273,
+    "processed_size": 114769787105,
+    "total_cost": 58059102208,
+    "cost_per_token": 1.866409283987666,
+    "total_tokens": 55859069392,
+    "total_literals": 1100016408,
+    "final_tokens": 58059102208,
+    "bytes_per_token": 1.866409283987666,
     "literal_dist_entropy": 0,
     "literal_cost": 2,
     "literal_entropy_per_input_byte": 0,
     "literal_entropy_per_token": 0,
+<<<<<<< HEAD
     "average_token_entropy": 7.444714501972927
+=======
+    "average_token_entropy": 7.444714496824656
+>>>>>>> 49e329a9e9d30f501e078c581e39ec6dec3ca7bb
   },
   "type": "fallback_bits",
   "fallback_bits": 4,

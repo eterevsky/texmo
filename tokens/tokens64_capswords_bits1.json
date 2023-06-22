@@ -84,7 +84,8 @@
     "literal_dist_entropy": 0,
     "literal_cost": 8,
     "literal_entropy_per_input_byte": 0,
-    "literal_entropy_per_token": 0
+    "literal_entropy_per_token": 0,
+    "average_token_entropy": 5.402052675704203
   },
   "type": "fallback_bits",
   "fallback_bits": 1,

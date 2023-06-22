@@ -19,7 +19,6 @@
     "\n",
     "\n\n",
     "\n\n\u0014",
-    "\n\n\"\u0014",
     "\u0014",
     "\u0014a",
     "\u0014b",
@@ -34,7 +33,6 @@
     "\u0016as\u0016",
     "\u0016at\u0016",
     "\u0016t",
-    "\u0016that\u0016",
     "\u0016the",
     "\u0016their\u0016",
     "\u0016them\u0016",
@@ -200,7 +198,6 @@
     "ents\u0016",
     "er",
     "er\u0016",
-    "ere\u0016",
     "ers\u0016",
     "es",
     "es\u0016",
@@ -509,26 +506,36 @@
     "z",
     "|",
     [
+      164
+    ],
+    [
       195
     ],
     "é",
+    [
+      224
+    ],
     "–",
-    "—"
+    "—",
+    [
+      229
+    ]
   ],
   "stats": {
     "ntokens": 512,
     "initial_size": 108362047381,
-    "processed_size": 114769772055,
-    "total_cost": 48444306167,
-    "cost_per_token": 2.236837637997087,
-    "total_tokens": 47297373445,
-    "total_literals": 573466361,
-    "final_tokens": 48444306167,
-    "bytes_per_token": 2.236837637997087,
+    "processed_size": 114769787105,
+    "total_cost": 48436829833,
+    "cost_per_token": 2.2371828989347475,
+    "total_tokens": 47351978775,
+    "total_literals": 542425529,
+    "final_tokens": 48436829833,
+    "bytes_per_token": 2.2371828989347475,
     "literal_dist_entropy": 0,
     "literal_cost": 2,
     "literal_entropy_per_input_byte": 0,
-    "literal_entropy_per_token": 0
+    "literal_entropy_per_token": 0,
+    "average_token_entropy": 8.41793712268328
   },
   "type": "fallback_bits",
   "fallback_bits": 4,

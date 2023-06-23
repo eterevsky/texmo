@@ -53,7 +53,6 @@
     "\u0016au",
     "\u0016t",
     "\u0016that\u0016",
-    "\u0016the",
     "\u0016their\u0016",
     "\u0016them\u0016",
     "\u0016to\u0016",
@@ -570,7 +569,6 @@
     "land\u0016",
     "lar",
     "last\u0016",
-    "ld\u0016",
     "le",
     "le\u0016",
     "lea",
@@ -1047,9 +1045,6 @@
       209
     ],
     [
-      224
-    ],
-    [
       224,
       164
     ],
@@ -1072,6 +1067,15 @@
       229
     ],
     [
+      230
+    ],
+    [
+      231
+    ],
+    [
+      235
+    ],
+    [
       236
     ]
   ],
@@ -1079,17 +1083,17 @@
     "ntokens": 1024,
     "initial_size": 108362047381,
     "processed_size": 114769787105,
-    "total_cost": 41143333704,
-    "cost_per_token": 2.633769255563871,
-    "total_tokens": 40575284832,
-    "total_literals": 284024436,
-    "final_tokens": 41143333704,
-    "bytes_per_token": 2.633769255563871,
+    "total_cost": 41142122962,
+    "cost_per_token": 2.633846762868464,
+    "total_tokens": 40583641244,
+    "total_literals": 279240859,
+    "final_tokens": 41142122962,
+    "bytes_per_token": 2.633846762868464,
     "literal_dist_entropy": 0,
     "literal_cost": 2,
     "literal_entropy_per_input_byte": 0,
     "literal_entropy_per_token": 0,
-    "average_token_entropy": 9.314439915267635
+    "average_token_entropy": 9.312207594419118
   },
   "type": "fallback_bits",
   "fallback_bits": 4,

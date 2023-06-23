@@ -38,8 +38,8 @@
     "en",
     "er",
     "f",
+    "f\u0016",
     "g",
-    "g\u0016",
     "h",
     "i",
     "in",
@@ -69,21 +69,17 @@
     "ntokens": 64,
     "initial_size": 108362047381,
     "processed_size": 114769787105,
-    "total_cost": 92177902034,
-    "cost_per_token": 1.1755751106271702,
-    "total_tokens": 81933836482,
+    "total_cost": 92188584107,
+    "cost_per_token": 1.1754388944213315,
+    "total_tokens": 81944518555,
     "total_literals": 5122032776,
-    "final_tokens": 92177902034,
-    "bytes_per_token": 1.1755751106271702,
+    "final_tokens": 92188584107,
+    "bytes_per_token": 1.1754388944213315,
     "literal_dist_entropy": 0,
     "literal_cost": 2,
     "literal_entropy_per_input_byte": 0,
     "literal_entropy_per_token": 0,
-<<<<<<< HEAD
-    "average_token_entropy": 5.319062884620279
-=======
-    "average_token_entropy": 5.319062880501215
->>>>>>> 49e329a9e9d30f501e078c581e39ec6dec3ca7bb
+    "average_token_entropy": 5.318798756901202
   },
   "type": "fallback_bits",
   "fallback_bits": 4,

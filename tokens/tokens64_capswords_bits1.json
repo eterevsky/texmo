@@ -11,6 +11,7 @@
     "\"",
     "'",
     "*",
+    ",",
     ", ",
     "-",
     ".",
@@ -28,7 +29,6 @@
     "e",
     "e\u0016",
     "ed\u0016",
-    "en",
     "er",
     "f",
     "g",
@@ -40,9 +40,9 @@
     "l",
     "m",
     "n",
+    "n\u0016",
     "o",
     "o\u0016",
-    "on",
     "or",
     "ou",
     "p",
@@ -74,22 +74,18 @@
   "stats": {
     "ntokens": 64,
     "initial_size": 108362047381,
-    "processed_size": 114769772055,
-    "total_cost": 101776260034,
-    "cost_per_token": 1.0647084825557543,
-    "total_tokens": 87580967146,
-    "total_literals": 1774411611,
-    "final_tokens": 101776260034,
-    "bytes_per_token": 1.0647084825557543,
+    "processed_size": 114769787105,
+    "total_cost": 102119209507,
+    "cost_per_token": 1.061132845662814,
+    "total_tokens": 88601251171,
+    "total_literals": 1689744792,
+    "final_tokens": 102119209507,
+    "bytes_per_token": 1.061132845662814,
     "literal_dist_entropy": 0,
     "literal_cost": 8,
     "literal_entropy_per_input_byte": 0,
     "literal_entropy_per_token": 0,
-<<<<<<< HEAD
-    "average_token_entropy": 5.402052679575186
-=======
-    "average_token_entropy": 5.402052675704203
->>>>>>> 49e329a9e9d30f501e078c581e39ec6dec3ca7bb
+    "average_token_entropy": 5.393020213648415
   },
   "type": "fallback_bits",
   "fallback_bits": 1,

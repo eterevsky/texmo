@@ -1,21 +1,90 @@
+import math
+
 import logging
 import numpy as np
 from statistics import mean
 from sklearn import linear_model
 
 from .configuration import Configuration, conf_tokens_name
+from .prng import Rng
+
+
+_TYPE_IDX = {
+    "bits1": 0,
+    "bits2": 1,
+    "bits4": 2,
+    "all": 3,
+}
+
+
+def _eval(weights, input):
+    x = weights["w"] * input + weights["b"]
+    x = np.tanh(x)
+    return np.sum(x)
+
+
+def _loss(weights, input, output):
+    prediction = _eval(weights, input)
+    return np.abs(np.log2(prediction) - np.log2(output))
 
 
 class SamplerModel(object):
-    def __init__(self):
-        pass
+    def __init__(self, rng):
+        self._rng = Rng()
+        self.weights = {
+            "w": rng.he((1, 10)),
+            "b": rng.normal((1,)),
+        }
 
-    def predict(self, token_type, token_processing, ntokens, batch, sample_len, bytes_per_token):
-        pass
+    def _build_features(
+        self,
+        token_type: str,
+        token_processing: str,
+        ntokens: int,
+        batch: int,
+        sample_len: int,
+        bytes_per_token: float,
+    ):
+        features = [0, 0, 0, 0]
+        features[_TYPE_IDX[token_type]] = 1
+        features.append(1 if token_processing == "capwords" else 0)
+        features.append(math.log2(ntokens))
+        features.append(batch)
+        features.append(sample_len)
+        features.append(batch * sample_len)
+        features.append(batch * sample_len * bytes_per_token)
+        return np.array(features, dtype=np.float32)
 
-    def train(self, token_type, token_processing, ntokens, batch, sample_len, bytes_per_token, latencies):
-        pass
+    def predict(
+        self,
+        token_type,
+        token_processing,
+        ntokens,
+        batch,
+        sample_len,
+        bytes_per_token,
+    ):
+        features = self._build_features(
+            token_type,
+            token_processing,
+            ntokens,
+            batch,
+            sample_len,
+            bytes_per_token,
+        )
 
+
+    def train(
+        self,
+        token_type,
+        token_processing,
+        ntokens,
+        batch,
+        sample_len,
+        bytes_per_token,
+        latencies,
+    ):
+        pass
 
 
 class Timing(object):
@@ -127,7 +196,9 @@ class Timing(object):
                 step.append(0)
             weights.append(len(step_latencies))
 
-        self._step_regression = linear_model.LinearRegression(positive=True, fit_intercept=False)
+        self._step_regression = linear_model.LinearRegression(
+            positive=True, fit_intercept=False
+        )
         self._step_regression.fit(xs, step, weights)
 
         self._first_step_regression = linear_model.LinearRegression(
@@ -155,4 +226,3 @@ class Timing(object):
         #         self._first_step_regression.coef_[i] * 1000, " ",
         #         self._step_regression.coef_[i] * 1000,
         #     )
-

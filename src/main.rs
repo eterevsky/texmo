@@ -17,8 +17,7 @@ use crate::sampler::SelectionSampler;
 
 use self::optimizer::optimize_bpe;
 use self::processing::process_file;
-use self::sampler::{FileSampler, MemorySampler, Sampler};
-use self::stats::TokenStats;
+use self::sampler::{FileSampler, MemorySampler};
 use self::tokenizer::tokenize_file;
 use self::tokens::{LiteralEncoding, TokenSet};
 

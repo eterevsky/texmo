@@ -185,7 +185,6 @@
     "^",
     "_",
     "_ ",
-    "__",
     "`",
     "a",
     "a\u0016",
@@ -1186,6 +1185,10 @@
       224
     ],
     [
+      224,
+      164
+    ],
+    [
       225
     ],
     [
@@ -1284,17 +1287,18 @@
   "stats": {
     "ntokens": 1024,
     "initial_size": 108362047381,
-    "processed_size": 114769772055,
-    "total_cost": 41931647946,
-    "cost_per_token": 2.584254440000778,
-    "total_tokens": 41931647946,
+    "processed_size": 114769787105,
+    "total_cost": 41931476844,
+    "cost_per_token": 2.584264985088537,
+    "total_tokens": 41931476844,
     "total_literals": 0,
-    "final_tokens": 41931647946,
-    "bytes_per_token": 2.584254440000778,
+    "final_tokens": 41931476844,
+    "bytes_per_token": 2.584264985088537,
     "literal_dist_entropy": 0,
     "literal_cost": 256,
     "literal_entropy_per_input_byte": 0,
-    "literal_entropy_per_token": 0
+    "literal_entropy_per_token": 0,
+    "average_token_entropy": null
   },
   "type": "all_tokens",
   "processing": "capswords"

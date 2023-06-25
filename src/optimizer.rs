@@ -1,4 +1,4 @@
-use std::cmp::min;
+use std::cmp::{min, Reverse};
 use std::collections::HashMap;
 use std::io;
 use std::io::Write;
@@ -131,7 +131,7 @@ fn add_tokens<'a, S: Sampler<'a>>(
     added
 }
 
-fn add_and_remove_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
+fn _add_and_remove_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
     tokenizer: &mut TokenizerCache<'a, S1>,
     fast_tokenizer: &mut TokenizerCache<'a, S2>,
     token_set: &TokenSet,
@@ -371,6 +371,71 @@ pub fn optimize_bpe<'a, S: Sampler<'a>>(
     (token_set, stats)
 }
 
+/// Optimize the set of tokens consisting of one byte. Collect all single-byte
+/// tokens and literals make sure that the number of usages of tokens is
+/// strictly higher than that of literals. If this is not the case, turn
+/// the most common literals into a tokens and vice versa.
+/// 
+/// Returns true if the token set was modified.
+fn optimize_byte_tokens(token_set: &mut TokenSet, stats: &TokenStats) -> bool {
+    let mut byte_count = [0u64; 256];
+    let mut one_byte_token_count = 0;
+    let mut is_token = [false; 256];
+    for (i, token) in token_set.tokens.iter().enumerate() {
+        if token.string.len() == 1 {
+            byte_count[token.string[0] as usize] += stats.token_count[i];
+            one_byte_token_count += 1;
+            is_token[token.string[0] as usize] = true;
+        }
+    }
+
+    for i in 0..256 {
+        if stats.literal_count[i] > 0 {
+            assert!(byte_count[i] == 0);
+            byte_count[i] = stats.literal_count[i];
+        }
+    }
+
+    let mut ids = (0..256).collect::<Vec<_>>();
+    ids.sort_unstable_by_key(|&i| Reverse(byte_count[i]));
+
+    let mut to_add = Vec::new();
+    let mut to_remove = Vec::new();
+    for i in 0..256 {
+        if i < one_byte_token_count {
+            if !is_token[ids[i]] {
+                to_add.push(ids[i]);
+            }
+        } else {
+            if is_token[ids[i]] {
+                to_remove.push(ids[i]);
+            }
+        }
+    }
+
+    if to_add.is_empty() {
+        assert!(to_remove.is_empty());
+        return false;
+    }
+
+    assert!(!to_remove.is_empty());
+
+    print!("Removing tokens:");
+    for &i in &to_remove {
+        print!(" {}", format_token(&[i as u8]));
+        token_set.remove_token(&[i as u8]);
+    }
+
+    print!("\nAdding tokens:");
+    for &i in &to_add {
+        print!(" {}", format_token(&[i as u8]));
+        token_set.add_token(&[i as u8]);
+    }
+    println!();
+
+    true
+}
+
 fn save_token_set(
     token_set: &TokenSet,
     stats: &TokenStats,
@@ -404,7 +469,11 @@ fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
         add_tokens_bpe(&mut tokenizer, &mut token_set, ntokens, block);
     }
 
-    let stats = tokenize_file(&token_set, slow_sampler);
+    let mut stats = tokenize_file(&token_set, slow_sampler);
+
+    if optimize_byte_tokens(&mut token_set, &stats) {
+        stats = tokenize_file(&token_set, slow_sampler);
+    }
     let mut best_cost = stats.cost();
 
     save_token_set(&token_set, &stats, output_path, processing, initial_size);
@@ -428,7 +497,10 @@ fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
         token_set = new_token_set;
 
         if Instant::now() - last_update_time > Duration::from_secs(600) {
-            let stats = tokenize_file(&token_set, slow_sampler);
+            let mut stats = tokenize_file(&token_set, slow_sampler);
+            if optimize_byte_tokens(&mut token_set, &stats) {
+                stats = tokenize_file(&token_set, slow_sampler);
+            }
             let cost = stats.cost();
             if cost < best_cost {
                 println!(
@@ -445,8 +517,11 @@ fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
         }
     }
 
-    let stats = tokenize_file(&token_set, slow_sampler);
-    let cost = stats.cost();
+    let mut stats = tokenize_file(&token_set, slow_sampler);
+    if optimize_byte_tokens(&mut token_set, &stats) {
+        stats = tokenize_file(&token_set, slow_sampler);
+    }
+let cost = stats.cost();
     if cost <= best_cost {
         println!(
             "Stats: bytes/cost = {:.3}  literals/bytes = {:.5}",

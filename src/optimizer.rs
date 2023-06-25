@@ -1,5 +1,6 @@
 use std::cmp::{min, Reverse};
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::io;
 use std::io::Write;
 use std::path::Path;
@@ -47,7 +48,7 @@ impl<'a, S: Sampler<'a>> TokenizerCache<'a, S> {
             key.push(0);
         }
 
-        let stats = tokenize_file(token_set, self.sampler);
+        let stats = tokenize_file(token_set, self.sampler, true);
         let mut stats_clone = stats.clone();
         stats_clone.pair_count.clear();
         stats_clone.pair_count.shrink_to_fit();
@@ -74,7 +75,7 @@ impl<'a, S: Sampler<'a>> TokenizerCache<'a, S> {
             return cached.clone();
         }
 
-        let stats = tokenize_file(token_set, self.sampler);
+        let stats = tokenize_file(token_set, self.sampler, false);
         let mut stats_clone = stats.clone();
         stats_clone.pair_count.clear();
         stats_clone.pair_count.shrink_to_fit();
@@ -108,14 +109,14 @@ fn add_tokens<'a, S: Sampler<'a>>(
 
     let set_size = token_set.tokens.len();
 
-    for ipair in 0..stats.pair_count.len() {
-        if stats.pair_count[ipair] > 0 {
-            let ifirst = ipair / set_size;
-            let isecond = ipair % set_size;
-
-            let mut token_str = token_set.tokens[ifirst].string.clone();
-            token_str.extend(token_set.tokens[isecond].string.clone());
-            token_values.push((token_str, stats.pair_count[ipair]))
+    for (&key, &count) in stats.pair_count.iter() {
+        let ifirst = key >> 16;
+        let isecond = key & 0xFFFF;
+    // for (&(ifirst, isecond), &count) in stats.pair_count.iter() {
+        if count > 0 {
+            let mut token_str = token_set.tokens[ifirst as usize].string.clone();
+            token_str.extend(token_set.tokens[isecond as usize].string.clone());
+            token_values.push((token_str, count))
         }
     }
 
@@ -129,6 +130,48 @@ fn add_tokens<'a, S: Sampler<'a>>(
     }
 
     added
+}
+
+fn add_token<'a, S: Sampler<'a>>(
+    tokenizer: &mut TokenizerCache<'a, S>,
+    token_set: &mut TokenSet,
+) -> Vec<u8> {
+    // let start = Instant::now();
+    let stats = tokenizer.get_stats_with_pairs(token_set);
+    // print!(" get_stats_with_pairs: {} ", start.elapsed().as_millis());
+
+    let mut added = None;
+    let mut best_cost = 0;
+
+    for i in 0..256 {
+        if stats.literal_count[i] > best_cost {
+            added = Some(vec![i as u8]);
+            best_cost = stats.literal_count[i];
+        }
+    }
+
+    // let set_size = token_set.tokens.len();
+
+    let mut pair_values: HashMap<Vec<u8>, u64> = HashMap::new();
+
+    // for (&(ifirst, isecond), &count) in stats.pair_count.iter() {
+    for (&key, &count) in stats.pair_count.iter() {
+        let ifirst = key >> 16;
+        let isecond = key & 0xFFFF;
+        if count > 0 {
+            let mut token_str = token_set.tokens[ifirst as usize].string.clone();
+            token_str.extend(token_set.tokens[isecond as usize].string.clone());
+
+            let total_count = pair_values.entry(token_str.clone()).or_insert(0);
+            *total_count += count;
+            if *total_count > best_cost {
+                added = Some(token_str);
+                best_cost = *total_count;
+            }
+        }
+    }
+
+    added.unwrap()
 }
 
 fn _add_and_remove_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
@@ -274,21 +317,25 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
         let mut new_token_set = token_set.clone();
         new_token_set.remove_token(token_str);
 
-        let added = add_tokens(fast_tokenizer, &mut new_token_set, 1);
+        // let start = Instant::now();
+        let added_str = add_token(fast_tokenizer, &mut new_token_set);
+        // print!(" add_token: {} ", start.elapsed().as_millis());
 
-        if added[0] == token_str {
+        if added_str == token_str {
             continue;
         }
 
         // let new_stats = fast_tokenizer.get_stats(&new_token_set);
 
         // if new_stats.cost() < initial_cost {
+        // let start = Instant::now();
         let new_full_stats = tokenizer.get_stats(&new_token_set);
+        // print!(" mid get_stats: {} ", start.elapsed().as_millis());
         if new_full_stats.cost() < initial_stats.cost() {
             println!(
                 "\nReplacing {} -> {} after {} tries",
                 format_token(&token_str),
-                format_token(added[0].as_slice()),
+                format_token(&added_str),
                 tries
             );
             return Some(new_token_set);
@@ -469,10 +516,12 @@ fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
         add_tokens_bpe(&mut tokenizer, &mut token_set, ntokens, block);
     }
 
-    let mut stats = tokenize_file(&token_set, slow_sampler);
+    let mut stats = tokenize_file(&token_set, slow_sampler, false);
 
+    let cost = stats.cost();
     if optimize_byte_tokens(&mut token_set, &stats) {
-        stats = tokenize_file(&token_set, slow_sampler);
+        stats = tokenize_file(&token_set, slow_sampler, false);
+        assert!(stats.cost() < cost);
     }
     let mut best_cost = stats.cost();
 
@@ -497,9 +546,9 @@ fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
         token_set = new_token_set;
 
         if Instant::now() - last_update_time > Duration::from_secs(600) {
-            let mut stats = tokenize_file(&token_set, slow_sampler);
+            let mut stats = tokenize_file(&token_set, slow_sampler, false);
             if optimize_byte_tokens(&mut token_set, &stats) {
-                stats = tokenize_file(&token_set, slow_sampler);
+                stats = tokenize_file(&token_set, slow_sampler, false);
             }
             let cost = stats.cost();
             if cost < best_cost {
@@ -517,11 +566,13 @@ fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
         }
     }
 
-    let mut stats = tokenize_file(&token_set, slow_sampler);
+    let mut stats = tokenize_file(&token_set, slow_sampler, false);
+    let cost = stats.cost();
     if optimize_byte_tokens(&mut token_set, &stats) {
-        stats = tokenize_file(&token_set, slow_sampler);
+        stats = tokenize_file(&token_set, slow_sampler, false);
+        assert!(stats.cost() < cost);
     }
-let cost = stats.cost();
+    let cost = stats.cost();
     if cost <= best_cost {
         println!(
             "Stats: bytes/cost = {:.3}  literals/bytes = {:.5}",

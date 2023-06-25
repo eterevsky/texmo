@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crate::sampler::{Sample, Sampler};
 use crate::stats::TokenStats;
@@ -114,7 +115,7 @@ impl Tokenizer {
         suffix_states
     }
 
-    fn process_slice(&self, bytes: &[u8], cost_array: &mut Vec<DynState>) -> TokenStats {
+    fn process_slice(&self, bytes: &[u8], cost_array: &mut Vec<DynState>, pair_stats: bool, stats: &mut TokenStats) {
         // let mut cost_array = Vec::with_capacity(bytes.len() + 1);
         cost_array.clear();
         cost_array.push(DynState {
@@ -182,15 +183,13 @@ impl Tokenizer {
 
             cost_array.push(best_dyn_state);
         }
-        self.get_stats(&cost_array)
+        // self.get_stats(&cost_array, pair_stats)
+        self.update_stats(&cost_array, pair_stats, stats);
     }
 
-    fn get_stats(&self, cost_array: &[DynState]) -> TokenStats {
-        let mut token_stats =
-            TokenStats::new(self.token_set.tokens.len(), self.token_set.literal_cost());
-
+    fn update_stats(&self, cost_array: &[DynState], pair_stats: bool, stats: &mut TokenStats) {
         let mut pos = cost_array.len() - 1;
-        token_stats.scanned_bytes = pos as u64;
+        stats.scanned_bytes = pos as u64;
 
         let mut next_token_id = TokenIdx::None;
 
@@ -198,17 +197,22 @@ impl Tokenizer {
             let token_id = cost_array[pos].token_id;
             match token_id {
                 TokenIdx::Token(id) => {
-                    token_stats.token_count[id as usize] += 1;
+                    stats.token_count[id as usize] += 1;
 
-                    if let TokenIdx::Token(next_id) = next_token_id {
-                        token_stats.pair_count
-                            [id as usize * self.token_set.tokens.len() + next_id as usize] += 1;
+                    if pair_stats {
+                        if let TokenIdx::Token(next_id) = next_token_id {
+                            assert!(next_id < 2048);
+                            let key = (id << 16) + next_id;
+                            assert!(key & 0xFFFF < 2048);
+                            *stats.pair_count.entry(key).or_insert(0) += 1;
+                            // *token_stats.pair_count.entry((id as u16, next_id as u16)).or_insert(0) += 1;
+                        }
                     }
                     let token = &self.token_set.tokens[id as usize];
                     pos -= token.string.len();
                 }
                 TokenIdx::Literal(l) => {
-                    token_stats.literal_count[l as usize] += 1;
+                    stats.literal_count[l as usize] += 1;
                     pos -= 1;
                 }
                 TokenIdx::None => unreachable!(),
@@ -216,8 +220,6 @@ impl Tokenizer {
 
             next_token_id = token_id;
         }
-
-        token_stats
     }
 }
 
@@ -225,10 +227,17 @@ fn worker(
     tokenizer: &Tokenizer,
     jobs_rx: Arc<Mutex<Receiver<Sample>>>,
     results_tx: Sender<TokenStats>,
+    pair_stats: bool,
 ) {
     let mut buffer = Vec::new();
+    // let mut wait = Vec::new();
+
+    let mut stats = TokenStats::new(tokenizer.token_set.tokens.len(), tokenizer.token_set.literal_cost());
+
     loop {
+        // let start = Instant::now();
         let job = jobs_rx.lock().unwrap().recv();
+        // wait.push(start.elapsed().as_millis() as u64);
         let data = {
             match job {
                 Ok(Sample::Data(ref data)) => data.as_slice(),
@@ -240,20 +249,22 @@ fn worker(
         // println!("got sample {}", data.len());
 
         assert!(!data.is_empty());
-
-        results_tx.send(tokenizer.process_slice(&data, &mut buffer)).unwrap();
+        tokenizer.process_slice(&data, &mut buffer, pair_stats, &mut stats);
     }
+
+    results_tx.send(stats).unwrap();
+    // println!("wait {:?}", wait.iter().sum::<u64>() as f64 / wait.len() as f64);
 }
 
-pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S) -> TokenStats {
+pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S, pair_stats: bool) -> TokenStats {
     let nthreads = std::thread::available_parallelism().unwrap().get();
 
-    let (jobs_tx, jobs_rx) = mpsc::sync_channel::<Sample>(2);
+    let (jobs_tx, jobs_rx) = mpsc::sync_channel::<Sample>(4);
     let jobs_rx_shared = Arc::new(Mutex::new(jobs_rx));
     let (results_tx, results_rx) = mpsc::channel::<TokenStats>();
 
-    let mut total_stats = TokenStats::new(token_set.tokens.len(), token_set.literal_cost());
     let tokenizer = Tokenizer::new(token_set.clone());
+    let mut total_stats = TokenStats::new(token_set.tokens.len(), token_set.literal_cost());
 
     std::thread::scope(|s| {
         let mut join_handles = Vec::new();
@@ -262,37 +273,41 @@ pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S) -
             let jobs_rx_clone = jobs_rx_shared.clone();
             let results_tx_clone = results_tx.clone();
             join_handles
-                .push(s.spawn(|| worker(&tokenizer, jobs_rx_clone, results_tx_clone)));
+                .push(s.spawn(|| worker(&tokenizer, jobs_rx_clone, results_tx_clone, pair_stats)));
         }
 
         let start = std::time::Instant::now();
-        let mut jobs_in_flight = 0;
+        // let mut jobs_in_flight = 0;
 
         for sample in sampler.iter() {
             // println!("sending sample");
             jobs_tx.send(sample).unwrap();
-            jobs_in_flight += 1;
+            // jobs_in_flight += 1;
 
-            for result in results_rx.try_iter() {
-                total_stats.add(&result);
-                jobs_in_flight -= 1;
-                let elapsed = std::time::Instant::now() - start;
-                if sampler.total_size() > 1 << 34 {
-                    print!(
-                        "\rAvg pace: {:.1} MB / s",
-                        total_stats.scanned_bytes as f64 / 1000000.0 / elapsed.as_secs_f64()
-                    );
-                }
-            }
+            // for result in results_rx.try_iter() {
+            //     total_stats.add(&result);
+            //     jobs_in_flight -= 1;
+            //     let elapsed = std::time::Instant::now() - start;
+            //     if sampler.total_size() > 1 << 32 {
+            //         print!(
+            //             "\rAvg pace: {:.1} MB / s",
+            //             total_stats.scanned_bytes as f64 / 1000000.0 / elapsed.as_secs_f64()
+            //         );
+            //     }
+            // }
         }
 
         std::mem::drop(jobs_tx);
 
-        while jobs_in_flight > 0 {
+        for _ in 0..nthreads {
             let result = results_rx.recv().unwrap();
             total_stats.add(&result);
-            jobs_in_flight -= 1;
         }
+        // while jobs_in_flight > 0 {
+        //     let result = results_rx.recv().unwrap();
+        //     total_stats.add(&result);
+        //     jobs_in_flight -= 1;
+        // }
         if total_stats.scanned_bytes > 1 << 34 {
             let elapsed = std::time::Instant::now() - start;
             println!(

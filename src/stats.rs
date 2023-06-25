@@ -1,10 +1,14 @@
+use std::collections::HashMap;
+
 use json::JsonValue;
 
 #[derive(Clone)]
 pub struct TokenStats {
     literal_cost: u64,
     pub token_count: Vec<u64>,
-    pub pair_count: Vec<u64>,
+    // Will work for up to 2^16 tokens
+    // pub pair_count: HashMap<(u16, u16), u64>,
+    pub pair_count: HashMap<u32, u64>,
     pub literal_count: [u64; 256],
     pub scanned_bytes: u64,
 }
@@ -14,13 +18,10 @@ impl TokenStats {
         let mut token_count = Vec::new();
         token_count.resize(ntokens, 0);
 
-        let mut pair_count = Vec::new();
-        pair_count.resize(ntokens * ntokens, 0);
-
         TokenStats {
             literal_cost,
             token_count,
-            pair_count,
+            pair_count: HashMap::new(),
             literal_count: [0; 256],
             scanned_bytes: 0,
         }
@@ -30,8 +31,8 @@ impl TokenStats {
         for i in 0..self.token_count.len() {
             self.token_count[i] += other.token_count[i];
         }
-        for i in 0..self.pair_count.len() {
-            self.pair_count[i] += other.pair_count[i];
+        for (&pair, count) in other.pair_count.iter() {
+            *self.pair_count.entry(pair).or_insert(0) += count;
         }
         for i in 0..256 {
             self.literal_count[i] += other.literal_count[i];

@@ -196,16 +196,23 @@ def default_from_template(template: Template, spec: str) -> Configuration:
             token_processing = "raw"
         else:
             token_processing = template.token_processing[0]
+        if "bits1" in template.token_type:
+            token_type = "bits1"
+        elif "bits2" in template.token_type:
+            token_type = "bits2"
+        else:
+            token_type = template.token_type[0]
     else:
         if "capswords" in template.token_processing:
             token_processing = "capswords"
         else:
             token_processing = template.token_processing[0]
-
-    if "dist4" in template.token_type:
-        token_type = "dist4"
-    else:
-        token_type = template.token_type[0]
+        if "bits4" in template.token_type:
+            token_type = "bits4"
+        elif "bits2" in template.token_type:
+            token_type = "bits2"
+        else:
+            token_type = template.token_type[0]
 
     model = build_model(ntokens, spec)
     return Configuration(

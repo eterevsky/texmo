@@ -13,7 +13,7 @@ from .pretrained import Checkpoint
 from .record import TrainingRecord
 from .results import ResultSet
 from .run import Run
-from .timing import Timing
+from .timing import TimingModel
 
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
 # with t = 2^k
@@ -31,7 +31,7 @@ class Search(object):
         self._init_conf = init_conf
         self._min_max_weights = min_max_weights
         self._checkpoints_path = checkpoints_path
-        self._timing = Timing()
+        self._timing = TimingModel()
 
         logging.info("Creaing ResultSet.")
         self._result_set = ResultSet(db, template)

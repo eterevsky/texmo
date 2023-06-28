@@ -13,7 +13,7 @@ from typing import Optional
 import numpy as np
 
 from . import latency
-from .timing import Timing
+from .timing import TimingModel
 from .tokens import Tokenizer, TokenSet, get_tokenizer, set_tokens_dir
 
 
@@ -167,13 +167,13 @@ class DataSet(object):
         tokens_dir: str = None,
         debug: bool = False,
         in_process: bool = False,
-        timing: Timing = None,
+        timing: TimingModel = None,
     ):
         set_tokens_dir(tokens_dir)
 
         logging.info("Creating DataSet")
         self._debug: bool = debug
-        self._timing = timing
+        # self._timing = timing
 
         self._reader_requests_queue: Queue = Queue()
         self._reader_queue: Queue = Queue()
@@ -285,18 +285,18 @@ class DataSet(object):
             self._request_queue.put(None)
             self._worker_threads[0].run()
         (batch, lengths, timer) = self._data_queues[request].get()
-        if (
-            self._timing is not None
-            and not first_request
-            and request.ntokens is not None
-        ):
-            self._timing.register_sample_latency(
-                request.token_set_name,
-                request.ntokens,
-                request.batch,
-                timer / 1e9,
-            )
-        return (batch, lengths)
+        # if (
+        #     self._timing is not None
+        #     and not first_request
+        #     and request.ntokens is not None
+        # ):
+        #     self._timing.register_sample_latency(
+        #         request.token_set_name,
+        #         request.ntokens,
+        #         request.batch,
+        #         timer / 1e9,
+        #     )
+        return (batch, lengths, timer)
 
     def sample_bytes(
         self, length, batch_size, token_set_name
@@ -304,14 +304,15 @@ class DataSet(object):
         request = SampleRequest(token_set_name, ntokens=None, length=length, batch=batch_size)
 
         with latency.timer("DataSet.sample_bytes"):
-            return self._execute_request(request)
+            batch, lengths, _timer = self._execute_request(request)
+            return batch, lengths
 
-    def sample_tokens(self, ntokens, batch_size, token_set_name) -> np.ndarray:
+    def sample_tokens(self, ntokens, batch_size, token_set_name) -> tuple[np.ndarray, int]:
         request = SampleRequest(token_set_name, ntokens=ntokens, length=None, batch=batch_size)
 
         with latency.timer("DataSet.sample_tokens"):
-            batch, _lengths = self._execute_request(request)
-            return batch
+            batch, _lengths, timer = self._execute_request(request)
+            return batch, timer
 
 
 def build_dataset(path):

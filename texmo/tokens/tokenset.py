@@ -34,7 +34,7 @@ class Token(object):
 class TokenSet(object):
     @staticmethod
     def from_json_file(filename: str):
-        with open(filename) as file:
+        with open(filename, "rb") as file:
             tokens_dict = json.load(file)
         return TokenSet.from_json(tokens_dict)
 

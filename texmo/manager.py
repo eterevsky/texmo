@@ -28,7 +28,7 @@ from .model2 import Model2, Weights
 from .prng import Rng
 from .record import TrainingRecord
 from .run import Run
-from .timing import Timing
+from .timing import TimingModel
 from .tokens import Tokenizer, TokenSet, get_tokenizer
 
 LOG2 = 1 / math.log(2)
@@ -81,7 +81,7 @@ class Manager(object):
         test_sample_len: int = 1024,
         test_batch: int = 1024,
         pre_training: Optional[list] = None,
-        timing: Timing = None,
+        timing: TimingModel = None,
     ):
         self._rng: Rng = Rng()
         self.ntokens = conf.ntokens
@@ -336,7 +336,9 @@ class Manager(object):
         loss = float(loss)
 
         byte_loss = (
-            loss if self.tokenizer is None else self.tokenizer.token_set.byte_loss(loss)
+            loss
+            if self.tokenizer is None
+            else self.tokenizer.token_set.byte_loss(loss)
         )
         self.run.add_step(loss, byte_loss)
 
@@ -366,12 +368,17 @@ class Manager(object):
         s = "" if steps > 1e10 else f" {steps} steps"
         logging.info(f"Training for{t}{s}")
 
+        sample_times = []
+
         while time.time() < finish_time and self.step < steps:
-            batch = train_set.sample_tokens(
+            batch, sample_time = train_set.sample_tokens(
                 ntokens=self.conf.sample_len,
                 batch_size=self.conf.batch,
                 token_set_name=self.token_set_name,
             )
+
+            if sample_time is not None:
+                sample_times.append(sample_time)
 
             step_start = perf_counter_ns()
 
@@ -383,9 +390,11 @@ class Manager(object):
                 )
                 raise TrainingDiverged
 
-            step_time = (perf_counter_ns() - step_start) / 1E9
+            step_time = (perf_counter_ns() - step_start) / 1e9
             if self._timing is not None:
-                self._timing.register_step(timing_key, self.step == 1, step_time)
+                self._timing.register_step(
+                    timing_key, self.step == 1, step_time
+                )
 
             if math.isnan(loss) or math.isinf(loss):
                 raise TrainingDiverged
@@ -395,7 +404,9 @@ class Manager(object):
                 or time.time() - last_report > 10
             ):
                 last_report = time.time()
-                logging.info(self.run.report_recent_loss(self.tokenizer.token_set))
+                logging.info(
+                    self.run.report_recent_loss(self.tokenizer.token_set)
+                )
 
             if (
                 temp_steps is not None
@@ -407,7 +418,12 @@ class Manager(object):
 
         total_time = time.time() - start
         if self._timing is not None:
-            self._timing.register_training_time(timing_key, self.step, total_time)
+            self._timing.register_sample_latency(
+                self.token_set_name,
+                self.conf.sample_len,
+                self.conf.batch,
+                sample_times,
+            )
 
         return total_time
 
@@ -469,9 +485,7 @@ class Manager(object):
 
         return (report, self.run, self.weights)
 
-    def continue_prefix(
-        self, prefix: str, length: int
-    ) -> str | bytes:
+    def continue_prefix(self, prefix: str, length: int) -> str | bytes:
         prefix_bytes: bytes = prefix.encode()  # convert str to bytes (?)
         prefix_tokens = [t.id for t in self.tokenizer.tokenize(prefix_bytes)]
 
@@ -479,7 +493,11 @@ class Manager(object):
 
         full_text = prefix_tokens + out
 
-        out = self.tokenizer.untokenize(full_text) if self.tokenizer else bytes(out)
+        out = (
+            self.tokenizer.untokenize(full_text)
+            if self.tokenizer
+            else bytes(out)
+        )
 
         return out
 

@@ -66,7 +66,7 @@ def conf_is_valid(conf: Configuration) -> bool:
         and is_power2(conf.ntokens)
         and conf.ntokens >= 2
         and conf.token_type in TOKEN_TYPES
-        and conf.token_processing in ("raw", "caps", "capswords")
+        and conf.token_processing in ("raw", "capswords")
     )
 
 
@@ -315,8 +315,8 @@ def conf_neighbors(conf: Configuration, template: Template):
             if get_tokenizer(conf_tokens_name(conf)):
                 yield conf
 
-    for x in _NEIGHBOR_TOKEN_PROCESSING[conf.token_processing]:
-        if x in template.token_processing:
+    for x in ("raw", "capswords"):
+        if x in template.token_processing and x != conf.token_processing:
             conf = conf._replace(token_processing=x)
             if get_tokenizer(conf_tokens_name(conf)):
                 yield conf

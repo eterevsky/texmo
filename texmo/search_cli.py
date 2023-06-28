@@ -11,7 +11,7 @@ from .report import (draw_weight_loss_graph, generate_max_report,
                      generate_param_report, generate_report_by_weight)
 from .resultdb import ResultDB
 from .search import Search
-from .timing import Timing
+from .timing import TimingModel
 from .tokens import set_tokens_dir
 
 
@@ -24,13 +24,13 @@ def warmup(dataset):
         lr=0.0625,
         sample_len=128,
         batch=32,
-        t=8,
+        t=1,
     )
     manager = Manager(conf)
     manager.init(quiet=True)
     manager.train_and_eval(
         steps=None,
-        time_limit=8,
+        time_limit=1,
         train_set=dataset,
         temp_steps=None,
         temp_dir=None,
@@ -67,7 +67,7 @@ def generate_report(result_set, template, min_max_weights):
     draw_weight_loss_graph(result_set, template)
 
 
-def search_loop(dataset, search: Search, timing: Timing, checkpoints_path: str):
+def search_loop(dataset, search: Search, timing: TimingModel, checkpoints_path: str):
     logging.info("Warming up training")
     warmup(dataset)
 
@@ -100,7 +100,7 @@ def search_loop(dataset, search: Search, timing: Timing, checkpoints_path: str):
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
     try:
-        timing = Timing()
+        timing = TimingModel()
         dataset = DataSet(args.data, tokens_dir=args.tokens_dir, timing=timing)
         template = Template.from_args(args)
         default = default_from_template(template, spec=args.default_spec)

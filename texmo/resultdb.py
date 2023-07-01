@@ -19,7 +19,7 @@ from .configuration import (
 )
 from .model2 import Model2, build_model
 from .record import TrainingRecord
-from .run import Run, build_loss_trend
+from .run import Run
 
 
 def _pack_ndarray(step_loss):
@@ -39,6 +39,12 @@ def _unpack_ndarray(blob):
 def _dict_row_factory(cursor, row):
     fields = [column[0] for column in cursor.description]
     return {key: value for key, value in zip(fields, row)}
+
+
+def _build_loss_trend(step_loss, model_version, params):
+    from .predict import build_loss_trend
+
+    return build_loss_trend(step_loss, model_version, params)
 
 
 class ResultDB(object):
@@ -197,7 +203,7 @@ class ResultDB(object):
                 conf = conf_from_dict(row)
                 step_loss = _unpack_ndarray(row["step_loss"])
 
-                loss_trend = build_loss_trend(
+                loss_trend = _build_loss_trend(
                     step_loss,
                     row["loss_model_v"],
                     _unpack_ndarray(row["loss_model"]),

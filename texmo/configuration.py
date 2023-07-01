@@ -241,9 +241,9 @@ _NEIGHBOR_TOKEN_TYPES = {
 }
 
 _NEIGHBOR_TOKEN_PROCESSING = {
-    "raw": ["caps"],
-    "caps": ["raw", "capswords"],
-    "capswords": ["caps"]
+    "raw": ["capswords"],
+    # "caps": ["raw", "capswords"],
+    "capswords": ["raw"]
 }
 
 
@@ -305,18 +305,19 @@ def conf_neighbors(conf: Configuration, template: Template):
     for x in power2_neighbors(conf.ntokens):
         if match_bounds(template.ntokens, x):
             model = build_model(x, str(conf.model))
-            conf = conf._replace(ntokens=x, model=model)
-            if get_tokenizer(conf_tokens_name(conf)):
-                yield conf
+            conf_mod = conf._replace(ntokens=x, model=model)
+            if get_tokenizer(conf_tokens_name(conf_mod)):
+                yield conf_mod
 
     for x in _NEIGHBOR_TOKEN_TYPES[conf.token_type]:
         if x in template.token_type:
-            conf = conf._replace(token_type=x)
-            if get_tokenizer(conf_tokens_name(conf)):
-                yield conf
+            conf_mod = conf._replace(token_type=x)
+            name = conf_tokens_name(conf_mod)
+            if get_tokenizer(conf_tokens_name(conf_mod)):
+                yield conf_mod
 
     for x in ("raw", "capswords"):
         if x in template.token_processing and x != conf.token_processing:
-            conf = conf._replace(token_processing=x)
-            if get_tokenizer(conf_tokens_name(conf)):
-                yield conf
+            conf_mod = conf._replace(token_processing=x)
+            if get_tokenizer(conf_tokens_name(conf_mod)):
+                yield conf_mod

@@ -5,15 +5,18 @@ from typing import Optional
 
 from . import latency
 from .common import INF
-from .configuration import (Configuration, conf_neighbors, conf_to_dict,
-                            conf_to_string, conf_tokens_name)
+from .configuration import (
+    Configuration,
+    conf_neighbors,
+    conf_to_string,
+    conf_tokens_name,
+)
 from .model2 import Weights
-from .predict import Predictor
+from .predict import LossPredictorV1, SampleTiming
 from .pretrained import Checkpoint
 from .record import TrainingRecord
 from .results import ResultSet
 from .run import Run
-from .timing import TimingModel
 
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
 # with t = 2^k
@@ -24,21 +27,26 @@ class Search(object):
     """Keep track of the configurations and selects what to try next."""
 
     def __init__(
-        self, db, template, init_conf, min_max_weights, checkpoints_path: str = None
+        self,
+        db,
+        template,
+        init_conf,
+        min_max_weights,
+        checkpoints_path: str = None,
     ):
         self._db = db
         self._template = template
         self._init_conf = init_conf
         self._min_max_weights = min_max_weights
         self._checkpoints_path = checkpoints_path
-        self._timing = TimingModel()
+        self._timing = SampleTiming()
 
         logging.info("Creaing ResultSet.")
         self._result_set = ResultSet(db, template)
         self._last_predictor_update = 0
 
         logging.info("Creating Predictor")
-        self._predictor = Predictor(self._result_set)
+        self._predictor = LossPredictorV1(self._result_set)
         if self._result_set.total_runs_count() > 0:
             self.train_predictor()
 
@@ -55,15 +63,17 @@ class Search(object):
     def add_run(
         self,
         record: TrainingRecord,
-        conf: Configuration,
         run: Run,
         weights: Weights,
         parent_checkpoint: Optional[Checkpoint] = None,
     ):
         assert isinstance(record, TrainingRecord)
-        assert isinstance(conf, Configuration)
         assert isinstance(run, Run)
-        with latency.timer("Search.add_record"):
+
+        conf = record.conf
+        assert self._template.match_conf(conf)
+
+        with latency.timer("Search.add_run"):
             if (
                 abs(log2(record.planned_time_s) - log2(record.train_time_s))
                 > 0.1
@@ -233,10 +243,11 @@ class Search(object):
                     score += " "
                 conf = conf_results.conf
                 tokens = conf_tokens_name(conf)
-                report.append(f"{score}  LEN{conf.sample_len:4}  B{conf.batch:4}  LR{conf.lr:7.4f}  {tokens}  {conf.model}")
+                report.append(
+                    f"{score}  LEN{conf.sample_len:4}  B{conf.batch:4}  LR{conf.lr:7.4f}  {tokens}  {conf.model}"
+                )
 
             logging.info("\n".join(report))
-
 
     def _select_checkpoint(self, t):
         pass

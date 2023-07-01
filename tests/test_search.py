@@ -2,7 +2,7 @@ import logging
 from unittest import TestCase
 from datetime import datetime
 
-from texmo.configuration import Configuration, Template, conf_to_string, conf_from_record
+from texmo.configuration import Configuration, Template
 from texmo.model2 import build_model
 from texmo.search import Search
 from texmo.record import TrainingRecord
@@ -34,28 +34,22 @@ TEMPLATE = Template(
     max_weights=None,
 )
 
-def create_record(spec, loss, batch=256):
+def create_record(spec: str, loss, batch=256, reg=0.125):
     return TrainingRecord(
         timestamp=datetime.fromisoformat("2022-02-02T02:02:02"),
-        token_set_name="tokens256_raw_all",
-        model_spec=spec,
-        weights=1024,
+        conf=INIT_CONF,
         steps=123,
-        train_time_s=1,
-        learning_rate=1.0,
-        regularization=0.0001,
-        train_sample_len=128,
-        train_batch=batch,
+        train_time_s=8,
+        regularization=reg,
         total_data=2**34,
         loss=loss,
         test_sample_len=1024,
         test_batch=1024,
         test_poisoned=True,
-        init_scale=1.0,
-        planned_time_s=1,
-        final_time_s=1,
+        planned_time_s=8,
+        final_time_s=8,
         loss_model_v=0,
-        loss_model_params=None,
+        loss_model_params=[8, 0, 0],
     )
 
 
@@ -80,7 +74,7 @@ class SearchTest(TestCase):
         record = create_record("dense.1.relu", 4.5)
         step_loss = [4.5 + (122 - s) * 0.01 for s in range(0, 123)]
         run = Run(loss=4.5, step_loss=step_loss)
-        search.add_run(record, INIT_CONF, run, None)
+        search.add_run(record, run, None)
 
         i, neighbor, conf = search._select_neighbor(1, 1024)
 
@@ -96,7 +90,9 @@ class SearchTest(TestCase):
         record = create_record("dense.1.relu", 4.5)
         step_loss = [4.5 + (122 - s) * 0.01 for s in range(0, 123)]
         run = Run(loss=4.5, step_loss=step_loss)
-        search.add_run(record, INIT_CONF, run, None)
+        search.add_run(record, run, None)
+        search.add_run(record, run, None)
+        search.add_run(record, run, None)
 
         i, conf = search._select_by_pred_score(1, 1024)
 

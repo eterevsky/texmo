@@ -11,7 +11,7 @@ from .report import (draw_weight_loss_graph, generate_max_report,
                      generate_param_report, generate_report_by_weight)
 from .resultdb import ResultDB
 from .search import Search
-from .timing import TimingModel
+from .predict import SampleTiming
 from .tokens import set_tokens_dir
 
 
@@ -19,8 +19,8 @@ def warmup(dataset):
     conf = Configuration(
         model=build_model(32, "suffix.4-rec.32.relu"),
         ntokens=32,
-        token_type="dist4",
-        token_processing="caps",
+        token_type="bits4",
+        token_processing="capswords",
         lr=0.0625,
         sample_len=128,
         batch=32,
@@ -67,7 +67,7 @@ def generate_report(result_set, template, min_max_weights):
     draw_weight_loss_graph(result_set, template)
 
 
-def search_loop(dataset, search: Search, timing: TimingModel, checkpoints_path: str):
+def search_loop(dataset, search: Search, timing: SampleTiming, checkpoints_path: str):
     logging.info("Warming up training")
     warmup(dataset)
 
@@ -80,7 +80,7 @@ def search_loop(dataset, search: Search, timing: TimingModel, checkpoints_path: 
             logging.info(f"Checkpoint: {checkpoint}")
             weights = checkpoint.load_weights(checkpoints_path)
 
-        manager = Manager(conf, weights=weights, timing=timing)
+        manager = Manager(conf, weights=weights, sample_timing=timing)
         manager.init(quiet=True)
 
         record, run, weights = manager.train_and_eval(
@@ -94,14 +94,14 @@ def search_loop(dataset, search: Search, timing: TimingModel, checkpoints_path: 
             quiet=True,
         )
 
-        search.add_run(record, conf, run, weights, parent_checkpoint=checkpoint)
+        search.add_run(record, run, weights, parent_checkpoint=checkpoint)
 
 
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
     try:
-        timing = TimingModel()
-        dataset = DataSet(args.data, tokens_dir=args.tokens_dir, timing=timing)
+        timing = SampleTiming()
+        dataset = DataSet(args.data, tokens_dir=args.tokens_dir)
         template = Template.from_args(args)
         default = default_from_template(template, spec=args.default_spec)
         logging.info("Default configuration: " + conf_to_string(default))

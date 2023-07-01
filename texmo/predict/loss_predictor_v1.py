@@ -3,19 +3,19 @@ import math
 from collections import namedtuple
 from collections.abc import Iterable
 from statistics import median
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-from . import latency
-from .common import NCHAR, total_size
-from .configuration import Configuration, conf_is_valid, conf_tokens_name
-from .model2 import Model2
+from .. import latency
+from ..common import NCHAR, total_size
+from ..configuration import Configuration, conf_is_valid, conf_tokens_name
+from ..model2 import Model2
 from .predict_common import MAX_LOSS
-from .results import ResultSet, ConfResults
-from .run import Run
-from .tokens import get_tokenizer
+from ..results import ResultSet, ConfResults
+from ..run import Run
+from ..tokens import get_tokenizer
 
 MAX_LOG_LOSS = math.log2(MAX_LOSS)
 
@@ -71,6 +71,19 @@ def decode_loss(loss):
         return None
     loss = np.minimum(loss, MAX_LOG_LOSS)
     return np.exp2(loss)
+
+
+class ResultsProvider(object):
+    """An abstract class that returns results for a given configuration.
+
+    Added to avoid a circular dependency.
+    """
+
+    def all_conf_results(self) -> Iterable[ConfResults]:
+        raise NotImplementedError
+
+    def get_conf_results(self, conf: Configuration) -> Optional[ConfResults]:
+        raise NotImplementedError
 
 
 class FeatureProvider(object):
@@ -256,7 +269,7 @@ class _HistPredictor(object):
         return np.sum(error) / np.sum(sample_weight)
 
 
-class Predictor(object):
+class LossPredictorV1(object):
     def __init__(self, result_set: ResultSet):
         assert isinstance(result_set, ResultSet)
         self._result_set = result_set

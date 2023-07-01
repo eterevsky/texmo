@@ -28,7 +28,7 @@ from .model2 import Model2, Weights
 from .prng import Rng
 from .record import TrainingRecord
 from .run import Run
-from .timing import TimingModel
+from .predict import SampleTiming, LossTrend
 from .tokens import Tokenizer, TokenSet, get_tokenizer
 
 LOG2 = 1 / math.log(2)
@@ -81,11 +81,11 @@ class Manager(object):
         test_sample_len: int = 1024,
         test_batch: int = 1024,
         pre_training: Optional[list] = None,
-        timing: TimingModel = None,
+        sample_timing: SampleTiming = None,
     ):
         self._rng: Rng = Rng()
         self.ntokens = conf.ntokens
-        self._timing = timing
+        self._sample_timing: SampleTiming = sample_timing
         self.token_set_name = conf_tokens_name(conf)
         self.tokenizer = get_tokenizer(self.token_set_name)
         self.ntokens = self.tokenizer.token_set.ntokens
@@ -219,7 +219,7 @@ class Manager(object):
             self.opt_state = self.optimizer.init(
                 self.weights[self.train_from :]
             )
-            self.run = Run()
+            self.run = Run(loss_trend=LossTrend())
         else:
             self._loss_grad = None
             self.optimizer = None
@@ -323,6 +323,7 @@ class Manager(object):
         return out
 
     def train_step(self, xs):
+        # print("train_step")
         xs = jax.nn.one_hot(xs, self.ntokens)
         trainable_weights = self.weights[self.train_from :]
         loss, grads = self._loss_grad(trainable_weights, xs)
@@ -353,10 +354,11 @@ class Manager(object):
         temp_dir=None,
         quiet=False,
     ):
+        # print("train")
         last_report = 0
 
-        if self._timing is not None:
-            timing_key = self._timing.generate_timing_key(self.conf)
+        if self._sample_timing is not None:
+            timing_key = self._sample_timing.generate_timing_key(self.conf)
 
         start = time.time()
         finish_time = start + time_limit if time_limit else INF
@@ -391,8 +393,8 @@ class Manager(object):
                 raise TrainingDiverged
 
             step_time = (perf_counter_ns() - step_start) / 1e9
-            if self._timing is not None:
-                self._timing.register_step(
+            if self._sample_timing is not None:
+                self._sample_timing.register_step(
                     timing_key, self.step == 1, step_time
                 )
 
@@ -417,8 +419,8 @@ class Manager(object):
                 self.save(temp_dir)
 
         total_time = time.time() - start
-        if self._timing is not None:
-            self._timing.register_sample_latency(
+        if self._sample_timing is not None:
+            self._sample_timing.register_sample_latency(
                 self.token_set_name,
                 self.conf.sample_len,
                 self.conf.batch,
@@ -454,7 +456,7 @@ class Manager(object):
             if math.isnan(eval_loss):
                 eval_loss = INF
         except TrainingDiverged:
-            print("Training stopped early.")
+            logging.warning("Training stopped early.")
             eval_loss = INF
             train_time = time_limit  # This is a hack, but we need to record
             # the loss with correct time.

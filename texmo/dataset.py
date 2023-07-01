@@ -13,7 +13,6 @@ from typing import Optional
 import numpy as np
 
 from . import latency
-from .timing import TimingModel
 from .tokens import Tokenizer, TokenSet, get_tokenizer, set_tokens_dir
 
 
@@ -38,6 +37,7 @@ def file_reader(
 def mem_reader(
     data: bytes, request_queue: Queue, data_queue: Queue, chunk_size: int
 ):
+    """A thread that reads random chunks from a bytes object."""
     while True:
         request = request_queue.get()
 
@@ -47,13 +47,14 @@ def mem_reader(
         with latency.timer("mem_reader"):
             start = random.randrange(len(data) - chunk_size)
             chunk = data[start : start + chunk_size]
+            # print("mem_reader put", chunk[:32])
             data_queue.put(chunk)
 
 
 def create_tokens_sample(
     chunk: bytes, tokenizer: Tokenizer, ntokens: int
 ) -> list[int]:
-    start = chunk.find(b"\n\n")
+    start = chunk.find(b"\n\n") + 2
     if start < 0:
         return None
     end = len(chunk) - 1
@@ -71,7 +72,7 @@ def create_tokens_sample(
 def create_bytes_sample(
     chunk: bytes, tokenizer: Tokenizer, length: int
 ) -> bytes:
-    start = chunk.find(b"\n\n")
+    start = chunk.find(b"\n\n") + 2
     if start < 0:
         return None
     end = start + length
@@ -113,6 +114,7 @@ class SamplerThread(Thread):
             self._execute_request(request)
 
     def _execute_request(self, request: SampleRequest):
+        # print("SamplerThread._execute_request", request)
         with latency.timer("SamplerThread._execute_request") as timer:
             with self._token_sets_lock:
                 tokenizer = get_tokenizer(request.token_set_name)
@@ -153,7 +155,8 @@ class SamplerThread(Thread):
                 max_len = max(len(sample) for sample in samples)
                 for sample in samples:
                     l = len(sample)
-                    sample.extend(repeat(0, max_len - l))
+                    if l < max_len:
+                        sample.extend(repeat(0, max_len - l))
 
             batch = np.array(samples, dtype=np.uint16)
             response_queue.put((batch, lengths, timer.value()))
@@ -167,12 +170,12 @@ class DataSet(object):
         tokens_dir: str = None,
         debug: bool = False,
         in_process: bool = False,
-        timing: TimingModel = None,
     ):
         set_tokens_dir(tokens_dir)
 
         logging.info("Creating DataSet")
         self._debug: bool = debug
+        self._in_process = in_process
         # self._timing = timing
 
         self._reader_requests_queue: Queue = Queue()
@@ -192,7 +195,35 @@ class DataSet(object):
                 assert len(data) == self.total_size
                 logging.info(f"Read {self.total_size} bytes")
 
-                self._reader_threads.append(Thread(
+                self._reader_threads.append(
+                    Thread(
+                        target=mem_reader,
+                        args=(
+                            data,
+                            self._reader_requests_queue,
+                            self._reader_queue,
+                            16384,
+                        ),
+                    )
+                )
+            else:
+                for i in range(4):
+                    self._reader_threads.append(
+                        Thread(
+                            target=file_reader,
+                            args=(
+                                path,
+                                self._reader_requests_queue,
+                                self._reader_queue,
+                                16384,
+                            ),
+                        )
+                    )
+        else:
+            assert data is not None
+            self.total_size = len(data)
+            self._reader_threads.append(
+                Thread(
                     target=mem_reader,
                     args=(
                         data,
@@ -200,30 +231,8 @@ class DataSet(object):
                         self._reader_queue,
                         16384,
                     ),
-                ))
-            else:
-                for i in range(4):
-                    self._reader_threads.append(Thread(
-                        target=file_reader,
-                        args=(
-                            path,
-                            self._reader_requests_queue,
-                            self._reader_queue,
-                            16384,
-                        ),
-                    ))
-        else:
-            assert data is not None
-            self.total_size = len(data)
-            self._reader_threads.append(Thread(
-                target=mem_reader,
-                args=(
-                    data,
-                    self._reader_requests_queue,
-                    self._reader_queue,
-                    16384,
-                ),
-            ))
+                )
+            )
         for th in self._reader_threads:
             th.start()
 
@@ -242,7 +251,6 @@ class DataSet(object):
 
         self._token_sets_lock = Lock()
 
-        self._in_process = in_process
         self._worker_threads = []
         for _ in range(1):
             worker_thread = SamplerThread(
@@ -270,7 +278,8 @@ class DataSet(object):
         for th in self._reader_threads:
             th.join()
 
-    def _execute_request(self, request: SampleRequest):
+    def _send_request(self, request: SampleRequest):
+        # print("_send_request")
         first_request = request not in self._data_queues
         if first_request:
             with self._token_sets_lock:
@@ -301,17 +310,24 @@ class DataSet(object):
     def sample_bytes(
         self, length, batch_size, token_set_name
     ) -> tuple[np.ndarray, list]:
-        request = SampleRequest(token_set_name, ntokens=None, length=length, batch=batch_size)
+        request = SampleRequest(
+            token_set_name, ntokens=None, length=length, batch=batch_size
+        )
 
         with latency.timer("DataSet.sample_bytes"):
-            batch, lengths, _timer = self._execute_request(request)
+            batch, lengths, _timer = self._send_request(request)
             return batch, lengths
 
-    def sample_tokens(self, ntokens, batch_size, token_set_name) -> tuple[np.ndarray, int]:
-        request = SampleRequest(token_set_name, ntokens=ntokens, length=None, batch=batch_size)
+    def sample_tokens(
+        self, ntokens, batch_size, token_set_name
+    ) -> tuple[np.ndarray, int]:
+        # print("sample_tokens")
+        request = SampleRequest(
+            token_set_name, ntokens=ntokens, length=None, batch=batch_size
+        )
 
         with latency.timer("DataSet.sample_tokens"):
-            batch, _lengths, timer = self._execute_request(request)
+            batch, _lengths, timer = self._send_request(request)
             return batch, timer
 
 
@@ -325,8 +341,10 @@ def build_dataset(path):
 def build_fake_dataset():
     """Build 'abacabadabacaba...' training set."""
     s = b"aba"
-    for c in range(ord("c"), ord("o")):
+    for c in range(ord("c"), ord("n")):
         s = s + bytes([c]) + s
+
+    s = b"\n\n".join([s] * 16)
     return DataSet(data=s)
 
 

@@ -211,6 +211,8 @@ class ResultSet(object):
         conf = record.conf
         assert conf_is_valid(conf)
 
+        assert self._template.match_conf(conf)
+
         self._result_db.add_record(record, run)
         conf_results = self._find_or_add_conf(conf)
         self.add_run(conf_results, run, update_scores=update_scores)

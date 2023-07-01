@@ -4,7 +4,7 @@ from unittest import TestCase, main
 
 import numpy as np
 
-from texmo.configuration import Configuration, Template
+from texmo.configuration import Configuration, Template, conf_is_valid
 from texmo.model2 import build_model
 from texmo.record import TrainingRecord
 from texmo.resultdb import ResultDB
@@ -13,28 +13,33 @@ from texmo.run import Run
 logging.disable(level=logging.ERROR)
 
 
-def create_record(spec, loss, batch=256, reg=0.125):
+def create_record(spec: str, loss, batch=256, reg=0.125):
+    model = build_model(ntokens=256, spec=spec)
+    conf = Configuration(
+            model=model,
+            ntokens=256,
+            token_processing="raw",
+            token_type="all",
+            lr=0.25,
+            sample_len=128,
+            batch=batch,
+            t=8,
+        )
     return TrainingRecord(
         timestamp=datetime.fromisoformat("2022-02-02T02:02:02"),
-        token_set_name="tokens256_raw_all",
-        model_spec=spec,
-        weights=1024,
+        conf=conf,
         steps=123,
         train_time_s=8,
-        learning_rate=0.25,
         regularization=reg,
-        train_sample_len=128,
-        train_batch=batch,
         total_data=2**34,
         loss=loss,
         test_sample_len=1024,
         test_batch=1024,
         test_poisoned=True,
-        init_scale=1.0,
         planned_time_s=8,
         final_time_s=8,
         loss_model_v=0,
-        loss_model_params=None,
+        loss_model_params=[8, 0, 0],
     )
 
 
@@ -75,11 +80,15 @@ class ResultDBTest(TestCase):
         self.assertEqual(cur.fetchall()[0]["count"], 2)
 
     def test_skip_invalid(self):
+        record = create_record("gru.43", 123)
+        assert not conf_is_valid(record.conf)
         self.db.add_record(
-            create_record("gru.16.relu", 123), Run(loss=123), skip_invalid=True
+            record, Run(loss=123), skip_invalid=True
         )
+        record = create_record("dense.16.tanh", 3.321, batch=127)
+        assert not conf_is_valid(record.conf)
         self.db.add_record(
-            create_record("dense.16.tanh", 3.321, batch=127),
+            record,
             Run(loss=3.321),
             skip_invalid=True,
         )

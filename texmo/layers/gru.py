@@ -12,11 +12,11 @@ from .registry import layer_cls
 class Gru(Layer):
     name = "gru"
 
-    def __init__(self, size, input_shape=None, tanh=False, relu=False, skip=False):
+    def __init__(self, size, input_shape=None, skip=False):
         super().__init__(input_shape=input_shape)
         self.size = size
         self.output_shape = (size,)
-        self._no_activation = not tanh and not relu
+        # self._no_activation = not tanh and not relu
         if skip:
             assert total_size(input_shape) == total_size(self.output_shape)
         self._skip = skip
@@ -26,7 +26,7 @@ class Gru(Layer):
         return f"gru.{self.size}{skip}"
 
     def is_valid(self) -> bool:
-        return self._no_activation and is_power2_int(self.size)
+        return is_power2_int(self.size)
 
     @property
     def weights(self) -> int:

@@ -8,9 +8,9 @@ from jax import numpy as jnp
 import optax
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-from .configuration import Configuration, conf_tokens_name
-from .prng import Rng
-from .tokens import get_tokenizer
+from ..configuration import Configuration, conf_tokens_name
+from ..prng import Rng
+from ..tokens import get_tokenizer
 
 
 _TYPE_IDX = {
@@ -127,7 +127,7 @@ class SamplerModel(object):
         self.pred.fit(xs, ys)
 
 
-class TimingModel(object):
+class SampleTiming(object):
     def __init__(self):
         self._sampler_model = SamplerModel()
         self._sample_latency = {}
@@ -182,96 +182,8 @@ class TimingModel(object):
         self._steps[key] = steps
         self._total_latency[key] = latency_s
 
-    # def fit(self):
-    #     for conf in self._confs:
-    #         if conf in self._conf_features:
-    #             continue
-    #         batch = conf.batch
-    #         sample_len = conf.sample_len
-    #         ntokens = conf.model.ntokens
-    #         layers = [f"input-i{ntokens}-b{batch}-l{sample_len}"]
-
-    #         size = ntokens
-    #         for layer in conf.model.layers:
-    #             layers.append(f"{layer}-i{size}-b{batch}-l{sample_len}")
-    #             size = 1
-    #             for dim in layer.output_shape:
-    #                 size *= dim
-
-    #         layers.append(f"output{ntokens}-i{size}-b{batch}-l{sample_len}")
-
-    #         conf_features = []
-
-    #         for layer in layers:
-    #             feature_id = self._layer_to_feature.get(layer)
-    #             if feature_id is None:
-    #                 feature_id = len(self._feature_to_layer)
-    #                 self._feature_to_layer.append(layer)
-    #                 self._layer_to_feature[layer] = feature_id
-
-    #             conf_features.append(feature_id)
-
-    #         self._conf_features[conf] = conf_features
-
-    #     xs = []
-    #     first_step = []
-    #     step = []
-    #     weights = []
-
-    #     for conf, first_step_latency, step_latencies, steps in zip(
-    #         self._confs,
-    #         self._first_step_latency,
-    #         self._step_latencies,
-    #         self._steps,
-    #     ):
-    #         x = np.zeros(
-    #             shape=(
-    #                 len(
-    #                     self._feature_to_layer,
-    #                 )
-    #             ),
-    #             dtype=np.float32,
-    #         )
-    #         conf_features = self._conf_features[conf]
-    #         for f in conf_features:
-    #             x[f] += 1
-    #         xs.append(x)
-    #         first_step.append(first_step_latency)
-
-    #         if step_latencies:
-    #             step.append(mean(step_latencies))
-    #         else:
-    #             # assert steps == 1
-    #             step.append(0)
-    #         weights.append(len(step_latencies))
-
-    #     self._step_regression = linear_model.LinearRegression(
-    #         positive=True, fit_intercept=False
-    #     )
-    #     self._step_regression.fit(xs, step, weights)
-
-    #     self._first_step_regression = linear_model.LinearRegression(
-    #         positive=True, fit_intercept=False
-    #     )
-    #     self._first_step_regression.fit(xs, first_step)
-
     def report(self):
         for key in sorted(self._sample_latency.keys()):
             avg = mean(self._sample_latency[key]) * 1000
             n = len(self._sample_latency[key])
             print(f"{key}  {avg:.3f} ms ({n})")
-
-        # self.fit()
-
-        # print(
-        #     self._first_step_regression.intercept_ * 1000,
-        #     self._step_regression.intercept_ * 1000,
-        # )
-
-        # for f in sorted(self._feature_to_layer):
-        #     i = self._layer_to_feature[f]
-        #     print(
-        #         f, " ",
-        #         self._first_step_regression.coef_[i] * 1000, " ",
-        #         self._step_regression.coef_[i] * 1000,
-        #     )

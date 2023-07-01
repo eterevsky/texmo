@@ -169,21 +169,21 @@ class Tokenizer(object):
                     sub_byte_buf.clear()
             else:
                 assert False, "Unsupported TokenSet type"
-        
+
         text = b"".join(chunks)
 
         try:
             text = text.decode("utf-8")
         except UnicodeDecodeError:
             return text
-        
+
         words = WORD_BOUNDARY.split(text)
 
         for i in range(len(words)):
             word = words[i]
             if not word.isalpha():
                 continue
-            
+
             if i > 0 and words[i-1][-1] == "\x14":
                 words[i-1] = words[i-1][:-1]
                 words[i] = word.capitalize()
@@ -200,7 +200,7 @@ class Tokenizer(object):
                     words[i + 1] = words[i + 1][1:]
 
         return "".join(words)
-        
+
 
     def _process(self, s: str) -> str:
         out = []
@@ -253,7 +253,11 @@ class Tokenizer(object):
             string = data[start:end]
 
             if self._mark_caps or self._mark_words:
-                string = string.decode("utf-8")
+                try:
+                    string = string.decode("utf-8")
+                except UnicodeDecodeError:
+                    print(string[:1000])
+                    raise
                 string = self._process(string).encode("utf-8")
 
             yield string

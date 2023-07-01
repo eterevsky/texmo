@@ -28,7 +28,7 @@ from .model2 import Model2, Weights
 from .prng import Rng
 from .record import TrainingRecord
 from .run import Run
-from .predict import SampleTiming, LossTrend
+from .predict import SampleTiming, LossTrend, TrainTiming
 from .tokens import Tokenizer, TokenSet, get_tokenizer
 
 LOG2 = 1 / math.log(2)
@@ -82,10 +82,12 @@ class Manager(object):
         test_batch: int = 1024,
         pre_training: Optional[list] = None,
         sample_timing: SampleTiming = None,
+        train_timing: TrainTiming = None,
     ):
         self._rng: Rng = Rng()
         self.ntokens = conf.ntokens
         self._sample_timing: SampleTiming = sample_timing
+        self._train_timing: TrainTiming = train_timing
         self.token_set_name = conf_tokens_name(conf)
         self.tokenizer = get_tokenizer(self.token_set_name)
         self.ntokens = self.tokenizer.token_set.ntokens
@@ -354,7 +356,6 @@ class Manager(object):
         temp_dir=None,
         quiet=False,
     ):
-        # print("train")
         last_report = 0
 
         if self._sample_timing is not None:
@@ -371,6 +372,7 @@ class Manager(object):
         logging.info(f"Training for{t}{s}")
 
         sample_times = []
+        step_times = []
 
         while time.time() < finish_time and self.step < steps:
             batch, sample_time = train_set.sample_tokens(
@@ -390,16 +392,12 @@ class Manager(object):
                 logging.warn(
                     "Internal XLA error, probably OOM. Returning +inf loss."
                 )
-                raise TrainingDiverged
-
-            step_time = (perf_counter_ns() - step_start) / 1e9
-            if self._sample_timing is not None:
-                self._sample_timing.register_step(
-                    timing_key, self.step == 1, step_time
-                )
+                step_times = []
+                break
 
             if math.isnan(loss) or math.isinf(loss):
-                raise TrainingDiverged
+                break
+
             if not quiet and (
                 self.step < 10
                 or (self.step % 10 == 0 and time.time() - last_report > 3)
@@ -409,6 +407,9 @@ class Manager(object):
                 logging.info(
                     self.run.report_recent_loss(self.tokenizer.token_set)
                 )
+
+            step_time = (perf_counter_ns() - step_start) / 1e9
+            step_times.append(step_time)
 
             if (
                 temp_steps is not None
@@ -425,6 +426,11 @@ class Manager(object):
                 self.conf.sample_len,
                 self.conf.batch,
                 sample_times,
+            )
+        if self._train_timing is not None:
+            self._train_timing.register_step_latency(
+                self.conf,
+                step_times
             )
 
         return total_time

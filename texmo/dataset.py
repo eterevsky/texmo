@@ -54,9 +54,10 @@ def mem_reader(
 def create_tokens_sample(
     chunk: bytes, tokenizer: Tokenizer, ntokens: int
 ) -> list[int]:
-    start = chunk.find(b"\n\n") + 2
+    start = chunk.find(b"\n\n")
     if start < 0:
         return None
+    start += 2  # Skip "\n\n"
     end = len(chunk) - 1
     while end > 0 and 128 <= chunk[end] < 192:
         end -= 1
@@ -72,9 +73,10 @@ def create_tokens_sample(
 def create_bytes_sample(
     chunk: bytes, tokenizer: Tokenizer, length: int
 ) -> bytes:
-    start = chunk.find(b"\n\n") + 2
+    start = chunk.find(b"\n\n")
     if start < 0:
         return None
+    start += 2  # Skip "\n\n"
     end = start + length
     while end < len(chunk) and 128 <= chunk[end] < 192:
         end += 1

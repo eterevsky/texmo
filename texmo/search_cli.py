@@ -11,7 +11,7 @@ from .report import (draw_weight_loss_graph, generate_max_report,
                      generate_param_report, generate_report_by_weight)
 from .resultdb import ResultDB
 from .search import Search
-from .predict import SampleTiming
+from .predict import SampleTiming, TrainTiming
 from .tokens import set_tokens_dir
 
 
@@ -67,7 +67,10 @@ def generate_report(result_set, template, min_max_weights):
     draw_weight_loss_graph(result_set, template)
 
 
-def search_loop(dataset, search: Search, timing: SampleTiming, checkpoints_path: str):
+def search_loop(dataset, search: Search, sample_timing: SampleTiming, train_timing: TrainTiming, checkpoints_path: str):
+    assert isinstance(sample_timing, SampleTiming)
+    assert isinstance(train_timing, TrainTiming)
+
     logging.info("Warming up training")
     warmup(dataset)
 
@@ -80,7 +83,7 @@ def search_loop(dataset, search: Search, timing: SampleTiming, checkpoints_path:
             logging.info(f"Checkpoint: {checkpoint}")
             weights = checkpoint.load_weights(checkpoints_path)
 
-        manager = Manager(conf, weights=weights, sample_timing=timing)
+        manager = Manager(conf, weights=weights, sample_timing=sample_timing, train_timing=train_timing)
         manager.init(quiet=True)
 
         record, run, weights = manager.train_and_eval(
@@ -100,7 +103,6 @@ def search_loop(dataset, search: Search, timing: SampleTiming, checkpoints_path:
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
     try:
-        timing = SampleTiming()
         dataset = DataSet(args.data, tokens_dir=args.tokens_dir)
         template = Template.from_args(args)
         default = default_from_template(template, spec=args.default_spec)
@@ -117,15 +119,17 @@ def main(args: argparse.Namespace):
             checkpoints_path=None,
         )
         result_set = search._result_set
+        sample_timing = SampleTiming()
+        train_timing = TrainTiming(args.train_timing)
         try:
-            search_loop(dataset, search, timing, None)
+            search_loop(dataset, search, sample_timing, train_timing, None)
         except KeyboardInterrupt:
             print("\nInterrupted\n")
 
         generate_report(result_set, template, args.min_max_weights)
 
         print()
-        timing.report()
+        sample_timing.report()
 
     finally:
         dataset.join()
@@ -151,19 +155,19 @@ def init_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--token-type",
         type=str,
-        default=",".join(TOKEN_TYPES),
+        default="all,bits1,bits2,bits4",
         help="comma-separate list of allowed tokenset types",
     )
     parser.add_argument(
         "--token-processing",
         type=str,
-        default="raw,caps,capswords",
+        default="raw,capswords",
         help="comma-separated list of allowed tokenizer processors",
     )
     parser.add_argument(
         "--ntokens",
         type=str,
-        default="2-1024",
+        default="2-16384",
         help="number of tokens in a token set",
     )
     parser.add_argument(
@@ -221,6 +225,12 @@ def init_args(parser: argparse.ArgumentParser):
         type=str,
         default=None,
         help="path to the SQLite database with the results",
+    )
+    parser.add_argument(
+        "--train-timing",
+        type=str,
+        default="results/train-timing.jsonl",
+        help="a file with measured train timings for each trainined configuration"
     )
 
     parser.set_defaults(func=main)

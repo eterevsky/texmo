@@ -121,9 +121,6 @@ class SamplerModel(object):
         xs = np.array(self.samples, dtype=np.float32)
         ys = np.array(self.latencies, dtype=np.float32)
 
-        logging.info(f"xs:\n{xs}")
-        logging.info(f"ys:\n{ys}")
-
         self.pred.fit(xs, ys)
 
 

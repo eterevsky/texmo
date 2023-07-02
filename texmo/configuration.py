@@ -304,8 +304,10 @@ def conf_neighbors(conf: Configuration, template: Template):
 
     for x in power2_neighbors(conf.ntokens):
         if match_bounds(template.ntokens, x):
-            model = build_model(x, str(conf.model))
-            conf_mod = conf._replace(ntokens=x, model=model)
+            new_model = build_model(x, str(conf.model))
+            if not template.match_model(new_model):
+                continue
+            conf_mod = conf._replace(ntokens=x, model=new_model)
             if get_tokenizer(conf_tokens_name(conf_mod)):
                 yield conf_mod
 

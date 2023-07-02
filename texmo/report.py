@@ -12,7 +12,7 @@ from texmo.results import ResultSet
 def max_points(result_set: ResultSet, t: int, maxx: int):
     x = []
     y = []
-    min_loss = 8
+    min_loss = 5
 
     for conf_results in result_set.get_results_by_weights():
         conf = conf_results.conf

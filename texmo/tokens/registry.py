@@ -75,9 +75,9 @@ def get_tokenizer(name: str):
         return None
 
     path = os.path.join(_TOKENS_DIR, name + ".json")
-    logging.info(f"Loading token set from {path}")
     try:
         token_set = TokenSet.from_json_file(path)
+        logging.info(f"Loaded token set from {path}")
         tokenizer = Tokenizer(token_set)
     except FileNotFoundError:
         tokenizer = None

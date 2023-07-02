@@ -13,6 +13,7 @@ from .resultdb import ResultDB
 from .search import Search
 from .predict import SampleTiming, TrainTiming
 from .tokens import set_tokens_dir
+from . import latency
 
 
 def warmup(dataset):
@@ -77,7 +78,6 @@ def search_loop(dataset, search: Search, sample_timing: SampleTiming, train_timi
     logging.info("Starting search")
     while True:
         conf, checkpoint = search.select_conf()
-        logging.info(conf_to_string(conf))
         weights = None
         if checkpoint is not None:
             logging.info(f"Checkpoint: {checkpoint}")
@@ -129,7 +129,8 @@ def main(args: argparse.Namespace):
         generate_report(result_set, template, args.min_max_weights)
 
         print()
-        sample_timing.report()
+
+        latency.report()
 
     finally:
         dataset.join()

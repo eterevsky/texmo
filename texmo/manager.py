@@ -255,7 +255,7 @@ class Manager(object):
         else:
             total_entropy0 = 0
 
-        shards = 1
+        shards = 4
         while shards <= xs.shape[0]:
             logging.info(f"Evaluating with {shards} batches")
             shard_size = xs.shape[0] // shards
@@ -358,21 +358,23 @@ class Manager(object):
     ):
         last_report = 0
 
-        if self._sample_timing is not None:
-            timing_key = self._sample_timing.generate_timing_key(self.conf)
-
-        start = time.time()
-        finish_time = start + time_limit if time_limit else INF
 
         if steps is None:
             steps = INF
 
         t = "" if time_limit is None else f" {time_limit} s"
         s = "" if steps > 1e10 else f" {steps} steps"
-        logging.info(f"Training for{t}{s}")
 
         sample_times = []
         step_times = []
+
+        if self._train_timing is not None:
+            pred_first, pred_avg = self._train_timing.predict(self.conf)
+            logging.info(f"Predicted first step: {pred_first} s, avg step: {pred_avg} s")
+
+        logging.info(f"Training for{t}{s}")
+        start = time.time()
+        finish_time = start + time_limit if time_limit else INF
 
         while time.time() < finish_time and self.step < steps:
             batch, sample_time = train_set.sample_tokens(
@@ -396,6 +398,7 @@ class Manager(object):
                 break
 
             if math.isnan(loss) or math.isinf(loss):
+                logging.warning(f"Loss is {loss}, stopping training")
                 break
 
             if not quiet and (
@@ -420,6 +423,7 @@ class Manager(object):
                 self.save(temp_dir)
 
         total_time = time.time() - start
+
         if self._sample_timing is not None:
             self._sample_timing.register_sample_latency(
                 self.token_set_name,
@@ -428,10 +432,11 @@ class Manager(object):
                 sample_times,
             )
         if self._train_timing is not None:
-            self._train_timing.register_step_latency(
+            first_step, avg_step = self._train_timing.register_step_latency(
                 self.conf,
                 step_times
             )
+            logging.info(f"Actual first step: {first_step} s, avg step: {avg_step}")
 
         return total_time
 

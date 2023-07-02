@@ -237,7 +237,7 @@ class Model2(object):
 _cache: dict[str, Model2] = {}
 
 
-def build_model(ntokens: int, spec: str):
+def build_model(ntokens: int, spec: str) -> Model2:
     model = _cache.get((ntokens, spec))
     if model is None:
         model = Model2(ntokens, spec)

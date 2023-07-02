@@ -108,14 +108,14 @@ class SamplerModel(object):
         self.latencies.append(math.log2(avg_latency_ms))
 
         logging.info(
-            f"Features: {token_type} {token_processing} {ntokens} {batch} {sample_len} {bytes_per_token}"
+            f"Sample timing features: {token_type} {token_processing} {ntokens} {batch} {sample_len} {bytes_per_token}"
         )
         if len(self.samples) > 2:
-            logging.info(f"Input:\n{features}")
+            # logging.info(f"Input:\n{features}")
             pred = self.pred.predict(features.reshape(1, -1))
             pred_ms = 2 ** pred[0]
             logging.info(
-                f"Predicted latency: {pred_ms} ms real latency: {avg_latency_ms} ms"
+                f"Predicted sample latency: {pred_ms} ms real latency: {avg_latency_ms} ms"
             )
 
         xs = np.array(self.samples, dtype=np.float32)
@@ -159,25 +159,6 @@ class SampleTiming(object):
             token_set.bytes_per_token,
             latencies,
         )
-
-    def generate_timing_key(self, conf: Configuration):
-        key = len(self._confs)
-        self._confs.append(conf)
-        self._first_step_latency.append(None)
-        self._step_latencies.append([])
-        self._steps.append(None)
-        self._total_latency.append(None)
-        return key
-
-    def register_step(self, key, first: bool, latency_s: float):
-        if first:
-            self._first_step_latency[key] = latency_s
-        else:
-            self._step_latencies[key].append(latency_s)
-
-    def register_training_time(self, key, steps: int, latency_s: float):
-        self._steps[key] = steps
-        self._total_latency[key] = latency_s
 
     def report(self):
         for key in sorted(self._sample_latency.keys()):

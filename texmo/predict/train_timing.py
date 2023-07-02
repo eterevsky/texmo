@@ -11,7 +11,6 @@ from scipy.optimize import nnls, lsq_linear
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 
-from .nnls_grad import nnls_grad
 from .. import latency
 from ..common import total_size, INF
 from ..configuration import Configuration

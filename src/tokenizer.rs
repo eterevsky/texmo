@@ -201,9 +201,9 @@ impl Tokenizer {
 
                     if pair_stats {
                         if let TokenIdx::Token(next_id) = next_token_id {
-                            assert!(next_id < 2048);
+                            // assert!(next_id < 2048);
                             let key = (id << 16) + next_id;
-                            assert!(key & 0xFFFF < 2048);
+                            // assert!(key & 0xFFFF < 2048);
                             *stats.pair_count.entry(key).or_insert(0) += 1;
                             // *token_stats.pair_count.entry((id as u16, next_id as u16)).or_insert(0) += 1;
                         }

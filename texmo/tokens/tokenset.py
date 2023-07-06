@@ -67,9 +67,10 @@ class TokenSet(object):
         processing: str,
         tokens: list[bytes],
         stats: dict,
+        bytes_per_token: Optional[float] = None,
     ):
         assert isinstance(fallback_bits, Optional[int])
-        token_set = TokenSet(type, processing, fallback_bits, stats)
+        token_set = TokenSet(type, processing, fallback_bits, stats, bytes_per_token=bytes_per_token)
         if type == "fallback_distribution":
             reserved_tokens = 1
         elif type == "fallback_bits":

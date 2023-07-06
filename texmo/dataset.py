@@ -116,7 +116,6 @@ class SamplerThread(Thread):
             self._execute_request(request)
 
     def _execute_request(self, request: SampleRequest):
-        # print("SamplerThread._execute_request", request)
         with latency.timer("SamplerThread._execute_request") as timer:
             with self._token_sets_lock:
                 tokenizer = get_tokenizer(request.token_set_name)
@@ -155,10 +154,13 @@ class SamplerThread(Thread):
 
             if request.length is not None:
                 max_len = max(len(sample) for sample in samples)
-                for sample in samples:
+                for i, sample in enumerate(samples):
                     l = len(sample)
                     if l < max_len:
-                        sample.extend(repeat(0, max_len - l))
+                        if isinstance(sample, list):
+                            sample.extend(repeat(0, max_len - l))
+                        else:
+                            samples[i] = np.pad(sample, (0, max_len - l), 'constant')
 
             batch = np.array(samples, dtype=np.uint16)
             response_queue.put((batch, lengths, timer.value()))
@@ -281,7 +283,6 @@ class DataSet(object):
             th.join()
 
     def _send_request(self, request: SampleRequest):
-        # print("_send_request")
         first_request = request not in self._data_queues
         if first_request:
             with self._token_sets_lock:
@@ -296,17 +297,6 @@ class DataSet(object):
             self._request_queue.put(None)
             self._worker_threads[0].run()
         (batch, lengths, timer) = self._data_queues[request].get()
-        # if (
-        #     self._timing is not None
-        #     and not first_request
-        #     and request.ntokens is not None
-        # ):
-        #     self._timing.register_sample_latency(
-        #         request.token_set_name,
-        #         request.ntokens,
-        #         request.batch,
-        #         timer / 1e9,
-        #     )
         return (batch, lengths, timer)
 
     def sample_bytes(
@@ -322,8 +312,7 @@ class DataSet(object):
 
     def sample_tokens(
         self, ntokens, batch_size, token_set_name
-    ) -> tuple[np.ndarray, int]:
-        # print("sample_tokens")
+    ) -> tuple[np.ndarray, float, float]:
         request = SampleRequest(
             token_set_name, ntokens=ntokens, length=None, batch=batch_size
         )

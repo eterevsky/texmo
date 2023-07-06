@@ -131,19 +131,9 @@ class TrainTiming(object):
             batch=run.batch,
         )
 
-    def register_step_latency(
-        self, conf: Configuration, step_times: list[float]
+    def add_step_latency(
+        self, conf: Configuration, first_step: float, avg_step: float
     ):
-        if step_times:
-            first_step = step_times[0]
-        else:
-            first_step = None
-
-        if len(step_times) >= 2:
-            avg_step = mean(step_times[1:])
-        else:
-            avg_step = None
-
         run = conf_to_run_timing(conf, first_step, avg_step)
         self._run_timings.append(run)
         if self._file is not None:
@@ -182,8 +172,13 @@ class TrainTiming(object):
 
     def predict(self, conf: Configuration) -> tuple[float, float]:
         with latency.timer("TrainTiming.predict"):
-            samples_since_last_traing = len(self._run_timings) - self._last_train
-            if samples_since_last_traing ** 3 >= self._last_train:
+            total_timings = len(self._run_timings)
+            if total_timings == 0:
+                # If we don't have any data at all, return 100 ms and 1 ms
+                # as a default.
+                return 0.1, 0.001
+            samples_since_last_traing = total_timings - self._last_train
+            if samples_since_last_traing**3 >= self._last_train:
                 self.train()
 
             run = conf_to_run_timing(conf)
@@ -242,19 +237,25 @@ class TrainTiming(object):
                     avg_ys.append(run_timing.avg_step)
                     avg_row += 1
 
-            first_xs = csr_array((first_xs, (first_rows, first_cols))) #.toarray()
-            print(first_xs.shape)
+            first_xs = csr_array(
+                (first_xs, (first_rows, first_cols)),
+                shape=(len(first_ys), len(self._layers)),
+            )
             first_ys = np.array(first_ys)
 
-            avg_xs = csr_array((avg_xs, (avg_rows, avg_cols))) #.toarray()
+            avg_xs = csr_array(
+                (avg_xs, (avg_rows, avg_cols)),
+                shape=(len(avg_ys), len(self._layers)),
+            )
             avg_ys = np.array(avg_ys)
 
         with latency.timer("TrainTiming._train_layer_timing.fit"):
-            logging.info("Running linear regression for per-layer first_step timing")
+            logging.info(
+                "Running linear regression for per-layer first_step timing"
+            )
             n = first_xs.shape[0]
             nlayers = len(self._layers)
             logging.info(f"Using {n} samples / {nlayers} layers")
-            print("Shape", first_xs.shape)
             # first_coef, _ = nnls(first_xs, first_ys)
             # first_coef = nnls_grad(first_xs, first_ys)
             result = lsq_linear(first_xs, first_ys, bounds=(0, INF))
@@ -262,9 +263,11 @@ class TrainTiming(object):
             # first_regression = LinearRegression(positive=True, fit_intercept=False, n_jobs=4)
             # first_regression.fit(first_xs, first_ys)
             # print(first_coef.shape)
-            print(first_coef)
+            # print(first_coef)
 
-            logging.info("Running linear regression for per-layer avg_step timing")
+            logging.info(
+                "Running linear regression for per-layer avg_step timing"
+            )
             n = avg_xs.shape[0]
             logging.info(f"Using {n} samples / {nlayers} layers")
 
@@ -276,7 +279,7 @@ class TrainTiming(object):
             # xty = np.matmul(avg_xs.transpose(), avg_ys)
             # avg_coef, _ = fnnls(xtx, xty)
             # print(avg_coef.shape)
-            print(avg_coef)
+            # print(avg_coef)
 
             # avg_regression = LinearRegression(positive=True, fit_intercept=False, n_jobs=4)
             # avg_regression.fit(avg_xs, avg_ys)

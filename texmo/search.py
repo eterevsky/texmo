@@ -131,7 +131,7 @@ class Search(object):
 
             runs_count = self._result_set.runs_count_per_t()
             runs = runs_count.get(lo, 0)
-            print(f"t = {lo:3}  complete = {runs:5}")
+            logging.info(f"t = {lo:3}  complete = {runs:5}")
 
             prev_runs = runs
 
@@ -142,7 +142,7 @@ class Search(object):
 
                 runs = runs_count.get(t, 0)
                 ratio = runs / (prev_runs + 1)
-                print(f"t = {t:3}  complete = {runs:5}  ratio = {ratio:.2f}")
+                logging.info(f"t = {t:3}  complete = {runs:5}  ratio = {ratio:.2f}")
                 prev_runs = runs
                 t *= 2
 
@@ -157,7 +157,7 @@ class Search(object):
 
             runs_count = self._result_set.runs_count_per_t()
             runs = runs_count.get(lo, 0)
-            print(f"t = {lo:3}  complete = {runs:5}")
+            logging.info(f"t = {lo:3}  complete = {runs:5}")
 
             if runs == 0:
                 return lo
@@ -170,7 +170,7 @@ class Search(object):
             while t <= hi:
                 runs = runs_count.get(t, 0)
                 ratio = runs / prev_runs
-                print(f"t = {t:3}  complete = {runs:5}  ratio = {ratio:.2f}")
+                logging.info(f"t = {t:3}  complete = {runs:5}  ratio = {ratio:.2f}")
                 if runs == 0:
                     return t
                 if ratio < min_ratio:
@@ -225,7 +225,7 @@ class Search(object):
 
     def print_top_confs(self, t, max_weights):
         with latency.timer("Search.print_top_confs"):
-            report = [f"T = {t}  W ≤ {max_weights}\n"]
+            report = [f"T = {t}  W ≤ {max_weights}"]
 
             for i, conf_results in enumerate(
                 self._result_set.top_pred_confs(t, max_weights, limit=20)
@@ -246,7 +246,7 @@ class Search(object):
                 report.append(
                     f"{score}  LEN{conf.sample_len:4}  B{conf.batch:4}  LR{conf.lr:7.4f}  {tokens}  {conf.model}"
                 )
-
+            report.append("")
             logging.info("\n".join(report))
 
     def _select_checkpoint(self, t):

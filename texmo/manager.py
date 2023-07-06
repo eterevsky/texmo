@@ -7,7 +7,8 @@ import time
 from copy import copy
 from datetime import datetime
 from typing import Optional
-from time import perf_counter_ns
+from time import perf_counter
+from statistics import mean
 
 import jax
 import jax.numpy as jnp
@@ -24,6 +25,7 @@ from .configuration import (
     conf_to_string,
     conf_tokens_name,
 )
+from .dataset import DataSet
 from .model2 import Model2, Weights
 from .prng import Rng
 from .record import TrainingRecord
@@ -81,13 +83,9 @@ class Manager(object):
         test_sample_len: int = 1024,
         test_batch: int = 1024,
         pre_training: Optional[list] = None,
-        sample_timing: SampleTiming = None,
-        train_timing: TrainTiming = None,
     ):
         self._rng: Rng = Rng()
         self.ntokens = conf.ntokens
-        self._sample_timing: SampleTiming = sample_timing
-        self._train_timing: TrainTiming = train_timing
         self.token_set_name = conf_tokens_name(conf)
         self.tokenizer = get_tokenizer(self.token_set_name)
         self.ntokens = self.tokenizer.token_set.ntokens
@@ -291,7 +289,7 @@ class Manager(object):
         )
         return INF
 
-    def eval(self, dataset) -> float:
+    def eval(self, dataset: DataSet) -> float:
         """Evaluate a model on a random sample from the training data."""
         with latency.timer("Manager.eval"):
             batch, lengths = dataset.sample_bytes(
@@ -349,15 +347,14 @@ class Manager(object):
 
     def train(
         self,
-        steps,
-        time_limit,
-        train_set,
+        steps: Optional[int],
+        time_limit: Optional[float],
+        dataset: DataSet,
         temp_steps=None,
         temp_dir=None,
         quiet=False,
     ):
-        last_report = 0
-
+        last_report = 0  # Timestamp of the last printed report
 
         if steps is None:
             steps = INF
@@ -368,25 +365,20 @@ class Manager(object):
         sample_times = []
         step_times = []
 
-        if self._train_timing is not None:
-            pred_first, pred_avg = self._train_timing.predict(self.conf)
-            logging.info(f"Predicted first step: {pred_first} s, avg step: {pred_avg} s")
-
         logging.info(f"Training for{t}{s}")
-        start = time.time()
+        start = perf_counter()
         finish_time = start + time_limit if time_limit else INF
 
-        while time.time() < finish_time and self.step < steps:
-            batch, sample_time = train_set.sample_tokens(
+        while perf_counter() < finish_time and self.step < steps:
+            batch, sample_time = dataset.sample_tokens(
                 ntokens=self.conf.sample_len,
                 batch_size=self.conf.batch,
                 token_set_name=self.token_set_name,
             )
 
-            if sample_time is not None:
-                sample_times.append(sample_time)
+            sample_times.append(sample_time)
 
-            step_start = perf_counter_ns()
+            step_start = perf_counter()
 
             try:
                 loss = self.train_step(batch)
@@ -403,15 +395,15 @@ class Manager(object):
 
             if not quiet and (
                 self.step < 10
-                or (self.step % 10 == 0 and time.time() - last_report > 3)
-                or time.time() - last_report > 10
+                or (self.step % 10 == 0 and perf_counter() - last_report > 3)
+                or perf_counter() - last_report > 10
             ):
-                last_report = time.time()
+                last_report = perf_counter()
                 logging.info(
                     self.run.report_recent_loss(self.tokenizer.token_set)
                 )
 
-            step_time = (perf_counter_ns() - step_start) / 1e9
+            step_time = perf_counter() - step_start
             step_times.append(step_time)
 
             if (
@@ -422,23 +414,8 @@ class Manager(object):
             ):
                 self.save(temp_dir)
 
-        total_time = time.time() - start
-
-        if self._sample_timing is not None:
-            self._sample_timing.register_sample_latency(
-                self.token_set_name,
-                self.conf.sample_len,
-                self.conf.batch,
-                sample_times,
-            )
-        if self._train_timing is not None:
-            first_step, avg_step = self._train_timing.register_step_latency(
-                self.conf,
-                step_times
-            )
-            logging.info(f"Actual first step: {first_step} s, avg step: {avg_step}")
-
-        return total_time
+        total_time = perf_counter() - start
+        return total_time, sample_times, step_times
 
     def train_and_eval(
         self,
@@ -452,7 +429,7 @@ class Manager(object):
         quiet=False,
     ) -> tuple[TrainingRecord, Run]:
         try:
-            train_time = self.train(
+            train_time, sample_times, step_times = self.train(
                 steps,
                 time_limit,
                 train_set,
@@ -474,7 +451,7 @@ class Manager(object):
 
         self.run.finalize(eval_loss)
 
-        report = TrainingRecord(
+        record = TrainingRecord(
             timestamp=datetime.now(),
             conf=self.conf,
             train_time_s=train_time,
@@ -489,14 +466,17 @@ class Manager(object):
             loss_model_v=self.run.loss_trend.version,
             loss_model_params=self.run.loss_trend.params(),
             steps=self.step,
+            avg_sample_time=mean(sample_times),
+            first_step_time=step_times[0],
+            avg_step_time=None if len(step_times) < 2 else mean(step_times[1:]),
         )
 
-        logging.info(str(report))
+        logging.info(str(record))
         if log is not None:
             with open(log, "a", newline="") as logfile:
-                log.write(report.jsonl() + "\n")
+                log.write(record.jsonl() + "\n")
 
-        return (report, self.run, self.weights)
+        return (record, self.run, self.weights)
 
     def continue_prefix(self, prefix: str, length: int) -> str | bytes:
         prefix_bytes: bytes = prefix.encode()  # convert str to bytes (?)

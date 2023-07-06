@@ -46,7 +46,7 @@ class LiteralBytesTokenizer(object):
         start=0,
         max_tokens=None,
         max_bytes=None,
-    ) -> list[Token]:
+    ) -> np.ndarray:
         if max_tokens is not None:
             l = max_tokens
         elif max_bytes is not None:
@@ -62,7 +62,52 @@ class LiteralBytesTokenizer(object):
         return bytes(tokens)
 
 
-_TOKENIZERS = {"tokens256_raw_all": LiteralBytesTokenizer()}
+class LiteralBitsTokenizer(object):
+    def __init__(self):
+        self.token_set = TokenSet.build("fallback_bits", 1, "raw", [], {"literal_cost": 8, "literal_dist_entropy": 0}, bytes_per_token=0.125)
+
+    def tokenize(
+        self,
+        string: bytes | mmap.mmap,
+        start=0,
+        max_tokens=None,
+        max_bytes=None,
+    ) -> np.ndarray:
+        ids = self.tokenize_ids(string, start, max_tokens, max_bytes)
+        return [self.token_set.tokens[i] for i in ids]
+
+    def tokenize_ids(
+        self,
+        string: bytes | mmap.mmap,
+        start=0,
+        max_tokens=None,
+        max_bytes=None,
+    ) -> np.ndarray:
+        if max_tokens is not None:
+            l = max_tokens // 8
+        elif max_bytes is not None:
+            l = max_bytes
+            assert start + l <= len(string)
+        else:
+            l = len(string) - start
+
+        b = np.frombuffer(string[start : start + l], dtype=np.uint8)
+        res = np.unpackbits(b)
+
+        if max_bytes is not None:
+            assert len(res) == max_bytes * 8
+
+        return res
+
+    def untokenize(self, ids: list[int]) -> bytes:
+        b = np.packbits(ids)
+        return bytes(b)
+
+
+_TOKENIZERS = {
+    "tokens2_raw_bits1": LiteralBitsTokenizer(),
+    "tokens256_raw_all": LiteralBytesTokenizer()
+}
 _TOKENS_DIR = None
 
 

@@ -5,8 +5,12 @@ from typing import Optional
 
 import numpy as np
 
-from .configuration import (Configuration, conf_from_dict, conf_to_dict,
-                            conf_to_string)
+from .configuration import (
+    Configuration,
+    conf_from_dict,
+    conf_to_dict,
+    conf_to_string,
+)
 from .common import INF
 
 
@@ -37,6 +41,9 @@ class TrainingRecord(object):
         loss_model_params: np.ndarray,
         regularization: float,
         checkpoint_id: Optional[int] = None,
+        avg_sample_time: float = None,
+        first_step_time: float = None,
+        avg_step_time: float = None,
     ):
         assert isinstance(timestamp, datetime)
 
@@ -64,11 +71,18 @@ class TrainingRecord(object):
             "test_batch": test_batch,
             "test_poisoned": test_poisoned,
             "checkpoint_id": checkpoint_id,
+            "avg_sample_time": avg_sample_time,
+            "first_step_time": first_step_time,
+            "avg_step_time": avg_step_time,
         }
 
     @property
     def train_data(self):
-        return self._dict["steps"] * self._dict["conf"]["sample_len"] * self._dict["conf"]["batch"]
+        return (
+            self._dict["steps"]
+            * self._dict["conf"]["sample_len"]
+            * self._dict["conf"]["batch"]
+        )
 
     @property
     def conf(self):
@@ -98,6 +112,18 @@ class TrainingRecord(object):
     def test_batch(self) -> int:
         return self._dict["test_batch"]
 
+    @property
+    def avg_sample_time(self) -> float:
+        return self._dict["avg_sample_time"]
+
+    @property
+    def first_step_time(self) -> float:
+        return self._dict["first_step_time"]
+
+    @property
+    def avg_step_time(self) -> float:
+        return self._dict["avg_step_time"]
+
     def invalidate(self):
         self._dict["loss"] = INF
 
@@ -110,7 +136,7 @@ class TrainingRecord(object):
             planned_time = f"{planned_time_s} s / {final_time_s} s"
 
         if self._dict["loss_model_v"] == 1:
-            c = 2**self._dict["loss_model_params"][0]
+            c = 2 ** self._dict["loss_model_params"][0]
             expected_loss = f" (expected -> {c:.4f})"
         else:
             expected_loss = ""
@@ -124,12 +150,16 @@ class TrainingRecord(object):
         steps = self._dict["steps"]
         train_time_s = self._dict["train_time_s"]
 
-        return f"""
-{conf_str}
-Loss: loss {loss:.4f}{expected_loss}
-Training: {steps} steps, {train_time_s:.1f} s ({planned_time})
-Training data: {train_data:.1f}M / {total_data:.1f}M
-        """
+        avg_sample_time = self.avg_sample_time * 1000
+        first_step_time = self.first_step_time * 1000
+        if self.avg_step_time is not None:
+            avg_step_time = self.avg_step_time * 1000
+        else:
+            avg_step_time = float("nan")
+
+        return f"""{conf_str}
+Loss: {loss:.4f}{expected_loss} Training data: {train_data:.1f} M / {total_data:.1f} M
+Training for {train_time_s:.1f} s ({planned_time}). Steps {steps}, sample {avg_sample_time:.2f} ms, step {first_step_time:.2f}|{avg_step_time:.2f} ms"""
 
     def jsonl(self):
         json.dumps(self._dict)

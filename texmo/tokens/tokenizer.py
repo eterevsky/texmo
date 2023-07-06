@@ -75,7 +75,11 @@ class Tokenizer(object):
         self._mark_words = "words" in token_set.processing
 
     def tokenize(
-        self, string: bytes|mmap.mmap, start=0, max_tokens=None, max_bytes=None
+        self,
+        string: bytes | mmap.mmap,
+        start=0,
+        max_tokens=None,
+        max_bytes=None,
     ) -> list[Token]:
         suffix_state = self._suffix_states[b""]
         cost_state = [(0, None)]
@@ -135,9 +139,17 @@ class Tokenizer(object):
             tokens = tokens[:max_tokens]
         return tokens
 
-    def tokenize_ids(self, string: bytes|mmap.mmap, start=0, max_tokens=None, max_bytes=None
+    def tokenize_ids(
+        self,
+        string: bytes | mmap.mmap,
+        start=0,
+        max_tokens=None,
+        max_bytes=None,
     ) -> list[int]:
-        return [token.id for token in self.tokenize(string, start, max_tokens, max_bytes)]
+        return [
+            token.id
+            for token in self.tokenize(string, start, max_tokens, max_bytes)
+        ]
 
     def untokenize(self, tokens: list[int]) -> bytes:
         chunks = []
@@ -184,23 +196,24 @@ class Tokenizer(object):
             if not word.isalpha():
                 continue
 
-            if i > 0 and words[i-1][-1] == "\x14":
-                words[i-1] = words[i-1][:-1]
+            if i > 0 and words[i - 1][-1] == "\x14":
+                words[i - 1] = words[i - 1][:-1]
                 words[i] = word.capitalize()
-            elif i > 0 and words[i-1][-1] == "\x15":
-                words[i-1] = words[i-1][:-1]
+            elif i > 0 and words[i - 1][-1] == "\x15":
+                words[i - 1] = words[i - 1][:-1]
                 words[i] = word.upper()
 
             if i + 1 < len(words):
-                if words[i+1] == WORD_MARKER:
+                if words[i + 1] == WORD_MARKER:
                     words[i + 1] = " "
-                elif words[i+1].startswith(WORD_MARKER) and words[i + 1][1] in (CAPITALIZED_MARKER, ALLCAPS_MARKER):
+                elif words[i + 1].startswith(WORD_MARKER) and words[i + 1][
+                    1
+                ] in (CAPITALIZED_MARKER, ALLCAPS_MARKER):
                     words[i + 1] = " " + words[i + 1][1:]
-                elif words[i+1].startswith(WORD_MARKER):
+                elif words[i + 1].startswith(WORD_MARKER):
                     words[i + 1] = words[i + 1][1:]
 
         return "".join(words)
-
 
     def _process(self, s: str) -> str:
         out = []

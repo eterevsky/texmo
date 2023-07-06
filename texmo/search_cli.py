@@ -1,17 +1,26 @@
 import argparse
 import logging
 
-from .configuration import (TOKEN_TYPES, Configuration, Template,
-                            conf_to_string, conf_tokens_name,
-                            default_from_template)
+from .configuration import (
+    TOKEN_TYPES,
+    Configuration,
+    Template,
+    conf_to_string,
+    conf_tokens_name,
+    default_from_template,
+)
 from .dataset import DataSet
 from .manager import Manager
 from .model2 import build_model
-from .report import (draw_weight_loss_graph, generate_max_report,
-                     generate_param_report, generate_report_by_weight)
+from .report import (
+    draw_weight_loss_graph,
+    generate_max_report,
+    generate_param_report,
+    generate_report_by_weight,
+)
 from .resultdb import ResultDB
 from .search import Search
-from .predict import SampleTiming, TrainTiming
+from .predict import Predictor2
 from .tokens import set_tokens_dir
 from . import latency
 
@@ -68,9 +77,10 @@ def generate_report(result_set, template, min_max_weights):
     draw_weight_loss_graph(result_set, template)
 
 
-def search_loop(dataset, search: Search, sample_timing: SampleTiming, train_timing: TrainTiming, checkpoints_path: str):
-    assert isinstance(sample_timing, SampleTiming)
-    assert isinstance(train_timing, TrainTiming)
+def search_loop(
+    dataset, search: Search, predictor: Predictor2, checkpoints_path: str
+):
+    assert isinstance(predictor, Predictor2)
 
     logging.info("Warming up training")
     warmup(dataset)
@@ -83,7 +93,7 @@ def search_loop(dataset, search: Search, sample_timing: SampleTiming, train_timi
             logging.info(f"Checkpoint: {checkpoint}")
             weights = checkpoint.load_weights(checkpoints_path)
 
-        manager = Manager(conf, weights=weights, sample_timing=sample_timing, train_timing=train_timing)
+        manager = Manager(conf, weights=weights)
         manager.init(quiet=True)
 
         record, run, weights = manager.train_and_eval(
@@ -98,6 +108,7 @@ def search_loop(dataset, search: Search, sample_timing: SampleTiming, train_timi
         )
 
         search.add_run(record, run, weights, parent_checkpoint=checkpoint)
+        predictor.add_record(record)
 
 
 def main(args: argparse.Namespace):
@@ -109,8 +120,8 @@ def main(args: argparse.Namespace):
         logging.info("Default configuration: " + conf_to_string(default))
         assert template.match_conf(default)
 
+        predictor = Predictor2(args.sample_timing, args.train_timing)
         result_db = ResultDB(args.db)
-
         search = Search(
             result_db,
             template,
@@ -118,20 +129,15 @@ def main(args: argparse.Namespace):
             args.min_max_weights,
             checkpoints_path=None,
         )
-        result_set = search._result_set
-        sample_timing = SampleTiming()
-        train_timing = TrainTiming(args.train_timing)
+
         try:
-            search_loop(dataset, search, sample_timing, train_timing, None)
+            search_loop(dataset, search, predictor, None)
         except KeyboardInterrupt:
-            print("\nInterrupted\n")
+            logging.warning("Interrupted\n")
 
-        generate_report(result_set, template, args.min_max_weights)
-
+        generate_report(search._result_set, template, args.min_max_weights)
         print()
-
         latency.report()
-
     finally:
         dataset.join()
 
@@ -231,7 +237,13 @@ def init_args(parser: argparse.ArgumentParser):
         "--train-timing",
         type=str,
         default="results/train-timing.jsonl",
-        help="a file with measured train timings for each trainined configuration"
+        help="a file with measured train timings for each trainined configuration",
+    )
+    parser.add_argument(
+        "--sample-timing",
+        type=str,
+        default="results/sample-timing.jsonl",
+        help="a file with measured timings of sample preparation",
     )
 
     parser.set_defaults(func=main)

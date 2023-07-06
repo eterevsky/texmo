@@ -14,9 +14,9 @@ class Timer(object):
         self.start = perf_counter_ns()
         return self
 
-    def value(self):
+    def value(self) -> float:
         now = perf_counter_ns()
-        return now - self.start
+        return (now - self.start) * 1E-9
 
     def __exit__(self, *args):
         end = perf_counter_ns()

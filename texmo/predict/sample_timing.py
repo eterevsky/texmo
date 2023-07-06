@@ -1,167 +1,157 @@
-import math
-
+import json
 import logging
+import math
+from collections import namedtuple
+from statistics import median
+from typing import Optional
+
 import numpy as np
-from statistics import mean
-import jax
 from jax import numpy as jnp
-import optax
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 from ..configuration import Configuration, conf_tokens_name
 from ..prng import Rng
 from ..tokens import get_tokenizer
+from .. import latency
+
+SampleLatency = namedtuple(
+    "SampleLatency",
+    [
+        "type",
+        "processing",
+        "ntokens",
+        "batch",
+        "sample_len",
+        "latency",
+    ],
+)
 
 
-_TYPE_IDX = {
-    "bits1": 0,
-    "bits2": 1,
-    "bits4": 2,
-    "all": 3,
-}
+def build_sample_latency(
+    token_set_name: str,
+    sample_len: int,
+    batch: int,
+    latency: Optional[float] = None,
+) -> SampleLatency:
+    token_set = get_tokenizer(token_set_name).token_set
 
-
-def _predict(weights, input):
-    return (jnp.dot(weights["w"], input) + weights["b"]).squeeze()
-
-
-def _loss(weights, input, output):
-    prediction = _predict(weights, input)
-    return (jnp.log2(prediction) - jnp.log2(output)) ** 2
-
-
-class SamplerModel(object):
-    def __init__(self):
-        self.pred = HistGradientBoostingRegressor(
-            loss="absolute_error",
-            max_depth=None,
-            max_leaf_nodes=63,
-            max_iter=100,
-            # n_iter_no_change=20,
-            # learning_rate=0.1,
-            warm_start=False,
-            early_stopping=False,
-            categorical_features=[True, True] + [False] * 5,
-        )
-        self.samples = []
-        self.latencies = []
-
-    def _build_features(
-        self,
-        token_type: str,
-        token_processing: str,
-        ntokens: int,
-        batch: int,
-        sample_len: int,
-        bytes_per_token: float,
-    ):
-        features = [_TYPE_IDX[token_type]]
-        features.append(1 if token_processing == "capwords" else 0)
-        features.append(np.log2(ntokens))
-        features.append(np.log2(batch))
-        features.append(np.log2(sample_len))
-        features.append(np.log2(bytes_per_token))
-        features.append(np.log2(bytes_per_token * ntokens * batch))
-        return np.array(features, dtype=np.float32)
-
-    def predict(
-        self,
-        token_type,
-        token_processing,
-        ntokens,
-        batch,
-        sample_len,
-        bytes_per_token,
-    ):
-        features = self._build_features(
-            token_type,
-            token_processing,
-            ntokens,
-            batch,
-            sample_len,
-            bytes_per_token,
-        )
-        xs = features.reshape(1, -1)
-        return self.pred.predict(xs)
-
-    def train(
-        self,
-        token_type,
-        token_processing,
-        ntokens,
-        batch,
-        sample_len,
-        bytes_per_token,
-        latencies,
-    ):
-        features = self._build_features(
-            token_type,
-            token_processing,
-            ntokens,
-            batch,
-            sample_len,
-            bytes_per_token,
-        )
-        avg_latency_ms = mean(latencies) / 1E6
-
-        self.samples.append(features)
-        self.latencies.append(math.log2(avg_latency_ms))
-
-        logging.info(
-            f"Sample timing features: {token_type} {token_processing} {ntokens} {batch} {sample_len} {bytes_per_token}"
-        )
-        if len(self.samples) > 2:
-            # logging.info(f"Input:\n{features}")
-            pred = self.pred.predict(features.reshape(1, -1))
-            pred_ms = 2 ** pred[0]
-            logging.info(
-                f"Predicted sample latency: {pred_ms} ms real latency: {avg_latency_ms} ms"
-            )
-
-        xs = np.array(self.samples, dtype=np.float32)
-        ys = np.array(self.latencies, dtype=np.float32)
-
-        self.pred.fit(xs, ys)
+    return SampleLatency(
+        type=token_set.token_type,
+        processing=token_set.processing,
+        ntokens=token_set.ntokens,
+        batch=batch,
+        sample_len=sample_len,
+        latency=latency,
+    )
 
 
 class SampleTiming(object):
-    def __init__(self):
-        self._sampler_model = SamplerModel()
-        self._sample_latency = {}
+    def __init__(self, jsonl_path=None):
+        self._types: list[str] = []
+        self._processing_types: list[str] = []
+        self._sample_timings: dict[SampleLatency, list[float]] = {}
 
-        self._confs = []
-        self._first_step_latency = []
-        self._step_latencies = []
-        self._steps = []
-        self._total_latency = []
+        if jsonl_path is not None:
+            try:
+                with open(jsonl_path, "r") as f:
+                    for line in f:
+                        sample = SampleLatency(**json.loads(line))
+                        self._add_sample(sample)
+            except FileNotFoundError:
+                pass
+            self._file = open(jsonl_path, "a", encoding="utf-8", newline="\n")
+        else:
+            self._file = None
 
-        self._regression = None
-        self._layer_to_feature = {}
-        self._feature_to_layer = []
-        self._conf_features = {}
+        self._last_train = 0
+        self._pred = HistGradientBoostingRegressor(
+            loss="absolute_error",
+            categorical_features=[True, True, False, False, False],
+            monotonic_cst=[0, 0, 0, 1, 1],
+        )
 
-    def register_sample_latency(
+    def _add_sample(self, sample: SampleLatency):
+        latency = sample.latency
+        sample = sample._replace(latency=None)
+        if sample not in self._sample_timings:
+            self._sample_timings[sample] = []
+        self._sample_timings[sample].append(latency)
+        if sample.type not in self._types:
+            self._types.append(sample.type)
+        if sample.processing not in self._processing_types:
+            self._processing_types.append(sample.processing)
+
+    def _get_features(self, sample: SampleLatency) -> np.ndarray:
+        if sample.type not in self._types:
+            self._types.append(sample.type)
+        return np.array(
+            [
+                self._types.index(sample.type),
+                self._processing_types.index(sample.processing),
+                math.log2(sample.ntokens),
+                math.log2(sample.batch),
+                math.log2(sample.sample_len),
+            ]
+        )
+
+    def _train(self):
+        with latency.timer("SampleTiming._train.prepare"):
+            features = []
+            log_latencies = []
+
+            for sample, latencies in self._sample_timings.items():
+                f = self._get_features(sample)
+                for l in latencies:
+                    features.append(f)
+                    log_latencies.append(math.log2(l))
+
+            features = np.array(features)
+            log_latencies = np.array(log_latencies)
+
+        with latency.timer("SampleTiming._train.fit"):
+            self._pred.fit(features, log_latencies)
+
+    def predict(
+        self, token_set_name: str, sample_len: int, batch: int
+    ) -> float:
+        """Predict the latency of sample generation."""
+        with latency.timer("SampleTiming.predict"):
+            sample = build_sample_latency(token_set_name, sample_len, batch)
+            latencies = self._sample_timings.get(sample)
+            if latencies is not None:
+                # logging.info(f"Predicting sampling latency from historical data: {latencies}")
+                return median(latencies)
+
+            total_samples = sum(
+                len(v) for v in self._sample_timings.values()
+            )
+
+            if total_samples == 0:
+                # Return 1 ms by default if we don't have any data at all.
+                return 0.001
+
+            samples_since_last_train = total_samples - self._last_train
+            if samples_since_last_train**3 >= self._last_train:
+                self._train()
+            self._last_train = total_samples
+
+            features = self._get_features(sample)
+            logging.info(f"Predicting sampling latency by the model ({features})")
+            latency_log = self._pred.predict([features])
+            return 2**latency_log[0]
+
+    def add_sample_latency(
         self,
         token_set_name: str,
         sample_len: int,
         batch: int,
-        latencies: list[int],
+        latency: float,
     ):
-        assert isinstance(latencies, list)
-        token_set = get_tokenizer(token_set_name).token_set
+        assert isinstance(latency, float)
 
-        self._sampler_model.train(
-            token_set.token_type,
-            token_set.processing,
-            token_set.ntokens,
-            batch,
-            sample_len,
-            token_set.bytes_per_token,
-            latencies,
+        sample = build_sample_latency(
+            token_set_name, sample_len, batch, latency
         )
-
-    def report(self):
-        for key in sorted(self._sample_latency.keys()):
-            avg = mean(self._sample_latency[key]) * 1000
-            n = len(self._sample_latency[key])
-            print(f"{key}  {avg:.3f} ms ({n})")
+        self._add_sample(sample)
+        if self._file is not None:
+            print(json.dumps(sample._asdict()), file=self._file)

@@ -73,7 +73,7 @@ def conf_is_valid(conf: Configuration) -> bool:
 def conf_to_string(conf: Configuration) -> str:
     tokens = conf_tokens_name(conf)
     return (
-        f"{conf.model} ({conf.model.weights})  {tokens}  LEN{conf.sample_len}  "
+        f"{tokens} | {conf.model} ({conf.model.weights})  LEN{conf.sample_len}  "
         + f"B{conf.batch}  LR{conf.lr:.4f}  T{conf.t}"
     )
 

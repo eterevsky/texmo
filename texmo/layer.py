@@ -58,7 +58,7 @@ class Layer(object):
         size = self.size
 
         for name in ("dense", "rec"):
-            for activation in ("tanh", "relu"):
+            for activation in ("tanh", "relu", "gelu"):
                 yield f"{name}.{size}.{activation}"
 
         for name in ("gru", "mgru", "lstm"):

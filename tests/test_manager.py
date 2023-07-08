@@ -25,7 +25,7 @@ class ManagerTest(TestCase):
         manager = Manager(conf)
         manager.init()
 
-        manager.train(steps=30, time_limit=None, train_set=dataset, quiet=True)
+        manager.train(steps=30, time_limit=None, dataset=dataset, quiet=True)
 
         loss = manager.eval(dataset)
         self.assertLess(loss, 2)

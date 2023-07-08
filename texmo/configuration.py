@@ -229,6 +229,9 @@ def default_from_template(template: Template, spec: str) -> Configuration:
 
 _model_neighbors: dict[Model2, list[Model2]] = {}
 
+def reset_neighbors_cache():
+    global _model_neighbors
+    _model_neighbors = {}
 
 _NEIGHBOR_TOKEN_TYPES = {
     "all": ["dist8", "bits1"],

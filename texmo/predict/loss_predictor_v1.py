@@ -133,8 +133,10 @@ class FeatureProvider(object):
         layer_type_enc = {
             "dense.tanh": 1,
             "dense.relu": 2,
+            "dense.gelu": 10,
             "rec.tanh": 3,
             "rec.relu": 4,
+            "rec.gelu": 11,
             "gru": 5,
             "mgru": 6,
             "lstm": 7,

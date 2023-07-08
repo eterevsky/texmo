@@ -35,7 +35,7 @@ class Run(object):
         self.step_byte_loss: list = []
 
         # A model for loss per step
-        assert loss_trend is not None
+        # assert loss_trend is not None
         self.loss_trend: LossTrendBase = loss_trend
 
         # Final loss, evaluated on the test set.

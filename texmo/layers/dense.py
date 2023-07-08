@@ -19,7 +19,7 @@ from .registry import layer_cls
 class Dense(Layer):
     name = "dense"
 
-    def __init__(self, size, relu=False, tanh=False, input_shape=None):
+    def __init__(self, size, relu=False, tanh=False, gelu=False, input_shape=None):
         super().__init__(input_shape=input_shape)
         self.size = size
         self.output_shape = (size,)
@@ -30,6 +30,9 @@ class Dense(Layer):
         elif tanh:
             self.activation = jnp.tanh
             self._activation_suffix = ".tanh"
+        elif gelu:
+            self.activation = jax.nn.gelu
+            self._activation_suffix = ".gelu"
         else:
             self.activation = None
             self._activation_suffix = ""

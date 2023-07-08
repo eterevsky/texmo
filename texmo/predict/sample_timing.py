@@ -82,12 +82,22 @@ class SampleTiming(object):
             self._processing_types.append(sample.processing)
 
     def _get_features(self, sample: SampleLatency) -> np.ndarray:
-        if sample.type not in self._types:
+        try:
+            type_idx = self._types.index(sample.type)
+        except ValueError:
+            type_idx = len(self._types)
             self._types.append(sample.type)
+
+        try:
+            processing_idx = self._processing_types.index(sample.processing)
+        except ValueError:
+            processing_idx = len(self._processing_types)
+            self._processing_types.append(sample.processing)
+
         return np.array(
             [
-                self._types.index(sample.type),
-                self._processing_types.index(sample.processing),
+                type_idx,
+                processing_idx,
                 math.log2(sample.ntokens),
                 math.log2(sample.batch),
                 math.log2(sample.sample_len),

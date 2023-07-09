@@ -5,7 +5,7 @@ import numpy as np
 
 from texmo import dataset, latency, search_cli, train_cli
 from texmo.tokens import small_tokens
-
+from texmo.predict import predict_cli
 
 def help(parser):
     parser.print_help()
@@ -42,10 +42,10 @@ def parse_args():
     )
     search_cli.init_args(parser_search)
 
-    # parser_loss_train = subparsers.add_parser(
-    #     "loss-train", help="train loss model"
-    # )
-    # lossmodel.init_args(parser_loss_train)
+    parser_predict = subparsers.add_parser(
+        "predict", help="train loss prediction model"
+    )
+    predict_cli.init_args(parser_predict)
 
     parser_benchmark_dataset = subparsers.add_parser(
         "benchmark-dataset", help="benchmark sampling the training data"

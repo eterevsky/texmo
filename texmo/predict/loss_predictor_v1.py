@@ -12,50 +12,13 @@ from .. import latency
 from ..common import NCHAR, total_size
 from ..configuration import Configuration, conf_is_valid, conf_tokens_name
 from ..model2 import Model2
+from .features import get_layer_cat_features, get_tokens_cat_features
 from .predict_common import MAX_LOSS
 from ..results import ResultSet, ConfResults
 from ..run import Run
 from ..tokens import get_tokenizer
 
 MAX_LOG_LOSS = math.log2(MAX_LOSS)
-
-
-LayerStat = namedtuple(
-    "LayerStat", ["name", "input", "state", "output", "weights", "suffix"]
-)
-
-
-def get_layer_stats(model):
-    shape = (NCHAR,)
-
-    layers = []
-
-    for layer in model.layers:
-        name = layer.name
-        input = total_size(shape)
-        if name in ("gru", "mgru", "rec"):
-            state = layer.size
-        elif name == "lstm":
-            state = 2 * layer.size
-        else:
-            state = None
-        weights = layer.weights
-        shape = layer.output_shape
-        output = total_size(shape)
-        if name == "suffix":
-            suffix = layer.length
-        elif name == "attn":
-            suffix = layer.length
-        elif name == "dense":
-            suffix = 1
-        else:
-            suffix = None
-        if name in ("dense", "rec"):
-            name += layer._activation_suffix
-
-        layers.append(LayerStat(name, input, state, output, weights, suffix))
-
-    return layers
 
 
 def encode_loss(loss: np.ndarray):
@@ -104,11 +67,7 @@ class FeatureProvider(object):
     @staticmethod
     def _get_tokenset_features(conf) -> list:
         token_set = get_tokenizer(conf_tokens_name(conf)).token_set
-        return [
-            math.log2(token_set.ntokens),
-            token_set.entropy0,
-            token_set.bytes_per_token,
-        ]
+        return get_tokens_cat_features(token_set)
 
     @staticmethod
     def _get_metaparameter_features(conf) -> list:
@@ -128,31 +87,11 @@ class FeatureProvider(object):
 
         features = []
 
-        stats = get_layer_stats(model)
-
-        layer_type_enc = {
-            "dense.tanh": 1,
-            "dense.relu": 2,
-            "dense.gelu": 10,
-            "rec.tanh": 3,
-            "rec.relu": 4,
-            "rec.gelu": 11,
-            "gru": 5,
-            "mgru": 6,
-            "lstm": 7,
-            "suffix": 8,
-            "attn": 9,
-        }
         for i in (0, 1, 2, -1):
-            if i >= len(stats):
-                features.extend([0, None, None, None])
+            if i >= len(model.layers):
+                features.extend([None] * 7)
                 continue
-            stat = stats[i]
-            layer_type = layer_type_enc[stat.name]
-            state = None if stat.state is None else math.log2(stat.state)
-            output = math.log2(stat.output)
-            suffix = None if stat.suffix is None else math.log2(stat.suffix)
-            features.extend([layer_type, state, output, suffix])
+            features.extend(get_layer_cat_features(model.layers[i]))
 
         self._spec_features_cache[model] = features
 
@@ -205,13 +144,13 @@ class FeatureProvider(object):
         return np.array(
             self._get_metaparameter_features(conf)
             + self._get_tokenset_features(conf)
-            + self._get_layer_features(conf.model)
-            + self._get_neighbor_features(conf),
+            + self._get_layer_features(conf.model),
+            # + self._get_neighbor_features(conf),
             dtype=np.float32,
         )
 
     def categorical(self) -> list:
-        return [False] * 5 + [False] * 3 + [True, False, False, False] * 4 + [False] * 19
+        return [False] * 5 + [True, True, False, False, False] + [True, True, False, False, False, False, False] * 4  #+ [False] * 19
 
     def update_conf_results(self, conf_results: ConfResults) -> list:
         """Add a new run.
@@ -272,43 +211,75 @@ class _HistPredictor(object):
 
 
 class LossPredictorV1(object):
-    def __init__(self, result_set: ResultSet):
+    def __init__(self, result_set: ResultSet, split_test_set: bool = False):
         assert isinstance(result_set, ResultSet)
         self._result_set = result_set
         self._feature_provider = FeatureProvider(result_set)
         categorical_features = self._feature_provider.categorical()
         self._predictor = _HistPredictor(categorical_features)
+        self._split_test_set = split_test_set
 
     def update_conf_results(self, conf_results: ConfResults) -> List[Configuration]:
         return self._feature_provider.update_conf_results(conf_results)
+    
+    def _prepare_data(self, result_set: ResultSet):
+        features = []
+        sample_weight = []
+        losses = []
+        for conf, loss in result_set.all_conf_runs():
+            features.append(self._feature_provider.get_features(conf))
+            sample_weight.append(conf.t)
+            assert loss is not None
+            assert loss > 0.1
+            losses.append(loss)
+
+        features = np.array(features, dtype=np.float32)
+        logging.info("Features:\n" + str(features))
+        sample_weight = np.array(sample_weight, dtype=np.float32)
+        losses = np.array(losses, dtype=np.float32)
+        losses = encode_loss(losses)
+
+        return features, losses, sample_weight
+
+    def _train(self, result_set: ResultSet):
+        features = []
+        sample_weight = []
+        losses = []
+        for conf, loss in result_set.all_conf_runs():
+            features.append(self._feature_provider.get_features(conf))
+            sample_weight.append(conf.t)
+            assert loss is not None
+            assert loss > 0.1
+            losses.append(loss)
+
+        features = np.array(features, dtype=np.float32)
+        logging.info("Features:\n" + str(features))
+        sample_weight = np.array(sample_weight, dtype=np.float32)
+        losses = np.array(losses, dtype=np.float32)
+        losses = encode_loss(losses)
+
+        logging.info(f"Prepared training data: {features.shape}")
 
     def train(self):
         with latency.timer("Predictor.train"):
             logging.info("Retraining loss prediction.")
 
-            features = []
-            sample_weight = []
-            losses = []
-            for conf, loss in self._result_set.all_conf_runs():
-                features.append(self._feature_provider.get_features(conf))
-                sample_weight.append(conf.t)
-                assert loss is not None
-                assert loss > 0.1
-                losses.append(loss)
-
-            features = np.array(features, dtype=np.float32)
-            logging.info("Features:\n" + str(features))
-            sample_weight = np.array(sample_weight, dtype=np.float32)
-            losses = np.array(losses, dtype=np.float32)
-            losses = encode_loss(losses)
+            if self._split_test_set:
+                train_set, test_set = self._result_set.train_test_split()
+                features, losses, sample_weight = self._prepare_data(train_set)
+                test_features, test_losses, test_sample_weight = self._prepare_data(test_set)
+            else:
+                features, losses, sample_weight = self._prepare_data(self._result_set)
 
             logging.info(f"Prepared training data: {features.shape}")
             self._predictor.fit(features, losses, sample_weight)
 
-            logging.info("Evaluating")
-            loss = self._predictor.loss(features, losses, sample_weight)
-
-            logging.info(f"Loss on the training data: {loss}")
+            if self._split_test_set:
+                loss = self._predictor.loss(test_features, test_losses, test_sample_weight)
+                logging.info(f"Loss on test set ({test_features.shape}): {loss}")
+            else:
+                loss = self._predictor.loss(features, losses, sample_weight)
+                logging.info(f"Loss on training set: {loss}")
 
     def predict(self, confs: Iterable[Configuration]):
         with latency.timer("Predictor.predict"):

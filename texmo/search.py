@@ -46,7 +46,7 @@ class Search(object):
         self._last_predictor_update = 0
 
         logging.info("Creating Predictor")
-        self._predictor = LossPredictorV1(self._result_set)
+        self._predictor = LossPredictorV1(self._result_set, split_test_set=True)
         if self._result_set.total_runs_count() > 0:
             self.train_predictor()
 

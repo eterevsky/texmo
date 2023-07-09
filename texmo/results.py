@@ -73,12 +73,10 @@ class ResultSet(object):
 
         for conf_results in self._conf_results_by_id.values():
             for run in conf_results.runs:
-                target_set = train_set if random.random() < 0.8 else test_set
+                target_set = train_set if random.random() < 0.9 else test_set
                 target_set.add_run_conf(
                     conf_results.conf,
-                    run.loss,
-                    run.step_loss,
-                    run.loss_model,
+                    run,
                     update_scores=False,
                 )
 
@@ -202,6 +200,7 @@ class ResultSet(object):
         run: Run,
         update_scores=False,
     ):
+        assert isinstance(run, Run)
         conf_results = self._find_or_add_conf(conf)
         self.add_run(conf_results, run, update_scores)
 

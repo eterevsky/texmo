@@ -125,7 +125,7 @@ class TokenSet(object):
     @property
     def tokens_in_literal(self) -> int:
         match self.type:
-            case "fallback_distribution" | "str_with_fallback_distribution" | "all" | "dist2" | "dist4" | "dist8":
+            case "fallback_distribution" | "str_with_fallback_distribution" | "all" | "all_tokens" | "dist2" | "dist4" | "dist8":
                 return 1
             case "fallback_bits":
                 return 8 // self.fallback_bits

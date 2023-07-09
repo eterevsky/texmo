@@ -390,6 +390,8 @@ class Manager(object):
                 break
 
             if math.isnan(loss) or math.isinf(loss):
+                step_time = perf_counter() - step_start
+                step_times.append(step_time)
                 logging.warning(f"Loss is {loss}, stopping training")
                 break
 

@@ -1,12 +1,15 @@
 import argparse
 import logging
+
 import numpy as np
 
-from .loss_predictor_v1 import LossPredictorV1
-from ..tokens import set_tokens_dir
+from .. import latency
+from ..configuration import Template
 from ..resultdb import ResultDB
 from ..results import ResultSet
-from ..configuration import Template
+from ..tokens import set_tokens_dir
+from .loss_predictor_v1 import LossPredictorV1
+from .loss_predictor_flat import LossPredictorFlat
 
 
 def main(args: argparse.Namespace):
@@ -15,16 +18,24 @@ def main(args: argparse.Namespace):
     np.set_printoptions(linewidth=100, edgeitems=6, precision=3)
 
     logging.info(f"Loading results from {args.db}")
-    record_db = ResultDB(args.db)
+    result_db = ResultDB(args.db)
     result_set = ResultSet(
-        record_db, template=Template(), populate_neighbors=False
+        result_db, template=Template(), populate_neighbors=False
     )
 
-    logging.info("Create legacy predictor")
-    predictor = LossPredictorV1(result_set, split_test_set=True)
+    # logging.info("Create legacy predictor")
+    # legacy_predictor = LossPredictorV1(result_set, split_test_set=True)
+
+    # logging.info("Training")
+    # legacy_predictor.train()
+    
+    logging.info("Creating new predictor")
+    predictor = LossPredictorFlat(result_db)
 
     logging.info("Training")
     predictor.train()
+    
+    latency.report()
 
 
 def init_args(parser: argparse.ArgumentParser):

@@ -13,28 +13,10 @@ from ..common import NCHAR, total_size
 from ..configuration import Configuration, conf_is_valid, conf_tokens_name
 from ..model2 import Model2
 from .features import get_layer_cat_features, get_tokens_cat_features
-from .predict_common import MAX_LOSS
+from .predict_common import MAX_LOSS, encode_loss, decode_loss, prediction_score
 from ..results import ResultSet, ConfResults
 from ..run import Run
 from ..tokens import get_tokenizer
-
-MAX_LOG_LOSS = math.log2(MAX_LOSS)
-
-
-def encode_loss(loss: np.ndarray):
-    if loss is None:
-        return None
-    loss = np.minimum(loss, 2**16)
-    loss = np.log2(loss)
-    return loss
-
-
-def decode_loss(loss):
-    if loss is None:
-        return None
-    loss = np.minimum(loss, MAX_LOG_LOSS)
-    return np.exp2(loss)
-
 
 class ResultsProvider(object):
     """An abstract class that returns results for a given configuration.
@@ -173,8 +155,8 @@ class _HistPredictor(object):
             max_iter=100,
             # n_iter_no_change=20,
             # learning_rate=0.1,
-            warm_start=False,
-            early_stopping=False,
+            # warm_start=False,
+            # early_stopping=False,
             categorical_features=categorical_features,
         )
 
@@ -196,18 +178,22 @@ class _HistPredictor(object):
         xs = x.reshape((1, -1))
         return self._predict(xs)[0]
 
-    def loss(self, test_xs, test_ys, sample_weight):
+    # def loss(self, test_xs, test_ys, sample_weight):
+    #     pred_ys = self.predict(test_xs)
+    #     pred_ys = decode_loss(pred_ys)
+    #     pred_ys = np.minimum(pred_ys, MAX_LOSS)
+    #     pred_ys = np.log2(pred_ys)
+
+    #     test_ys = decode_loss(test_ys)
+    #     test_ys = np.minimum(test_ys, MAX_LOSS)
+    #     test_ys = np.log2(test_ys)
+
+    #     error = np.abs(pred_ys - test_ys) * sample_weight
+    #     return np.sum(error) / np.sum(sample_weight)
+
+    def loss(self, test_xs, test_ys):
         pred_ys = self.predict(test_xs)
-        pred_ys = decode_loss(pred_ys)
-        pred_ys = np.minimum(pred_ys, MAX_LOSS)
-        pred_ys = np.log2(pred_ys)
-
-        test_ys = decode_loss(test_ys)
-        test_ys = np.minimum(test_ys, MAX_LOSS)
-        test_ys = np.log2(test_ys)
-
-        error = np.abs(pred_ys - test_ys) * sample_weight
-        return np.sum(error) / np.sum(sample_weight)
+        return prediction_score(pred_ys, test_ys)
 
 
 class LossPredictorV1(object):
@@ -226,9 +212,10 @@ class LossPredictorV1(object):
         features = []
         sample_weight = []
         losses = []
-        for conf, loss in result_set.all_conf_runs():
+        for conf, run in result_set.all_conf_runs():
             features.append(self._feature_provider.get_features(conf))
             sample_weight.append(conf.t)
+            loss = run.loss
             assert loss is not None
             assert loss > 0.1
             losses.append(loss)
@@ -241,30 +228,12 @@ class LossPredictorV1(object):
 
         return features, losses, sample_weight
 
-    def _train(self, result_set: ResultSet):
-        features = []
-        sample_weight = []
-        losses = []
-        for conf, loss in result_set.all_conf_runs():
-            features.append(self._feature_provider.get_features(conf))
-            sample_weight.append(conf.t)
-            assert loss is not None
-            assert loss > 0.1
-            losses.append(loss)
-
-        features = np.array(features, dtype=np.float32)
-        logging.info("Features:\n" + str(features))
-        sample_weight = np.array(sample_weight, dtype=np.float32)
-        losses = np.array(losses, dtype=np.float32)
-        losses = encode_loss(losses)
-
-        logging.info(f"Prepared training data: {features.shape}")
-
     def train(self):
         with latency.timer("Predictor.train"):
             logging.info("Retraining loss prediction.")
 
             if self._split_test_set:
+                logging.info("Splitting the data into training and test sets.")
                 train_set, test_set = self._result_set.train_test_split()
                 features, losses, sample_weight = self._prepare_data(train_set)
                 test_features, test_losses, test_sample_weight = self._prepare_data(test_set)
@@ -275,10 +244,10 @@ class LossPredictorV1(object):
             self._predictor.fit(features, losses, sample_weight)
 
             if self._split_test_set:
-                loss = self._predictor.loss(test_features, test_losses, test_sample_weight)
+                loss = self._predictor.loss(test_features, test_losses)
                 logging.info(f"Loss on test set ({test_features.shape}): {loss}")
             else:
-                loss = self._predictor.loss(features, losses, sample_weight)
+                loss = self._predictor.loss(features, losses)
                 logging.info(f"Loss on training set: {loss}")
 
     def predict(self, confs: Iterable[Configuration]):

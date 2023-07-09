@@ -359,7 +359,7 @@ class ResultSet(object):
     def all_conf_runs(self):
         for conf_results in self._all_conf_results_by_conf.values():
             for run in conf_results.runs:
-                yield conf_results.conf, run.loss
+                yield conf_results.conf, run
 
     def has_runs(self, conf):
         conf_results = self._all_conf_results_by_conf.get(conf)

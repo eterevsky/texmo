@@ -188,7 +188,7 @@ def default_from_template(template: Template, spec: str) -> Configuration:
     sample_len = _pick_default_value(template.sample_len)
     batch = _pick_default_value(template.batch)
     t = _pick_default_value(template.t)
-    ntokens = _pick_default_value(template.ntokens)
+    ntokens = template.ntokens[0]
 
     if ntokens <= 16:
         if "raw" in template.token_processing:

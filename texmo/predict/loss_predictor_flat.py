@@ -63,9 +63,6 @@ def make_features(conf: Configuration, run: Run) -> list[float]:
 class LossPredictorFlat(object):
     def __init__(self, result_db: ResultDB):
         self._result_db = result_db
-        self._result_set = ResultSet(
-            result_db, template=Template(), populate_neighbors=False
-        )
         self._pred = HistGradientBoostingRegressor(
             loss="absolute_error",
             max_depth=None,
@@ -77,6 +74,9 @@ class LossPredictorFlat(object):
             # early_stopping=False,
             categorical_features=[False] * 5 + [True, True, False, False, False] + [True, True, False, False, False, False, False] * 4,
         )
+        self.train()
+        self._last_train_samples = 0
+        self._samples_since_train = 0
 
     def _prepare_data(self, result_set: ResultSet):
         features = []
@@ -103,9 +103,15 @@ class LossPredictorFlat(object):
         train_set = ResultSet(result_db=None, template=Template(), populate_neighbors=False)
         test_set = ResultSet(result_db=None, template=Template(), populate_neighbors=False)
 
+        total_samples = 0
+
         for _, conf, run in self._result_db.get_confs_runs():
             target_set = train_set if random.random() < 0.9 else test_set
             target_set.add_run_conf(conf, run)
+            total_samples += 1
+        
+        self._last_train_samples = total_samples
+        self._samples_since_train = 0
 
         features, losses, sample_weight = self._prepare_data(train_set)
         test_features, test_losses, test_sample_weight = self._prepare_data(test_set)
@@ -116,3 +122,11 @@ class LossPredictorFlat(object):
         pred_losses = self._pred.predict(test_features)
         score = prediction_score(test_losses, pred_losses)
         logging.info(f"Loss on test set ({test_features.shape}): {score}")
+    
+    def count_record(self):
+        self._samples_since_train += 1
+        if self._samples_since_train ** 3 > self._last_train_samples:
+            self.train()
+    
+    def predict(self, confs: list[Configuration], steps: list[int]) -> list[float]:
+        pass

@@ -120,8 +120,8 @@ def main(args: argparse.Namespace):
         logging.info("Default configuration: " + conf_to_string(default))
         assert template.match_conf(default)
 
-        predictor = Predictor2(args.sample_timing, args.train_timing)
         result_db = ResultDB(args.db)
+        predictor = Predictor2(args.sample_timing, args.train_timing, result_db)
         search = Search(
             result_db,
             template,

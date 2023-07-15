@@ -27,11 +27,10 @@ def file_reader(
             if request is None:
                 break
 
-            with latency.timer("file_reader"):
-                start = random.randrange(size - chunk_size)
-                f.seek(start)
-                chunk = f.read(chunk_size)
-                data_queue.put(chunk)
+            start = random.randrange(size - chunk_size)
+            f.seek(start)
+            chunk = f.read(chunk_size)
+            data_queue.put(chunk)
 
 
 def mem_reader(

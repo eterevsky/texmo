@@ -224,7 +224,7 @@ def init_args(parser: argparse.ArgumentParser):
         help="minimum max-weights value in search",
     )
     parser.add_argument(
-        "--default-spec", type=str, default="dense.1.relu", help="default model"
+        "--default-spec", type=str, default=None, help="default model"
     )
 
     parser.add_argument(

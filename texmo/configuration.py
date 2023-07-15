@@ -213,7 +213,28 @@ def default_from_template(template: Template, spec: str) -> Configuration:
         else:
             token_type = template.token_type[0]
 
-    model = build_model(ntokens, spec)
+    if spec is not None:
+        model = build_model(ntokens, spec)
+        if not template.match_model:
+            raise RuntimeError("Default model doesn't fit the template")
+    else:
+        for spec in (
+            "suffix.2",
+            "dense.1.gelu",
+            "dense.1.gelu",
+            "rec.1.relu",
+            "rec.1.gelu",
+            "gru.1",
+            "mgru.1",
+            "lstm.1",
+        ):
+            model = build_model(ntokens, spec)
+            if template.match_model(model):
+                break
+        if not template.match_model:
+            raise RuntimeError(
+                "Can't pick up a default model that would fit the template"
+            )
     return Configuration(
         model=model,
         lr=lr,
@@ -228,9 +249,11 @@ def default_from_template(template: Template, spec: str) -> Configuration:
 
 _model_neighbors: dict[Model2, list[Model2]] = {}
 
+
 def reset_neighbors_cache():
     global _model_neighbors
     _model_neighbors = {}
+
 
 _NEIGHBOR_TOKEN_TYPES = {
     "all": ["dist8", "bits1"],
@@ -245,7 +268,7 @@ _NEIGHBOR_TOKEN_TYPES = {
 _NEIGHBOR_TOKEN_PROCESSING = {
     "raw": ["capswords"],
     # "caps": ["raw", "capswords"],
-    "capswords": ["raw"]
+    "capswords": ["raw"],
 }
 
 

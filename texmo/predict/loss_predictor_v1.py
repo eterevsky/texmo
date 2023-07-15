@@ -207,7 +207,7 @@ class LossPredictorV1(object):
 
     def update_conf_results(self, conf_results: ConfResults) -> List[Configuration]:
         return self._feature_provider.update_conf_results(conf_results)
-    
+
     def _prepare_data(self, result_set: ResultSet):
         features = []
         sample_weight = []
@@ -236,14 +236,14 @@ class LossPredictorV1(object):
                 logging.info("Splitting the data into training and test sets.")
                 train_set, test_set = self._result_set.train_test_split()
                 features, losses, sample_weight = self._prepare_data(train_set)
-                test_features, test_losses, test_sample_weight = self._prepare_data(test_set)
+                test_features, test_losses, _ = self._prepare_data(test_set)
             else:
                 features, losses, sample_weight = self._prepare_data(self._result_set)
 
             logging.info(f"Prepared training data: {features.shape}")
             self._predictor.fit(features, losses, sample_weight)
 
-            if self._split_test_set:
+            if self._split_test_set and test_features:
                 loss = self._predictor.loss(test_features, test_losses)
                 logging.info(f"Loss on test set ({test_features.shape}): {loss}")
             else:

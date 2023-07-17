@@ -84,13 +84,7 @@ class LossPredictorFlat(object):
             + [True, True, False, False, False]
             + [True, True, False, False, False, False, False] * 4,
         )
-<<<<<<< HEAD
         self._samples_till_next_train = 0
-=======
-        self.train()
-        self._last_train_samples = 0
-        self._samples_since_train = 0
->>>>>>> ebdad1e9ca24628380679fad40f60ef188bd3716
 
     def _prepare_data(self, result_set: ResultSet):
         features = []
@@ -127,7 +121,7 @@ class LossPredictorFlat(object):
             target_set = train_set if random.random() < 0.9 else test_set
             target_set.add_run_conf(conf, run)
             total_samples += 1
-        
+
         self._last_train_samples = total_samples
         self._samples_since_train = 0
 
@@ -142,7 +136,6 @@ class LossPredictorFlat(object):
         pred_losses = self._pred.predict(test_features)
         score = prediction_score(test_losses, pred_losses)
         logging.info(f"Loss on test set ({test_features.shape}): {score}")
-<<<<<<< HEAD
 
     def predict(
         self, confs: list[Configuration], steps: list[int]
@@ -165,13 +158,3 @@ class LossPredictorFlat(object):
         self._samples_till_next_train = int(total_runs ** (1 / 3))
 
         return True
-=======
-    
-    def count_record(self):
-        self._samples_since_train += 1
-        if self._samples_since_train ** 3 > self._last_train_samples:
-            self.train()
-    
-    def predict(self, confs: list[Configuration], steps: list[int]) -> list[float]:
-        pass
->>>>>>> ebdad1e9ca24628380679fad40f60ef188bd3716

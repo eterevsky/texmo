@@ -141,9 +141,9 @@ class FeatureProvider(object):
         """
         assert isinstance(conf_results, ConfResults)
         self._conf_loss[conf_results.conf] = conf_results.median_score
-        for neighbor in self._get_neighbors(conf_results.conf):
-            if conf_is_valid(neighbor):
-                yield neighbor
+        # for neighbor in self._get_neighbors(conf_results.conf):
+        #     if conf_is_valid(neighbor):
+        #         yield neighbor
 
 
 class _HistPredictor(object):
@@ -243,7 +243,7 @@ class LossPredictorV1(object):
             logging.info(f"Prepared training data: {features.shape}")
             self._predictor.fit(features, losses, sample_weight)
 
-            if self._split_test_set and test_features:
+            if self._split_test_set and test_features.shape[0] > 0:
                 loss = self._predictor.loss(test_features, test_losses)
                 logging.info(f"Loss on test set ({test_features.shape}): {loss}")
             else:

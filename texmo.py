@@ -4,8 +4,9 @@ import logging
 import numpy as np
 
 from texmo import dataset, latency, search_cli, train_cli
+from texmo.predict import predict_cli, predictor2, sample_timing
 from texmo.tokens import small_tokens
-from texmo.predict import predict_cli
+
 
 def help(parser):
     parser.print_help()
@@ -46,6 +47,16 @@ def parse_args():
         "predict", help="train loss prediction model"
     )
     predict_cli.init_args(parser_predict)
+
+    parser_predict2 = subparsers.add_parser(
+        "predict2", help="train the new loss prediction model"
+    )
+    predictor2.init_args(parser_predict2)
+
+    parser_predict_sample = subparsers.add_parser(
+        "predict-sample", help="examine sample timing prediction model"
+    )
+    sample_timing.init_args(parser_predict_sample)
 
     parser_benchmark_dataset = subparsers.add_parser(
         "benchmark-dataset", help="benchmark sampling the training data"

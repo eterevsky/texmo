@@ -78,10 +78,8 @@ def generate_report(result_set, template, min_max_weights):
 
 
 def search_loop(
-    dataset, search: Search, predictor: Predictor2, checkpoints_path: str
+    dataset, search: Search, checkpoints_path: str
 ):
-    assert isinstance(predictor, Predictor2)
-
     logging.info("Warming up training")
     warmup(dataset)
 
@@ -93,6 +91,7 @@ def search_loop(
             logging.info(f"Checkpoint: {checkpoint}")
             weights = checkpoint.load_weights(checkpoints_path)
 
+        # TODO: Train from the checkpoint
         manager = Manager(conf, weights=weights)
         manager.init(quiet=True)
 
@@ -108,7 +107,6 @@ def search_loop(
         )
 
         search.add_run(record, run, weights, parent_checkpoint=checkpoint)
-        predictor.add_record(record)
 
 
 def main(args: argparse.Namespace):
@@ -120,18 +118,19 @@ def main(args: argparse.Namespace):
         logging.info("Default configuration: " + conf_to_string(default))
         assert template.match_conf(default)
 
-        predictor = Predictor2(args.sample_timing, args.train_timing)
         result_db = ResultDB(args.db)
+        predictor = Predictor2(args.sample_timing, args.train_timing, result_db)
         search = Search(
             result_db,
             template,
             default,
             args.min_max_weights,
             checkpoints_path=None,
+            predictor=predictor,
         )
 
         try:
-            search_loop(dataset, search, predictor, None)
+            search_loop(dataset, search, None)
         except KeyboardInterrupt:
             logging.warning("Interrupted\n")
 
@@ -220,7 +219,7 @@ def init_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--min-max-weights",
         type=int,
-        default=1024,
+        default=32,
         help="minimum max-weights value in search",
     )
     parser.add_argument(

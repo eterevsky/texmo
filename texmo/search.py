@@ -12,7 +12,7 @@ from .configuration import (
     conf_tokens_name,
 )
 from .model2 import Weights
-from .predict import LossPredictorV1, SampleTiming
+from .predict import Predictor2
 from .pretrained import Checkpoint
 from .record import TrainingRecord
 from .results import ResultSet
@@ -32,6 +32,7 @@ class Search(object):
         template,
         init_conf,
         min_max_weights,
+        predictor: Predictor2,
         checkpoints_path: str = None,
     ):
         self._db = db
@@ -39,26 +40,22 @@ class Search(object):
         self._init_conf = init_conf
         self._min_max_weights = min_max_weights
         self._checkpoints_path = checkpoints_path
-        self._timing = SampleTiming()
 
         logging.info("Creaing ResultSet.")
         self._result_set = ResultSet(db, template)
-        self._last_predictor_update = 0
+        # self._last_predictor_update = 0
 
-        logging.info("Creating Predictor")
-        self._predictor = LossPredictorV1(self._result_set, split_test_set=True)
-        if self._result_set.total_runs_count() > 0:
-            self.train_predictor()
+        # self._predictor = LossPredictorV1(self._result_set, split_test_set=True)
+        self._predictor = predictor
+        if self._predictor.maybe_train():
+            self._update_pred_scores()
 
-    def train_predictor(self):
-        self._predictor.train()
+    def _update_pred_scores(self):
         logging.info("Generating predicted losses for all confs")
         all_confs = list(self._result_set.get_confs())
         pred_losses = self._predictor.predict(all_confs)
         logging.info("Populating predicted losses")
         self._result_set.update_pred_scores(all_confs, pred_losses)
-        logging.info("Pred scores ready")
-        self._last_predictor_update = self._result_set.total_runs_count()
 
     def add_run(
         self,
@@ -76,12 +73,10 @@ class Search(object):
         with latency.timer("Search.add_run"):
             if (
                 abs(log2(record.planned_time_s) - log2(record.train_time_s))
-                > 0.1
+                > 0.1375
             ):
-                logging.warn("Bad training time, skipping")
-                # continue
+                logging.warn("Training time differs from the planned by >10%")
                 record.invalidate()
-                # record.loss = INF
 
             if parent_checkpoint is None:
                 checkpoint = Checkpoint(conf, run)
@@ -96,28 +91,34 @@ class Search(object):
             ):
                 checkpoint.save(weights, self._checkpoints_path)
 
-            conf_results, loss = self._result_set.add_record(record, run)
-            affected_confs = set()
-            for neighbor in self._predictor.update_conf_results(conf_results):
-                if self._template.match_conf(neighbor):
-                    affected_confs.add(neighbor)
+            self._predictor.add_record(record)
+            self._result_set.add_record(record, run)
 
-            for neighbor in conf_neighbors(conf_results.conf, self._template):
-                affected_confs.add(neighbor)
+            # self._predictor.update_conf_results(conf_results)
+            # affected_confs = set()
+            # for neighbor in self._predictor.update_conf_results(conf_results):
+            #     if self._template.match_conf(neighbor):
+            #         affected_confs.add(neighbor)
 
-            affected_confs = list(affected_confs)
+            # for neighbor in conf_neighbors(conf_results.conf, self._template):
+            #     affected_confs.add(neighbor)
 
-            total_runs = self._result_set.total_runs_count()
-            if (
-                total_runs > 0
-                and total_runs
-                > self._last_predictor_update
-                + self._last_predictor_update ** (1 / 3)
-            ):
-                self.train_predictor()
+            # affected_confs = list(affected_confs)
 
-            pred_losses = self._predictor.predict(affected_confs)
-            self._result_set.update_pred_scores(affected_confs, pred_losses)
+            if self._predictor.maybe_train():
+                self._update_pred_scores()
+
+            # total_runs = self._result_set.total_runs_count()
+            # if (
+            #     total_runs > 0
+            #     and total_runs
+            #     > self._last_predictor_update
+            #     + self._last_predictor_update ** (1 / 3)
+            # ):
+            #     self.train_predictor()
+
+            # pred_losses = self._predictor.predict(affected_confs)
+            # self._result_set.update_pred_scores(affected_confs, pred_losses)
 
     def _select_time(self):
         with latency.timer("Search._select_time"):

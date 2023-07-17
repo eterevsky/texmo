@@ -142,6 +142,12 @@ class ResultDB(object):
             with latency.timer("ResultDB.add_record-commit"):
                 self._db.commit()
 
+    def total_runs(self) -> int:
+        cur = self._db.execute("SELECT COUNT(*) AS count FROM run")
+        total = cur.fetchone()["count"]
+        assert isinstance(total, int)
+        return total
+
     def get_confs_runs(self, template=None):
         """Iterates through all confs that match template."""
         if template is None:

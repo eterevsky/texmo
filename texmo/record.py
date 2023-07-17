@@ -124,8 +124,12 @@ class TrainingRecord(object):
     def avg_step_time(self) -> float:
         return self._dict["avg_step_time"]
 
+    @property
+    def invalid_time(self) -> bool:
+        return self._dict.get("invalid_time", False)
+
     def invalidate(self):
-        self._dict["loss"] = INF
+        self._dict["invalid_time"] = True
 
     def __str__(self) -> str:
         planned_time_s = self._dict["planned_time_s"]
@@ -157,9 +161,14 @@ class TrainingRecord(object):
         else:
             avg_step_time = float("nan")
 
+        if self.invalid_time:
+            invalid = "INVALID "
+        else:
+            invalid = ""
+
         return f"""{conf_str}
 Loss: {loss:.4f}{expected_loss} Training data: {train_data:.1f} M / {total_data:.1f} M
-Training for {train_time_s:.1f} s ({planned_time}). Steps {steps}, sample {avg_sample_time:.2f} ms, step {first_step_time:.2f}|{avg_step_time:.2f} ms"""
+Training for {train_time_s:.1f} s ({invalid}{planned_time} s). Steps {steps}, sample {avg_sample_time:.2f} ms, step {first_step_time:.2f}|{avg_step_time:.2f} ms"""
 
     def jsonl(self):
         json.dumps(self._dict)

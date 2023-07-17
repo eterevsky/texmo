@@ -1,18 +1,24 @@
+import argparse
 import json
 import logging
+import math
 import random
 from collections import namedtuple
 from statistics import mean
 from typing import Iterable, Optional
 
+import jax.numpy as jnp
 import numpy as np
+import scipy
+from jax.experimental.sparse import BCOO
+from jax.scipy.optimize import minimize
+from scipy.optimize import lsq_linear, nnls
 from scipy.sparse import csr_array
-from scipy.optimize import nnls, lsq_linear
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 
 from .. import latency
-from ..common import total_size, INF
+from ..common import INF, total_size
 from ..configuration import Configuration
 from ..model2 import Model2, build_model
 
@@ -64,7 +70,6 @@ class TrainTiming(object):
         else:
             self._file = None
 
-        self._last_train = 0
         self._layer_types = {}
         self._layers = []
         self._layer_to_idx = {}
@@ -170,16 +175,16 @@ class TrainTiming(object):
         avg_log = self._avg_pred.predict([features])
         return 2 ** first_log[0], 2 ** avg_log[0]
 
+    @property
+    def total_samples(self) -> int:
+        return len(self._run_timings)
+
     def predict(self, conf: Configuration) -> tuple[float, float]:
         with latency.timer("TrainTiming.predict"):
-            total_timings = len(self._run_timings)
-            if total_timings == 0:
+            if self.total_samples == 0:
                 # If we don't have any data at all, return 100 ms and 1 ms
                 # as a default.
                 return 0.1, 0.001
-            samples_since_last_traing = total_timings - self._last_train
-            if samples_since_last_traing**3 >= self._last_train:
-                self.train()
 
             run = conf_to_run_timing(conf)
             total_first, total_avg = 0, 0
@@ -191,13 +196,15 @@ class TrainTiming(object):
 
             return total_first, total_avg
 
-    def _train_layer_timing(self) -> tuple[np.ndarray, np.ndarray]:
-        """Run a linear regression to separate network timings into layer timings.
+    def _prepare_model_layer_data(self):
+        """Build matrices for training splitting model latency into layer latency
 
-        Returns:
-            A tuple of coefficients for first step timing and average step timing.
+        Produces two datasets, for the latency of the first training steps and
+        the average step (after the first one). Each dataset contains:
+          - a sparse matrix with models as rows and layers as columsn, with the number of time a given layer appears in the a given model;
+          - latency of training the model
         """
-        with latency.timer("TrainTiming._train_layer_timing.prepare"):
+        with latency.timer("TrainTiming._prepare_model_layer_data"):
             avg_xs = []
             avg_rows = []
             avg_cols = []
@@ -241,62 +248,96 @@ class TrainTiming(object):
                 (first_xs, (first_rows, first_cols)),
                 shape=(len(first_ys), len(self._layers)),
             )
+            # first_xs = BCOO.from_scipy_sparse(first_xs)
             first_ys = np.array(first_ys)
 
             avg_xs = csr_array(
                 (avg_xs, (avg_rows, avg_cols)),
                 shape=(len(avg_ys), len(self._layers)),
             )
+            # avg_xs = BCOO.from_scipy_sparse(avg_xs)
             avg_ys = np.array(avg_ys)
+
+            return first_xs, first_ys, avg_xs, avg_ys
+
+    def _optimize_layer_split_jax(
+        self, model_layer_mat: BCOO, model_time: np.ndarray
+    ) -> np.ndarray:
+        """Given a sparse matrix with the model-layer correspondence and model timing, find layer timing."""
+
+        assert isinstance(model_layer_mat, BCOO)
+        nmodels, nlayers = model_layer_mat.shape
+
+        model_time_log = jnp.log2(model_time)
+
+        def loss(layer_time_log):
+            layer_time = 2**layer_time_log
+            pred_model_time = model_layer_mat @ layer_time
+            pred_model_time_log = jnp.log2(pred_model_time)
+            return jnp.sum(jnp.abs(pred_model_time_log - model_time_log))
+
+        initial_guess = jnp.ones(shape=(nlayers,)) * math.log2(0.001)
+
+        results = minimize(
+            loss, initial_guess, method="BFGS", options={"maxiter": 40}
+        )
+
+        avg_loss = results.fun / nmodels
+        loss_pct = (2**avg_loss - 1) * 100
+
+        logging.info(
+            f"nfev = {results.nfev} njev = {results.njev} nit = {results.nit}"
+        )
+        logging.info(f"loss = {results.fun} avg_loss = {avg_loss}, {loss_pct}%")
+
+        layer_time = 2**results.x
+        logging.info(f"Layer time: {layer_time}")
+
+        return layer_time
+
+    def _optimize_layer_split(
+        self, model_layer_mat: csr_array, model_time: np.ndarray
+    ) -> np.ndarray:
+        assert isinstance(model_layer_mat, csr_array)
+        nmodels, nlayers = model_layer_mat.shape
+        result = lsq_linear(model_layer_mat, model_time, bounds=(0, INF))
+        layer_time = result.x
+
+        pred = model_layer_mat @ layer_time
+        loss = np.sum(np.abs(np.log2(pred) - np.log2(model_time))) / nmodels
+        loss_pct = (2**loss - 1) * 100
+        logging.info(f"Loss on training data: {loss_pct:.1f}%")
+
+        return layer_time
+
+    def _train_layer_timing(self) -> tuple[np.ndarray, np.ndarray]:
+        """Run a linear regression to separate network timings into layer timings.
+
+        Returns:
+            A tuple of coefficients for first step timing and average step timing.
+        """
+        first_xs, first_ys, avg_xs, avg_ys = self._prepare_model_layer_data()
 
         with latency.timer("TrainTiming._train_layer_timing.fit"):
             logging.info(
                 "Running linear regression for per-layer first_step timing"
             )
-            n = first_xs.shape[0]
-            nlayers = len(self._layers)
-            logging.info(f"Using {n} samples / {nlayers} layers")
-            # first_coef, _ = nnls(first_xs, first_ys)
-            # first_coef = nnls_grad(first_xs, first_ys)
-            result = lsq_linear(first_xs, first_ys, bounds=(0, INF))
-            first_coef = result.x
-            # first_regression = LinearRegression(positive=True, fit_intercept=False, n_jobs=4)
-            # first_regression.fit(first_xs, first_ys)
-            # print(first_coef.shape)
-            # print(first_coef)
-
+            layer_first_step = self._optimize_layer_split(first_xs, first_ys)
             logging.info(
                 "Running linear regression for per-layer avg_step timing"
             )
-            n = avg_xs.shape[0]
-            logging.info(f"Using {n} samples / {nlayers} layers")
+            layer_avg_step = self._optimize_layer_split(avg_xs, avg_ys)
 
-            # avg_coef, _ = nnls(avg_xs, avg_ys)
-            # avg_coef = nnls_grad(avg_xs, avg_ys)
-            result = lsq_linear(avg_xs, avg_ys, bounds=(0, INF))
-            avg_coef = result.x
-            # xtx = np.matmul(avg_xs.transpose(), avg_xs)
-            # xty = np.matmul(avg_xs.transpose(), avg_ys)
-            # avg_coef, _ = fnnls(xtx, xty)
-            # print(avg_coef.shape)
-            # print(avg_coef)
-
-            # avg_regression = LinearRegression(positive=True, fit_intercept=False, n_jobs=4)
-            # avg_regression.fit(avg_xs, avg_ys)
-
-        return first_coef, avg_coef
-        # return first_regression.coef_, avg_regression.coef_
+        return layer_first_step, layer_avg_step
 
     def train(self):
-        with latency.timer("TrainTiming.train"):
-            self._last_train = len(self._run_timings)
+        logging.info("Training a model to predict training latency")
 
-            logging.info("Training a model to predict layer latency")
+        first_step, avg_step = self._train_layer_timing()
+        self._layer_first_step = first_step
+        self._layer_avg_step = avg_step
 
-            first_step, avg_step = self._train_layer_timing()
-            self._layer_first_step = first_step
-            self._layer_avg_step = avg_step
-
+        with latency.timer("TrainTiming.train.fit"):
             first_step = np.maximum(first_step, 0.0001)
             avg_step = np.maximum(avg_step, 0.0001)
             first_step_log = np.log2(first_step)

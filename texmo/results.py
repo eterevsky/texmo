@@ -192,7 +192,7 @@ class ResultSet(object):
 
         if update_scores and self._template.match_conf(conf_results.conf):
             self._update_scores(conf_results)
-            self._update_neighbors(conf_results.conf)
+            # self._update_neighbors(conf_results.conf)
 
     def add_run_conf(
         self,
@@ -206,17 +206,16 @@ class ResultSet(object):
 
     def add_record(
         self, record: TrainingRecord, run: Run, update_scores=True
-    ) -> tuple[ConfResults, float]:
+    ) -> ConfResults:
         conf = record.conf
         assert conf_is_valid(conf)
-
         assert self._template.match_conf(conf)
 
         self._result_db.add_record(record, run)
         conf_results = self._find_or_add_conf(conf)
         self.add_run(conf_results, run, update_scores=update_scores)
 
-        return conf_results, record.loss
+        return conf_results
 
     def get_results_by_weights(self):
         return sorted(
@@ -347,9 +346,16 @@ class ResultSet(object):
         for conf_results in self._conf_results_by_id.values():
             yield conf_results.conf
 
-    def update_pred_scores(self, confs: Iterable[Configuration], scores):
+    def update_pred_scores(self, confs: Iterable[Configuration], scores: Iterable[float]):
+        logging.info("Updating predicted scores in ResultSet")
         for conf, score in zip(confs, scores):
             conf_results = self._find_or_add_conf(conf)
+
+            if len(conf_results.runs) > 0:
+                scores = [r.loss for r in conf_results.runs]
+                scores.append(score)
+                score = median(scores)
+
             conf_results.pred_score = score
             self._db.execute(
                 "UPDATE conf SET pred_score = ? WHERE id = ?",

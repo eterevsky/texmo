@@ -1,17 +1,18 @@
+import argparse
 import json
 import logging
 import math
 from collections import namedtuple
 from statistics import median
-from typing import Optional
+from typing import Optional, Iterable
+import random
 
 import numpy as np
-from jax import numpy as jnp
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 from ..configuration import Configuration, conf_tokens_name
 from ..prng import Rng
-from ..tokens import get_tokenizer
+from ..tokens import get_tokenizer, set_tokens_dir
 from .. import latency
 
 SampleLatency = namedtuple(
@@ -44,12 +45,21 @@ def build_sample_latency(
         latency=latency,
     )
 
+def sample_token_set_name(sample: SampleLatency) -> str:
+    return f"tokens{sample.ntokens}_{sample.processing}_{sample.type}"
+
 
 class SampleTiming(object):
-    def __init__(self, jsonl_path=None):
+    def __init__(
+        self, jsonl_path: str = None, samples: Iterable[SampleLatency] = None
+    ):
         self._types: list[str] = []
         self._processing_types: list[str] = []
         self._sample_timings: dict[SampleLatency, list[float]] = {}
+
+        if samples:
+            for sample in samples:
+                self._add_sample(sample)
 
         if jsonl_path is not None:
             try:
@@ -104,8 +114,8 @@ class SampleTiming(object):
             ]
         )
 
-    def _train(self):
-        with latency.timer("SampleTiming._train.prepare"):
+    def train(self):
+        with latency.timer("SampleTiming.train.prepare"):
             features = []
             log_latencies = []
 
@@ -118,8 +128,12 @@ class SampleTiming(object):
             features = np.array(features)
             log_latencies = np.array(log_latencies)
 
-        with latency.timer("SampleTiming._train.fit"):
+        with latency.timer("SampleTiming.train.fit"):
             self._pred.fit(features, log_latencies)
+
+    @property
+    def total_samples(self) -> int:
+        return sum(len(v) for v in self._sample_timings.values())
 
     def predict(
         self, token_set_name: str, sample_len: int, batch: int
@@ -132,23 +146,14 @@ class SampleTiming(object):
                 # logging.info(f"Predicting sampling latency from historical data: {latencies}")
                 return median(latencies)
 
-            total_samples = sum(
-                len(v) for v in self._sample_timings.values()
-            )
-
-            if total_samples == 0:
+            if len(self._sample_timings) == 0:
                 # Return 1 ms by default if we don't have any data at all.
                 return 0.001
 
-            samples_since_last_train = total_samples - self._last_train
-            if samples_since_last_train**3 >= self._last_train:
-                self._train()
-            self._last_train = total_samples
-
             features = self._get_features(sample)
-            logging.info(f"Predicting sampling latency by the model ({features})")
+            # logging.info(f"Predicting sampling latency by the model ({features})")
             latency_log = self._pred.predict([features])
-            return 2**latency_log[0]
+            return 2 ** latency_log[0]
 
     def add_sample_latency(
         self,
@@ -165,3 +170,51 @@ class SampleTiming(object):
         self._add_sample(sample)
         if self._file is not None:
             print(json.dumps(sample._asdict()), file=self._file)
+
+
+def main(args: argparse.Namespace):
+    set_tokens_dir(args.tokens_dir)
+
+    test_set = []
+
+    def read_samples(filename):
+        with open(args.sample_timing, "r") as f:
+            for line in f:
+                sample = SampleLatency(**json.loads(line))
+                if random.random() < 0.1:
+                    test_set.append(sample)
+                else:
+                    yield sample
+
+    sample_timing = SampleTiming(samples=read_samples(args.sample_timing))
+    logging.info(f"Training on {sample_timing.total_samples} samples")
+    sample_timing.train()
+
+    total_samples = 0
+    total_error = 0
+    for sample in test_set:
+        total_samples += 1
+        pred_latency = sample_timing.predict(sample_token_set_name(sample), sample.sample_len, sample.batch)
+        total_error += abs(math.log2(pred_latency / sample.latency))
+
+    avg_error = total_error / total_samples
+    error_pct = (2**avg_error - 1) * 100
+    logging.info(f"Average error on test set: {error_pct}%")
+
+    latency.report()
+
+
+def init_args(parser: argparse.ArgumentParser):
+    parser.add_argument(
+        "--tokens-dir",
+        type=str,
+        default="tokens",
+        help="directory with token sets",
+    )
+    parser.add_argument(
+        "--sample-timing",
+        type=str,
+        default="results/sample-timing.jsonl",
+        help="a file with measured timings of sample preparation",
+    )
+    parser.set_defaults(func=main)

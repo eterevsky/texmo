@@ -469,7 +469,7 @@ class Manager(object):
             loss_model_params=self.run.loss_trend.params(),
             steps=self.step,
             avg_sample_time=mean(sample_times),
-            first_step_time=step_times[0],
+            first_step_time=step_times[0] if step_times else None,
             avg_step_time=None if len(step_times) < 2 else mean(step_times[1:]),
         )
 

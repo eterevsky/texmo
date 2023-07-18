@@ -23,9 +23,9 @@ from .predict_common import decode_loss, encode_loss, prediction_score
 
 def make_metaparameter_features(conf: Configuration, steps: int) -> list[float]:
     assert conf_is_valid(conf)
-    log_steps = math.log2(steps) if steps > 0 else -INF
+    assert steps > 0
     return [
-        log_steps,
+        math.log2(steps),
         math.log2(conf.lr),
         math.log2(conf.sample_len),
         math.log2(conf.batch),

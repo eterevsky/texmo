@@ -71,7 +71,9 @@ class Predictor2(object):
             f"Prediction: steps {steps}, sample {sample_pred:.2f} ms, step {first_pred:.2f}|{avg_pred:.2f} ms"
         )
 
-    def predict(self, confs: list[Configuration], verbose: bool = False) -> list[float]:
+    def predict(
+        self, confs: list[Configuration], verbose: bool = False
+    ) -> list[float]:
         steps = []
         for conf in confs:
             token_set_name = conf_tokens_name(conf)
@@ -80,16 +82,20 @@ class Predictor2(object):
             )
             first_step, avg_step = self._train_timing.predict(conf)
             avg_step = max(avg_step, sample)
-            s = math.ceil((conf.t - first_step) / avg_step) + 1
+            s = max(math.ceil((conf.t - first_step) / avg_step), 0) + 1
             steps.append(s)
 
             if verbose:
                 sample_ms = sample * 1000
                 first_step_ms = first_step * 1000
                 avg_step_ms = avg_step * 1000
-                logging.info("Predicting steps for configuration " + conf_to_string(conf))
+                logging.info(
+                    "Predicting steps for configuration " + conf_to_string(conf)
+                )
                 logging.info(f"Sampling time: {sample_ms} ms")
-                logging.info(f"Training time: {first_step_ms} ms | {avg_step_ms} ms")
+                logging.info(
+                    f"Training time: {first_step_ms} ms | {avg_step_ms} ms"
+                )
                 logging.info(f"Steps: {s}")
 
         losses = self._loss_predictor.predict(confs, steps)
@@ -182,10 +188,7 @@ def init_args(parser: argparse.ArgumentParser):
         help="layer-by-layer model specification",
     )
     parser.add_argument(
-        "--token-set",
-        required=True,
-        type=str,
-        help="token set name"
+        "--token-set", required=True, type=str, help="token set name"
     )
     parser.add_argument(
         "-b",

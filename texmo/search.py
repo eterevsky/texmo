@@ -235,13 +235,12 @@ class Search(object):
                     break
 
                 num_runs = len(conf_results.runs)
-                score = (
-                    f"{conf_results.median_score:.4f} ({num_runs})"
-                    if conf_results.median_score
-                    else "          "
-                )
-                if num_runs < 10:
-                    score += " "
+                if conf_results.median_score:
+                    score = f" {conf_results.median_score:.4f} ({num_runs})"
+                    if num_runs < 10:
+                        score += " "
+                elif conf_results.pred_score:
+                    score = f"({conf_results.pred_score:.4f})    "
                 conf = conf_results.conf
                 tokens = conf_tokens_name(conf)
                 report.append(

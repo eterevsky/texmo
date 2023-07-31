@@ -246,6 +246,8 @@ def _train(
     best_weights = weights
     best_loss = INF
 
+    logging.info(f"Training timing model for {steps} steps")
+
     for _ in range(steps):
         loss, grads = loss_grad(weights)
 
@@ -253,7 +255,6 @@ def _train(
             best_weights = weights
             best_loss = loss
 
-        print(loss)
         step_loss.append(loss)
         updates, opt_state = optimizer.update(grads, opt_state, weights)
         weights = optax.apply_updates(weights, updates)
@@ -261,13 +262,11 @@ def _train(
     # results = minimize(loss, weights, method="BFGS", options={"gtol": 1E-7})  #, options={"disp": True, })
     # best_weights = results.x
 
-    print("new weights")
     show_weights = best_weights**2
-    print(jnp.where(show_weights < 1e-10, 0, show_weights))
 
     pure_loss = _loss_log(best_weights, features, times)
 
-    print("final loss:", pure_loss)
+    logging.info(f"final loss: {pure_loss}")
     # _draw_train_graph(step_loss)
 
     return jax.device_get(best_weights)

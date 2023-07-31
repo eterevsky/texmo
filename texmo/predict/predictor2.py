@@ -11,7 +11,8 @@ from ..record import TrainingRecord
 from ..resultdb import ResultDB
 from .loss_predictor_flat import LossPredictorFlat
 from .sample_timing import SampleTiming
-from .train_timing import TrainTiming
+# from .train_timing import TrainTiming
+from .traintiming2 import TrainTiming2
 from .loss_predictor_flat import LossPredictorFlat
 from ..resultdb import ResultDB
 from .. import latency
@@ -32,7 +33,7 @@ class Predictor2(object):
         result_db: ResultDB,
     ):
         self._sample_timing = SampleTiming(sample_timing_path)
-        self._train_timing = TrainTiming(train_timing_path)
+        self._train_timing = TrainTiming2(train_timing_path)
         # Applies to timing models.
         self._samples_till_next_train = 0
         self._loss_predictor = LossPredictorFlat(result_db)

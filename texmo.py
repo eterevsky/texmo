@@ -4,7 +4,7 @@ import logging
 import numpy as np
 
 from texmo import dataset, latency, search_cli, train_cli
-from texmo.predict import predict_cli, predictor2, sample_timing
+from texmo.predict import predict_cli, predictor2, sample_timing, traintiming2
 from texmo.tokens import small_tokens
 
 
@@ -54,9 +54,14 @@ def parse_args():
     predictor2.init_args(parser_predict2)
 
     parser_predict_sample = subparsers.add_parser(
-        "predict-sample", help="examine sample timing prediction model"
+        "predict-sample", help="sample timing prediction model"
     )
     sample_timing.init_args(parser_predict_sample)
+
+    parser_predict_train = subparsers.add_parser(
+        "predict-train", help="train timing prediction model"
+    )
+    traintiming2.init_args(parser_predict_train)
 
     parser_benchmark_dataset = subparsers.add_parser(
         "benchmark-dataset", help="benchmark sampling the training data"

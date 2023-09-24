@@ -1,23 +1,19 @@
 import argparse
 import logging
 import math
-import numpy as np
-from typing import Optional, Iterable
+from typing import Iterable, Optional
 
 import numpy as np
 
-from ..configuration import conf_tokens_name, Configuration, conf_to_string
+from .. import latency
+from ..configuration import Configuration, conf_to_string, conf_tokens_name
+from ..model2 import build_model
 from ..record import TrainingRecord
 from ..resultdb import ResultDB
+from ..tokens import get_tokenizer, set_tokens_dir
 from .loss_predictor_flat import LossPredictorFlat
 from .sample_timing import SampleTiming
-# from .train_timing import TrainTiming
 from .traintiming2 import TrainTiming2
-from .loss_predictor_flat import LossPredictorFlat
-from ..resultdb import ResultDB
-from .. import latency
-from ..tokens import set_tokens_dir, get_tokenizer
-from ..model2 import build_model
 
 
 class Predictor2(object):
@@ -31,12 +27,13 @@ class Predictor2(object):
         sample_timing_path: Optional[str],
         train_timing_path: Optional[str],
         result_db: ResultDB,
+        extra_dbs: list[str],
     ):
         self._sample_timing = SampleTiming(sample_timing_path)
         self._train_timing = TrainTiming2(train_timing_path)
         # Applies to timing models.
         self._samples_till_next_train = 0
-        self._loss_predictor = LossPredictorFlat(result_db)
+        self._loss_predictor = LossPredictorFlat(result_db, extra_dbs)
 
     def add_record(self, record: TrainingRecord):
         conf = record.conf
@@ -132,8 +129,15 @@ def main(args: argparse.Namespace):
     logging.info(f"Loading results from {args.db}")
     result_db = ResultDB(args.db)
 
+    if args.extra_db:
+        extra_dbs = [args.extra_db]
+    else:
+        extra_dbs = []
+
     logging.info("Creating new predictor")
-    predictor = Predictor2(args.sample_timing, args.train_timing, result_db)
+    predictor = Predictor2(
+        args.sample_timing, args.train_timing, result_db, extra_dbs
+    )
 
     logging.info("Training")
     predictor.maybe_train()
@@ -168,6 +172,12 @@ def init_args(parser: argparse.ArgumentParser):
         type=str,
         default=None,
         help="path to the SQLite database with the results",
+    )
+    parser.add_argument(
+        "--extra-db",
+        type=str,
+        default=None,
+        help="path to additional result DBs from other machines",
     )
     parser.add_argument(
         "--train-timing",

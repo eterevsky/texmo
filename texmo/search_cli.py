@@ -119,7 +119,8 @@ def main(args: argparse.Namespace):
         assert template.match_conf(default)
 
         result_db = ResultDB(args.db)
-        predictor = Predictor2(args.sample_timing, args.train_timing, result_db)
+        extra_dbs = [args.extra_db] if args.extra_db else []
+        predictor = Predictor2(args.sample_timing, args.train_timing, result_db, extra_dbs)
         search = Search(
             result_db,
             template,
@@ -231,6 +232,12 @@ def init_args(parser: argparse.ArgumentParser):
         type=str,
         default=None,
         help="path to the SQLite database with the results",
+    )
+    parser.add_argument(
+        "--extra-db",
+        type=str,
+        default=None,
+        help="path to additional result DBs from other machines",
     )
     parser.add_argument(
         "--train-timing",

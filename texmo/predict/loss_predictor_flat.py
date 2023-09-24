@@ -70,8 +70,12 @@ def make_features(conf: Configuration, steps: int) -> list[float]:
 
 
 class LossPredictorFlat(object):
-    def __init__(self, result_db: ResultDB):
+    def __init__(self, result_db: ResultDB, extra_dbs: list[str]):
         self._result_db = result_db
+        self._extra_dbs = []
+        for path in extra_dbs:
+            db = ResultDB(path)
+            self._extra_dbs.append(db)
         self._pred = HistGradientBoostingRegressor(
             loss="absolute_error",
             max_depth=None,
@@ -107,6 +111,13 @@ class LossPredictorFlat(object):
 
         return features, losses, sample_weight
 
+    def _get_all_confs_runs(self):
+        for _, conf, run in self._result_db.get_confs_runs():
+            yield conf, run
+        for db in self._extra_dbs:
+            for _, conf, run in db.get_confs_runs():
+                yield conf, run
+
     def train(self):
         logging.info("Splitting into train and test sets")
         train_set = ResultSet(
@@ -118,7 +129,7 @@ class LossPredictorFlat(object):
 
         total_samples = 0
 
-        for _, conf, run in self._result_db.get_confs_runs():
+        for conf, run in self._get_all_confs_runs():
             target_set = train_set if random.random() < 0.9 else test_set
             target_set.add_run_conf(conf, run)
             total_samples += 1

@@ -59,7 +59,7 @@ def conf_is_valid(conf: Configuration) -> bool:
         tokenizer is not None
         and conf.model is not None
         and conf.model.is_valid()
-        and is_power2(conf.lr)
+        # and is_power2(conf.lr)
         and is_power2(conf.sample_len)
         and is_power2(conf.batch)
         and is_power2(conf.t)

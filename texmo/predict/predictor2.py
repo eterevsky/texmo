@@ -82,14 +82,13 @@ class Predictor2(object):
 
             if verbose:
                 sample_ms = sample * 1000
-                first_step_ms = first_step * 1000
                 avg_step_ms = avg_step * 1000
                 logging.info(
                     "Predicting steps for configuration " + conf_to_string(conf)
                 )
                 logging.info(f"Sampling time: {sample_ms} ms")
                 logging.info(
-                    f"Training time: {first_step_ms} ms | {avg_step_ms} ms"
+                    f"Training step time: {avg_step_ms} ms"
                 )
                 logging.info(f"Steps: {s}")
 
@@ -157,35 +156,35 @@ def main(args: argparse.Namespace):
     latency.report()
 
 
-def init_args(parser: argparse.ArgumentParser):
+def init_args(parser: argparse.ArgumentParser, config):
     parser.add_argument(
         "--tokens-dir",
         type=str,
-        default="tokens",
+        default=config.TOKENS_DIR,
         help="directory with token sets",
     )
     parser.add_argument(
         "--db",
         type=str,
-        default=None,
+        default=config.DB,
         help="path to the SQLite database with the results",
     )
     parser.add_argument(
         "--extra-db",
         type=str,
-        default=None,
+        default=config.EXTRA_DB,
         help="path to additional result DBs from other machines",
     )
     parser.add_argument(
         "--train-timing",
         type=str,
-        default="results/train-timing.jsonl",
+        default=config.TRAIN_TIMING,
         help="a file with measured train timings for each trainined configuration",
     )
     parser.add_argument(
         "--sample-timing",
         type=str,
-        default="results/sample-timing.jsonl",
+        default=config.SAMPLE_TIMING,
         help="a file with measured timings of sample preparation",
     )
 

@@ -159,7 +159,8 @@ class LossPredictorFlat(object):
             for conf, s in zip(confs, steps):
                 features.append(make_features(conf, s))
             features = np.array(features, dtype=np.float32)
-            return self._pred.predict(features)
+            losses = self._pred.predict(features)
+            return decode_loss(losses)
 
     def maybe_train(self) -> bool:
         self._samples_till_next_train -= 1

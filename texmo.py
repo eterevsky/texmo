@@ -3,6 +3,7 @@ import logging
 
 import numpy as np
 
+import config
 from texmo import dataset, latency, search_cli, train_cli
 from texmo.predict import predict_cli, predictor2, sample_timing, traintiming2
 from texmo.tokens import small_tokens
@@ -41,7 +42,7 @@ def parse_args():
     parser_search = subparsers.add_parser(
         "search", help="optimize model and metaparameters"
     )
-    search_cli.init_args(parser_search)
+    search_cli.init_args(parser_search, config)
 
     parser_predict = subparsers.add_parser(
         "predict", help="train loss prediction model"
@@ -51,7 +52,7 @@ def parse_args():
     parser_predict2 = subparsers.add_parser(
         "predict2", help="train the new loss prediction model"
     )
-    predictor2.init_args(parser_predict2)
+    predictor2.init_args(parser_predict2, config)
 
     parser_predict_sample = subparsers.add_parser(
         "predict-sample", help="sample timing prediction model"

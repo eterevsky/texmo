@@ -119,7 +119,7 @@ def main(args: argparse.Namespace):
         assert template.match_conf(default)
 
         result_db = ResultDB(args.db)
-        extra_dbs = [args.extra_db] if args.extra_db else []
+        extra_dbs = args.extra_db.split(",") if args.extra_db else []
         predictor = Predictor2(args.sample_timing, args.train_timing, result_db, extra_dbs)
         search = Search(
             result_db,
@@ -142,19 +142,19 @@ def main(args: argparse.Namespace):
         dataset.join()
 
 
-def init_args(parser: argparse.ArgumentParser):
+def init_args(parser: argparse.ArgumentParser, config):
     # Data
     parser.add_argument(
         "-d",
         "--data",
         type=str,
-        required=True,
+        default=config.DATA,
         help="a file with training data",
     )
     parser.add_argument(
         "--tokens-dir",
         type=str,
-        required=True,
+        default=config.TOKENS_DIR,
         help="directory with token sets",
     )
 
@@ -230,25 +230,25 @@ def init_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--db",
         type=str,
-        default=None,
+        default=config.DB,
         help="path to the SQLite database with the results",
     )
     parser.add_argument(
         "--extra-db",
         type=str,
-        default=None,
+        default=config.EXTRA_DB,
         help="path to additional result DBs from other machines",
     )
     parser.add_argument(
         "--train-timing",
         type=str,
-        default="results/train-timing.jsonl",
+        default=config.TRAIN_TIMING,
         help="a file with measured train timings for each trainined configuration",
     )
     parser.add_argument(
         "--sample-timing",
         type=str,
-        default="results/sample-timing.jsonl",
+        default=config.SAMPLE_TIMING,
         help="a file with measured timings of sample preparation",
     )
 

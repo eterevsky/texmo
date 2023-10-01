@@ -2,12 +2,10 @@
 
 import os
 
-DIR = os.path.dirname(__file__)
+DATA = "data/data.txt"
+TOKENS_DIR = "tokens"
 
-DB = os.path.join(DIR, "results/db.sqlite")
-DATA = os.path.join(DIR, "data.txt")
-LOG = os.path.join(DIR, "log.csv")
-CHECKPOINTS = os.path.join(DIR, "checkpoints")
-
-DEFAULT_BATCH = 32
-DEFAULT_LR = 0.0625
+DB = "results/db.sqlite"
+EXTRA_DB = ["results/db-other.sqlite"]
+TRAIN_TIMING = "results/train-timing.jsonl"
+SAMPLE_TIMING = "results/sample-timing.jsonl"

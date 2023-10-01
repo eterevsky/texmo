@@ -274,17 +274,11 @@ def _train(
 
 class TrainTiming2(object):
     def __init__(self, jsonl_path=None):
-        self._first_features = []
-        self._first_times = []
-        self._first_test_features = []
-        self._first_test_times = []
-
         self._avg_features = []
         self._avg_times = []
         self._avg_test_features = []
         self._avg_test_times = []
 
-        self._first_weights = None
         self._avg_weights = None
 
         if jsonl_path is not None:
@@ -293,7 +287,7 @@ class TrainTiming2(object):
                     for line in f:
                         run = RunTiming(**json.loads(line))
                         features = _make_run_timing_features(run)
-                        self._add_sample(features, run.first_step, run.avg_step)
+                        self._add_sample(features, run.avg_step)
             except FileNotFoundError:
                 pass
             self._file = open(jsonl_path, "a", encoding="utf-8", newline="\n")
@@ -301,74 +295,40 @@ class TrainTiming2(object):
             self._file = None
 
     def _add_sample(
-        self, features: np.ndarray, first_step: float, avg_step: Optional[float]
+        self, features: np.ndarray, avg_step: Optional[float]
     ):
-        if first_step is None:
-            return
         assert isinstance(features, np.ndarray)
-        assert isinstance(first_step, float)
 
         if random.random() < 0.9:
-            self._first_features.append(features)
-            self._first_times.append(first_step)
-
             if avg_step is not None:
                 self._avg_features.append(features)
                 self._avg_times.append(avg_step)
         else:
-            self._first_test_features.append(features)
-            self._first_test_times.append(first_step)
-
             if avg_step is not None:
                 self._avg_test_features.append(features)
                 self._avg_test_times.append(avg_step)
 
     def add_step_latency(
-        self, conf: Configuration, first_step: float, avg_step: Optional[float]
+        self, conf: Configuration, avg_step: Optional[float]
     ):
         if self._file is not None:
-            run = conf_to_run_timing(conf, first_step, avg_step)
+            run = conf_to_run_timing(conf, avg_step)
             print(json.dumps(run._asdict()), file=self._file)
 
-        self._add_sample(_make_conf_features(conf), first_step, avg_step)
+        self._add_sample(_make_conf_features(conf), avg_step)
 
     @property
     def total_samples(self) -> int:
-        return len(self._first_features)
+        return len(self._avg_features)
 
-    def predict(self, conf: Configuration) -> tuple[float, float]:
-        assert self._first_weights is not None
+    def predict(self, conf: Configuration) -> float:
         assert self._avg_weights is not None
         features = _make_conf_features(conf)
-        first_pred = _predict_one(self._first_weights, features)
         avg_pred = _predict_one(self._avg_weights, features)
-        return first_pred, avg_pred
+        return avg_pred
 
     def train(self):
         logging.info("Updating train timing model")
-        self._first_weights = _train(
-            features=self._first_features,
-            times=self._first_times,
-            weights=self._first_weights,
-            steps=500 if self._first_weights is None else 50,
-            lr=0.00005,
-        )
-
-        train_loss = _loss(
-            self._first_weights,
-            jnp.array(self._first_features),
-            jnp.array(self._first_times),
-        )
-        test_loss = _loss(
-            self._first_weights,
-            jnp.array(self._first_test_features),
-            jnp.array(self._first_test_times),
-        )
-        logging.info(
-            f"First step model: train loss {_show_loss(train_loss)} " +
-            f"test loss {_show_loss(test_loss)}"
-        )
-
         self._avg_weights = _train(
             features=self._avg_features,
             times=self._avg_times,
@@ -416,10 +376,8 @@ def main(args: argparse.Namespace):
     )
     logging.info("Predicting step time for the model: " + conf_to_string(conf))
 
-    first_step, avg_step = predictor.predict(conf)
-    first_step *= 1000
-    avg_step *= 1000
-    logging.info(f"Time: {first_step} ms | {avg_step} ms")
+    avg_step = predictor.predict(conf)
+    logging.info(f"Time: {1000 * avg_step} ms")
 
     latency.report()
 

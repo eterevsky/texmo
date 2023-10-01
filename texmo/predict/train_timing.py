@@ -171,9 +171,8 @@ class TrainTiming(object):
                 self._layer_avg_step[layer_idx],
             )
         features = self._get_features_for_layer(layer)
-        first_log = self._first_pred.predict([features])
         avg_log = self._avg_pred.predict([features])
-        return 2 ** first_log[0], 2 ** avg_log[0]
+        return 2 ** avg_log[0]
 
     @property
     def total_samples(self) -> int:
@@ -187,14 +186,12 @@ class TrainTiming(object):
                 return 0.1, 0.001
 
             run = conf_to_run_timing(conf)
-            total_first, total_avg = 0, 0
+            total_avg = 0
 
             for layer in self._run_timing_to_layers(run):
-                first_step, avg_step = self.predict_layer(layer)
-                total_first += first_step
-                total_avg += avg_step
+                total_avg += self.predict_layer(layer)
 
-            return total_first, total_avg
+            return total_avg
 
     def _prepare_model_layer_data(self):
         """Build matrices for training splitting model latency into layer latency
@@ -209,13 +206,8 @@ class TrainTiming(object):
             avg_rows = []
             avg_cols = []
             avg_ys = []
-            first_xs = []
-            first_rows = []
-            first_cols = []
-            first_ys = []
 
             avg_row = 0
-            first_row = 0
 
             for run_timing in self._run_timings:
                 if run_timing.first_step is None:
@@ -229,13 +221,6 @@ class TrainTiming(object):
                         self._layer_to_idx[layer] = idx
                     layer_counts[idx] = layer_counts.get(idx, 0) + 1
 
-                for col, value in layer_counts.items():
-                    first_rows.append(first_row)
-                    first_cols.append(col)
-                    first_xs.append(value)
-                first_ys.append(run_timing.first_step)
-                first_row += 1
-
                 if run_timing.avg_step is not None:
                     for col, value in layer_counts.items():
                         avg_rows.append(avg_row)
@@ -244,13 +229,6 @@ class TrainTiming(object):
                     avg_ys.append(run_timing.avg_step)
                     avg_row += 1
 
-            first_xs = csr_array(
-                (first_xs, (first_rows, first_cols)),
-                shape=(len(first_ys), len(self._layers)),
-            )
-            # first_xs = BCOO.from_scipy_sparse(first_xs)
-            first_ys = np.array(first_ys)
-
             avg_xs = csr_array(
                 (avg_xs, (avg_rows, avg_cols)),
                 shape=(len(avg_ys), len(self._layers)),
@@ -258,7 +236,7 @@ class TrainTiming(object):
             # avg_xs = BCOO.from_scipy_sparse(avg_xs)
             avg_ys = np.array(avg_ys)
 
-            return first_xs, first_ys, avg_xs, avg_ys
+            return avg_xs, avg_ys
 
     def _optimize_layer_split_jax(
         self, model_layer_mat: BCOO, model_time: np.ndarray
@@ -316,31 +294,24 @@ class TrainTiming(object):
         Returns:
             A tuple of coefficients for first step timing and average step timing.
         """
-        first_xs, first_ys, avg_xs, avg_ys = self._prepare_model_layer_data()
+        avg_xs, avg_ys = self._prepare_model_layer_data()
 
         with latency.timer("TrainTiming._train_layer_timing.fit"):
-            logging.info(
-                "Running linear regression for per-layer first_step timing"
-            )
-            layer_first_step = self._optimize_layer_split(first_xs, first_ys)
             logging.info(
                 "Running linear regression for per-layer avg_step timing"
             )
             layer_avg_step = self._optimize_layer_split(avg_xs, avg_ys)
 
-        return layer_first_step, layer_avg_step
+        return layer_avg_step
 
     def train(self):
         logging.info("Training a model to predict training latency")
 
-        first_step, avg_step = self._train_layer_timing()
-        self._layer_first_step = first_step
+        avg_step = self._train_layer_timing()
         self._layer_avg_step = avg_step
 
         with latency.timer("TrainTiming.train.fit"):
-            first_step = np.maximum(first_step, 0.0001)
             avg_step = np.maximum(avg_step, 0.0001)
-            first_step_log = np.log2(first_step)
             avg_step_log = np.log2(avg_step)
 
             features = []
@@ -349,5 +320,4 @@ class TrainTiming(object):
 
             features = np.array(features)
 
-            self._first_pred.fit(features, first_step_log)
             self._avg_pred.fit(features, avg_step_log)

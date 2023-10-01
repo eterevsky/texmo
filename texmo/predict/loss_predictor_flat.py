@@ -152,6 +152,8 @@ class LossPredictorFlat(object):
     def predict(
         self, confs: list[Configuration], steps: list[int]
     ) -> list[float]:
+        if not confs:
+            return []
         with latency.timer("LossPredictionFlat.predict"):
             features = []
             for conf, s in zip(confs, steps):

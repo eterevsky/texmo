@@ -366,8 +366,7 @@ class Manager(object):
         step_times = []
 
         logging.info(f"Training for{t}{s}")
-        start = perf_counter()
-        finish_time = start + time_limit if time_limit else INF
+        finish_time = INF
 
         while perf_counter() < finish_time and self.step < steps:
             batch, sample_time = dataset.sample_tokens(
@@ -415,6 +414,14 @@ class Manager(object):
                 and temp_dir is not None
             ):
                 self.save(temp_dir)
+
+            if len(step_times) == 1:
+                logging.info(
+                    f"First training step took {step_times[0] * 1000} ms. "
+                    + "Disregarded for time limit."
+                )
+                start = perf_counter()
+                finish_time = start + time_limit if time_limit else INF
 
         total_time = perf_counter() - start
         return total_time, sample_times, step_times

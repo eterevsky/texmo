@@ -37,7 +37,7 @@ def parse_args():
     small_tokens.init_args(parser_count_bytes)
 
     parser_train = subparsers.add_parser("train", help="train a model")
-    train_cli.init_args(parser_train)
+    train_cli.init_args(parser_train, config)
 
     parser_search = subparsers.add_parser(
         "search", help="optimize model and metaparameters"

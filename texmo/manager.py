@@ -367,6 +367,7 @@ class Manager(object):
 
         logging.info(f"Training for{t}{s}")
         finish_time = INF
+        start = None
 
         while perf_counter() < finish_time and self.step < steps:
             batch, sample_time = dataset.sample_tokens(
@@ -423,7 +424,8 @@ class Manager(object):
                 start = perf_counter()
                 finish_time = start + time_limit if time_limit else INF
 
-        total_time = perf_counter() - start
+        assert start is not None
+        total_time = None if start is None else perf_counter() - start
         return total_time, sample_times, step_times
 
     def train_and_eval(

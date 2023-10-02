@@ -10,7 +10,7 @@ _activations = []
 
 def get_layer_cat_features(layer):
     """Generate features for a layer, with some categorical features.
-    
+
     Features: [layer, activation, input_size, output_size, weights, state size, suffix len]
 
     Categoricals: [1, 1, 0, 0, 0, 0, 0]
@@ -48,11 +48,11 @@ def get_layer_cat_features(layer):
             features.extend([2 + log2(layer.size), 0])
         case "dense":
             features.extend([0, 0])
-        case "suffix" | "attn":
+        case "suffix" | "attn" | "attnmq":
             features.extend([0, log2(layer.length)])
         case _:
             raise ValueError(f"Unknown layer name: {layer.name}")
-    
+
     return features
 
 

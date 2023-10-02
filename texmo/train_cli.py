@@ -110,13 +110,13 @@ def train(args: argparse.Namespace):
         show_loss_graph(manager, args.output_dir)
 
 
-def init_args(parser: argparse.ArgumentParser):
+def init_args(parser: argparse.ArgumentParser, config):
     # Data
     parser.add_argument(
         "-d",
         "--data",
         type=str,
-        required=True,
+        default=config.DATA,
         help="a file with",
     )
 
@@ -159,13 +159,13 @@ def init_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--tokens-dir",
         type=str,
-        default="tokens",
+        default=config.TOKENS_DIR,
         help="directory with token sets"
     )
     parser.add_argument(
         "--token-set",
-        required=True,
         type=str,
+        default="tokens256_raw_all",
         help="token set name"
     )
     parser.add_argument(

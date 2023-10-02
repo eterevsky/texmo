@@ -43,9 +43,10 @@ class Model2(object):
 
     def is_valid(self):
         for layer1, layer2 in zip(self.layers[:-1], self.layers[1:]):
-            if layer1.name in ("suffix", "attn") and layer2.name in (
+            if layer1.name in ("suffix", "attn", "attnmq") and layer2.name in (
                 "suffix",
                 "attn",
+                "attnmq",
             ):
                 return False
         return all(l.is_valid() for l in self.layers)
@@ -183,7 +184,7 @@ class Model2(object):
     ) -> DeviceArray:
         prefix_len = 1
         for layer in self.layers:
-            if layer.name in ("suffix", "attn"):
+            if layer.name in ("suffix", "attn", "attnmq"):
                 prefix_len += layer.length - 1
         batch_size, sample_len, n = batch.shape
         assert n == self.ntokens

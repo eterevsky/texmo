@@ -1,6 +1,7 @@
 import argparse
 import logging
 
+import jax
 import numpy as np
 
 import config
@@ -84,6 +85,8 @@ if __name__ == "__main__":
     logging.basicConfig(format="%(levelname)s [%(filename)s:%(lineno)d] %(message)s", level=logging.INFO)
     logging.getLogger().setLevel(logging.INFO)
     np.set_printoptions(linewidth=100, edgeitems=6, precision=3)
+    # For timing model
+    jax.config.update("jax_enable_x64", True)
     args = parse_args()
     args.func(args)
 

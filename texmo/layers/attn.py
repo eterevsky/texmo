@@ -43,6 +43,7 @@ class Attn(Layer):
         return (
             is_power2_int(self.length)
             and self.length > 1
+            and self.heads > 1  # Otherwise it's equivalent to attnmq
             and is_power2_int(self.heads)
             and is_power2_int(self.size)
             and self.size % self.heads == 0

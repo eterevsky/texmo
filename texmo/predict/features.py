@@ -43,9 +43,9 @@ def get_layer_cat_features(layer):
 
     match layer.name:
         case "gru" | "mgru" | "rec":
-            features.extend([1 + log2(layer.size), 0])
+            features.extend([log2(layer.size), 0])
         case "lstm":
-            features.extend([2 + log2(layer.size), 0])
+            features.extend([log2(2 * layer.size), 0])
         case "dense":
             features.extend([0, 0])
         case "suffix" | "attn" | "attnmq":

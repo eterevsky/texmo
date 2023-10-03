@@ -34,10 +34,9 @@ RunTiming = namedtuple(
 
 def conf_to_run_timing(
     conf: Configuration,
-    first_step: float,
-    avg_step: Optional[float] = None,
+    avg_step: float,
 ) -> RunTiming:
-    assert isinstance(first_step, float)
+    assert isinstance(avg_step, float)
     return RunTiming(
         spec=str(conf.model),
         ntokens=conf.ntokens,
@@ -310,7 +309,7 @@ class TrainTiming2(object):
                 self._avg_test_times.append(avg_step)
 
     def add_step_latency(
-        self, conf: Configuration, avg_step: Optional[float]
+        self, conf: Configuration, avg_step: float
     ):
         if self._file is not None:
             run = conf_to_run_timing(conf, avg_step)

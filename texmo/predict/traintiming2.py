@@ -63,6 +63,7 @@ _LAYER_FEATURES = [
     ("mgru", [0] * 16),  # input * size * sample_len * batch
     ("lstm", [0] * 16),  # input * size * sample_len * batch
     ("attn", [0] * 64),  # input * size * heads * length * sample_len * batch
+    ("attnmq", [0] * 64),  # input * size * heads * length * sample_len * batch
 ]
 _N_LAYER_FEATURES = sum(len(z) for _, z in _LAYER_FEATURES)
 _ALL_ZEROS = [0] * _N_LAYER_FEATURES
@@ -101,9 +102,9 @@ def _make_features(
         dims = [layer.input_size, sample_len, batch]
         if layer.name != "suffix":
             dims.append(layer.size)
-        if layer.name in ("suffix", "attn"):
+        if layer.name in ("suffix", "attn", "attnmq"):
             dims.append(layer.length)
-        if layer.name == "attn":
+        if layer.name in ("attn", "attnmq"):
             dims.append(layer.heads)
 
         layer_features.append(_make_layer_features(name, dims))

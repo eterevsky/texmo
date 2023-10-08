@@ -190,6 +190,7 @@ class Layer(object):
         Returns:
             Output array with the shape (batch_size, sample_len, output_shape)
         """
+        assert inputs.dtype == jnp.float32
         if self.use_step_batch:
             return self._forward_batch_from_step(weights, inputs)
         else:

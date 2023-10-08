@@ -86,7 +86,7 @@ if __name__ == "__main__":
     logging.getLogger().setLevel(logging.INFO)
     np.set_printoptions(linewidth=100, edgeitems=6, precision=3)
     # For timing model
-    jax.config.update("jax_enable_x64", True)
+    # jax.config.update("jax_enable_x64", True)
     args = parse_args()
     args.func(args)
 

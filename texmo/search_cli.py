@@ -14,6 +14,7 @@ from .manager import Manager
 from .model2 import build_model
 from .report import (
     draw_weight_loss_graph,
+    draw_loss_by_time,
     generate_max_report,
     generate_param_report,
     generate_report_by_weight,
@@ -75,6 +76,7 @@ def generate_report(result_set, template, min_max_weights):
             )
         )
     draw_weight_loss_graph(result_set, template)
+    draw_loss_by_time(result_set, template)
 
 
 def search_loop(
@@ -128,6 +130,7 @@ def main(args: argparse.Namespace):
             args.min_max_weights,
             checkpoints_path=None,
             predictor=predictor,
+            all_neighbors=args.all_neighbors,
         )
 
         try:
@@ -250,6 +253,11 @@ def init_args(parser: argparse.ArgumentParser, config):
         type=str,
         default=config.SAMPLE_TIMING,
         help="a file with measured timings of sample preparation",
+    )
+    parser.add_argument(
+        "--all-neighbors",
+        action="store_true",
+        help="generate all neighbors of the configurations at startup, not just when selecting the neighbor of the top configuration"
     )
 
     parser.set_defaults(func=main)

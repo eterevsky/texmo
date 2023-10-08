@@ -34,6 +34,7 @@ class Search(object):
         min_max_weights,
         predictor: Predictor2,
         checkpoints_path: str = None,
+        all_neighbors: bool = False,
     ):
         self._db = db
         self._template = template
@@ -42,7 +43,7 @@ class Search(object):
         self._checkpoints_path = checkpoints_path
 
         logging.info("Creaing ResultSet.")
-        self._result_set = ResultSet(db, template)
+        self._result_set = ResultSet(db, template, populate_neighbors=all_neighbors)
         # self._last_predictor_update = 0
 
         # self._predictor = LossPredictorV1(self._result_set, split_test_set=True)

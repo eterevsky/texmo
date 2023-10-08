@@ -74,6 +74,40 @@ def draw_weight_loss_graph(result_set: ResultSet, template: Template):
     plt.show()
 
 
+def draw_loss_by_time(result_set: ResultSet, template: Template):
+    _, ax = plt.subplots()
+    ax.set_xlabel("time (s)")
+    ax.set_ylabel("cross-entropy (bits per byte)")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.grid(visible=True)
+    ax.xaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+    ax.xaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
+    ax.yaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+    ax.yaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
+
+    times = []
+    t = template.t[0]
+    while t <= template.t[1]:
+        times.append(t)
+        t *= 2
+
+    best = []
+    best_for_bytes = []
+
+    for t in times:
+        best.append(result_set.top_conf_all_t(t, t).median_score)
+        bytes_top_conf = result_set.top_conf_for_tokenset(t, "tokens256_raw_all")
+        best_for_bytes.append(
+            bytes_top_conf.median_score if bytes_top_conf else 4
+        )
+
+    ax.plot(times, best, label="best")
+    ax.plot(times, best_for_bytes, label="best for bytes")
+
+    plt.show()
+
+
 def get_top_confs(
     result_set: ResultSet, template: Template, min_max_weights: int
 ):

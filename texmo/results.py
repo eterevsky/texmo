@@ -10,7 +10,7 @@ from typing import Optional
 from . import latency
 from .common import INF
 from .configuration import (Configuration, Template,
-                            conf_is_valid, conf_neighbors)
+                            conf_is_valid, conf_neighbors, conf_tokens_name)
 from .record import TrainingRecord
 from .resultdb import ResultDB
 from .run import Run
@@ -299,6 +299,17 @@ class ResultSet(object):
         )
         row = cur.fetchone()
         return None if row is None else self._conf_results_by_id[row[0]]
+    
+    def top_conf_for_tokenset(self, t, tokenset):
+        best_conf = None
+        for conf_results in self._conf_results_by_id.values():
+            if (conf_results.conf.t == t and
+                conf_tokens_name(conf_results.conf) == tokenset and
+                conf_results.median_score is not None and
+                (best_conf is None or
+                 conf_results.median_score < best_conf.median_score)):
+                best_conf = conf_results
+        return best_conf
 
     def top_confs(self, t, max_weights) -> Iterable[ConfResults]:
         with latency.timer("ResultSet.top_confs"):

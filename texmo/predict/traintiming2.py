@@ -233,8 +233,13 @@ def _train(
         #     jnp.zeros((_N_LAYER_FEATURES,), dtype=jnp.float64),
         # )
 
-    features = jnp.array(features, dtype=jnp.float64)
-    times = jnp.array(times, dtype=jnp.float64)
+    if not features:
+        return jax.device_get(weights)
+
+    # features = jnp.array(features, dtype=jnp.float64)
+    # times = jnp.array(times, dtype=jnp.float64)
+    features = jnp.array(features)
+    times = jnp.array(times)
 
     loss = lambda weights: _loss(weights, features, times)
     loss_grad = jax.jit(jax.value_and_grad(loss))
@@ -339,11 +344,18 @@ class TrainTiming2(object):
             lr=0.000005,
         )
 
+        if not self._avg_times:
+            return
+
         train_loss = _loss_log(
             self._avg_weights,
             jnp.array(self._avg_features),
             jnp.array(self._avg_times),
         )
+
+        if not self._avg_test_times:
+            return
+
         test_loss = _loss_log(
             self._avg_weights,
             jnp.array(self._avg_test_features),

@@ -4,7 +4,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from jax.numpy import DeviceArray
 
 from .common import NCHAR
 from .layer import Layer, LayerState, LayerWeights
@@ -181,7 +180,7 @@ class Model2(object):
 
     def _loss_batch_unpacked(
         self, weights: Weights, batch: jnp.ndarray
-    ) -> DeviceArray:
+    ) -> jax.Array:
         prefix_len = 1
         for layer in self.layers:
             if layer.name in ("suffix", "attn", "attnmq"):
@@ -204,7 +203,7 @@ class Model2(object):
         entropy = optax.softmax_cross_entropy(out, batch)
         return entropy
 
-    def loss_batch(self, weights: Weights, batch: jnp.ndarray) -> DeviceArray:
+    def loss_batch(self, weights: Weights, batch: jnp.ndarray) -> jax.Array:
         """Compute the average loss over a batch of training data.
 
         Args:
@@ -217,7 +216,7 @@ class Model2(object):
 
     def loss_batch_masked(
         self, weights: Weights, batch: jnp.ndarray, lengths: jnp.ndarray
-    ) -> DeviceArray:
+    ) -> jax.Array:
         # print("loss_batch_masked")
         # print(batch.shape)
         # print(batch)

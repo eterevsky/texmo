@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-from jax.numpy import DeviceArray
 from typing import Callable, Optional
 
 from .common import total_size, power2_neighbors
@@ -107,7 +106,7 @@ class Layer(object):
         Args:
             weights: a normal set of weights
             states: an object structured as a normal state for the layer,
-                but each DeviceArray has an extra (first) dimension of
+                but each jax.Array has an extra (first) dimension of
                 batch_size
             inputs: a batch of inputs with dimensions (batch_size,) + input_shape
 

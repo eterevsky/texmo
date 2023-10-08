@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-from jax.numpy import DeviceArray
 
 from ..common import is_power2_int, power2_neighbors
 from ..layer import Layer, LayerState, LayerWeights

@@ -1,7 +1,6 @@
 import math
 import jax
 import jax.numpy as jnp
-from jax.numpy import DeviceArray
 
 from ..common import is_power2_int, power2_neighbors
 from ..layer import Layer, LayerState, LayerWeights
@@ -91,7 +90,7 @@ class Attn(Layer):
 
     def step(
         self, weights: LayerWeights, state: LayerState, input: jnp.ndarray
-    ) -> tuple[LayerState, DeviceArray]:
+    ) -> tuple[LayerState, jax.Array]:
         input = input.flatten()
 
         kvq = jnp.dot(weights["w"], input)
@@ -121,7 +120,7 @@ class Attn(Layer):
         next_values = values[:, 1:, :]
         return {"keys": next_keys, "values": next_values}, attn_value
 
-    def forward(self, weights: LayerWeights, input: DeviceArray) -> DeviceArray:
+    def forward(self, weights: LayerWeights, input: jax.Array) -> jax.Array:
         input_len = input.shape[0]
         input = input.reshape((input_len, -1))
 
@@ -243,7 +242,7 @@ class AttnMQ(Layer):
 
     def step(
         self, weights: LayerWeights, state: LayerState, input: jnp.ndarray
-    ) -> tuple[LayerState, DeviceArray]:
+    ) -> tuple[LayerState, jax.Array]:
         input = input.flatten()
 
         #kvq = jnp.dot(weights["w"], input)
@@ -273,7 +272,7 @@ class AttnMQ(Layer):
         next_values = values[1:, :]
         return {"keys": next_keys, "values": next_values}, attn_value
 
-    def forward(self, weights: LayerWeights, input: DeviceArray) -> DeviceArray:
+    def forward(self, weights: LayerWeights, input: jax.Array) -> jax.Array:
         input_len = input.shape[0]
         input = input.reshape((input_len, -1))
 

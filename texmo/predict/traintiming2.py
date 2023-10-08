@@ -182,7 +182,8 @@ def _predict_batch(weights, features_batch):
 
 def _predict_one(weights: np.ndarray, features: list[float]) -> float:
     assert isinstance(weights, np.ndarray)
-    features = np.array(features, dtype=jnp.float64)
+    # features = np.array(features, dtype=np.float64)
+    features = np.array(features)
     coef = weights[:_N_LAYER_FEATURES]
     coef = np.expand_dims(coef, axis=(0, 1))
     coef = coef * coef
@@ -227,7 +228,7 @@ def _train(
     features, times, weights: Optional[dict], steps: int, lr: float = 0.00001
 ) -> dict:
     if weights is None:
-        weights = 0.0001 * jnp.ones((_N_LAYER_FEATURES,), dtype=jnp.float64)
+        weights = 0.0001 * jnp.ones((_N_LAYER_FEATURES,))
         # weights = jnp.concatenate(
         #     0.0001 * jnp.ones((_N_LAYER_FEATURES,), dtype=jnp.float64),
         #     jnp.zeros((_N_LAYER_FEATURES,), dtype=jnp.float64),
@@ -333,7 +334,7 @@ class TrainTiming2(object):
         features = make_conf_features(conf)
         avg_pred = _predict_one(self._avg_weights, features)
         return avg_pred
-    
+
     def train(self):
         logging.info("Updating train timing model")
         self._avg_weights = _train(

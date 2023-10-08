@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-from jax.numpy import DeviceArray
 
 from ..common import is_power2_int
 from ..layer import Layer, LayerState, LayerWeights
@@ -42,8 +41,8 @@ class Lstm(Layer):
         }
 
     def step(
-        self, weights: LayerWeights, state: LayerState, input: DeviceArray
-    ) -> tuple[LayerState, DeviceArray]:
+        self, weights: LayerWeights, state: LayerState, input: jax.Array
+    ) -> tuple[LayerState, jax.Array]:
         input = input.flatten()
 
         h = state["h"]

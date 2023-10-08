@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-from jax.numpy import DeviceArray
 
 from ..common import is_power2_int
 from ..layer import Layer, LayerState, LayerWeights
@@ -52,8 +51,8 @@ class Rec(Layer):
         return jnp.zeros((self.size,))
 
     def step(
-        self, weights: LayerWeights, state: LayerState, input: DeviceArray
-    ) -> tuple[LayerState, DeviceArray]:
+        self, weights: LayerWeights, state: LayerState, input: jax.Array
+    ) -> tuple[LayerState, jax.Array]:
         input = input.flatten()
         input_state = jnp.concatenate((input, state))
         new_state = jnp.dot(weights["w"], input_state) + weights["b"]
@@ -63,8 +62,8 @@ class Rec(Layer):
 
     # use_step_batch = True
     # def step_batch(
-    #     self, weights: LayerWeights, state: LayerState, input: DeviceArray
-    # ) -> tuple[LayerState, DeviceArray]:
+    #     self, weights: LayerWeights, state: LayerState, input: jax.Array
+    # ) -> tuple[LayerState, jax.Array]:
     #     input = input.reshape((input.shape[0], -1))
 
     #     print("input", input.shape)

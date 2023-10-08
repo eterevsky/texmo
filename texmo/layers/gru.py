@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-from jax.numpy import DeviceArray
 
 from ..common import is_power2_int, total_size
 from ..layer import Layer, LayerState, LayerWeights
@@ -47,7 +46,7 @@ class Gru(Layer):
 
     def step(
         self, weights: LayerWeights, state: LayerState, input: jnp.ndarray
-    ) -> tuple[LayerState, DeviceArray]:
+    ) -> tuple[LayerState, jax.Array]:
         input = input.flatten()
         input_state = jnp.concatenate((input, state))
         zr = jnp.dot(weights["w"], input_state) + weights["b"]
@@ -100,8 +99,8 @@ class Mgru(Layer):
         return jnp.zeros((self.size,))
 
     def step(
-        self, weights: LayerWeights, state: LayerState, input: DeviceArray
-    ) -> tuple[LayerState, DeviceArray]:
+        self, weights: LayerWeights, state: LayerState, input: jax.Array
+    ) -> tuple[LayerState, jax.Array]:
         input = input.flatten()
         input_state = jnp.concatenate((input, state))
         f = jnp.dot(weights["wf"], input_state) + weights["bf"]

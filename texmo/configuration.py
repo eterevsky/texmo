@@ -4,6 +4,7 @@ import re
 from collections import namedtuple
 from typing import Any
 
+from . import latency
 from .common import INF, is_power2, power2_neighbors
 from .model2 import Model2, build_model
 from .tokens import parse_token_set_name, get_tokenizer
@@ -86,9 +87,9 @@ def match_bounds(bounds, value):
     return bounds is None or bounds[0] <= value <= bounds[1]
 
 
-def make_bounds(v):
+def make_bounds(v, min_value):
     if v is None:
-        return None
+        return (min_value, INF)
     try:
         return tuple(v)
     except TypeError:
@@ -121,12 +122,12 @@ class Template(object):
         max_weights=None,
     ):
         self.regex = re.compile(spec_regex) if spec_regex is not None else None
-        self.lr = make_bounds(lr)
-        self.sample_len = make_bounds(sample_len)
-        self.batch = make_bounds(batch)
-        self.t = make_bounds(t)
+        self.lr = make_bounds(lr, 0)
+        self.sample_len = make_bounds(sample_len, 2)
+        self.batch = make_bounds(batch, 1)
+        self.t = make_bounds(t, 1)
         self.max_weights = max_weights
-        self.ntokens = make_bounds(ntokens)
+        self.ntokens = make_bounds(ntokens, 2)
         self.token_type = token_type
         self.token_processing = token_processing
 
@@ -255,14 +256,21 @@ def reset_neighbors_cache():
     _model_neighbors = {}
 
 
+# _NEIGHBOR_TOKEN_TYPES = {
+#     "all": ["dist8", "bits1"],
+#     "dist2": ["dist4", "bits4"],
+#     "dist4": ["dist2", "dist8", "bits2"],
+#     "dist8": ["dist4", "bits1", "all"],
+#     "bits1": ["bits2", "all", "dist8"],
+#     "bits2": ["bits1", "bits4", "dist4"],
+#     "bits4": ["bits2", "dist2"],
+# }
+
 _NEIGHBOR_TOKEN_TYPES = {
-    "all": ["dist8", "bits1"],
-    "dist2": ["dist4", "bits4"],
-    "dist4": ["dist2", "dist8", "bits2"],
-    "dist8": ["dist4", "bits1", "all"],
-    "bits1": ["bits2", "all", "dist8"],
-    "bits2": ["bits1", "bits4", "dist4"],
-    "bits4": ["bits2", "dist2"],
+    "all": ["bits1"],
+    "bits1": ["bits2", "all"],
+    "bits2": ["bits1", "bits4"],
+    "bits4": ["bits2"],
 }
 
 _NEIGHBOR_TOKEN_PROCESSING = {
@@ -272,7 +280,7 @@ _NEIGHBOR_TOKEN_PROCESSING = {
 }
 
 
-def conf_neighbors(conf: Configuration, template: Template):
+def _conf_neighbors(conf: Configuration, template: Template):
     """Generate all possible conf neighbors.
 
     Returns: iterator over pairs (neighbor conf, type of neighbor)
@@ -286,9 +294,6 @@ def conf_neighbors(conf: Configuration, template: Template):
                 cache.append(neighbor_model)
 
     for neighbor_model in cache:
-        if not template.match_model(neighbor_model):
-            continue
-
         yield conf._replace(model=neighbor_model)
 
         # For neighbor specs that add or remove layers we'll also add
@@ -348,3 +353,91 @@ def conf_neighbors(conf: Configuration, template: Template):
             conf_mod = conf._replace(token_processing=x)
             if get_tokenizer(conf_tokens_name(conf_mod)):
                 yield conf_mod
+
+
+def _conf_neighbors2(conf: Configuration, template: Template):
+    """Generate all possible conf neighbors.
+
+    Returns: iterator over pairs (neighbor conf, type of neighbor)
+    """
+    neighbors = []
+
+    cached_model_neighbors = _model_neighbors.get(conf.model)
+    if cached_model_neighbors is None:
+        cached_model_neighbors = []
+        for neighbor_model in conf.model.neighbors():
+            if template.match_model(neighbor_model):
+                cached_model_neighbors.append(neighbor_model)
+        _model_neighbors[conf.model] = cached_model_neighbors
+
+    for neighbor_model in cached_model_neighbors:
+        neighbors.append(conf._replace(model=neighbor_model))
+
+        # For neighbor specs that add or remove layers we'll also add
+        # configurations with increased/decreased time limit.
+
+        if len(neighbor_model.layers) > len(conf.model.layers) and match_bounds(
+            template.t, conf.t * 2
+        ):
+            neighbors.append(conf._replace(model=neighbor_model, t=conf.t * 2))
+            if template.lr[0] <= conf.lr / 2 <= template.lr[1]:
+                neighbors.append(conf._replace(
+                    model=neighbor_model, t=conf.t * 2, lr=conf.lr / 2
+                ))
+        elif len(neighbor_model.layers) < len(
+            conf.model.layers
+        ) and template.t[0] <= conf.t // 2 <= template.t[1]:
+            neighbors.append(conf._replace(model=neighbor_model, t=conf.t // 2))
+            if template.lr[0] <= conf.lr * 2 <= template.lr[1]:
+                neighbors.append(conf._replace(
+                    model=neighbor_model, t=conf.t // 2, lr=conf.lr * 2))
+
+    if template.lr[0] <= conf.lr / 2 <= template.lr[1]:
+        neighbors.append(conf._replace(lr=conf.lr / 2))
+    if template.lr[0] <= conf.lr * 2 <= template.lr[1]:
+        neighbors.append(conf._replace(lr=conf.lr * 2))
+
+    if template.sample_len[0] <= conf.sample_len // 2 <= template.sample_len[1]:
+        neighbors.append(conf._replace(sample_len=conf.sample_len // 2))
+    if template.sample_len[0] <= conf.sample_len * 2 <= template.sample_len[1]:
+        neighbors.append(conf._replace(sample_len=conf.sample_len * 2))
+
+    if template.batch[0] <= conf.batch // 2 <= template.batch[1]:
+        neighbors.append(conf._replace(batch=conf.batch // 2))
+    if template.batch[0] <= conf.batch * 2 <= template.batch[1]:
+        neighbors.append(conf._replace(batch=conf.batch * 2))
+
+    if template.t[0] <= conf.t // 2 <= template.t[1]:
+        neighbors.append(conf._replace(t=conf.t // 2))
+    if template.t[0] <= conf.t * 2 <= template.t[1]:
+        neighbors.append(conf._replace(t=conf.t * 2))
+
+    for x in (conf.ntokens // 2, conf.ntokens * 2):
+        if template.ntokens[0] <= x <= template.ntokens[1]:
+            new_model = build_model(x, str(conf.model))
+            if not template.match_model(new_model):
+                continue
+            conf_mod = conf._replace(ntokens=x, model=new_model)
+            if get_tokenizer(conf_tokens_name(conf_mod)):
+                neighbors.append(conf_mod)
+
+    for x in _NEIGHBOR_TOKEN_TYPES[conf.token_type]:
+        if x in template.token_type:
+            conf_mod = conf._replace(token_type=x)
+            if get_tokenizer(conf_tokens_name(conf_mod)):
+                neighbors.append(conf_mod)
+
+    if "raw" in template.token_processing and "raw" != conf.token_processing:
+        conf_mod = conf._replace(token_processing="raw")
+        if get_tokenizer(conf_tokens_name(conf_mod)):
+            neighbors.append(conf_mod)
+    if "capswords" in template.token_processing and "capswords" != conf.token_processing:
+        conf_mod = conf._replace(token_processing="capswords")
+        if get_tokenizer(conf_tokens_name(conf_mod)):
+            neighbors.append(conf_mod)
+    return neighbors
+
+
+def conf_neighbors(conf: Configuration, template: Template):
+    with latency.timer("conf_neighbors"):
+        return list(_conf_neighbors2(conf, template))

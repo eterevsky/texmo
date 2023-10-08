@@ -40,6 +40,7 @@ class ResultSet(object):
         result_db: Optional[ResultDB],
         template: Template,
         populate_neighbors: bool = True,
+        verbose: bool = True,
     ):
         self._template: Template = template
 
@@ -54,10 +55,10 @@ class ResultSet(object):
             self._db.executescript(schema.read())
 
         if result_db is None:
-            result_db = ResultDB()
-
-        self._result_db: ResultDB = result_db
-        self._import_from_result_db()
+            self._result_db = ResultDB()
+        else:
+            self._result_db = result_db
+            self._import_from_result_db()
 
         if populate_neighbors:
             logging.info("Generating all neighbors")
@@ -84,36 +85,37 @@ class ResultSet(object):
 
     def _find_or_add_conf(self, conf: Configuration, id=None) -> ConfResults:
         """Finds the conf in the db and returns the copy with populated id."""
-        assert isinstance(conf, Configuration)
-        conf_results = self._all_conf_results_by_conf.get(conf)
-        if conf_results is not None:
-            assert id is None or conf_results.id == id
+        with latency.timer("ResultSet._find_or_add_conf"):
+            assert isinstance(conf, Configuration)
+            conf_results = self._all_conf_results_by_conf.get(conf)
+            if conf_results is not None:
+                assert id is None or conf_results.id == id
+                return conf_results
+            if id is None:
+                id = self._result_db.find_or_add_conf(conf)
+            conf_results = ConfResults(id, conf)
+            if self._template.match_conf(conf):
+                self._conf_results_by_id[id] = conf_results
+            self._all_conf_results_by_conf[conf] = conf_results
+
+            conf_dict = {
+                "id": id,
+                "spec": str(conf.model),
+                "lr": conf.lr,
+                "sample_len": conf.sample_len,
+                "batch": conf.batch,
+                "t": conf.t,
+                "weights": conf.model.weights,
+            }
+            self._db.execute(
+                """
+                INSERT INTO conf(id, spec, lr, sample_len, batch, t, weights)
+                VALUES(:id, :spec, :lr, :sample_len, :batch, :t, :weights)
+                """,
+                conf_dict,
+            )
+
             return conf_results
-        if id is None:
-            id = self._result_db.find_or_add_conf(conf)
-        conf_results = ConfResults(id, conf)
-        if self._template.match_conf(conf):
-            self._conf_results_by_id[id] = conf_results
-        self._all_conf_results_by_conf[conf] = conf_results
-
-        conf_dict = {
-            "id": id,
-            "spec": str(conf.model),
-            "lr": conf.lr,
-            "sample_len": conf.sample_len,
-            "batch": conf.batch,
-            "t": conf.t,
-            "weights": conf.model.weights,
-        }
-        self._db.execute(
-            """
-            INSERT INTO conf(id, spec, lr, sample_len, batch, t, weights)
-            VALUES(:id, :spec, :lr, :sample_len, :batch, :t, :weights)
-            """,
-            conf_dict,
-        )
-
-        return conf_results
 
     def _import_from_result_db(self):
         """Import from the persistent DB all matching confs.

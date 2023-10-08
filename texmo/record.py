@@ -154,10 +154,10 @@ class TrainingRecord(object):
         steps = self._dict["steps"]
         train_time_s = self._dict["train_time_s"]
 
-        avg_sample_time = self.avg_sample_time * 1000
-        first_step_time = self.first_step_time * 1000
+        avg_sample_time = "{:.2f} ms".format(self.avg_sample_time * 1000) if self.avg_sample_time is not None else "None"
+        # first_step_time = self.first_step_time * 1000
         if self.avg_step_time is not None:
-            avg_step_time = self.avg_step_time * 1000
+            avg_step_time = "{:.2f} ms".format(self.avg_step_time * 1000)
         else:
             avg_step_time = float("nan")
 
@@ -168,7 +168,7 @@ class TrainingRecord(object):
 
         return f"""{conf_str}
 Loss: {loss:.4f}{expected_loss} Training data: {train_data:.1f} M / {total_data:.1f} M
-Training for {train_time_s:.1f} s ({invalid}{planned_time} s). Steps {steps}, sample {avg_sample_time:.2f} ms, step {first_step_time:.2f}|{avg_step_time:.2f} ms"""
+Training for {train_time_s:.1f} s ({invalid}{planned_time} s). Steps {steps}, sample {avg_sample_time} ms, step {avg_step_time}"""
 
     def jsonl(self):
         json.dumps(self._dict)

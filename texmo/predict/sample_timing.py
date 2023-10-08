@@ -56,6 +56,7 @@ class SampleTiming(object):
         self._types: list[str] = []
         self._processing_types: list[str] = []
         self._sample_timings: dict[SampleLatency, list[float]] = {}
+        self._cached_predictions: dict[tuple[str, int, int], float] = {}
 
         if samples:
             for sample in samples:
@@ -116,6 +117,7 @@ class SampleTiming(object):
 
     def train(self):
         with latency.timer("SampleTiming.train.prepare"):
+            self._cached_predictions = {}
             features = []
             log_latencies = []
 
@@ -140,6 +142,11 @@ class SampleTiming(object):
     ) -> float:
         """Predict the latency of sample generation."""
         with latency.timer("SampleTiming.predict"):
+            key = (token_set_name, sample_len, batch)
+            cached_prediction = self._cached_predictions.get(key)
+            if cached_prediction is not None:
+                return cached_prediction
+
             sample = build_sample_latency(token_set_name, sample_len, batch)
             latencies = self._sample_timings.get(sample)
             if latencies is not None:
@@ -153,7 +160,9 @@ class SampleTiming(object):
             features = self._get_features(sample)
             # logging.info(f"Predicting sampling latency by the model ({features})")
             latency_log = self._pred.predict([features])
-            return 2 ** latency_log[0]
+            prediction = 2 ** latency_log[0]
+            self._cached_predictions[key] = prediction
+            return prediction
 
     def add_sample_latency(
         self,

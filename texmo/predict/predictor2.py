@@ -13,7 +13,7 @@ from ..resultdb import ResultDB
 from ..tokens import get_tokenizer, set_tokens_dir
 from .loss_predictor_flat import LossPredictorFlat
 from .sample_timing import SampleTiming
-from .traintiming2 import TrainTiming2
+from .traintiming2 import TrainTiming2, make_conf_features
 
 
 class Predictor2(object):
@@ -68,36 +68,47 @@ class Predictor2(object):
         self, confs: list[Configuration], verbose: bool = False
     ) -> list[float]:
         """Predicting losses for configurations"""
-        steps = []
-        for conf in confs:
-            token_set_name = conf_tokens_name(conf)
-            sample = self._sample_timing.predict(
-                token_set_name, conf.sample_len, conf.batch
-            )
-            avg_step = self._train_timing.predict(conf)
-            avg_step = max(avg_step, sample)
-            assert avg_step > 0
-            s = math.ceil(conf.t / avg_step) + 1
-            steps.append(s)
+        with latency.timer("Predictor2.predict"):
+            steps = []
+            with latency.timer("Predictor2.predict.predict_timing"):
+                for conf in confs:
+                    token_set_name = conf_tokens_name(conf)
+                    sample = self._sample_timing.predict(
+                        token_set_name, conf.sample_len, conf.batch
+                    )
+
+                    avg_step = self._train_timing.predict(conf)
+                    avg_step = max(avg_step, sample)
+                    assert avg_step > 0
+                    s = math.ceil(conf.t / avg_step) + 1
+                    steps.append(s)
+
+                    # if verbose:
+                    #     sample_ms = sample * 1000
+                    #     avg_step_ms = avg_step * 1000
+                    #     logging.info(
+                    #         "Predicting steps for configuration " + conf_to_string(conf)
+                    #     )
+                    #     logging.info(f"Sampling time: {sample_ms} ms")
+                    #     logging.info(
+                    #         f"Training step time: {avg_step_ms} ms"
+                    #     )
+                    #     logging.info(f"Steps: {s}")
+
+            # with latency.timer("Predictor2.predict.predict_timing"):
+            #     logging.info(f"confs: {len(confs)}, features: {len(timing_features)}")
+            #     logging.info(f"features shape: {timing_features[0].shape}")
+            #     timing_features = np.stack(timing_features)
+            #     train_times = self._train_timing.predict_batch(timing_features)
+            #     times = np.maximum(sample_times, train_times)
+
+            logging.info(f"Running prediction model for {len(confs)} confs")
+            losses = self._loss_predictor.predict(confs, steps)
 
             if verbose:
-                sample_ms = sample * 1000
-                avg_step_ms = avg_step * 1000
-                logging.info(
-                    "Predicting steps for configuration " + conf_to_string(conf)
-                )
-                logging.info(f"Sampling time: {sample_ms} ms")
-                logging.info(
-                    f"Training step time: {avg_step_ms} ms"
-                )
-                logging.info(f"Steps: {s}")
+                logging.info(f"Predicted losses: {losses}")
 
-        losses = self._loss_predictor.predict(confs, steps)
-
-        if verbose:
-            logging.info(f"Predicted losses: {losses}")
-
-        return losses
+            return losses
 
     def maybe_train(self) -> bool:
         trained_timing = False

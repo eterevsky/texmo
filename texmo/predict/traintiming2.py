@@ -26,7 +26,6 @@ RunTiming = namedtuple(
         "ntokens",
         "sample_len",
         "batch",
-        "first_step",
         "avg_step",
     ],
 )
@@ -36,13 +35,12 @@ def conf_to_run_timing(
     conf: Configuration,
     avg_step: float,
 ) -> RunTiming:
-    assert isinstance(avg_step, float)
+    # assert isinstance(avg_step, float)
     return RunTiming(
         spec=str(conf.model),
         ntokens=conf.ntokens,
         sample_len=conf.sample_len,
         batch=conf.batch,
-        first_step=first_step,
         avg_step=avg_step,
     )
 
@@ -88,7 +86,7 @@ def _make_layer_features(
 
 
 def _make_features(
-    model: Model2, ntokens: int, sample_len: int, batch: int
+    model: Model2, ntokens: int, sample_len: int, batch: int, max_layers: int
 ) -> np.ndarray:
     layer_features = []
     layer_features.append(
@@ -108,16 +106,15 @@ def _make_features(
 
         layer_features.append(_make_layer_features(name, dims))
 
-    while len(layer_features) < MAX_LAYERS:
+    while len(layer_features) < max_layers:
         layer_features.append(_ALL_ZEROS)
 
-    assert len(layer_features) == MAX_LAYERS
     return np.array(layer_features)
 
 
-def _make_conf_features(conf: Configuration) -> np.ndarray:
+def make_conf_features(conf: Configuration, max_layers=0) -> np.ndarray:
     assert isinstance(conf, Configuration)
-    return _make_features(conf.model, conf.ntokens, conf.sample_len, conf.batch)
+    return _make_features(conf.model, conf.ntokens, conf.sample_len, conf.batch, max_layers)
 
 
 def _make_run_timing_features(run_timing: RunTiming) -> np.ndarray:
@@ -126,6 +123,7 @@ def _make_run_timing_features(run_timing: RunTiming) -> np.ndarray:
         run_timing.ntokens,
         run_timing.sample_len,
         run_timing.batch,
+        max_layers=MAX_LAYERS,
     )
 
 
@@ -158,6 +156,7 @@ def _predict_batch(weights, features_batch):
     coef = jnp.expand_dims(coef, axis=(0, 1))
     # bias = jnp.expand_dims(bias, axis=(0, 1))
 
+    # To force coefficients to be positive
     coef = coef * coef
     # bias = bias * bias
 
@@ -285,7 +284,10 @@ class TrainTiming2(object):
             try:
                 with open(jsonl_path, "r") as f:
                     for line in f:
-                        run = RunTiming(**json.loads(line))
+                        run_json = json.loads(line)
+                        if "first_step" in run_json:
+                            del run_json["first_step"]
+                        run = RunTiming(**run_json)
                         features = _make_run_timing_features(run)
                         self._add_sample(features, run.avg_step)
             except FileNotFoundError:
@@ -315,7 +317,7 @@ class TrainTiming2(object):
             run = conf_to_run_timing(conf, avg_step)
             print(json.dumps(run._asdict()), file=self._file)
 
-        self._add_sample(_make_conf_features(conf), avg_step)
+        self._add_sample(make_conf_features(conf, max_layers=MAX_LAYERS), avg_step)
 
     @property
     def total_samples(self) -> int:
@@ -323,10 +325,10 @@ class TrainTiming2(object):
 
     def predict(self, conf: Configuration) -> float:
         assert self._avg_weights is not None
-        features = _make_conf_features(conf)
+        features = make_conf_features(conf)
         avg_pred = _predict_one(self._avg_weights, features)
         return avg_pred
-
+    
     def train(self):
         logging.info("Updating train timing model")
         self._avg_weights = _train(

@@ -52,7 +52,8 @@ class ResultDB(object):
         if path is None:
             path = ":memory:"
         exists = path != ":memory:" and os.path.exists(path)
-        logging.info(f"Connecting to results DB {path}")
+        if path != ":memory:":
+            logging.info(f"Connecting to results DB {path}")
         self._db = sqlite3.connect(path)
         if not exists:
             schema_path = os.path.join(

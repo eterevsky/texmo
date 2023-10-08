@@ -39,10 +39,11 @@ def report():
             print(f"{name}(1)  {val:.3f} s")
         else:
             percentiles = quantiles(measures, n=100)
-            p50th = percentiles[48] / 1e6
-            p90th = percentiles[88] / 1e6
-            p99th = percentiles[98] / 1e6
+            p50th = percentiles[48] * 1e-6
+            p90th = percentiles[88] * 1e-6
+            p99th = percentiles[98] * 1e-6
+            avg = sum(measures) / len(measures) * 1e-6
             total = len(measures)
             print(
-                f"{name}({total})  {p50th:.3f} ms  {p90th:.3f} ms  {p99th:.3f} ms"
+                f"{name}({total})  {p50th:.3f} ms  {p90th:.3f} ms  {p99th:.3f} ms  AVG {avg:.3f} ms"
             )

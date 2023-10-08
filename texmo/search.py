@@ -53,7 +53,7 @@ class Search(object):
     def _update_pred_scores(self):
         logging.info("Generating predicted losses for all confs")
         all_confs = list(self._result_set.get_confs())
-        pred_losses = self._predictor.predict(all_confs)
+        pred_losses = self._predictor.predict(all_confs, verbose=True)
         logging.info("Populating predicted losses")
         self._result_set.update_pred_scores(all_confs, pred_losses)
 

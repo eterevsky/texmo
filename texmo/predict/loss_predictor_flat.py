@@ -137,12 +137,14 @@ class LossPredictorFlat(object):
         self._last_train_samples = total_samples
         self._samples_since_train = 0
 
+        logging.info("Preparing loss model training data")
         features, losses, sample_weight = self._prepare_data(train_set)
+        logging.info(f"Prepared training data: {features.shape}")
+        logging.info("Preparing loss model test data")
         test_features, test_losses, test_sample_weight = self._prepare_data(
             test_set
         )
 
-        logging.info(f"Prepared training data: {features.shape}")
         self._pred.fit(features, losses, sample_weight)
 
         pred_losses = self._pred.predict(test_features)

@@ -424,7 +424,7 @@ class Manager(object):
                 start = perf_counter()
                 finish_time = start + time_limit if time_limit else INF
 
-        total_time = None if start is None else perf_counter() - start
+        total_time = 0 if start is None else perf_counter() - start
         return total_time, sample_times, step_times
 
     def train_and_eval(

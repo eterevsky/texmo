@@ -73,6 +73,7 @@ class Search(object):
 
         with latency.timer("Search.add_run"):
             if (
+                record.train_time_s == 0 or
                 abs(log2(record.planned_time_s) - log2(record.train_time_s))
                 > 0.1375
             ):

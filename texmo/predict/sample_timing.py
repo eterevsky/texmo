@@ -130,6 +130,9 @@ class SampleTiming(object):
             features = np.array(features)
             log_latencies = np.array(log_latencies)
 
+            if log_latencies.shape[0] == 0:
+                return
+
         with latency.timer("SampleTiming.train.fit"):
             self._pred.fit(features, log_latencies)
 

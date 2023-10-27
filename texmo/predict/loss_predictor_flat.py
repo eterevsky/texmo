@@ -163,15 +163,26 @@ class LossPredictorFlat(object):
             features = np.array(features, dtype=np.float32)
             losses = self._pred.predict(features)
             return decode_loss(losses)
+        
+    def total_runs(self) -> int:
+        runs = self._result_db.total_runs()
+        for db in self._extra_dbs:
+            runs += db.total_runs()
+        return runs
 
     def maybe_train(self) -> bool:
+        logging.info(f"_samples_till_next_train = {self._samples_till_next_train}")
+
         self._samples_till_next_train -= 1
         if self._samples_till_next_train > 0:
             return False
 
         self.train()
 
-        total_runs = self._result_db.total_runs()
+        total_runs = self.total_runs()
         self._samples_till_next_train = int(total_runs ** (1 / 3))
+
+        logging.info(f"total_runs = {total_runs}")
+
 
         return True

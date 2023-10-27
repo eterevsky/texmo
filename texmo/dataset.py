@@ -7,6 +7,7 @@ import time
 from collections import namedtuple
 from itertools import repeat
 from queue import Queue
+import sys
 from threading import Thread, Lock
 from typing import Optional
 
@@ -29,7 +30,12 @@ def file_reader(
 
             start = random.randrange(size - chunk_size)
             f.seek(start)
-            chunk = f.read(chunk_size)
+            try:
+                chunk = f.read(chunk_size)
+            except PermissionError as e:
+                print("PermissionError", filename, start, chunk_size)
+                print(e)
+                os._exit(1)
             data_queue.put(chunk)
 
 
@@ -210,7 +216,7 @@ class DataSet(object):
                     )
                 )
             else:
-                for i in range(4):
+                for i in range(1):
                     self._reader_threads.append(
                         Thread(
                             target=file_reader,

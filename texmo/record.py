@@ -166,8 +166,23 @@ class TrainingRecord(object):
         else:
             invalid = ""
 
+        if loss is None or math.isnan(loss):
+            loss_str = "INF"
+        else:
+            loss_str = f"{loss:.4f}{expected_loss}"
+
+        assert conf_str is not None
+        assert loss_str is not None
+        assert train_data is not None
+        assert total_data is not None
+        assert train_time_s is not None
+        assert invalid is not None
+        assert planned_time is not None
+        assert steps is not None
+        assert avg_sample_time is not None
+
         return f"""{conf_str}
-Loss: {loss:.4f}{expected_loss} Training data: {train_data:.1f} M / {total_data:.1f} M
+Loss: {loss_str} Training data: {train_data:.1f} M / {total_data:.1f} M
 Training for {train_time_s:.1f} s ({invalid}{planned_time} s). Steps {steps}, sample {avg_sample_time} ms, step {avg_step_time}"""
 
     def jsonl(self):

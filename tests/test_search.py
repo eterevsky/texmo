@@ -53,6 +53,17 @@ def create_record(spec: str, loss, batch=256, reg=0.125):
     )
 
 
+class FakePredictor(object):
+    def __init__(self):
+        pass
+
+    def maybe_train(self):
+        pass
+
+    def add_record(self, record):
+        pass
+
+
 class SearchTest(TestCase):
     def test_init(self):
         search = Search(
@@ -60,6 +71,7 @@ class SearchTest(TestCase):
             template=TEMPLATE,
             init_conf=INIT_CONF,
             min_max_weights=1024,
+            predictor=FakePredictor(),
         )
         conf, _ = search.select_conf()
         self.assertEqual(conf, INIT_CONF)
@@ -70,6 +82,7 @@ class SearchTest(TestCase):
             template=TEMPLATE,
             init_conf=INIT_CONF,
             min_max_weights=1024,
+            predictor=FakePredictor(),
         )
         record = create_record("dense.1.relu", 4.5)
         step_loss = [4.5 + (122 - s) * 0.01 for s in range(0, 123)]
@@ -86,6 +99,7 @@ class SearchTest(TestCase):
             template=TEMPLATE,
             init_conf=INIT_CONF,
             min_max_weights=1024,
+            predictor=FakePredictor(),
         )
         record = create_record("dense.1.relu", 4.5)
         step_loss = [4.5 + (122 - s) * 0.01 for s in range(0, 123)]

@@ -15,7 +15,12 @@ class TokenSetTest(TestCase):
             "total_literals": 256,
         }
 
-        token_set = TokenSet(token_set_type="dist4", processing="raw", fallback_bits=None, stats=stats)
+        token_set = TokenSet(
+            token_set_type="dist4",
+            processing="raw",
+            fallback_bits=None,
+            stats=stats,
+        )
         token_set._add_special_token(0)
         token_set.add_token(b"abc")
         token_set.add_token(b"bc")
@@ -23,7 +28,6 @@ class TokenSetTest(TestCase):
         token_set.add_token(b"a")
         token_set.add_token(b"ac")
         token_set.add_token(b"b")
-
 
         self.assertEqual(token_set.tokens_by_str[b"abc"].suffix.string, b"bc")
         self.assertEqual(token_set.tokens_by_str[b"bc"].suffix, ord("c"))

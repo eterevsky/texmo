@@ -22,7 +22,7 @@ class Token(object):
             except UnicodeDecodeError:
                 return repr(self.string)
         else:
-            return f"\{self.value}"
+            return f"\\{self.value}"
 
     def __repr__(self):
         if self.string is not None:

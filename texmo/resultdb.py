@@ -115,7 +115,7 @@ class ResultDB(object):
         conf_id = self.find_or_add_conf(conf)
         row = {
             "conf_id": conf_id,
-            "timestamp": record.timestamp,
+            "timestamp": record.timestamp.isoformat(),
             "test_sample_len": record.test_sample_len,
             "test_batch": record.test_batch,
             "loss": run.loss,

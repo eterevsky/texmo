@@ -10,8 +10,6 @@ from texmo.prng import Rng
 from texmo.tokens import set_tokens_dir
 
 logging.disable(level=logging.ERROR)
-
-
 set_tokens_dir(os.path.join(os.path.dirname(__file__), "../tokens"))
 
 

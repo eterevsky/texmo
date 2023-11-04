@@ -68,7 +68,7 @@ class Input(object):
     """
 
     @staticmethod
-    def parse(spec: str) -> Self:
+    def from_spec(spec: str) -> Self:
         # Defaults
         ntokens = None
         positions = None  # no position encoding
@@ -121,6 +121,10 @@ class Input(object):
             return self._positions + self.ntokens
         else:
             return self.ntokens
+        
+    @property
+    def output_shape(self) -> tuple[int]:
+        return (self.output_size,)
 
     @property
     def weights(self) -> int:
@@ -132,6 +136,23 @@ class Input(object):
         if self._positions is not None:
             weights += self._positions * self._emb_size
         return weights
+
+    def __str__(self):
+        parts = []
+        if self._raw_bytes:
+            parts.append("bytes")
+        else:
+            parts.append(f"tokens.{self.ntokens}")
+        
+        if self._positions:
+            parts.append(f"pos.{self._positions}")
+        
+        if self._emb_size:
+            norm = ".norm" if self._emb_norm else ""
+            parts.append(f"emb.{self._emb_size}{norm}")
+        else:
+            parts.append("onehot")
+        return "-".join(parts)
 
     def neighbors(self):
         if self._raw_bytes:
@@ -196,13 +217,13 @@ class Input(object):
         if self._emb_size is None:
             yield Input(
                 ntokens=self.ntokens,
-                positions=2,
+                positions=self._positions,
                 emb_dim=self.ntokens,
                 emb_norm=False,
             )
             yield Input(
                 ntokens=self.ntokens,
-                positions=2,
+                positions=self._positions,
                 emb_dim=self.ntokens,
                 emb_norm=True,
             )
@@ -210,26 +231,26 @@ class Input(object):
             if self._emb_size == self.ntokens:
                 yield Input(
                     ntokens=self.ntokens,
-                    positions=2,
+                    positions=self._positions,
                     emb_dim=None,
                     emb_norm=False,
                 )
             if self._emb_size > 1:
                 yield Input(
                     ntokens=self.ntokens,
-                    positions=2,
+                    positions=self._positions,
                     emb_dim=self._emb_size // 2,
                     emb_norm=self._emb_norm,
                 )
             yield Input(
                 ntokens=self.ntokens,
-                positions=2,
+                positions=self._positions,
                 emb_dim=self._emb_size * 2,
                 emb_norm=self._emb_norm,
             )
             yield Input(
                 ntokens=self.ntokens,
-                positions=2,
+                positions=self._positions,
                 emb_dim=self._emb_size,
                 emb_norm=not self._emb_norm,
             )

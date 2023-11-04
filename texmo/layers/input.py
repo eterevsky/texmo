@@ -24,7 +24,7 @@ _PREFERRED_TOKENSETS = {
 }
 
 
-class InputLayer(object):
+class Input(object):
     """Input layer controlling tokenization, position and embedding.
 
     The spec consists of three parts each one of them is optional:
@@ -85,13 +85,13 @@ class InputLayer(object):
                 case "pos":
                     positions = int(parts[1])
                 case "onehot":
-                    positions = None
+                    emb_dim = None
                 case "emb":
                     emb_dim = int(parts[1])
                     if len(parts) > 2 and parts[2] == "norm":
                         emb_norm = True
 
-        return InputLayer(ntokens, positions, emb_dim, emb_norm)
+        return Input(ntokens, positions, emb_dim, emb_norm)
 
     def __init__(
         self,
@@ -111,7 +111,7 @@ class InputLayer(object):
 
     @property
     def ntokens(self) -> int:
-        return self.tokenizer.token_set
+        return self.tokenizer.token_set.ntokens
 
     @property
     def output_size(self) -> int:
@@ -126,14 +126,16 @@ class InputLayer(object):
     def weights(self) -> int:
         if self._emb_size is None:
             return 0
-        weights = self.ntokens * self._emb_size
+        # Token # self.ntokens stands for unknown tokens before the beginning
+        # of the sample.
+        weights = (self.ntokens + 1) * self._emb_size
         if self._positions is not None:
             weights += self._positions * self._emb_size
         return weights
 
     def neighbors(self):
         if self._raw_bytes:
-            yield InputLayer(
+            yield Input(
                 ntokens=256,
                 positions=self._positions,
                 emb_dim=self._emb_size,
@@ -141,21 +143,21 @@ class InputLayer(object):
             )
         else:
             if self.ntokens == 256:
-                yield InputLayer(
+                yield Input(
                     ntokens=None,
                     positions=self._positions,
                     emb_dim=self._emb_size,
                     emb_norm=self._emb_norm,
                 )
             if self.ntokens > 2:
-                yield InputLayer(
+                yield Input(
                     ntokens=self.ntokens // 2,
                     positions=self._positions,
                     emb_dim=self._emb_size,
                     emb_norm=self._emb_norm,
                 )
             if self.ntokens < 16384:
-                yield InputLayer(
+                yield Input(
                     ntokens=self.ntokens * 2,
                     positions=self._positions,
                     emb_dim=self._emb_size,
@@ -163,7 +165,7 @@ class InputLayer(object):
                 )
 
         if self._positions is None:
-            yield InputLayer(
+            yield Input(
                 ntokens=self.ntokens,
                 positions=2,
                 emb_dim=self._emb_size,
@@ -171,20 +173,20 @@ class InputLayer(object):
             )
         else:
             if self._positions == 2:
-                yield InputLayer(
+                yield Input(
                     ntokens=self.ntokens,
                     positions=None,
                     emb_dim=self._emb_size,
                     emb_norm=self._emb_norm,
                 )
             if self._positions > 2:
-                yield InputLayer(
+                yield Input(
                     ntokens=self.ntokens,
                     positions=self._positions // 2,
                     emb_dim=self._emb_size,
                     emb_norm=self._emb_norm,
                 )
-            yield InputLayer(
+            yield Input(
                 ntokens=self.ntokens,
                 positions=self._positions * 2,
                 emb_dim=self._emb_size,
@@ -192,13 +194,13 @@ class InputLayer(object):
             )
 
         if self._emb_size is None:
-            yield InputLayer(
+            yield Input(
                 ntokens=self.ntokens,
                 positions=2,
                 emb_dim=self.ntokens,
                 emb_norm=False,
             )
-            yield InputLayer(
+            yield Input(
                 ntokens=self.ntokens,
                 positions=2,
                 emb_dim=self.ntokens,
@@ -206,26 +208,26 @@ class InputLayer(object):
             )
         else:
             if self._emb_size == self.ntokens:
-                yield InputLayer(
+                yield Input(
                     ntokens=self.ntokens,
                     positions=2,
                     emb_dim=None,
                     emb_norm=False,
                 )
             if self._emb_size > 1:
-                yield InputLayer(
+                yield Input(
                     ntokens=self.ntokens,
                     positions=2,
                     emb_dim=self._emb_size // 2,
                     emb_norm=self._emb_norm,
                 )
-            yield InputLayer(
+            yield Input(
                 ntokens=self.ntokens,
                 positions=2,
                 emb_dim=self._emb_size * 2,
                 emb_norm=self._emb_norm,
             )
-            yield InputLayer(
+            yield Input(
                 ntokens=self.ntokens,
                 positions=2,
                 emb_dim=self._emb_size,
@@ -237,24 +239,27 @@ class InputLayer(object):
             return {}
         weights = {}
 
-        token_emb = rng.uniform(shape=(self._emb_size, self.ntokens))
+        token_emb = rng.uniform(shape=(self.ntokens + 1, self._emb_size))
         token_emb = token_emb / token_emb.sum(axis=1).reshape(-1, 1)
 
         weights["tokens"] = token_emb
 
         if self._positions is not None:
-            pos_emb = rng.uniform(shape=(self._emb_size, self._positions))
+            pos_emb = rng.uniform(shape=(self._positions, self._emb_size))
             pos_emb = pos_emb / pos_emb.sum(axis=1).reshape(-1, 1)
             weights["positions"] = pos_emb
-        
+
         return weights
 
     def init_state(self, weights: LayerWeights) -> LayerState:
-        return {"position": 0}
+        if self._positions:
+            return {"position": 0}
+        else:
+            return {}
 
     def step(self, weights: LayerWeights, state: LayerState, input: int):
         """Consume one token from the input and return new state and output.
-        
+
         Args:
             weights: embedding weights
             state:
@@ -263,8 +268,11 @@ class InputLayer(object):
         Returns:
             (new state, output vector)
         """
-        pos = state["position"]
-        new_state = {"position": (pos + 1) % self._positions}
+        if self._positions:
+            pos = state["position"]
+            new_state = {"position": (pos + 1) % self._positions}
+        else:
+            new_state = {}
 
         if self._emb_size:
             emb = weights["tokens"][input]
@@ -281,17 +289,51 @@ class InputLayer(object):
                 pos_oh = jax.nn.one_hot(pos, self._positions)
                 oh = jnp.concatenate([oh, pos_oh])
             return new_state, oh
-        
-    def forward_batch(self, weights: LayerWeights, input: jax.Array, prefix_len: ) -> jax.Array:
+
+    def forward_batch(
+        self, weights: LayerWeights, input: jax.Array, padding_len: int
+    ) -> jax.Array:
         """Generate output for a batch of full inputs.
 
         Args:
             weights: embedding weights
             input: a batch of inputs with dimensions (batch_size, sample_len)
                 with integer components
-            prefix_len: extend the sample to the left by this amount of unknown
+            paddingS_len: extend the sample to the left by this amount of unknown
                 tokens
 
         Returns:
-            Output as (batch_size, sample_len, output_size)
+            Output as (batch_size, sample_len + padding_len, output_size),
+            where output_size
+            is either emb_size, or if it is not defined, the total size of
+            one-hot encoding of the token + optionally position.
         """
+        batch, sample_len = input.shape
+
+        if self._emb_size:
+            padding = jnp.full((batch, padding_len), fill_value=self.ntokens, dtype=jnp.int32)
+            input = jnp.concatenate([padding, input], axis=1)
+            emb = weights["tokens"][input]
+            if self._positions:
+                positions = (
+                    jnp.arange(-padding_len, sample_len) % self._positions
+                )
+                pos_emb = weights["positions"][positions]
+                emb += pos_emb
+            if self._emb_norm:
+                emb = emb / emb.sum(axis=2).reshape(batch, padding_len, 1)
+            return emb
+
+        input_oh = jax.nn.one_hot(input, self.ntokens)
+        padding = jnp.ones((batch, padding_len, self.ntokens)) / self.ntokens
+        tokens_oh = jnp.concatenate([padding, input_oh], axis=1)
+        if self._positions:
+            pos = jnp.arange(-padding_len, sample_len) % self._positions
+            pos_oh = jax.nn.one_hot(
+                pos,
+                self._positions,
+            ).reshape(1, -1, self._positions)
+            pos_oh = jnp.tile(pos_oh, (batch, 1, 1))
+            tokens_oh = jnp.concatenate([tokens_oh, pos_oh], axis=2)
+
+        return tokens_oh

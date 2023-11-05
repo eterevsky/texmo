@@ -1,4 +1,5 @@
 import logging
+import os
 from unittest import TestCase
 
 from texmo.configuration import (
@@ -13,11 +14,10 @@ from texmo.model2 import build_model
 from texmo.tokens import set_tokens_dir
 
 logging.disable(level=logging.ERROR)
-
+set_tokens_dir(os.path.join(os.path.dirname(__file__), "../tokens"))
 
 class ConfigurationTest(TestCase):
     def test_conf_neighbors(self):
-        set_tokens_dir("tokens")
         reset_neighbors_cache()
 
         template = Template(
@@ -60,7 +60,6 @@ class ConfigurationTest(TestCase):
         )
 
     def test_dense_layer_neighbor(self):
-        set_tokens_dir("tokens")
         reset_neighbors_cache()
 
         template = Template(
@@ -95,8 +94,6 @@ class ConfigurationTest(TestCase):
         )
 
     def test_conf_neighbors_suffix(self):
-        set_tokens_dir("tokens")
-
         template = Template(
             spec_regex=r"suffix\.\d+",
             ntokens=(32, 64),

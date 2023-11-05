@@ -2,9 +2,6 @@ import logging
 import os
 from unittest import TestCase
 
-from texmo.configuration import Configuration
-from texmo.dataset import build_fake_dataset
-from texmo.manager import Manager
 from texmo.model3 import build_model
 from texmo.tokens import set_tokens_dir
 

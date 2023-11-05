@@ -116,7 +116,7 @@ def get_tokenizer(name: str):
         return _TOKENIZERS[name]
 
     if _TOKENS_DIR is None:
-        logging.warning(f"Tokens directory not set")
+        logging.error(f"Tokens directory not set")
         return None
 
     path = os.path.join(_TOKENS_DIR, name + ".json")
@@ -133,4 +133,6 @@ def get_tokenizer(name: str):
 
 def set_tokens_dir(path: str):
     global _TOKENS_DIR
+    if path is None:
+        raise ValueError("Tokens directory cannot be None")
     _TOKENS_DIR = path

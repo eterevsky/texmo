@@ -176,12 +176,9 @@ class DataSet(object):
         self,
         path: Optional[str] = None,
         data: Optional[bytes] = None,
-        tokens_dir: str = None,
         debug: bool = False,
         in_process: bool = False,
     ):
-        set_tokens_dir(tokens_dir)
-
         logging.info("Creating DataSet")
         self._debug: bool = debug
         self._in_process = in_process

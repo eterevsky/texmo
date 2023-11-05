@@ -6,7 +6,9 @@ from typing import Optional, Sequence
 
 
 class Rng(object):
-    def __init__(self, key: Optional[KeyArray] = None):
+    def __init__(self, key: Optional[KeyArray] = None, seed: Optional[int] = None):
+        if seed is not None:
+            key = jax.random.PRNGKey(seed)
         if key is None:
             key = jax.random.PRNGKey(randrange(2**32))
         self._key: KeyArray = key

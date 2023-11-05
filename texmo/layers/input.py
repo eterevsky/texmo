@@ -121,7 +121,7 @@ class Input(object):
             return self._positions + self.ntokens
         else:
             return self.ntokens
-        
+
     @property
     def output_shape(self) -> tuple[int]:
         return (self.output_size,)
@@ -143,10 +143,10 @@ class Input(object):
             parts.append("bytes")
         else:
             parts.append(f"tokens.{self.ntokens}")
-        
+
         if self._positions:
             parts.append(f"pos.{self._positions}")
-        
+
         if self._emb_size:
             norm = ".norm" if self._emb_norm else ""
             parts.append(f"emb.{self._emb_size}{norm}")
@@ -278,7 +278,33 @@ class Input(object):
         else:
             return {}
 
-    def step(self, weights: LayerWeights, state: LayerState, input: int):
+    def initial_step(
+        self, weights: LayerWeights
+    ) -> tuple[LayerState, jax.Array]:
+        """Return initial state and output for position 0.
+
+        Args:
+            weights: embedding weights
+
+        Returns:
+            (initial state, output vector)
+        """
+        if self._emb_size:
+            if self._positions:
+                return {"position": 0}, weights["positions"][0]
+            else:
+                return {}, jnp.zeros(self._emb_size)
+        else:
+            if self._positions:
+                return {"position": 0}, jax.nn.one_hot(
+                    self.ntokens, self._positions + self.ntokens
+                )
+            else:
+                return {}, jnp.zeros(self.ntokens)
+
+    def step(
+        self, weights: LayerWeights, state: LayerState, input: int
+    ) -> tuple[LayerState, jax.Array]:
         """Consume one token from the input and return new state and output.
 
         Args:
@@ -290,8 +316,8 @@ class Input(object):
             (new state, output vector)
         """
         if self._positions:
-            pos = state["position"]
-            new_state = {"position": (pos + 1) % self._positions}
+            pos = (state["position"] + 1) % self._positions
+            new_state = {"position": pos}
         else:
             new_state = {}
 
@@ -332,7 +358,9 @@ class Input(object):
         batch, sample_len = input.shape
 
         if self._emb_size:
-            padding = jnp.full((batch, padding_len), fill_value=self.ntokens, dtype=jnp.int32)
+            padding = jnp.full(
+                (batch, padding_len), fill_value=self.ntokens, dtype=jnp.int32
+            )
             input = jnp.concatenate([padding, input], axis=1)
             emb = weights["tokens"][input]
             if self._positions:

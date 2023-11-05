@@ -82,7 +82,7 @@ class InputTest(TestCase):
         self.assertEqual(state["position"], 0)
 
         new_state, out = input.step({}, state, 2)
-        self.assertEqual(list(out), [0, 0, 1, 0, 1, 0])
+        self.assertEqual(list(out), [0, 0, 1, 0, 0, 1])
         self.assertEqual(new_state["position"], 1)
 
     def test_pos_onehot_forward(self):
@@ -123,7 +123,7 @@ class InputTest(TestCase):
             state,
             2,
         )
-        self.assertEqual(list(out), [3, 1])
+        self.assertEqual(list(out), [3, 2])
         self.assertEqual(new_state["position"], 1)
 
     def test_emb_forward(self):

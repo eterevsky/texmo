@@ -2,7 +2,10 @@ import logging
 import os
 from unittest import TestCase
 
-from texmo.model3 import build_model
+import jax.numpy as jnp
+
+from texmo.model3 import Model3, build_model
+from texmo.prng import Rng
 from texmo.tokens import set_tokens_dir
 
 logging.disable(level=logging.ERROR)
@@ -10,6 +13,27 @@ set_tokens_dir(os.path.join(os.path.dirname(__file__), "../tokens"))
 
 
 class Model3Test(TestCase):
+
+    def _step_and_forward(self, model: Model3, input: list[int]):
+        rng = Rng(seed=0)
+        weights = model.init_weights(rng)
+
+        state, out = model.initial_step(weights)
+        outs = [out]
+
+        for token in input[:-1]:
+            state, out = model.step(weights, state, token)
+            outs.append(out)
+
+        step_outs = jnp.stack(outs)
+        
+        batch = jnp.array(input).reshape(1, -1)
+        batch_outs = model._forward_batch(weights, batch)
+
+        np.testing.assert_array_equal(
+            step_outs, batch_outs.reshape(step_outs.shape)
+        )
+
     def test_build_model(self):
         model = build_model("tokens.128-pos.16-emb.64.norm|gru.64-dense.128.relu")
         self.assertEqual(
@@ -64,3 +88,7 @@ class Model3Test(TestCase):
                 "tokens.64-pos.16-emb.64.norm|gru.64-dense.64.relu",
             },
         )
+
+    def test_input(self):
+        model = build_model("tokens.4-oh|")
+        self._step_and_forward(model, [0, 1, 2, 3])

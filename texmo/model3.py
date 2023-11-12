@@ -101,12 +101,13 @@ class Model3(object):
             )
 
         yield input_spec + "|" + "-".join(chain(layers_str, (f"suffix.2",)))
-        yield input_spec + "|" + "-".join(
-            chain(layers_str, (f"attn.2.2.{new_layer_size}",))
-        )
-        yield input_spec + "|" + "-".join(
-            chain(layers_str, (f"attnmq.2.2.{new_layer_size}",))
-        )
+        if new_layer_size >= 2:
+            yield input_spec + "|" + "-".join(
+                chain(layers_str, (f"attn.2.2.{new_layer_size}",))
+            )
+            yield input_spec + "|" + "-".join(
+                chain(layers_str, (f"attnmq.2.2.{new_layer_size}",))
+            )
 
         if self.layers:
             if len(self.layers) == 1:

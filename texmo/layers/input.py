@@ -150,8 +150,6 @@ class Input(object):
         if self._emb_size:
             norm = ".norm" if self._emb_norm else ""
             parts.append(f"emb.{self._emb_size}{norm}")
-        else:
-            parts.append("onehot")
         return "-".join(parts)
 
     def neighbors(self):

@@ -91,5 +91,5 @@ class Model3Test(TestCase):
         )
 
     def test_input(self):
-        model = build_model("tokens.4-oh|")
+        model = build_model("tokens.4|")
         self._step_and_forward(model, [0, 1, 2, 3])

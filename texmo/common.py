@@ -38,3 +38,32 @@ def power2_neighbors(x: int) -> Iterable[int]:
         return (2,)
     else:
         return (x // 2, x * 2)
+
+_BASES = (
+    (1, ""),
+    (1000, "k"),
+    (1E6, "M"),
+    (1E9, "G"),
+    (1E12, "T"),
+)
+
+def itoa3(x: int) -> str:
+    """Convert integer to a string with 3 significant digits."""
+    if x < 2000: return str(x)
+    for i in range(1, len(_BASES) - 1):
+        if x >= _BASES[i][0] and x < _BASES[i + 1][0]:
+            break
+    
+    base, suffix = _BASES[i]
+    prev_base, prev_suffix = _BASES[i - 1]
+
+    significand = x / base
+
+    if significand < 1.995:
+        return f"{x / prev_base:.0f}{prev_suffix}"
+    if significand < 19.95:
+        return f"{x / base:.2f}{suffix}"
+    elif significand < 199.5:
+        return f"{x / base:.1f}{suffix}"
+    else:
+        return f"{x / base:.0f}{suffix}"

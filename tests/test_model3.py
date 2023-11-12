@@ -18,7 +18,6 @@ class Model3Test(TestCase):
     def _step_and_forward(self, model: Model3, input: list[int]):
         rng = Rng(seed=0)
         weights = model.init_weights(rng)
-
         state, out = model.initial_step(weights)
         outs = [out]
 

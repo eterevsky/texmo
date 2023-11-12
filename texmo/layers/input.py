@@ -372,7 +372,7 @@ class Input(object):
             return emb
 
         input_oh = jax.nn.one_hot(input, self.ntokens)
-        padding = jnp.ones((batch, padding_len, self.ntokens)) / self.ntokens
+        padding = jnp.zeros((batch, padding_len, self.ntokens))
         tokens_oh = jnp.concatenate([padding, input_oh], axis=1)
         if self._positions:
             pos = jnp.arange(-padding_len, sample_len) % self._positions

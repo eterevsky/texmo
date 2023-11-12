@@ -156,6 +156,10 @@ class TokenSet(object):
     @property
     def ntokens(self):
         return len(self.tokens)
+    
+    @property
+    def name(self):
+        return f"tokens{self.ntokens}_{self.processing}_{self.token_type}"
 
     def _add_special_token(self, n: int):
         assert n == len(self.tokens)

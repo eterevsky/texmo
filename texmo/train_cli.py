@@ -5,10 +5,10 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .configuration import Configuration
+from .configuration2 import Configuration2
 from .dataset import DataSet
 from .manager import Manager
-from .model2 import build_model
+from .model3 import build_model
 from .tokens import TokenSet, get_tokenizer, set_tokens_dir
 
 
@@ -63,29 +63,31 @@ def train(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
 
     logging.info(f"Training data: {args.data}")
-    train_set = DataSet(args.data, tokens_dir=args.tokens_dir)
+    train_set = DataSet(path=args.data)
     lr = parse_lr(args.lr)
 
     try:
         if args.model_path is not None:
-            manager = Manager.load(args.model_path, test_batch=args.test_batch, test_sample_len=args.test_sample_len)
+            manager = Manager.load(
+                args.model_path,
+                test_batch=args.test_batch,
+                test_sample_len=args.test_sample_len,
+            )
             manager.update_conf(lr, args.sample_len, args.batch, args.time)
             if args.add_layers:
                 manager.add_layers(args.add_layers)
             manager.init()
         else:
-            tokenizer = get_tokenizer(args.token_set)
-            conf = Configuration(
-                build_model(tokenizer.token_set.ntokens, args.spec),
-                ntokens=tokenizer.token_set.ntokens,
-                token_type=tokenizer.token_set.token_type,
-                token_processing=tokenizer.token_set.processing,
+            conf = Configuration2(
+                build_model(args.spec),
                 lr=lr,
-                sample_len=args.sample_len,
+                length=args.length,
                 batch=args.batch,
-                t=args.time,
+                steps=args.steps,
             )
-            manager = Manager(conf, test_batch=args.test_batch, test_sample_len=args.test_sample_len)
+            manager = Manager(
+                conf, test_batch=args.test_batch, test_sample_len=args.test_sample_len
+            )
             manager.init()
 
         manager.train_and_eval(
@@ -101,7 +103,7 @@ def train(args: argparse.Namespace):
         train_set.join()
 
     if args.prefix is not None:
-        s = manager.continue_prefix(args.prefix, 256)
+        s = manager.continue_prefix(args.prefix, 256, temperature=args.temperature)
         print()
         print(s)
         print()
@@ -160,13 +162,7 @@ def init_args(parser: argparse.ArgumentParser, config):
         "--tokens-dir",
         type=str,
         default=config.TOKENS_DIR,
-        help="directory with token sets"
-    )
-    parser.add_argument(
-        "--token-set",
-        type=str,
-        default="tokens256_raw_all",
-        help="token set name"
+        help="directory with token sets",
     )
     parser.add_argument(
         "--tokens",
@@ -190,7 +186,7 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="learning rate, could be written as a float or as 2^-10",
     )
     parser.add_argument(
-        "--sample-len",
+        "--length",
         type=int,
         default=128,
         metavar="NTOKENS",
@@ -239,19 +235,25 @@ def init_args(parser: argparse.ArgumentParser, config):
         "--test-batch",
         type=int,
         default=1024,
-        help="Size of the test batch, used for final evaluation"
+        help="Size of the test batch, used for final evaluation",
     )
     parser.add_argument(
         "--test-sample-len",
         type=int,
         default=1024,
-        help="Length in bytes of test samples, used for final evaluation"
+        help="Length in bytes of test samples, used for final evaluation",
     )
     parser.add_argument(
         "--no-graph",
         default=False,
         action="store_true",
-        help="Don't show trianing loss graph"
+        help="Don't show trianing loss graph",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.1,
+        help="temperature for sampling",
     )
 
     parser.set_defaults(func=train)

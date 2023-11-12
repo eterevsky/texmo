@@ -1,14 +1,12 @@
 import argparse
 import logging
-import mmap
 import os
 import random
 import time
 from collections import namedtuple
 from itertools import repeat
 from queue import Queue
-import sys
-from threading import Thread, Lock
+from threading import Lock, Thread
 from typing import Optional
 
 import numpy as np
@@ -179,6 +177,9 @@ class DataSet(object):
         debug: bool = False,
         in_process: bool = False,
     ):
+        print("path", path, "data", data, "debug", debug, "in_process", in_process)
+        # print("!!! DataSet.__init__")
+        # exit(0)
         logging.info("Creating DataSet")
         self._debug: bool = debug
         self._in_process = in_process
@@ -271,14 +272,14 @@ class DataSet(object):
             self._worker_threads.append(worker_thread)
 
     def __del__(self):
-        if not self._in_process:
-            self.join()
+        self.join()
 
     def join(self):
-        for th in self._worker_threads:
-            self._request_queue.put(None)
-        for th in self._worker_threads:
-            th.join()
+        if not self._in_process:
+            for th in self._worker_threads:
+                self._request_queue.put(None)
+            for th in self._worker_threads:
+                th.join()
         for th in self._reader_threads:
             self._reader_requests_queue.put(None)
         for th in self._reader_threads:
@@ -342,50 +343,56 @@ def build_fake_dataset():
 
 
 def sample(args: argparse.Namespace):
-    if args.tokens is None:
-        token_set = None
-        token_sets = {}
-        token_set_size = None
-    else:
-        token_set = TokenSet.from_json_file(args.tokens)
-        token_sets = {token_set.ntokens: token_set}
-        token_set_size = token_set.ntokens
+    set_tokens_dir(args.tokens_dir)
 
     dataset = DataSet(
         args.data,
         debug=not args.benchmark,
         in_process=not args.benchmark,
-        token_sets=token_sets,
     )
 
     if args.benchmark:
         benchmark(
-            dataset, args.length, args.ntokens, args.batch, token_set_size
+            dataset, args.length, args.ntokens, args.batch, args.tokens
         )
     else:
         if args.length:
             sample, lengths = dataset.sample_bytes(
-                args.length, args.batch, token_set_size
+                args.length, args.batch, args.tokens
             )
             print(f"Prepared sample:\n{sample}")
             print(f"Lengths: {lengths}")
         else:
-            sample = dataset.sample_tokens(
-                args.ntokens, args.batch, token_set_size
+            sample, timer = dataset.sample_tokens(
+                args.ntokens, args.batch, args.tokens
             )
             print(f"Prepared sample:\n{sample}")
+            print(f"Timer: {timer}")
+            token_set = get_tokenizer(args.tokens).token_set
+
+            for token in sample[0]:
+                print(token_set.tokens[token], end="|")
+            print()
+        dataset.join()
 
 
-def sample_init_args(parser: argparse.ArgumentParser):
+def sample_init_args(parser: argparse.ArgumentParser, config):
     parser.add_argument(
-        "-d", "--data", type=str, help="training data file", required=True
+        "-d", "--data", type=str, help="training data file", 
+        default=config.DATA,        
+    )
+    parser.add_argument(
+        "--tokens-dir",
+        type=str,
+        default=config.TOKENS_DIR,
+        help="directory with token sets"
     )
     parser.add_argument("-b", "--batch", type=int, help="batch size", default=1)
     parser.add_argument(
         "-t",
         "--tokens",
         type=str,
-        help="path to the token set definition",
+        help="name of the token set",
         default=None,
     )
     parser.add_argument(

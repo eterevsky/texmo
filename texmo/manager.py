@@ -25,8 +25,11 @@ from .configuration import (
     conf_to_string,
     conf_tokens_name,
 )
+from .configuration2 import Configuration2
 from .dataset import DataSet
-from .model2 import Model2, Weights
+
+# from .model2 import Model2, Weights
+from .model3 import Model3, Weights
 from .prng import Rng
 from .record import TrainingRecord
 from .run import Run
@@ -78,20 +81,15 @@ class TrainingDiverged(Exception):
 class Manager(object):
     def __init__(
         self,
-        conf: Configuration,
+        # conf: Configuration,
+        conf: Configuration2,
         weights: Optional[Weights] = None,
         test_sample_len: int = 1024,
         test_batch: int = 1024,
         pre_training: Optional[list] = None,
     ):
         self._rng: Rng = Rng()
-        self.ntokens = conf.ntokens
-        self.token_set_name = conf_tokens_name(conf)
-        self.tokenizer = get_tokenizer(self.token_set_name)
-        self.ntokens = self.tokenizer.token_set.ntokens
-        assert self.ntokens == conf.ntokens
-        self.conf: Configuration = conf
-        self.model: Model2 = self.conf.model
+        self.conf: Configuration2 = conf
         if weights is None:
             weights = self.model.init_weights(self._rng, 1.0)
         self.weights: Weights = weights
@@ -107,17 +105,27 @@ class Manager(object):
 
     # def __del__(self):
     #     # Clear all GPU memory
-    #     backend = jax.lib.xla_bridge.get_backend()
-    #     for buf in backend.live_buffers():
-    #         buf.delete()
+    #     release_device_buffers()
 
     @property
     def step(self):
         return self.run.steps
 
     @property
-    def loss(self):
+    def loss(self) -> float:
         return self.run.loss
+
+    @property
+    def ntokens(self) -> int:
+        return self.conf.model.input.ntokens
+
+    @property
+    def model(self) -> Model3:
+        return self.conf.model
+
+    @property
+    def tokenizer(self) -> Tokenizer:
+        return self.conf.model.input.tokenizer
 
     def save(self, dir):
         model_name = self.name()
@@ -133,14 +141,13 @@ class Manager(object):
             training = []
         training.append(
             {
-                "conf": conf_to_dict(self.conf),
+                "conf": self.conf.to_dict(),
                 "run": self.run.to_dict(),
             }
         )
 
         data = {
-            "conf": conf_to_dict(self.conf),
-            "model": str(self.conf.model),
+            "conf": self.conf.to_dict(),
             "training": training,
             "weights": weights,
         }
@@ -154,7 +161,7 @@ class Manager(object):
         with open(path) as f:
             spec = json.load(f)
 
-        conf = conf_from_dict(spec["conf"])
+        conf = Configuration2.from_dict(spec["conf"])
         weights = deserialize_weights(spec["weights"])
 
         manager = Manager(
@@ -166,26 +173,26 @@ class Manager(object):
 
         return manager
 
-    def update_conf(self, lr, sample_len, batch, t):
-        """Updates the configuration with new parameters.
+    # def update_conf(self, lr, sample_len, batch, t):
+    #     """Updates the configuration with new parameters.
 
-        Useful after loading a model.
-        """
-        if lr is not None:
-            self.conf = self.conf._replace(lr=lr)
-        if sample_len is not None:
-            self.conf = self.conf._replace(sample_len=sample_len)
-        if batch is not None:
-            self.conf = self.conf._replace(batch=batch)
-        if t is not None:
-            self.conf = self.conf._replace(t=t)
+    #     Useful after loading a model.
+    #     """
+    #     if lr is not None:
+    #         self.conf = self.conf._replace(lr=lr)
+    #     if sample_len is not None:
+    #         self.conf = self.conf._replace(sample_len=sample_len)
+    #     if batch is not None:
+    #         self.conf = self.conf._replace(batch=batch)
+    #     if t is not None:
+    #         self.conf = self.conf._replace(t=t)
 
     def add_layers(self, layers_spec):
         """Fix pretrained weights and add more layers."""
         # Drop the output layer
         model = copy(self.conf.model)
         model.add_layers(layers_spec)
-        self.conf = self.conf._replace(model=model)
+        self.conf = self.conf.replace(model=model)
 
         self.train_from = len(self.weights) - 1
         weights = self.model.init_weights(self._rng, 1.0)
@@ -193,7 +200,7 @@ class Manager(object):
         self.weights = weights
 
     def init(self, quiet=False, training=True):
-        logging.info("Conf: " + conf_to_string(self.conf))
+        logging.info(f"Conf: {self.conf}")
 
         if self.train_from == 0:
             self._loss_avg = self.model.loss_batch
@@ -216,36 +223,18 @@ class Manager(object):
                 optax.adamw(self.conf.lr, mask=mask_bias, weight_decay=0.01),
             )
 
-            self.opt_state = self.optimizer.init(
-                self.weights[self.train_from :]
-            )
+            self.opt_state = self.optimizer.init(self.weights[self.train_from :])
             self.run = Run(loss_trend=LossTrend())
         else:
             self._loss_grad = None
             self.optimizer = None
             self.opt_state = None
 
-    def sample_loss(self, s):
-        """Loss of the model for a given string."""
-
-        sarray = jnp.array(list(s))
-        soh = jax.nn.one_hot(sarray, self.token_set.ntokens)
-
-        state = self.model.init_state(self.weights)
-        _, r = self.model.step(self.weights, state, soh[0])
-
-        loss = self.model.loss(self.weights, soh)
-
-        print("Sample loss:", jnp.average(loss))
-
-    def batch_loss(self, xs):
-        xs = jax.nn.one_hot(xs, self.ntokens)
-        return self.model.loss_batch(self.weights, xs)
-
     def _eval(self, xs, lengths):
         lengths = np.array(lengths)
 
-        if self.tokenizer is not None and self.tokenizer.token_set.entropy0 > 0:
+        assert self.tokenizer is not None
+        if self.tokenizer.token_set.entropy0 > 0:
             zeros = 0
             for sample, l in zip(xs, lengths):
                 zeros += l - np.count_nonzero(sample[:l])
@@ -266,7 +255,7 @@ class Manager(object):
                 shard = xs[start:end]
                 shard_len = lengths[start:end]
                 try:
-                    shard = jax.nn.one_hot(shard, self.ntokens)
+                    # shard = jax.nn.one_hot(shard, self.ntokens)
                     loss += self.model.loss_batch_masked(
                         self.weights, shard, shard_len
                     ).item()
@@ -284,9 +273,10 @@ class Manager(object):
             release_device_buffers()
             shards *= 2
 
-        logging.info(
-            "Can't evaluate the model even with shards 1. Assuming INF loss."
-        )
+        # TODO: When we can't run eval with forward, we could just run it
+        # step-by-step.
+
+        logging.info("Can't evaluate the model even with shards 1. Assuming INF loss.")
         return INF
 
     def eval(self, dataset: DataSet) -> float:
@@ -295,7 +285,7 @@ class Manager(object):
             batch, lengths = dataset.sample_bytes(
                 length=self.test_sample_len,
                 batch_size=self.test_batch,
-                token_set_name=self.token_set_name,
+                token_set_name=self.tokenizer.token_set.name,
             )
             return self._eval(batch, lengths)
 
@@ -303,9 +293,8 @@ class Manager(object):
         """Sample from the distribution to continue the given prefix."""
         self._rng = Rng()
         prefix = jnp.array(list(prefix))
-        c_selected = prefix[-1]
-        prefix = jax.nn.one_hot(prefix, self.ntokens)
-        c = prefix[-1, :]
+        # prefix = jax.nn.one_hot(prefix, self.ntokens)
+        c = prefix[-1]
 
         state = self.model.init_state(self.weights)
         state, _ = jax.lax.scan(
@@ -314,17 +303,11 @@ class Manager(object):
 
         out = []
         while len(out) < l:
-            state, c = self.model.step_prob(self.weights, state, c)
-            c_selected = jax.random.choice(self._rng.gen(), self.ntokens, p=c)
-            c = jax.nn.one_hot(c_selected, self.ntokens)
-            # if self.token_set:
-            out.append(c_selected)
-        # return bytes(out)
+            state, c = self.model.step_sample(self.weights, state, c, self._rng, temperature)
+            out.append(c)
         return out
 
     def train_step(self, xs):
-        # print("train_step")
-        xs = jax.nn.one_hot(xs, self.ntokens)
         trainable_weights = self.weights[self.train_from :]
         loss, grads = self._loss_grad(trainable_weights, xs)
 
@@ -337,9 +320,7 @@ class Manager(object):
         loss = float(loss)
 
         byte_loss = (
-            loss
-            if self.tokenizer is None
-            else self.tokenizer.token_set.byte_loss(loss)
+            loss if self.tokenizer is None else self.tokenizer.token_set.byte_loss(loss)
         )
         self.run.add_step(loss, byte_loss)
 
@@ -369,44 +350,40 @@ class Manager(object):
         finish_time = INF
         start = None
 
+        step_start = perf_counter()
+
         while perf_counter() < finish_time and self.step < steps:
             batch, sample_time = dataset.sample_tokens(
-                ntokens=self.conf.sample_len,
+                ntokens=self.conf.length,
                 batch_size=self.conf.batch,
-                token_set_name=self.token_set_name,
+                token_set_name=self.conf.tokens_name,
             )
 
             sample_times.append(sample_time)
 
-            step_start = perf_counter()
+            # try:
+            loss = self.train_step(batch)
+            # except (XlaRuntimeError, ValueError) as e:
+            #     logging.warn("Internal XLA error, probably OOM. Returning +inf loss:\n" + str(e))
+            #     step_times = []
+            #     break
 
-            try:
-                loss = self.train_step(batch)
-            except (XlaRuntimeError, ValueError):
-                logging.warn(
-                    "Internal XLA error, probably OOM. Returning +inf loss."
-                )
-                step_times = []
-                break
+            step_end = perf_counter()
+            step_time = step_end - step_start
+            step_times.append(step_time)
+            step_start = step_end  # Counting output in the next step time
 
             if math.isnan(loss) or math.isinf(loss):
-                step_time = perf_counter() - step_start
-                step_times.append(step_time)
                 logging.warning(f"Loss is {loss}, stopping training")
                 break
 
             if not quiet and (
                 self.step < 10
-                or (self.step % 10 == 0 and perf_counter() - last_report > 3)
-                or perf_counter() - last_report > 10
+                or (self.step % 10 == 0 and step_end - last_report > 3)
+                or step_end - last_report > 10
             ):
-                last_report = perf_counter()
-                logging.info(
-                    self.run.report_recent_loss(self.tokenizer.token_set)
-                )
-
-            step_time = perf_counter() - step_start
-            step_times.append(step_time)
+                last_report = step_end
+                logging.info(self.run.report_recent_loss(self.tokenizer.token_set))
 
             if (
                 temp_steps is not None
@@ -421,7 +398,7 @@ class Manager(object):
                     f"First training step took {step_times[0] * 1000} ms. "
                     + "Disregarded for time limit."
                 )
-                start = perf_counter()
+                start = step_start
                 finish_time = start + time_limit if time_limit else INF
 
         total_time = 0 if start is None else perf_counter() - start
@@ -488,19 +465,15 @@ class Manager(object):
 
         return (record, self.run, self.weights)
 
-    def continue_prefix(self, prefix: str, length: int) -> str | bytes:
-        prefix_bytes: bytes = prefix.encode()  # convert str to bytes (?)
+    def continue_prefix(self, prefix: str, length: int, temperature: float) -> str | bytes:
+        prefix_bytes: bytes = prefix.encode()  # convert str to bytes
         prefix_tokens = [t.id for t in self.tokenizer.tokenize(prefix_bytes)]
 
-        out = self.sample(prefix_tokens, length)
+        out = self.sample(prefix_tokens, length, temperature)
 
         full_text = prefix_tokens + out
 
-        out = (
-            self.tokenizer.untokenize(full_text)
-            if self.tokenizer
-            else bytes(out)
-        )
+        out = self.tokenizer.untokenize(full_text) if self.tokenizer else bytes(out)
 
         return out
 

@@ -3,6 +3,7 @@ import logging
 
 import jax
 import numpy as np
+import sys
 
 import config
 from texmo import dataset, latency, search_cli, train_cli
@@ -30,7 +31,7 @@ def parse_args():
     parser_sample = subparsers.add_parser(
         "sample", help="generate a typical sample of training data"
     )
-    dataset.sample_init_args(parser_sample)
+    dataset.sample_init_args(parser_sample, config)
 
     parser_count_bytes = subparsers.add_parser(
         "small-tokens", help="generate a set of sub-byte tokens"

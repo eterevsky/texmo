@@ -1,7 +1,9 @@
 import jax
+import jax.numpy as jnp
 from itertools import chain
 from typing import Iterable, Self
 import math
+import optax
 
 from .layer import Layer, LayerState, LayerWeights
 from .layers import build_layer
@@ -145,8 +147,8 @@ class Model3(object):
         )
 
     def init_state(self, weights: Weights) -> State:
-        return [self.input.init_state()] + [
-            l.init_state(w) for l, w in zip(self.layers, weights)
+        return [self.input.init_state(weights[0])] + [
+            l.init_state(w) for l, w in zip(self.layers, weights[1:-1])
         ]
 
     def initial_step(self, weights: Weights) -> tuple[State, jax.Array]:
@@ -188,6 +190,16 @@ class Model3(object):
         _, out = self.output.step(weights[-1], None, v)
         return new_state, out
 
+    def step_prob(
+        self,
+        weights: Weights,
+        state: State,
+        input_char: int,
+        temperature=1.0,
+    ):
+        state, out = self.step(weights, state, input_char)
+        return state, jax.nn.softmax(out / temperature)
+
     def step_sample(
         self,
         weights: Weights,
@@ -208,9 +220,8 @@ class Model3(object):
         Returns:
             (new state, index of the sampled token)
         """
-        state, out = self.step(weights, state, input_char)
-        out_softmax = jax.nn.softmax(out / temperature)
-        c_selected = jax.random.choice(rng.gen(), self.ntokens, p=out_softmax)
+        state, out_softmax = self.step_prob(weights, state, input_char, temperature)
+        c_selected = jax.random.choice(rng.gen(), self.input.ntokens, p=out_softmax)
         return state, c_selected
 
     def _forward_batch(self, weights: Weights, batch: jax.Array) -> jax.Array:
@@ -239,7 +250,7 @@ class Model3(object):
             of each character
         """
         out = self._forward_batch(weights, batch)
-        return optax.softmax_cross_entropy(out, batch)
+        return optax.softmax_cross_entropy_with_integer_labels(out, batch)
 
     def loss_batch(self, weights: Weights, batch: jax.Array) -> jax.Array:
         """Run model on a batch of inputs and return the average entropy.
@@ -274,7 +285,7 @@ class Model3(object):
             total cross-entropy in bits
         """
         entropy = self._loss_batch_unpacked(weights, batch)
-        mask = jnp.arange(entropy.shape[1]) < lengths[:, np.newaxis]
+        mask = jnp.arange(entropy.shape[1]) < lengths[:, jnp.newaxis]
         return _1_BY_LOG2 * jnp.sum(entropy * mask)
 
 

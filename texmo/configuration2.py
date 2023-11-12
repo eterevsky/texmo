@@ -5,6 +5,7 @@ from typing import Optional, Self, Iterable
 from .common import INF, itoa3
 from .model3 import Model3, build_model
 from . import latency
+from .tokens.tokenizer import Tokenizer
 
 
 def is_valid_int(x: int) -> bool:
@@ -72,15 +73,16 @@ class Configuration2(object):
             "batch": self.batch,
             "steps": self.steps,
         }
-    
+
     def __repr__(self) -> str:
         return f"Configuration2('{self.model}', {self.lr}, {self.length}, {self.batch}, {self.steps})"
 
     def __str__(self) -> str:
         model = str(self.model)
+        steps = f"  S{itoa3(self.steps)}" if self.steps else ""
         return (
-            f"{model} ({itoa3(self.model.weights)})  LEN{itoa3(self.len)}"
-            + f"  B{itoa3(self.batch)}  LR{self.lr:.4f}  S{itoa3(self.steps)}"
+            f"{model} ({itoa3(self.model.weights)})  LEN{itoa3(self.length)}"
+            + f"  B{itoa3(self.batch)}  LR{self.lr:.4f}{steps}"
         )
 
     def is_valid(self) -> bool:
@@ -91,6 +93,14 @@ class Configuration2(object):
             and is_valid_int(self.batch)
             and is_valid_int(self.steps)
         )
+
+    @property
+    def tokenizer(self) -> Tokenizer:
+        return self.model.input.tokenizer
+    
+    @property
+    def tokens_name(self) -> str:
+        return self.tokenizer.token_set.name
 
 
 class Bounds(object):

@@ -344,7 +344,7 @@ class Input(object):
             weights: embedding weights
             input: a batch of inputs with dimensions (batch_size, sample_len)
                 with integer components
-            paddingS_len: extend the sample to the left by this amount of unknown
+            padding_len: extend the sample to the left by this amount of unknown
                 tokens
 
         Returns:
@@ -368,7 +368,7 @@ class Input(object):
                 pos_emb = weights["positions"][positions]
                 emb += pos_emb
             if self._emb_norm:
-                emb = emb / emb.sum(axis=2).reshape(batch, padding_len, 1)
+                emb = emb / emb.sum(axis=2).reshape(batch, sample_len + padding_len, 1)
             return emb
 
         input_oh = jax.nn.one_hot(input, self.ntokens)

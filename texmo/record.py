@@ -5,12 +5,7 @@ from typing import Optional
 
 import numpy as np
 
-from .configuration import (
-    Configuration,
-    conf_from_dict,
-    conf_to_dict,
-    conf_to_string,
-)
+from .configuration2 import Configuration2
 from .common import INF
 
 
@@ -27,7 +22,7 @@ class TrainingRecord(object):
     def __init__(
         self,
         timestamp: datetime,
-        conf: Configuration,
+        conf: Configuration2,
         steps: int,
         train_time_s: float,
         total_data: int,
@@ -49,7 +44,7 @@ class TrainingRecord(object):
 
         self._dict = {
             "timestamp": timestamp.isoformat(),
-            "conf": conf_to_dict(conf),
+            "conf": conf.to_dict(),
             "weights": conf.model.weights,
             "regularization": regularization,
             # Time in seconds that the training was supposed to take. Usually
@@ -80,13 +75,13 @@ class TrainingRecord(object):
     def train_data(self):
         return (
             self._dict["steps"]
-            * self._dict["conf"]["sample_len"]
+            * self._dict["conf"]["length"]
             * self._dict["conf"]["batch"]
         )
 
     @property
     def conf(self):
-        return conf_from_dict(self._dict["conf"])
+        return Configuration2.from_dict(self._dict["conf"])
 
     @property
     def planned_time_s(self):
@@ -148,7 +143,7 @@ class TrainingRecord(object):
         train_data = self.train_data / 1e6
         total_data = self._dict["total_data"] / 1e6
 
-        conf_str = conf_to_string(self.conf)
+        conf_str = str(self.conf)
 
         loss = self._dict["loss"]
         steps = self._dict["steps"]

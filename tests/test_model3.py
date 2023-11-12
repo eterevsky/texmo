@@ -2,6 +2,7 @@ import logging
 import os
 from unittest import TestCase
 
+import numpy as np
 import jax.numpy as jnp
 
 from texmo.model3 import Model3, build_model

@@ -219,7 +219,7 @@ class Model3(object):
             v = layer.forward_batch(layer_weights, v)
 
         out = self.output.forward_batch(weights[-1], v)
-        assert out.shape == batch.shape
+        assert out.shape == batch.shape + (self.input.ntokens,), f"batch_shape={batch.shape}, out_shape={out.shape}"
         return out
 
     def _loss_batch_unpacked(

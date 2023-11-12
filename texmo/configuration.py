@@ -304,17 +304,13 @@ def _conf_neighbors(conf: Configuration, template: Template):
         ):
             yield conf._replace(model=neighbor_model, t=conf.t * 2)
             if match_bounds(template.lr, conf.lr / 2):
-                yield conf._replace(
-                    model=neighbor_model, t=conf.t * 2, lr=conf.lr / 2
-                )
-        elif len(neighbor_model.layers) < len(
-            conf.model.layers
-        ) and match_bounds(template.t, conf.t // 2):
+                yield conf._replace(model=neighbor_model, t=conf.t * 2, lr=conf.lr / 2)
+        elif len(neighbor_model.layers) < len(conf.model.layers) and match_bounds(
+            template.t, conf.t // 2
+        ):
             yield conf._replace(model=neighbor_model, t=conf.t // 2)
             if match_bounds(template.lr, conf.lr * 2):
-                yield conf._replace(
-                    model=neighbor_model, t=conf.t // 2, lr=conf.lr * 2
-                )
+                yield conf._replace(model=neighbor_model, t=conf.t // 2, lr=conf.lr * 2)
 
     for x in (conf.lr / 2, conf.lr * 2):
         if match_bounds(template.lr, x):
@@ -381,16 +377,18 @@ def _conf_neighbors2(conf: Configuration, template: Template):
         ):
             neighbors.append(conf._replace(model=neighbor_model, t=conf.t * 2))
             if template.lr[0] <= conf.lr / 2 <= template.lr[1]:
-                neighbors.append(conf._replace(
-                    model=neighbor_model, t=conf.t * 2, lr=conf.lr / 2
-                ))
-        elif len(neighbor_model.layers) < len(
-            conf.model.layers
-        ) and template.t[0] <= conf.t // 2 <= template.t[1]:
+                neighbors.append(
+                    conf._replace(model=neighbor_model, t=conf.t * 2, lr=conf.lr / 2)
+                )
+        elif (
+            len(neighbor_model.layers) < len(conf.model.layers)
+            and template.t[0] <= conf.t // 2 <= template.t[1]
+        ):
             neighbors.append(conf._replace(model=neighbor_model, t=conf.t // 2))
             if template.lr[0] <= conf.lr * 2 <= template.lr[1]:
-                neighbors.append(conf._replace(
-                    model=neighbor_model, t=conf.t // 2, lr=conf.lr * 2))
+                neighbors.append(
+                    conf._replace(model=neighbor_model, t=conf.t // 2, lr=conf.lr * 2)
+                )
 
     if template.lr[0] <= conf.lr / 2 <= template.lr[1]:
         neighbors.append(conf._replace(lr=conf.lr / 2))
@@ -431,7 +429,10 @@ def _conf_neighbors2(conf: Configuration, template: Template):
         conf_mod = conf._replace(token_processing="raw")
         if get_tokenizer(conf_tokens_name(conf_mod)):
             neighbors.append(conf_mod)
-    if "capswords" in template.token_processing and "capswords" != conf.token_processing:
+    if (
+        "capswords" in template.token_processing
+        and "capswords" != conf.token_processing
+    ):
         conf_mod = conf._replace(token_processing="capswords")
         if get_tokenizer(conf_tokens_name(conf_mod)):
             neighbors.append(conf_mod)

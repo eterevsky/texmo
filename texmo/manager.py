@@ -383,7 +383,7 @@ class Manager(object):
                 or step_end - last_report > 10
             ):
                 last_report = step_end
-                logging.info(self.run.report_recent_loss(self.tokenizer.token_set))
+                logging.info(self.run.report_recent_loss())
 
             if (
                 temp_steps is not None

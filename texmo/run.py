@@ -5,7 +5,6 @@ from typing import Optional
 import numpy as np
 
 from .common import INF
-from .configuration import Configuration
 from .tokens import TokenSet
 
 
@@ -24,28 +23,28 @@ class Run(object):
         step_loss: Optional[list[float]] = None,
         loss: Optional[float] = None,
         loss_trend: LossTrendBase = None,
-        checkpoint: str = None,
+        train_time: Optional[float] = None,
+        checkpoint: Optional[str] = None,
     ):
         self.id: Optional[int] = id
 
         # Training loss per step, calculated on the training batch.
         if step_loss is None:
             step_loss = []
-        self.step_loss: list = step_loss
-        self.step_byte_loss: list = []
+        self.step_loss: list[float] = step_loss
 
         # A model for loss per step
-        # assert loss_trend is not None
+        assert isinstance(loss_trend, LossTrendBase)
         self.loss_trend: LossTrendBase = loss_trend
 
         # Final loss, evaluated on the test set.
         self.loss: float = loss
+        self.train_time: Optional[float] = train_time
 
-        self.checkpoint: str = checkpoint
+        self.checkpoint: Optional[str] = checkpoint
 
-    def add_step(self, token_loss: float, byte_loss: float):
+    def add_step(self, token_loss: float):
         self.step_loss.append(token_loss)
-        self.step_byte_loss.append(byte_loss)
 
     @property
     def steps(self):

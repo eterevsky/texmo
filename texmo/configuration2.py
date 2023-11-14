@@ -27,7 +27,7 @@ class Configuration2(object):
 
     @staticmethod
     def from_dict(d: dict) -> Self:
-        model = build_model(d["model"])
+        model = build_model(d["spec"])
         return Configuration2(
             model=model,
             lr=d["lr"],
@@ -67,7 +67,7 @@ class Configuration2(object):
 
     def to_dict(self) -> dict:
         return {
-            "model": str(self.model),
+            "spec": str(self.model),
             "lr": self.lr,
             "length": self.length,
             "batch": self.batch,

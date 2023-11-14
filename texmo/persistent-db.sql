@@ -1,11 +1,16 @@
 CREATE TABLE conf (
     id INTEGER NOT NULL PRIMARY KEY,
 
+    -- Model3 spec (including token set specification).
     spec TEXT NOT NULL,
+    -- Number of weights in the model.
+    weights INTEGER NOT NULL,
+
+    -- Learning rate.
     lr REAL NOT NULL,
-    sample_len INTEGER NOT NULL,
+    length INTEGER NOT NULL,
     batch INTEGER NOT NULL,
-    steps INTEGER NOT NULL,
+    steps INTEGER NOT NULL
 );
 
 CREATE INDEX conf_spec ON conf(spec);
@@ -15,20 +20,35 @@ CREATE TABLE run (
 
     conf_id INTEGER NOT NULL,
 
-    timestamp TEXT,
+    -- The name of the machine on which the run was executed.
+    system TEXT NOT NULL,
+
+    -- Time in seconds from the end of the first optimization step till the
+    -- end of the optimization.
+    train_time REAL NOT NULL,
+
+    -- Timestamp in ISO8601 when the run occured.
+    timestamp TIMESTAMP,
+
     test_sample_len INTEGER,
     test_batch INTEGER,
+
+    -- Final loss per byte on the eval sample.
     loss REAL NOT NULL,
+
     -- A 1D array of training losses after each step, encoded as
     -- ndarray(dtype=np.float32) and converted to bytes by ndarray.tobytes().
     -- Can be converted back to an array by np.frombuffer().
     step_loss BLOB,
+
     -- Loss model version.
     loss_model_v INTEGER,
     -- Parameters of loss model as ndarray(dtype=np.float32).
     loss_model BLOB,
+
     -- If non-empty, this contains the filename of the weights checkpoint.
     checkpoint TEXT,
+
     FOREIGN KEY (conf_id) REFERENCES conf(id)
 );
 

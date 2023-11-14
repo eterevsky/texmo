@@ -1,63 +1,47 @@
 import logging
-from datetime import datetime
+import os
 from unittest import TestCase, main
 
 import numpy as np
 
-from texmo.configuration import Configuration, Template, conf_is_valid
-from texmo.model2 import build_model
-from texmo.record import TrainingRecord
+from texmo.configuration2 import Configuration2
+from texmo.model3 import build_model
+from texmo.predict import build_loss_trend
 from texmo.resultdb import ResultDB
 from texmo.run import Run
+from texmo.tokens import set_tokens_dir
 
 logging.disable(level=logging.ERROR)
+set_tokens_dir(os.path.join(os.path.dirname(__file__), "../tokens"))
 
 
-def create_record(spec: str, loss, batch=256, reg=0.125):
-    model = build_model(ntokens=256, spec=spec)
-    conf = Configuration(
-            model=model,
-            ntokens=256,
-            token_processing="raw",
-            token_type="all",
-            lr=0.25,
-            sample_len=128,
-            batch=batch,
-            t=8,
-        )
-    return TrainingRecord(
-        timestamp=datetime.fromisoformat("2022-02-02T02:02:02"),
-        conf=conf,
-        steps=123,
-        train_time_s=8,
-        regularization=reg,
-        total_data=2**34,
-        loss=loss,
-        test_sample_len=1024,
-        test_batch=1024,
-        test_poisoned=True,
-        planned_time_s=8,
-        final_time_s=8,
-        loss_model_v=0,
-        loss_model_params=[8, 0, 0],
+def create_conf_run(spec="tokens.256-emb.64|gru.64", batch=256, loss=3.123):
+    model = build_model(spec)
+    conf = Configuration2(
+        model=model,
+        lr=0.25,
+        length=128,
+        batch=batch,
+        steps=256,
     )
+    loss_trend = build_loss_trend(None, 1, [1, 2, 3])
+    run = Run(step_loss=None, loss=loss, loss_trend=loss_trend, train_time=12.345)
+    return conf, run
 
 
 class ResultDBTest(TestCase):
     def setUp(self):
-        self.db = ResultDB(":memory:")
+        self.db = ResultDB(path=None, system_name="sys")
 
     def test_create(self):
         cur = self.db._db.execute("SELECT * FROM conf")
         self.assertIsNone(cur.fetchone())
 
     def test_add_record_same_spec(self):
-        self.db.add_record(
-            create_record("dense.16.relu", 3.123), Run(loss=3.123)
-        )
-        self.db.add_record(
-            create_record("dense.16.relu", 3.321), Run(loss=3.123)
-        )
+        conf1, run1 = create_conf_run()
+        conf2, run2 = create_conf_run(loss=3.321)
+        self.db.add_run(conf1, run1)
+        self.db.add_run(conf2, run2)
 
         cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
         self.assertEqual(cur.fetchall()[0]["count"], 1)
@@ -66,121 +50,51 @@ class ResultDBTest(TestCase):
         self.assertEqual(cur.fetchall()[0]["count"], 2)
 
     def test_add_record_two_specs(self):
-        self.db.add_record(
-            create_record("dense.16.relu", 3.123), Run(loss=3.123)
-        )
-        self.db.add_record(
-            create_record("dense.16.tanh", 3.321), Run(loss=3.123)
-        )
+        conf1, run1 = create_conf_run()
+        self.db.add_run(conf1, run1)
+        conf2, run2 = create_conf_run(spec="tokens.256-emb.64|lstm.64", loss=3.321)
+        self.db.add_run(conf2, run2)
 
         cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
         self.assertEqual(cur.fetchall()[0]["count"], 2)
 
         cur = self.db._db.execute("SELECT COUNT(*) AS count FROM run")
         self.assertEqual(cur.fetchall()[0]["count"], 2)
-
-    def test_skip_invalid(self):
-        record = create_record("gru.43", 123)
-        assert not conf_is_valid(record.conf)
-        self.db.add_record(
-            record, Run(loss=123), skip_invalid=True
-        )
-        record = create_record("dense.16.tanh", 3.321, batch=127)
-        assert not conf_is_valid(record.conf)
-        self.db.add_record(
-            record,
-            Run(loss=3.321),
-            skip_invalid=True,
-        )
-
-        cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
-        self.assertEqual(cur.fetchall()[0]["count"], 0)
-
-        cur = self.db._db.execute("SELECT COUNT(*) AS count FROM run")
-        self.assertEqual(cur.fetchall()[0]["count"], 0)
 
     def test_get_confs(self):
-        self.db.add_record(
-            create_record("dense.16.tanh", 3.123), Run(loss=3.123)
-        )
-        self.db.add_record(
-            create_record("dense.16.tanh", 3.321), Run(loss=3.321)
-        )
-        self.db.add_record(
-            create_record("dense.16.relu", 3.321), Run(loss=3.321)
-        )
-        self.db.add_record(
-            create_record("dense.16.relu", 3.321, batch=64), Run(loss=3.321)
-        )
-        self.db.add_record(
-            create_record("dense.16.relu", 3.321, batch=64, reg=0.03125),
-            Run(loss=3.321),
-        )
+        conf1, run1 = create_conf_run(loss=1)
+        self.db.add_run(conf1, run1)
+        conf2, run2 = create_conf_run(loss=2)
+        self.db.add_run(conf2, run2)
+        conf3, run3 = create_conf_run(spec="tokens.256-emb.64|lstm.64", loss=3)
+        self.db.add_run(conf3, run3)
+        conf4, run4 = create_conf_run(spec="tokens.256-emb.64|lstm.64", loss=4)
+        self.db.add_run(conf4, run4)
 
-        conf_runs = self.db.get_confs_runs(Template(sample_len=128))
+        conf_runs = self.db.get_confs_runs()
         all = set((conf, run.loss) for _, conf, run in conf_runs)
-
-        spec_tanh = build_model(256, "dense.16.tanh")
-        spec_relu = build_model(256, "dense.16.relu")
-
-        conf = Configuration(
-            model=spec_relu,
-            ntokens=256,
-            token_processing="raw",
-            token_type="all",
-            lr=0.25,
-            sample_len=128,
-            batch=256,
-            t=8,
-        )
 
         self.assertEqual(
             all,
             {
-                (conf._replace(model=spec_tanh), 3.123),
-                (conf._replace(model=spec_tanh), 3.321),
-                (conf, 3.321),
-                (conf._replace(batch=64), 3.321),
-            },
-        )
-
-        conf_runs = self.db.get_confs_runs(Template(sample_len=128))
-        subset1 = set((conf, run.loss) for _, conf, run in conf_runs)
-
-        self.assertEqual(
-            subset1,
-            {
-                (conf._replace(model=spec_tanh), 3.123),
-                (conf._replace(model=spec_tanh), 3.321),
-                (conf, 3.321),
-                (conf._replace(batch=64), 3.321),
-            },
-        )
-
-        conf_runs = self.db.get_confs_runs(Template(sample_len=128, batch=256))
-        subset2 = set((conf, run.loss) for _, conf, run in conf_runs)
-
-        self.assertEqual(
-            subset2,
-            {
-                (conf._replace(model=spec_tanh), 3.123),
-                (conf._replace(model=spec_tanh), 3.321),
-                (conf, 3.321),
+                (conf1, 1),
+                (conf2, 2),
+                (conf3, 3),
+                (conf4, 4),
             },
         )
 
     def test_step_loss(self):
-        step_loss = [1, 2, 3]
-        self.db.add_record(
-            create_record("dense.16.relu", 3.123),
-            Run(loss=3.123, step_loss=[1, 2, 3]),
-        )
+        conf1, run1 = create_conf_run(loss=1)
+        run1.add_step(1)
+        run1.add_step(2)
+        run1.add_step(3)
+        self.db.add_run(conf1, run1)
 
-        for i, (conf, loss, step_loss) in enumerate(
-            self.db.get_confs_runs(Template(sample_len=128))
-        ):
-            self.assertEqual(i, 0)
-            self.assertTrue((np.array(step_loss) == step_loss).all())
+        conf_runs = list(self.db.get_confs_runs())
+        self.assertEqual(len(conf_runs), 1)
+
+        np.testing.assert_array_equal(conf_runs[0][2].step_loss, [1, 2, 3])
 
 
 if __name__ == "__main__":

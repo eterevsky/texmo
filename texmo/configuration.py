@@ -1,3 +1,5 @@
+# TODO: This is deprecated. Remove it.
+
 import argparse
 import math
 import re

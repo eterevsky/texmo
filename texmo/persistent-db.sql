@@ -1,17 +1,11 @@
 CREATE TABLE conf (
     id INTEGER NOT NULL PRIMARY KEY,
 
-    ntokens INTEGER NOT NULL,
-    token_type TEXT NOT NULL,
-    token_processing TEXT NOT NULL,
     spec TEXT NOT NULL,
     lr REAL NOT NULL,
     sample_len INTEGER NOT NULL,
     batch INTEGER NOT NULL,
-    t INTEGER NOT NULL,
-    weights INTEGER NOT NULL,
-    checkpoint_id INTEGER,
-    cluster_score REAL
+    steps INTEGER NOT NULL,
 );
 
 CREATE INDEX conf_spec ON conf(spec);

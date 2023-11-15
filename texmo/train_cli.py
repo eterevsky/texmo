@@ -29,7 +29,7 @@ def show_loss_graph(manager: Manager, output_dir: str):
     plt.ylim(top=8)
     plt.plot(
         range(1, steps + 1),
-        list(map(manager.tokenizer.token_set.byte_loss, run.step_loss)),
+        run.step_loss,
     )
     plt.plot(xs, ys)
     if output_dir is not None:

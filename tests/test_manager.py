@@ -1,10 +1,10 @@
 import logging
 from unittest import TestCase
 
-from texmo.configuration import Configuration
+from texmo.configuration2 import Configuration2
 from texmo.dataset import build_fake_dataset
 from texmo.manager import Manager
-from texmo.model2 import build_model
+from texmo.model3 import build_model
 
 logging.disable(level=logging.ERROR)
 
@@ -12,23 +12,20 @@ logging.disable(level=logging.ERROR)
 class ManagerTest(TestCase):
     def test_train(self):
         dataset = build_fake_dataset()
-        conf = Configuration(
-            build_model(256, "gru.16"),
-            ntokens=256,
-            token_type="all",
-            token_processing="raw",
+        conf = Configuration2(
+            build_model("bytes-emb.16|gru.32"),
             lr=0.125,
-            sample_len=32,
+            length=32,
             batch=8,
-            t=1,
+            steps=64,
         )
         manager = Manager(conf)
         manager.init()
 
-        manager.train(steps=30, time_limit=None, dataset=dataset, quiet=True)
+        manager.train(steps=None, time_limit=None, dataset=dataset, quiet=False)
 
         loss = manager.eval(dataset)
         self.assertLess(loss, 2)
 
-        s = manager.continue_prefix("abac", 2)
-        self.assertEqual(len(s), 6)
+        s = manager.continue_prefix("abac", 2, temperature=0.01)
+        self.assertEqual(s, b"abacab")

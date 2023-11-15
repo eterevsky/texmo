@@ -177,7 +177,7 @@ class DataSet(object):
         debug: bool = False,
         in_process: bool = False,
     ):
-        print("path", path, "data", data, "debug", debug, "in_process", in_process)
+        # print("path", path, "debug", debug, "in_process", in_process)
         # print("!!! DataSet.__init__")
         # exit(0)
         logging.info("Creating DataSet")

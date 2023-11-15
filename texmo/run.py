@@ -58,13 +58,12 @@ class Run(object):
         self.loss = eval_loss
         self.step_loss = np.array(self.step_loss, dtype=np.float32)
         assert self.loss_trend is not None
-        self.loss_trend.fit(self.step_byte_loss)
+        self.loss_trend.fit(self.step_loss)
 
     def report_recent_loss(self, token_set: TokenSet):
         step = len(self.step_loss)
         loss = sum(self.step_loss[-10:]) / 10 if step >= 10 else self.step_loss[-1]
-        byte_loss = token_set.byte_loss(loss)
-        return f"{step}  {loss:.4f} b/token  {byte_loss:.4f} b/byte"
+        return f"{step}  {loss:.4f} b/byte"
 
     def to_dict(self):
         loss_trend = self.loss_trend.to_dict() if self.loss_trend else self.loss_trend

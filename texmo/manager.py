@@ -318,11 +318,8 @@ class Manager(object):
         self.weights[self.train_from :] = trainable_weights
 
         loss = float(loss)
-
-        byte_loss = (
-            loss if self.tokenizer is None else self.tokenizer.token_set.byte_loss(loss)
-        )
-        self.run.add_step(loss, byte_loss)
+        byte_loss = self.tokenizer.token_set.byte_loss(loss)
+        self.run.add_step(byte_loss)
 
         return loss
 
@@ -336,6 +333,9 @@ class Manager(object):
         quiet=False,
     ):
         last_report = 0  # Timestamp of the last printed report
+
+        if steps is None and time_limit is None:
+            steps = self.conf.steps
 
         if steps is None:
             steps = INF
@@ -383,7 +383,7 @@ class Manager(object):
                 or step_end - last_report > 10
             ):
                 last_report = step_end
-                logging.info(self.run.report_recent_loss())
+                logging.info(self.run.report_recent_loss(self.tokenizer.token_set))
 
             if (
                 temp_steps is not None

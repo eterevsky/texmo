@@ -383,13 +383,3 @@ class ResultSet(object):
     def has_runs(self, conf):
         conf_results = self._all_conf_results_by_conf.get(conf)
         return conf_results is not None and conf_results.runs
-
-
-def open_db(path):
-    exists = os.path.exists(path)
-    db = sqlite3.connect(path)
-    if not exists:
-        with open("results.sql") as schema:
-            db.executescript(schema.read())
-            db.commit()
-    return db

@@ -19,6 +19,7 @@ class LossTrendBase(object):
 class Run(object):
     def __init__(
         self,
+        system: str,
         id: Optional[int] = None,
         step_loss: Optional[list[float]] = None,
         loss: Optional[float] = None,
@@ -26,6 +27,9 @@ class Run(object):
         train_time: Optional[float] = None,
         checkpoint: Optional[str] = None,
     ):
+        assert isinstance(system, str)
+        self.system: str = system
+
         self.id: Optional[int] = id
 
         # Training loss per step, calculated on the training batch.
@@ -50,12 +54,13 @@ class Run(object):
     def steps(self):
         return len(self.step_loss)
 
-    def finalize(self, eval_loss: float):
+    def finalize(self, eval_loss: float, train_time: float):
         """Sets the eval loss and fits the loss trend model.
 
         Called after the model has been trained.
         """
         self.loss = eval_loss
+        self.train_time = train_time
         self.step_loss = np.array(self.step_loss, dtype=np.float32)
         assert self.loss_trend is not None
         self.loss_trend.fit(self.step_loss)
@@ -75,16 +80,3 @@ class Run(object):
         if self.id is not None:
             d["id"] = self.id
         return d
-
-    # @staticmethod
-    # def from_dict(d):
-    #     step_loss = d.get("step_loss")
-    #     if step_loss is not None:
-    #         step_loss = np.array(step_loss, dtype=np.float32)
-    #     loss_trend = build_loss_trend(d.get("loss_trend"))
-    #     return Run(
-    #         id=d.get("id"),
-    #         step_loss=step_loss,
-    #         loss=d["loss"],
-    #         loss_trend=loss_trend,
-    #     )

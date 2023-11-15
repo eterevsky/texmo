@@ -1,6 +1,7 @@
 import argparse
 import re
 from typing import Optional, Self, Iterable
+import math
 
 from .common import INF, itoa3
 from .model3 import Model3, build_model
@@ -117,6 +118,18 @@ class Bounds(object):
     def match(self, value: float) -> bool:
         return self.min <= value <= self.max
 
+    def pick_default(self, default: float) -> float:
+        if self.min <= default <= self.max:
+            return default
+        elif self.min == 0:
+            return self.max
+        else:
+            mid = math.sqrt(self.min * self.max)
+
+        round_mid = 2 ** round(math.log2(mid))
+        assert self.min <= round_mid <= self.max
+        return round_mid
+
     def neighbors(self, value: float | int) -> Iterable[float | int]:
         assert self.match(value)
 
@@ -158,8 +171,9 @@ class Template(object):
         self.lr = Bounds(lr, 0)
         self.length = Bounds(length, 1)
         self.batch = Bounds(batch, 1)
-        self.steps = Bounds(steps, 1)
+        self.steps = Bounds(steps, 2)
         self.max_weights = max_weights or INF
+        self._conf_neighbors_cache = {}
 
     @staticmethod
     def from_args(args: argparse.Namespace):
@@ -185,6 +199,34 @@ class Template(object):
             and self.batch.match(conf.batch)
             and self.steps.match(conf.steps)
         )
+    
+    def _conf_neighbors(self, conf: Configuration2) -> Iterable[Configuration2]:
+        for model in conf.model.neighbors():
+            if self.match_model(model):
+                yield conf.replace(model=model)
+        for lr in self.lr.neighbors(conf.lr):
+            yield conf.replace(lr=lr)
+        for length in self.length.neighbors(conf.length):
+            yield conf.replace(length=length)
+        for batch in self.batch.neighbors(conf.batch):
+            yield conf.replace(batch=batch)
+        for steps in self.steps.neighbors(conf.steps):
+            yield conf.replace(steps=steps)
+
+
+def conf_neighbors(
+    conf: Configuration2, template: Template
+) -> Iterable[Configuration2]:
+    with latency.timer("conf_neighbors"):
+        neighbors = template._conf_neighbors_cache.get(conf)
+
+        if neighbors is not None:
+            return neighbors
+
+        neighbors = list(template._conf_neighbors(conf, template))
+        template._conf_neighbors_cache[conf] = neighbors
+
+        return neighbors
 
 
 def default_from_template(template: Template, spec: Optional[str]) -> Configuration2:
@@ -217,28 +259,3 @@ def default_from_template(template: Template, spec: Optional[str]) -> Configurat
     raise RuntimeError("Can't pick up a default model that would fit the template")
 
 
-def reset_neighbors_cache():
-    pass
-
-
-def _conf_neighbors(
-    conf: Configuration2, template: Template
-) -> Iterable[Configuration2]:
-    for model in conf.model.neighbors():
-        if template.match_model(model):
-            yield conf.replace(model=model)
-    for lr in template.lr.neighbors(conf.lr):
-        yield conf.replace(lr=lr)
-    for length in template.length.neighbors(conf.length):
-        yield conf.replace(length=length)
-    for batch in template.batch.neighbors(conf.batch):
-        yield conf.replace(batch=batch)
-    for steps in template.steps.neighbors(conf.steps):
-        yield conf.replace(steps=steps)
-
-
-def conf_neighbors(
-    conf: Configuration2, template: Template
-) -> Iterable[Configuration2]:
-    with latency.timer("conf_neighbors"):
-        return list(_conf_neighbors(conf, template))

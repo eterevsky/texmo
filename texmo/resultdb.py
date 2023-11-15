@@ -40,10 +40,7 @@ def _build_loss_trend(step_loss, model_version, params):
 
 
 class ResultDB(object):
-    def __init__(self, path: Optional[str], system_name: str):
-        assert isinstance(system_name, str)
-        self._system_name = system_name
-
+    def __init__(self, path: Optional[str]):
         if path is None:
             path = ":memory:"
         exists = path != ":memory:" and os.path.exists(path)
@@ -115,7 +112,7 @@ class ResultDB(object):
 
         run_dict = {
             "conf_id": conf_id,
-            "system": self._system_name,
+            "system": run.system,
             "train_time": run.train_time,
             "timestamp": timestamp,
             "loss": INF if math.isnan(run.loss) or run.loss is None else run.loss,

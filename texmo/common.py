@@ -67,3 +67,25 @@ def itoa3(x: int) -> str:
         return f"{x / base:.1f}{suffix}"
     else:
         return f"{x / base:.0f}{suffix}"
+
+
+def ttoa3(t: float) -> str:
+    """Convert time in seconds to a string with 3 significant digits."""
+    if t < 1E-6: return f"{t * 1E9:.0f} ns"
+    elif t < 1E-5: return f"{t * 1E6:.2f} μs"
+    elif t < 1E-4: return f"{t * 1E6:.1f} μs"
+    elif t < 0.001: return f"{t * 1E6:.0f} μs"
+    elif t < 0.01: return f"{t * 1E3:.2f} ms"
+    elif t < 0.1: return f"{t * 1E3:.1f} ms"
+    elif t < 1: return f"{t * 1E3:.0f} ms"
+    elif t < 10: return f"{t:.2f} s"
+    elif t < 60: return f"{t:.1f} s"
+    elif t < 3600:
+        m = t // 60
+        s = round(t % 60)
+        return f"{m} m {s} s"
+    else:
+        h = t // 3600
+        m = (t % 3600) // 60
+        s = round(t % 60)
+        return f"{h} h {m} m {s} s"

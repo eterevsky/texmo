@@ -72,6 +72,7 @@ def train(args: argparse.Namespace):
                 args.model_path,
                 test_batch=args.test_batch,
                 test_sample_len=args.test_sample_len,
+                system=args.system,
             )
             manager.update_conf(lr, args.sample_len, args.batch, args.time)
             if args.add_layers:
@@ -86,7 +87,10 @@ def train(args: argparse.Namespace):
                 steps=args.steps,
             )
             manager = Manager(
-                conf, test_batch=args.test_batch, test_sample_len=args.test_sample_len
+                conf,
+                test_batch=args.test_batch,
+                test_sample_len=args.test_sample_len,
+                system=args.system,
             )
             manager.init()
 
@@ -254,6 +258,12 @@ def init_args(parser: argparse.ArgumentParser, config):
         type=float,
         default=0.1,
         help="temperature for sampling",
+    )
+    parser.add_argument(
+        "--system",
+        type=str,
+        default=config.SYSTEM_NAME,
+        help="the name of the system that will be used to identify runs in the DB",
     )
 
     parser.set_defaults(func=train)

@@ -17,14 +17,7 @@ import optax
 from jaxlib.xla_extension import XlaRuntimeError
 
 from . import latency
-from .common import INF
-from .configuration import (
-    Configuration,
-    conf_from_dict,
-    conf_to_dict,
-    conf_to_string,
-    conf_tokens_name,
-)
+from .common import INF, ttoa3
 from .configuration2 import Configuration2
 from .dataset import DataSet
 
@@ -81,14 +74,17 @@ class TrainingDiverged(Exception):
 class Manager(object):
     def __init__(
         self,
-        # conf: Configuration,
         conf: Configuration2,
+        system: str,
         weights: Optional[Weights] = None,
         test_sample_len: int = 1024,
         test_batch: int = 1024,
         pre_training: Optional[list] = None,
     ):
         self._rng: Rng = Rng()
+        assert isinstance(system, str), f"`system` must be a string, got {system}"
+        self._system: str = system
+        assert isinstance(conf, Configuration2)
         self.conf: Configuration2 = conf
         if weights is None:
             weights = self.model.init_weights(self._rng, 1.0)
@@ -224,7 +220,7 @@ class Manager(object):
             )
 
             self.opt_state = self.optimizer.init(self.weights[self.train_from :])
-            self.run = Run(loss_trend=LossTrend())
+            self.run = Run(loss_trend=LossTrend(), system=self._system)
         else:
             self._loss_grad = None
             self.optimizer = None
@@ -395,7 +391,7 @@ class Manager(object):
 
             if len(step_times) == 1:
                 logging.info(
-                    f"First training step took {step_times[0] * 1000} ms. "
+                    f"First training step took {ttoa3(step_times[0])}. "
                     + "Disregarded for time limit."
                 )
                 start = step_start
@@ -406,8 +402,8 @@ class Manager(object):
 
     def train_and_eval(
         self,
-        steps,
-        time_limit,
+        steps: Optional[int],
+        time_limit: Optional[float],
         train_set,
         temp_steps,
         temp_dir,
@@ -433,37 +429,10 @@ class Manager(object):
         except TrainingDiverged:
             logging.warning("Training stopped early.")
             eval_loss = INF
-            train_time = time_limit  # This is a hack, but we need to record
-            # the loss with correct time.
 
-        self.run.finalize(eval_loss)
+        self.run.finalize(eval_loss, train_time)
 
-        record = TrainingRecord(
-            timestamp=datetime.now(),
-            conf=self.conf,
-            train_time_s=train_time,
-            regularization=1e-4,
-            total_data=train_set.total_size,
-            loss=eval_loss,
-            test_sample_len=self.test_sample_len,
-            test_batch=self.test_batch,
-            test_poisoned=True,
-            planned_time_s=time_limit,
-            final_time_s=time_limit,
-            loss_model_v=self.run.loss_trend.version,
-            loss_model_params=self.run.loss_trend.params(),
-            steps=self.step,
-            avg_sample_time=mean(sample_times),
-            first_step_time=step_times[0] if step_times else None,
-            avg_step_time=None if len(step_times) < 2 else mean(step_times[1:]),
-        )
-
-        logging.info(str(record))
-        if log is not None:
-            with open(log, "a", newline="") as logfile:
-                log.write(record.jsonl() + "\n")
-
-        return (record, self.run, self.weights)
+        return (self.run, self.weights)
 
     def continue_prefix(self, prefix: str, length: int, temperature: float) -> str | bytes:
         prefix_bytes: bytes = prefix.encode()  # convert str to bytes

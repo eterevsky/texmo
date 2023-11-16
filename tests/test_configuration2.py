@@ -6,7 +6,6 @@ from texmo.configuration2 import (
     Configuration2,
     Template,
     conf_neighbors,
-    reset_neighbors_cache
 )
 from texmo.model3 import build_model
 from texmo.tokens import set_tokens_dir
@@ -17,8 +16,6 @@ set_tokens_dir(os.path.join(os.path.dirname(__file__), "../tokens"))
 
 class Configuration2Test(TestCase):
     def test_conf_neighbors(self):
-        reset_neighbors_cache()
-
         template = Template(
             spec_regex=r"tokens\.(32|64)\|(dense|rec)\.\d+\.relu(-suffix\.\d+)?",
             lr=None,
@@ -48,8 +45,6 @@ class Configuration2Test(TestCase):
         )
 
     def test_dense_layer_neighbor(self):
-        reset_neighbors_cache()
-
         template = Template(
             spec_regex=r"tokens\.32\|dense\.\d+\.\w+",
             lr=(0.25, 0.25),

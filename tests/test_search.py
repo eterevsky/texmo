@@ -1,113 +1,37 @@
 import logging
 from unittest import TestCase
-from datetime import datetime
 
-from texmo.configuration import Configuration, Template
-from texmo.model2 import build_model
+from texmo.model3 import build_model
 from texmo.search import Search
-from texmo.record import TrainingRecord
-from texmo.run import Run
+from texmo.resultdb import ResultDB
+from texmo.configuration2 import Configuration2, Template
 
 logging.disable(level=logging.ERROR)
 
 
-INIT_CONF = Configuration(
-    model=build_model(256, "dense.1.relu"),
-    ntokens=256,
-    token_processing="raw",
-    token_type="all",
-    lr=1.0,
-    sample_len=128,
-    batch=256,
-    t=1,
-)
-
-TEMPLATE = Template(
-    spec_regex="dense.1.relu",
-    ntokens=(256, 256),
-    token_processing=("raw",),
-    token_type=("all",),
-    lr=(1.0, 1.0),
-    sample_len=(128, 128),
-    batch=(128, 256),
-    t=(1, 1),
-    max_weights=None,
-)
-
-def create_record(spec: str, loss, batch=256, reg=0.125):
-    return TrainingRecord(
-        timestamp=datetime.fromisoformat("2022-02-02T02:02:02"),
-        conf=INIT_CONF,
-        steps=123,
-        train_time_s=8,
-        regularization=reg,
-        total_data=2**34,
-        loss=loss,
-        test_sample_len=1024,
-        test_batch=1024,
-        test_poisoned=True,
-        planned_time_s=8,
-        final_time_s=8,
-        loss_model_v=0,
-        loss_model_params=[8, 0, 0],
-    )
-
-
-class FakePredictor(object):
-    def __init__(self):
-        pass
-
-    def maybe_train(self):
-        pass
-
-    def add_record(self, record):
-        pass
-
-
 class SearchTest(TestCase):
+    def setUp(self):
+        self._db = ResultDB()
+        self._template = Template(
+            spec_regex=None,
+            lr=None,
+            length=None,
+            batch=None,
+            steps=None,
+            max_weights=None,
+        )
+        self._init_conf = Configuration2(build_model("tokens.2|"), lr=0.125, length=32, batch=1, steps=64)
+
     def test_init(self):
         search = Search(
-            db=None,
-            template=TEMPLATE,
-            init_conf=INIT_CONF,
-            min_max_weights=1024,
-            predictor=FakePredictor(),
+            system="test",
+            db=self._db,
+            template=self._template,
+            init_conf=self._init_conf,
+            min_max_weights=32,
+            predictor=None,
+            train_time=(1., 1.),
         )
-        conf, _ = search.select_conf()
-        self.assertEqual(conf, INIT_CONF)
+        conf = search.select_conf()
+        self.assertEqual(conf, self._init_conf)
 
-    def test_select_neighbor(self):
-        search = Search(
-            db=None,
-            template=TEMPLATE,
-            init_conf=INIT_CONF,
-            min_max_weights=1024,
-            predictor=FakePredictor(),
-        )
-        record = create_record("dense.1.relu", 4.5)
-        step_loss = [4.5 + (122 - s) * 0.01 for s in range(0, 123)]
-        run = Run(loss=4.5, step_loss=step_loss)
-        search.add_run(record, run, None)
-
-        i, neighbor, conf = search._select_neighbor(1, 1024)
-
-        self.assertEqual(neighbor, INIT_CONF._replace(batch=128))
-
-    def test_select_by_pred(self):
-        search = Search(
-            db=None,
-            template=TEMPLATE,
-            init_conf=INIT_CONF,
-            min_max_weights=1024,
-            predictor=FakePredictor(),
-        )
-        record = create_record("dense.1.relu", 4.5)
-        step_loss = [4.5 + (122 - s) * 0.01 for s in range(0, 123)]
-        run = Run(loss=4.5, step_loss=step_loss)
-        search.add_run(record, run, None)
-        search.add_run(record, run, None)
-        search.add_run(record, run, None)
-
-        i, conf = search._select_by_pred_score(1, 1024)
-
-        self.assertEqual(conf, INIT_CONF._replace(batch=128))

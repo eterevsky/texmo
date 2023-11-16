@@ -40,7 +40,7 @@ def _build_loss_trend(step_loss, model_version, params):
 
 
 class ResultDB(object):
-    def __init__(self, path: Optional[str]):
+    def __init__(self, path: Optional[str] = None):
         if path is None:
             path = ":memory:"
         exists = path != ":memory:" and os.path.exists(path)

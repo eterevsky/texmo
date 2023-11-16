@@ -252,7 +252,7 @@ class ResultSet(object):
             for row in cur:
                 yield self._conf_results_by_id[row[0]]
 
-    def top_conf(self, t: float) -> ConfResults:
+    def top_conf(self, max_time: float) -> ConfResults:
         """A configuration with the highest (self) score with time = t."""
         cur = self._db.execute(
             """
@@ -263,7 +263,7 @@ class ResultSet(object):
               AND median_score IS NOT NULL
             ORDER BY median_score LIMIT 1
             """,
-            (t,),
+            (max_time,),
         )
         row = cur.fetchone()
         return None if row is None else self._conf_results_by_id[row[0]]

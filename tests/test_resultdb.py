@@ -25,13 +25,13 @@ def create_conf_run(spec="tokens.256-emb.64|gru.64", batch=256, loss=3.123):
         steps=256,
     )
     loss_trend = build_loss_trend(None, 1, [1, 2, 3])
-    run = Run(step_loss=None, loss=loss, loss_trend=loss_trend, train_time=12.345)
+    run = Run(step_loss=None, loss=loss, loss_trend=loss_trend, train_time=12.345, system="test")
     return conf, run
 
 
 class ResultDBTest(TestCase):
     def setUp(self):
-        self.db = ResultDB(path=None, system_name="sys")
+        self.db = ResultDB(path=None)
 
     def test_create(self):
         cur = self.db._db.execute("SELECT * FROM conf")

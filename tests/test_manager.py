@@ -19,7 +19,7 @@ class ManagerTest(TestCase):
             batch=8,
             steps=64,
         )
-        manager = Manager(conf)
+        manager = Manager(conf, system="test")
         manager.init()
 
         manager.train(steps=None, time_limit=None, dataset=dataset, quiet=False)

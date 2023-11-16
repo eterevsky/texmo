@@ -276,7 +276,7 @@ class Search(object):
     # def _select_checkpoint(self, t):
     #     pass
 
-    def select_conf(self):
+    def select_conf(self) -> Configuration2:
         with latency.timer("Search.select_conf"):
             t = self._select_time()
 

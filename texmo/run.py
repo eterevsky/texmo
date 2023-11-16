@@ -15,6 +15,9 @@ class LossTrendBase(object):
     def predict(self, step: int) -> float:
         raise NotImplementedError
 
+    def params(self) -> np.ndarray:
+        raise NotImplementedError
+
 
 class Run(object):
     def __init__(

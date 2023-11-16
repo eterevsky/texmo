@@ -112,22 +112,16 @@ class ResultSet(object):
             self._conf_results_by_id[id] = conf_results
             self._conf_results_by_conf[conf] = conf_results
 
-            # conf_dict = {
-            #     "id": id,
-            #     "spec": str(conf.model),
-            #     "lr": conf.lr,
-            #     "sample_len": conf.sample_len,
-            #     "batch": conf.batch,
-            #     "t": conf.t,
-            #     "weights": conf.model.weights,
-            # }
-            # self._db.execute(
-            #     """
-            #     INSERT INTO conf(id, spec, lr, sample_len, batch, t, weights)
-            #     VALUES(:id, :spec, :lr, :sample_len, :batch, :t, :weights)
-            #     """,
-            #     conf_dict,
-            # )
+            matches_template = self._template.match(conf)
+
+            self._db.execute(
+                """
+                INSERT INTO conf(id, weights, matches_template)
+                VALUES(:id, :weights, :matches_template)
+                """,
+                {"id": id, "weights": conf.model.weights,
+                 "matches_template": matches_template},
+            )
 
             return conf_results
 
@@ -183,37 +177,18 @@ class ResultSet(object):
     def _update_conf_scores(self, conf_results: ConfResults):
         with latency.timer("ResultSet._update_conf_scores"):
             scores = []
-            times = []
             for neighbor in conf_neighbors(conf_results.conf, self._template):
                 neighbor_results = self._conf_results_by_conf.get(neighbor)
                 if neighbor_results is not None:
-                    print("Found neighbor results:", neighbor_results.id)
                     if neighbor_results.median_score is not None:
-                        print("Neighbor median score:", neighbor_results.median_score)
                         scores.append(neighbor_results.median_score)
-                    if neighbor_results.median_time(self._system) is not None:
-                        print("Neighbor median time:", neighbor_results.median_time(self._system))
-                        times.append(neighbor_results.median_time(self._system))
 
             if conf_results.median_score is not None:
                 scores.append(conf_results.median_score)
-            if conf_results.median_time(self._system) is not None:
-                times.append(conf_results.median_time(self._system))
 
             if scores:
                 conf_results.neighbors_score = median(scores)
-            if times:
-                conf_results.neighbors_time = median(times)
             
-            print({
-                    "id": conf_results.id,
-                    # "conf": str(conf_results.conf),
-                    "median_score": conf_results.median_score,
-                    "neighbors_score": conf_results.neighbors_score,
-                    "median_time": conf_results.median_time(self._system),
-                    "estimated_time": conf_results.estimated_time(self._system),
-                })
-
             self._db.execute(
                 """
                 UPDATE conf
@@ -231,6 +206,9 @@ class ResultSet(object):
                     "estimated_time": conf_results.estimated_time(self._system),
                 },
             )
+
+    def get_conf_results(self, conf: Configuration2) -> Optional[ConfResults]:
+        return self._conf_results_by_conf.get(conf)
 
     def top_by_neighbors_score(
         self, max_time: float, max_weights: float = INF, limit: Optional[int] = None
@@ -254,6 +232,7 @@ class ResultSet(object):
 
     def top_conf(self, max_time: float) -> ConfResults:
         """A configuration with the highest (self) score with time = t."""
+
         cur = self._db.execute(
             """
             SELECT id FROM conf
@@ -272,8 +251,6 @@ class ResultSet(object):
         with latency.timer("ResultSet.add_run"):
             conf_results = self._find_or_add_conf(conf)
 
-            print("Add run for conf", conf_results.id, conf_results.conf)
-
             self._result_db.add_run(
                 conf, run, timestamp=datetime.now(), conf_id=conf_results.id
             )
@@ -283,7 +260,9 @@ class ResultSet(object):
             self._update_conf_scores(conf_results)
             count = 1
             for neighbor in conf_neighbors(conf_results.conf, self._template):
-                self._update_conf_scores(self._find_or_add_conf(neighbor))
+                neighbor_results = self._find_or_add_conf(neighbor)
+                neighbor_results.add_neighbor_run(conf_results.conf, run)
+                self._update_conf_scores(neighbor_results)
                 count += 1
 
             logging.info(f"Updated scores for {count} configurations")

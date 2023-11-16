@@ -1,11 +1,10 @@
 import logging
-import math
 import os
-import random
 import sqlite3
 from collections.abc import Iterable
 from statistics import median
 from typing import Optional
+from datetime import datetime
 
 from . import latency
 from .common import INF
@@ -90,7 +89,7 @@ class ResultSet(object):
 
             for id, conf, run in self._result_db.get_confs_runs():
                 n += 1
-                if self._template.match_conf(conf):
+                if self._template.match(conf):
                     n_w_template += 1
                 conf_results = self._find_or_add_conf(conf, id)
                 conf_results.add_run(run)
@@ -173,9 +172,65 @@ class ResultSet(object):
                     conf_results.neighbors_score = median(scores)
                     count += 1
 
-                conf_results.neighbors_time = conf_neighbor_times.get(conf_results.conf)
+                neighbor_times = conf_neighbor_times.get(conf_results.conf)
+                if neighbor_times:
+                    conf_results.neighbors_time = median(neighbor_times)
+                else:
+                    conf_results.neighbors_time = None
 
             logging.info(f"Populated neighbors' scores for {count} configurations")
+
+    def _update_conf_scores(self, conf_results: ConfResults):
+        with latency.timer("ResultSet._update_conf_scores"):
+            scores = []
+            times = []
+            for neighbor in conf_neighbors(conf_results.conf, self._template):
+                neighbor_results = self._conf_results_by_conf.get(neighbor)
+                if neighbor_results is not None:
+                    print("Found neighbor results:", neighbor_results.id)
+                    if neighbor_results.median_score is not None:
+                        print("Neighbor median score:", neighbor_results.median_score)
+                        scores.append(neighbor_results.median_score)
+                    if neighbor_results.median_time(self._system) is not None:
+                        print("Neighbor median time:", neighbor_results.median_time(self._system))
+                        times.append(neighbor_results.median_time(self._system))
+
+            if conf_results.median_score is not None:
+                scores.append(conf_results.median_score)
+            if conf_results.median_time(self._system) is not None:
+                times.append(conf_results.median_time(self._system))
+
+            if scores:
+                conf_results.neighbors_score = median(scores)
+            if times:
+                conf_results.neighbors_time = median(times)
+            
+            print({
+                    "id": conf_results.id,
+                    # "conf": str(conf_results.conf),
+                    "median_score": conf_results.median_score,
+                    "neighbors_score": conf_results.neighbors_score,
+                    "median_time": conf_results.median_time(self._system),
+                    "estimated_time": conf_results.estimated_time(self._system),
+                })
+
+            self._db.execute(
+                """
+                UPDATE conf
+                SET median_score = :median_score,
+                    neighbors_score = :neighbors_score,
+                    median_time = :median_time,
+                    estimated_time = :estimated_time
+                WHERE id = :id
+                """,
+                {
+                    "id": conf_results.id,
+                    "median_score": conf_results.median_score,
+                    "neighbors_score": conf_results.neighbors_score,
+                    "median_time": conf_results.median_time(self._system),
+                    "estimated_time": conf_results.estimated_time(self._system),
+                },
+            )
 
     def top_by_neighbors_score(
         self, max_time: float, max_weights: float = INF, limit: Optional[int] = None
@@ -212,9 +267,26 @@ class ResultSet(object):
         )
         row = cur.fetchone()
         return None if row is None else self._conf_results_by_id[row[0]]
-    
+
     def add_run(self, conf: Configuration2, run: Run):
-        raise NotImplementedError()
+        with latency.timer("ResultSet.add_run"):
+            conf_results = self._find_or_add_conf(conf)
+
+            print("Add run for conf", conf_results.id, conf_results.conf)
+
+            self._result_db.add_run(
+                conf, run, timestamp=datetime.now(), conf_id=conf_results.id
+            )
+
+            conf_results.add_run(run)
+
+            self._update_conf_scores(conf_results)
+            count = 1
+            for neighbor in conf_neighbors(conf_results.conf, self._template):
+                self._update_conf_scores(self._find_or_add_conf(neighbor))
+                count += 1
+
+            logging.info(f"Updated scores for {count} configurations")
 
     # def train_test_split(self) -> tuple:
     #     train_set = ResultSet(

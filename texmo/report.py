@@ -207,16 +207,19 @@ def generate_report_by_weight(
     return print_top_confs(top_confs, run_count)
 
 
-def generate_max_report(result_set: ResultSet, template: Template) -> str:
+def generate_max_report(result_set: ResultSet, template: Template, train_time: tuple[float, float]) -> str:
     out = StringIO()
-    lo, hi = template.t
+    lo, hi = train_time
     assert 1 <= lo <= hi
 
-    runs_count = result_set.runs_count_per_t()
+    # runs_count = result_set.runs_count_per_t()
     t = lo
     while t <= hi:
-        runs = runs_count.get(t, 0)
-        print(f"\nT = {t:3}  runs = {runs:5}", file=out)
+        # runs = runs_count.get(t, 0)
+        if t == lo:
+            print(f"\nT ≤ {t}", file=out)
+        else:
+            print(f"\n{t//2} ≤ nT ≤ {t}", file=out)
 
         for conf_results in result_set.top_confs_by_score(t, limit=5):
             num_runs = len(conf_results.runs)

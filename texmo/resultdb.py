@@ -184,6 +184,7 @@ class ResultDB(object):
                     loss_trend=loss_trend,
                     train_time=row["train_time"],
                     checkpoint=row["checkpoint"],
+                    system=row["system"],
                 )
 
                 yield conf_id, conf, run

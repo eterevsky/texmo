@@ -223,7 +223,7 @@ def conf_neighbors(
         if neighbors is not None:
             return neighbors
 
-        neighbors = list(template._conf_neighbors(conf, template))
+        neighbors = list(template._conf_neighbors(conf))
         template._conf_neighbors_cache[conf] = neighbors
 
         return neighbors

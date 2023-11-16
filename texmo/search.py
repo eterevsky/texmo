@@ -214,7 +214,7 @@ class Search(object):
                 expected_runs = 1
                 while i > 0:
                     if confs[i][1] < expected_runs:
-                        assert self._template.match_conf(confs[i][0])
+                        assert self._template.match(confs[i][0])
                         logging.info(f"Selecting conf top #{i-1} by neighbors score.")
                         return confs[i][0]
                     i //= 3

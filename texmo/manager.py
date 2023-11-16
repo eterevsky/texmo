@@ -432,6 +432,10 @@ class Manager(object):
 
         self.run.finalize(eval_loss, train_time)
 
+        step_time = train_time / (len(step_times) - 1)
+
+        logging.info(f"{self.conf}:  loss {eval_loss:.4f} b/byte  step time {ttoa3(step_time)}")
+
         return (self.run, self.weights)
 
     def continue_prefix(self, prefix: str, length: int, temperature: float) -> str | bytes:

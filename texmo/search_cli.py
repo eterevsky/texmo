@@ -19,30 +19,30 @@ from .tokens import set_tokens_dir
 from . import latency
 
 
-def generate_report(result_set, template, min_max_weights):
+def generate_report(result_set, template, min_max_weights, train_time):
     if template.max_weights is None:
         print(generate_report_by_weight(result_set, template, min_max_weights))
         print()
-    print(generate_max_report(result_set, template))
-    print("\nLearning Rate")
-    print(generate_param_report(result_set, template, lambda conf: conf.lr))
-    if template.sample_len[0] < template.sample_len[1]:
-        print("\nSample Length")
-        print(
-            generate_param_report(
-                result_set,
-                template,
-                lambda conf: conf.sample_len,
-                is_float=False,
-            )
-        )
-    if template.batch is None or template.batch[0] < template.batch[1]:
-        print("\nBatch")
-        print(
-            generate_param_report(
-                result_set, template, lambda conf: conf.batch, is_float=False
-            )
-        )
+    print(generate_max_report(result_set, template, train_time))
+    # print("\nLearning Rate")
+    # print(generate_param_report(result_set, template, lambda conf: conf.lr))
+    # if template.sample_len[0] < template.sample_len[1]:
+    #     print("\nSample Length")
+    #     print(
+    #         generate_param_report(
+    #             result_set,
+    #             template,
+    #             lambda conf: conf.sample_len,
+    #             is_float=False,
+    #         )
+    #     )
+    # if template.batch is None or template.batch[0] < template.batch[1]:
+    #     print("\nBatch")
+    #     print(
+    #         generate_param_report(
+    #             result_set, template, lambda conf: conf.batch, is_float=False
+    #         )
+    #     )
     draw_weight_loss_graph(result_set, template)
     draw_loss_by_time(result_set, template)
 
@@ -112,7 +112,7 @@ def main(args: argparse.Namespace):
         except KeyboardInterrupt:
             logging.warning("Interrupted\n")
 
-        generate_report(search._result_set, template, args.min_max_weights)
+        generate_report(search._result_set, template, args.min_max_weights, train_time=train_time)
         print()
         latency.report()
     finally:

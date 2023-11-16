@@ -87,7 +87,8 @@ class Model3(object):
                 )
 
         # Add layer to the end
-        new_layer_size = min(self.layers[-1].output_size, self.input.ntokens)
+        last_layer_size = self.layers[-1].output_size if self.layers else self.input.output_size
+        new_layer_size = min(last_layer_size, self.input.ntokens)
         for layer_type in ("dense", "rec"):
             for activation in ("gelu", "relu", "tanh"):
                 yield input_spec + "|" + "-".join(

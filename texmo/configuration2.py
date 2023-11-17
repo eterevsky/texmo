@@ -1,12 +1,15 @@
 import argparse
 import re
-from typing import Optional, Self, Iterable
+from typing import Optional, Iterable
 import math
 
 from .common import INF, itoa3
 from .model3 import Model3, build_model
 from . import latency
 from .tokens.tokenizer import Tokenizer
+
+
+Self = ()
 
 
 def is_valid_int(x: int) -> bool:
@@ -238,9 +241,18 @@ def conf_neighbors(
 
 def default_from_template(template: Template, spec: Optional[str]) -> Configuration2:
     lr = template.lr.pick_default(1 / 32)
-    length = template.length.pick_default(64)
+    length = template.length.pick_default(1)
     batch = template.batch.pick_default(1)
-    steps = template.steps.pick_default(256)
+    steps = template.steps.pick_default(2)
+
+    if spec is not None:
+        return Configuration2(
+            model=build_model(spec),
+            lr=lr,
+            length=length,
+            batch=batch,
+            steps=steps,
+        )
 
     for tokens in ("tokens.2", "bytes", "tokens.256"):
         for pos in ("", "-pos.16", "-pos.256"):

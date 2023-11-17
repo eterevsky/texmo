@@ -21,7 +21,7 @@ class AttnTest(TestCase):
         state1, out1 = layer.step(weights, state0, input[1])
         _, out2 = layer.step(weights, state1, input[2])
 
-        out = jnp.stack((out1, out2))
+        out = jnp.stack((out0, out1, out2))
         out_fw = layer.forward(weights, input)
         out_fw_fs = layer._forward_from_step(weights, input)
 

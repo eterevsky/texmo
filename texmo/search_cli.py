@@ -20,9 +20,8 @@ from . import latency
 
 
 def generate_report(result_set, template, min_max_weights, train_time):
-    if template.max_weights is None:
-        print(generate_report_by_weight(result_set, template, min_max_weights))
-        print()
+    # print(generate_report_by_weight(result_set, template, min_max_weights, train_time))
+    print()
     print(generate_max_report(result_set, template, train_time))
     # print("\nLearning Rate")
     # print(generate_param_report(result_set, template, lambda conf: conf.lr))
@@ -43,8 +42,8 @@ def generate_report(result_set, template, min_max_weights, train_time):
     #             result_set, template, lambda conf: conf.batch, is_float=False
     #         )
     #     )
-    draw_weight_loss_graph(result_set, template)
-    draw_loss_by_time(result_set, template)
+    draw_weight_loss_graph(result_set, template, train_time)
+    # draw_loss_by_time(result_set, template)
 
 
 def search_loop(
@@ -83,6 +82,7 @@ def main(args: argparse.Namespace):
     try:
         dataset = DataSet(path=args.data)
         template = Template.from_args(args)
+        logging.info(f"Template: {template}")
         default = default_from_template(template, spec=args.default_spec)
         logging.info(f"Default configuration: {default}")
         assert template.match(default)

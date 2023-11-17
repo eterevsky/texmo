@@ -40,7 +40,7 @@ class Suffix(Layer):
         return None
 
     def init_state(self, _weights) -> LayerState:
-        return jnp.ones(self._state_shape) / self.input_size
+        return jnp.zeros(self._state_shape)
 
     def step(
         self, _weights: jnp.ndarray, state: LayerState, input: jnp.ndarray
@@ -49,17 +49,24 @@ class Suffix(Layer):
         return suffix[1:], suffix
 
     def forward(self, _weights, input: jnp.ndarray) -> jnp.ndarray:
+        padded_input = jnp.concatenate(
+            [jnp.zeros((self.length - 1, self.input_size)), input]
+        )
+        input_len = padded_input.shape[0]
         slices = []
-        input_len = input.shape[0]
         for offset in range(self.length):
-            slices.append(input[offset : input_len - self.length + offset + 1])
+            slices.append(padded_input[offset : input_len - self.length + offset + 1])
         return jnp.stack(slices, axis=1)
 
     def forward_batch(self, _weights, input: jnp.ndarray) -> jnp.ndarray:
+        batch = input.shape[0]
+        padded_input = jnp.concatenate(
+            [jnp.zeros((batch, self.length - 1, self.input_size)), input], axis=1
+        )
+        input_len = padded_input.shape[1]
+
         slices = []
-        input_len = input.shape[1]
         for offset in range(self.length):
-            slices.append(
-                input[:, offset : input_len - self.length + offset + 1]
-            )
+            slices.append(padded_input[:, offset : input_len - self.length + offset + 1])
+        
         return jnp.stack(slices, axis=2)

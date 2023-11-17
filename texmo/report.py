@@ -5,43 +5,46 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 
-from texmo.configuration import Template, conf_to_string, conf_tokens_name
-from texmo.results import ResultSet
+from .results import ResultSet
+from .configuration2 import Template
+from .common import INF
 
 
 def max_points(result_set: ResultSet, t: int, maxx: int):
     x = []
     y = []
-    min_loss = 5
+    max_loss = 5
 
-    for conf_results in result_set.get_results_by_weights():
+    weight_loss = []
+    max_weights = INF
+    while True:
+        conf_results = result_set.top_conf(t, max_weights)
+        if not conf_results:
+            break
         conf = conf_results.conf
-        if conf.t != t or not conf_results.median_score:
+        weight_loss.append((conf.model.weights, conf_results.median_score))
+        max_weights = conf.model.weights - 1
+
+    prev_loss = max_loss
+
+    for weight, loss in reversed(weight_loss):
+        if loss > max_loss:
             continue
-        if conf_results.median_score > min_loss:
-            continue
+        x.append(weight - 1)
+        y.append(prev_loss)
 
-        weights = conf.model.weights
+        x.append(weight)
+        y.append(loss)
 
-        if x:
-            if x[-1] < weights - 1:
-                x.append(weights - 1)
-                y.append(min_loss)
-            elif x[-1] == weights:
-                x.pop()
-                y.pop()
-
-        x.append(weights)
-        y.append(conf_results.median_score)
-        min_loss = conf_results.median_score
+        prev_loss = loss
 
     x.append(maxx)
-    y.append(min_loss)
+    y.append(prev_loss)
 
     return x, y
 
 
-def draw_weight_loss_graph(result_set: ResultSet, template: Template):
+def draw_weight_loss_graph(result_set: ResultSet, template: Template, train_time: tuple[float, float]):
     fig, ax = plt.subplots()
     ax.set_ylabel("cross-entropy (bits per byte)")
     ax.set_xlabel("weights")
@@ -57,10 +60,10 @@ def draw_weight_loss_graph(result_set: ResultSet, template: Template):
     t = 1
     legends = []
 
-    top_conf_results = result_set.top_conf_all_t(template.t[0], template.t[1])
+    top_conf_results = result_set.top_conf(train_time[1])
 
-    while t <= template.t[1]:
-        if t >= template.t[0]:
+    while t <= train_time[1]:
+        if t >= train_time[0]:
             x, y = max_points(
                 result_set, t, top_conf_results.conf.model.weights * 4
             )
@@ -96,7 +99,7 @@ def draw_loss_by_time(result_set: ResultSet, template: Template):
     best_for_bytes = []
 
     for t in times:
-        best.append(result_set.top_conf_all_t(t, t).median_score)
+        best.append(result_set.top_conf(t).median_score)
         bytes_top_conf = result_set.top_conf_for_tokenset(t, "tokens256_raw_all")
         best_for_bytes.append(
             bytes_top_conf.median_score if bytes_top_conf else 4
@@ -109,11 +112,12 @@ def draw_loss_by_time(result_set: ResultSet, template: Template):
 
 
 def get_top_confs(
-    result_set: ResultSet, template: Template, min_max_weights: int
+    result_set: ResultSet, template: Template, min_max_weights: int,
+    train_time: tuple[float, float]
 ):
     top_confs = {}  # (weights_limit, planned_time_s) -> (conf, score)
     count = {}  # (weights_limit, planned_time_s) -> count
-    tlo, thi = template.t
+    tlo, thi = train_time
     for conf_results in result_set.get_results_by_weights():
         if not conf_results.runs:
             continue
@@ -201,9 +205,10 @@ def print_top_confs(top_confs, run_count) -> str:
 
 
 def generate_report_by_weight(
-    result_set: ResultSet, template: Template, min_max_weights: int
+    result_set: ResultSet, template: Template, min_max_weights: int,
+    train_time: tuple[float, float]
 ) -> str:
-    top_confs, run_count = get_top_confs(result_set, template, min_max_weights)
+    top_confs, run_count = get_top_confs(result_set, template, min_max_weights, train_time)
     return print_top_confs(top_confs, run_count)
 
 
@@ -215,19 +220,14 @@ def generate_max_report(result_set: ResultSet, template: Template, train_time: t
     # runs_count = result_set.runs_count_per_t()
     t = lo
     while t <= hi:
-        # runs = runs_count.get(t, 0)
-        if t == lo:
-            print(f"\nT ≤ {t}", file=out)
-        else:
-            print(f"\n{t//2} ≤ nT ≤ {t}", file=out)
+        print(f"\nT ≤ {t}", file=out)
 
-        for conf_results in result_set.top_confs_by_score(t, limit=5):
+        for conf_results in result_set.top_confs(t, limit=5):
             num_runs = len(conf_results.runs)
             score = f"{conf_results.median_score:.4f} ({num_runs})"
             if num_runs < 10:
                 score += " "
-            c = conf_to_string(conf_results.conf)
-            print(f"{score} {c}", file=out)
+            print(f"{score} {conf_results.conf}", file=out)
 
         t *= 2
 

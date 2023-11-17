@@ -125,7 +125,7 @@ class Layer(object):
             input,
         )
 
-        out = out[self.length - 1 :, :]
+        # out = out[self.length - 1 :, :]
 
         return out
 
@@ -171,7 +171,8 @@ class Layer(object):
             inputs_swapped,
         )
         out = jnp.swapaxes(out_swapped, 0, 1)
-        return out[:, self.length - 1 :, :]
+        return out
+        # return out[:, self.length - 1 :, :]
 
     # If True, forward_batch will be executed by using step_batch() recurrently.
     # If False, forward_batch will be executed by batching forward().

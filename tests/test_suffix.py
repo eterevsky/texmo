@@ -20,9 +20,7 @@ class SuffixTest(TestCase):
         state, out2 = layer.step(None, state, input[2])
         self.assertTrue((out0[1] == np.array([1, 2, 3, 4])).all())
         self.assertTrue((out1 == np.array([[1, 2, 3, 4], [5, 6, 7, 8]])).all())
-        self.assertTrue(
-            (out2 == np.array([[5, 6, 7, 8], [9, 10, 11, 12]])).all()
-        )
+        self.assertTrue((out2 == np.array([[5, 6, 7, 8], [9, 10, 11, 12]])).all())
 
     def test_forward(self):
         layer = Suffix(2, input_shape=(4,))
@@ -32,7 +30,11 @@ class SuffixTest(TestCase):
         out_fw_fs = layer._forward_from_step(None, input)
 
         expected = np.array(
-            [[[1, 2, 3, 4], [5, 6, 7, 8]], [[5, 6, 7, 8], [9, 10, 11, 12]]]
+            [
+                [[0, 0, 0, 0], [1, 2, 3, 4]],
+                [[1, 2, 3, 4], [5, 6, 7, 8]],
+                [[5, 6, 7, 8], [9, 10, 11, 12]],
+            ]
         )
 
         self.assertTrue((expected == out_fw).all())
@@ -53,8 +55,13 @@ class SuffixTest(TestCase):
 
         expected = np.array(
             [
-                [[[1, 2, 3, 4], [5, 6, 7, 8]], [[5, 6, 7, 8], [9, 10, 11, 12]]],
                 [
+                    [[0, 0, 0, 0], [1, 2, 3, 4]],
+                    [[1, 2, 3, 4], [5, 6, 7, 8]],
+                    [[5, 6, 7, 8], [9, 10, 11, 12]],
+                ],
+                [
+                    [[0, 0, 0, 0], [13, 14, 15, 16]],
                     [[13, 14, 15, 16], [17, 18, 19, 20]],
                     [[17, 18, 19, 20], [21, 22, 23, 24]],
                 ],

@@ -14,10 +14,10 @@ class ManagerTest(TestCase):
         dataset = build_fake_dataset()
         conf = Configuration2(
             build_model("bytes-emb.16|gru.32"),
-            lr=0.125,
+            lr=0.0625,
             length=32,
             batch=8,
-            steps=64,
+            steps=128,
         )
         manager = Manager(conf, system="test")
         manager.init()

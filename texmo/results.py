@@ -33,6 +33,8 @@ class ResultSet(object):
         self._conf_results_by_id: dict[int, ConfResults] = {}
         self._conf_results_by_conf: dict[Configuration2, ConfResults] = {}
 
+        self._init_db()
+
         if result_db is None:
             self._result_db = ResultDB()
         else:
@@ -47,23 +49,28 @@ class ResultSet(object):
 
             if self._use_neighbors_scores:
                 self._update_neighbors_scores()
-
-        self._init_db()
+        
+        self._populate_db()
 
     def _init_db(self):
-        logging.info("Populating runtime DB")
         self._db = sqlite3.connect(":memory:")
         schema_path = os.path.join(os.path.dirname(__file__), "runtime-db.sql")
         with open(schema_path) as schema:
             self._db.executescript(schema.read())
-
+    
+    def _populate_db(self):
+        logging.info("Populating runtime DB")
         for conf_results in self._conf_results_by_id.values():
             self._db.execute(
                 """
-                INSERT INTO conf(id, weights, matches_template, median_time,
-                                 estimated_time, median_score, neighbors_score)
-                VALUES(:id, :weights, :matches_template, :median_time,
-                       :estimated_time, :median_score, :neighbors_score)
+                UPDATE conf
+                SET weights = :weights,
+                    matches_template = :matches_template,
+                    median_time = :median_time,
+                    estimated_time = :estimated_time,
+                    median_score = :median_score,
+                    neighbors_score = :neighbors_score
+                WHERE id = :id
                 """,
                 {
                     "id": conf_results.id,
@@ -222,6 +229,7 @@ class ResultSet(object):
                 WHERE neighbors_score IS NOT NULL
                   AND estimated_time <= :max_time
                   AND weights <= :max_weights
+                  AND matches_template
                 ORDER BY neighbors_score
                 """
                 + limit_str,
@@ -230,7 +238,7 @@ class ResultSet(object):
             for row in cur:
                 yield self._conf_results_by_id[row[0]]
 
-    def top_conf(self, max_time: float) -> ConfResults:
+    def top_conf(self, max_time: float, max_weights: int = INF) -> ConfResults:
         """A configuration with the highest (self) score with time = t."""
 
         cur = self._db.execute(
@@ -240,12 +248,30 @@ class ResultSet(object):
               AND median_time IS NOT NULL
               AND median_time <= ?
               AND median_score IS NOT NULL
+              AND weights <= ?
             ORDER BY median_score LIMIT 1
             """,
-            (max_time,),
+            (max_time, max_weights),
         )
         row = cur.fetchone()
         return None if row is None else self._conf_results_by_id[row[0]]
+
+    def top_confs(self, max_time: float, limit: int) -> Iterable[ConfResults]:
+        """A configuration with the highest (self) score with time = t."""
+
+        cur = self._db.execute(
+            """
+            SELECT id FROM conf
+            WHERE matches_template
+              AND median_time IS NOT NULL
+              AND median_time <= ?
+              AND median_score IS NOT NULL
+            ORDER BY median_score LIMIT ?
+            """,
+            (max_time, limit),
+        )
+        for row in cur:
+            yield self._conf_results_by_id[row[0]]
 
     def add_run(self, conf: Configuration2, run: Run):
         with latency.timer("ResultSet.add_run"):

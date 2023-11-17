@@ -432,9 +432,9 @@ class Manager(object):
 
         self.run.finalize(eval_loss, train_time)
 
-        step_time = train_time / (len(step_times) - 1)
+        # step_time = train_time / (len(step_times) - 1)
 
-        logging.info(f"{self.conf}:  loss {eval_loss:.4f} b/byte  step time {ttoa3(step_time)}")
+        logging.info(f"{self.conf}:  loss {eval_loss:.4f} b/byte  T = {ttoa3(train_time)}")
 
         return (self.run, self.weights)
 

@@ -123,6 +123,10 @@ class Attn(Layer):
     def forward(self, weights: LayerWeights, input: jax.Array) -> jax.Array:
         input_len = input.shape[0]
         input = input.reshape((input_len, -1))
+        input = jnp.concatenate(
+            [jnp.zeros((self.length - 1, self.input_size)), input]
+        )
+        input_len = input.shape[0]
 
         kvq = jnp.einsum("hoi,pi->pho", weights["w"], input)
 
@@ -275,12 +279,10 @@ class AttnMQ(Layer):
     def forward(self, weights: LayerWeights, input: jax.Array) -> jax.Array:
         input_len = input.shape[0]
         input = input.reshape((input_len, -1))
-
-        # print("input", input.shape)
-
-        # print("wk", weights["wk"].shape)
-        # print("wv", weights["wv"].shape)
-        # print("wq", weights["wq"].shape)
+        input = jnp.concatenate(
+            [jnp.zeros((self.length - 1, self.input_size)), input]
+        )
+        input_len = input.shape[0]
 
         keys = jnp.einsum("oi,pi->po", weights["wk"], input)
         values = jnp.einsum("oi,pi->po", weights["wv"], input)
@@ -288,10 +290,6 @@ class AttnMQ(Layer):
             weights["bquery"], 0
         )
         queries = queries[self.length - 1 :]
-
-        # print("keys", keys.shape)
-        # print("values", values.shape)
-        # print("queries", queries.shape)
 
         key_slices = []
         for offset in range(self.length):
@@ -301,8 +299,6 @@ class AttnMQ(Layer):
         key_suffixes = jnp.stack(
             key_slices, axis=1
         )  # position, relative position, value
-
-        # print("key_suffixes", key_suffixes.shape)
 
         value_slices = []
         for offset in range(self.length):

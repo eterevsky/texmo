@@ -114,6 +114,9 @@ class Bounds(object):
                 self.min, self.max = limits
             except TypeError:
                 self.min = self.max = limits
+    
+    def __str__(self) -> str:
+        return f"({self.min}, {self.max})"
 
     def match(self, value: float) -> bool:
         return self.min <= value <= self.max
@@ -186,10 +189,14 @@ class Template(object):
             max_weights=args.max_weights,
         )
 
+    def __str__(self):
+        return (f"Template({self.regex}, lr={self.lr}, length={self.length}, " +
+               f"batch={self.batch}, steps={self.steps}, max_weights={self.max_weights})")
+
     def match_model(self, model: Model3) -> bool:
         if model.weights > self.max_weights:
             return False
-        return self.regex is None or self.regex.fullmatch(str(model))
+        return self.regex is None or bool(self.regex.fullmatch(str(model)))
 
     def match(self, conf: Configuration2) -> bool:
         return (

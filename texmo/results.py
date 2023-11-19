@@ -261,6 +261,8 @@ class ResultSet(object):
 
             logging.info(f"Updated scores for {count} configurations")
 
+        self._check_consistency()
+
     # def train_test_split(self) -> tuple:
     #     train_set = ResultSet(
     #         result_db=None, template=self._template, populate_neighbors=False

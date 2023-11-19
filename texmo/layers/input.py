@@ -1,10 +1,14 @@
 import jax
 import jax.numpy as jnp
-from typing import Self, Optional
+from typing import Optional
 
 from ..layer import LayerState, LayerWeights
 from ..prng import Rng
 from ..tokens import get_tokenizer
+
+
+Self = ()
+
 
 _PREFERRED_TOKENSETS = {
     2: "tokens2_raw_bits1",

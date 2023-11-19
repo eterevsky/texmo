@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 from itertools import chain
-from typing import Iterable, Self
+from typing import Iterable
 import math
 import optax
 
@@ -11,6 +11,7 @@ from .layers.dense import Dense
 from .layers.input import Input
 from .prng import Rng
 
+Self = ()
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
 _SUFFIX_LIKE_LAYERS = ("suffix", "attn", "attnmq")

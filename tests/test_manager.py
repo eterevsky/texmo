@@ -14,7 +14,7 @@ class ManagerTest(TestCase):
         dataset = build_fake_dataset()
         conf = Configuration2(
             build_model("bytes-emb.16|gru.32"),
-            lr=0.0625,
+            lr=0.03125,
             length=32,
             batch=8,
             steps=128,

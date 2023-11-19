@@ -20,7 +20,9 @@ class SearchTest(TestCase):
             steps=None,
             max_weights=None,
         )
-        self._init_conf = Configuration2(build_model("tokens.2|"), lr=0.125, length=32, batch=1, steps=64)
+        self._init_conf = Configuration2(
+            build_model("tokens.2|"), lr=0.125, length=32, batch=1, steps=64
+        )
 
     def test_init(self):
         search = Search(
@@ -30,8 +32,7 @@ class SearchTest(TestCase):
             init_conf=self._init_conf,
             min_max_weights=32,
             predictor=None,
-            train_time=(1., 1.),
+            train_time=(1.0, 1.0),
         )
         conf = search.select_conf()
         self.assertEqual(conf, self._init_conf)
-

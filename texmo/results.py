@@ -21,7 +21,6 @@ class ResultSet(object):
         result_db: Optional[ResultDB],
         template: Template,
         system: str,
-        populate_neighbors: bool = True,
     ):
         assert isinstance(template, Template)
         self._template: Template = template
@@ -29,7 +28,7 @@ class ResultSet(object):
         assert isinstance(system, str)
         self._system: str = system
 
-        # Configurations, matching the template
+        # Configurations matching the template
         self._conf_results_by_id: dict[int, ConfResults] = {}
         self._conf_results_by_conf: dict[Configuration2, ConfResults] = {}
 
@@ -41,15 +40,8 @@ class ResultSet(object):
             self._result_db = result_db
             self._import_from_result_db()
 
-        self._use_neighbors_scores = True
-
-        if populate_neighbors:
-            logging.info("Generating all neighbors")
-            self._update_all_neighbors()
-
-            if self._use_neighbors_scores:
-                self._update_neighbors_scores()
-        
+        logging.info("Generating all neighbors")
+        self._update_all_neighbors()
         self._populate_db()
 
     def _init_db(self):
@@ -57,7 +49,7 @@ class ResultSet(object):
         schema_path = os.path.join(os.path.dirname(__file__), "runtime-db.sql")
         with open(schema_path) as schema:
             self._db.executescript(schema.read())
-    
+
     def _populate_db(self):
         logging.info("Populating runtime DB")
         for conf_results in self._conf_results_by_id.values():
@@ -126,76 +118,32 @@ class ResultSet(object):
                 INSERT INTO conf(id, weights, matches_template)
                 VALUES(:id, :weights, :matches_template)
                 """,
-                {"id": id, "weights": conf.model.weights,
-                 "matches_template": matches_template},
+                {
+                    "id": id,
+                    "weights": conf.model.weights,
+                    "matches_template": matches_template,
+                },
             )
 
             return conf_results
 
     def _update_all_neighbors(self):
         with latency.timer("ResultSet._update_all_neighbors"):
-            confs = []
-            for conf_results in self._conf_results_by_id.values():
-                if conf_results.median_score is not None:
-                    confs.append(conf_results.conf)
-
-            for conf in confs:
-                for neighbor in conf_neighbors(conf, self._template):
-                    self._find_or_add_conf(neighbor)
-            n = len(confs)
-            logging.info(f"Generated neighbors for {n} confs")
-
-    def _update_neighbors_scores(self):
-        with latency.timer("ResultSet._update_neighbor_scores"):
-            logging.info("Updating neighbors' scores")
-            conf_neighbor_scores = {}
-            conf_neighbor_times = {}
             count = 0
-
-            for conf_results in self._conf_results_by_id.values():
-                median_score = conf_results.median_score
-                median_time = conf_results.median_time(self._system)
+            for conf_results in list(self._conf_results_by_id.values()):
+                if conf_results.median_score is None:
+                    continue
+                count += 1
                 for neighbor in conf_neighbors(conf_results.conf, self._template):
-                    if median_score is not None:
-                        conf_neighbor_scores.setdefault(neighbor, []).append(
-                            median_score
-                        )
-                    if median_time is not None:
-                        conf_neighbor_times.setdefault(neighbor, []).append(median_time)
-
-            for conf_results in self._conf_results_by_id.values():
-                scores = conf_neighbor_scores.get(conf_results.conf)
-                if scores is None:
-                    scores = []
-                if conf_results.median_score is not None:
-                    scores.append(conf_results.median_score)
-                if scores:
-                    conf_results.neighbors_score = median(scores)
-                    count += 1
-
-                neighbor_times = conf_neighbor_times.get(conf_results.conf)
-                if neighbor_times:
-                    conf_results.neighbors_time = median(neighbor_times)
-                else:
-                    conf_results.neighbors_time = None
-
-            logging.info(f"Populated neighbors' scores for {count} configurations")
+                    neighbor_results = self._find_or_add_conf(neighbor)
+                    neighbor_results.neighbor_media_scores[
+                        conf_results.id
+                    ] = conf_results.median_score
+                    self._update_conf_scores(neighbor_results)
+            logging.info(f"Generated neighbors for {count} configurations")
 
     def _update_conf_scores(self, conf_results: ConfResults):
         with latency.timer("ResultSet._update_conf_scores"):
-            scores = []
-            for neighbor in conf_neighbors(conf_results.conf, self._template):
-                neighbor_results = self._conf_results_by_conf.get(neighbor)
-                if neighbor_results is not None:
-                    if neighbor_results.median_score is not None:
-                        scores.append(neighbor_results.median_score)
-
-            if conf_results.median_score is not None:
-                scores.append(conf_results.median_score)
-
-            if scores:
-                conf_results.neighbors_score = median(scores)
-            
             self._db.execute(
                 """
                 UPDATE conf
@@ -213,6 +161,26 @@ class ResultSet(object):
                     "estimated_time": conf_results.estimated_time(self._system),
                 },
             )
+
+    def _check_consistency(self):
+        """Checks the consistency of ConfResults with the values in the DB."""
+        found_ids = set()
+
+        for row in self._db.execute(
+            "SELECT id, weights, matches_template, median_score, neighbors_score, median_time, estimated_time FROM conf"
+        ):
+            id = row[0]
+            found_ids.add(id)
+            conf_results = self._conf_results_by_id[id]
+
+            assert conf_results.conf.model.weights == row[1]
+            assert self._template.match(conf_results.conf) == row[2]
+            assert conf_results.median_score == row[3]
+            assert conf_results.neighbors_score == row[4]
+            assert conf_results.median_time(self._system) == row[5]
+            assert conf_results.estimated_time(self._system) == row[6]
+
+        assert len(found_ids) == len(self._conf_results_by_id)
 
     def get_conf_results(self, conf: Configuration2) -> Optional[ConfResults]:
         return self._conf_results_by_conf.get(conf)
@@ -287,7 +255,7 @@ class ResultSet(object):
             count = 1
             for neighbor in conf_neighbors(conf_results.conf, self._template):
                 neighbor_results = self._find_or_add_conf(neighbor)
-                neighbor_results.add_neighbor_run(conf_results.conf, run)
+                neighbor_results.add_neighbor_run(conf_results, run)
                 self._update_conf_scores(neighbor_results)
                 count += 1
 

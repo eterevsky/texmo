@@ -49,9 +49,7 @@ class Search(object):
         self._checkpoints_path = checkpoints_path
 
         logging.info("Creating ResultSet.")
-        self._result_set = ResultSet(
-            system=system, result_db=db, template=template, populate_neighbors=True
-        )
+        self._result_set = ResultSet(system=system, result_db=db, template=template)
         # self._last_predictor_update = 0
 
         # self._predictor = LossPredictorV1(self._result_set, split_test_set=True)
@@ -210,7 +208,8 @@ class Search(object):
             confs = [(None, 0)]
             for conf_results in self._result_set.top_by_neighbors_score(t, max_weights):
                 i = len(confs)
-                confs.append((conf_results.conf, len(conf_results.runs)))
+                nruns = min(len(conf_results.runs), conf_results.ntimes(self._system))
+                confs.append((conf_results.conf, nruns))
                 expected_runs = 1
                 while i > 0:
                     if confs[i][1] < expected_runs:

@@ -131,7 +131,7 @@ class ResultSet(object):
         with latency.timer("ResultSet._update_all_neighbors"):
             count = 0
             for conf_results in list(self._conf_results_by_id.values()):
-                if conf_results.median_score is None:
+                if conf_results.median_score is None or not self._template.match(conf_results.conf):
                     continue
                 count += 1
                 for neighbor in conf_neighbors(conf_results.conf, self._template):

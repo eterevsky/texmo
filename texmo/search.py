@@ -4,14 +4,14 @@ from math import log2, sqrt
 from typing import Optional
 
 from . import latency
-from .common import INF, ttoa3, itoa3
-from .configuration2 import Configuration2, conf_neighbors, Template
+from .common import INF, itoa3, ttoa3
+from .configuration2 import Configuration2, Template, conf_neighbors
 from .model2 import Weights
 from .predict import Predictor2
 from .pretrained import Checkpoint
 from .record import TrainingRecord
-from .results import ResultSet
 from .resultdb import ResultDB
+from .results import ResultSet
 from .run import Run
 
 # The number of runs with t = 2^(k+1) should be RUNS_EXP time number of runs
@@ -275,12 +275,18 @@ class Search(object):
     # def _select_checkpoint(self, t):
     #     pass
 
+    def _select_untimed(self):
+        return self._result_set.get_untimed_conf(self._template.max_weights)
+
     def select_conf(self) -> Configuration2:
         with latency.timer("Search.select_conf"):
-            t = self._select_time()
+            if random.random() < 1.0:
+                conf = self._select_untimed()
+                if conf is not None:
+                    logging.info(f"Selecting untimed conf: {conf}")
+                    return conf
 
-            if False:
-                return self._select_checkpoint(t)
+            t = self._select_time()
 
             if self._template.max_weights == INF:
                 max_weights = self._select_max_weights(t)

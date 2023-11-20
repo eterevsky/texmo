@@ -53,7 +53,7 @@ class ResultSet(object):
     def _populate_db(self):
         logging.info("Populating runtime DB")
         for conf_results in self._conf_results_by_id.values():
-            self._db.execute(
+            cur = self._db.execute(
                 """
                 UPDATE conf
                 SET weights = :weights,
@@ -74,6 +74,7 @@ class ResultSet(object):
                     "neighbors_score": conf_results.neighbors_score,
                 },
             )
+            assert cur.rowcount == 1
         logging.info(f"Populated runtime DB with {len(self._conf_results_by_id)} confs")
 
     def _import_from_result_db(self):
@@ -136,15 +137,13 @@ class ResultSet(object):
                 count += 1
                 for neighbor in conf_neighbors(conf_results.conf, self._template):
                     neighbor_results = self._find_or_add_conf(neighbor)
-                    neighbor_results.neighbor_media_scores[
-                        conf_results.id
-                    ] = conf_results.median_score
-                    self._update_conf_scores(neighbor_results)
+                    for run in conf_results.runs:
+                        neighbor_results.add_neighbor_run(conf_results, run)
             logging.info(f"Generated neighbors for {count} configurations")
 
     def _update_conf_scores(self, conf_results: ConfResults):
         with latency.timer("ResultSet._update_conf_scores"):
-            self._db.execute(
+            cur = self._db.execute(
                 """
                 UPDATE conf
                 SET median_score = :median_score,
@@ -161,6 +160,7 @@ class ResultSet(object):
                     "estimated_time": conf_results.estimated_time(self._system),
                 },
             )
+            assert cur.rowcount == 1
 
     def _check_consistency(self):
         """Checks the consistency of ConfResults with the values in the DB."""
@@ -184,6 +184,23 @@ class ResultSet(object):
 
     def get_conf_results(self, conf: Configuration2) -> Optional[ConfResults]:
         return self._conf_results_by_conf.get(conf)
+
+    def get_untimed_conf(self, max_weights: int = INF) -> Optional[ConfResults]:
+        cur = self._db.execute(
+            """
+            SELECT id
+            FROM conf
+            WHERE median_time IS NULL
+              AND weights <= ?
+              AND matches_template
+              AND median_score IS NOT NULL
+            ORDER BY weights
+            LIMIT 1
+            """,
+            (max_weights,),
+        )
+        row = cur.fetchone()
+        return None if row is None else self._conf_results_by_id[row[0]].conf
 
     def top_by_neighbors_score(
         self, max_time: float, max_weights: float = INF, limit: Optional[int] = None

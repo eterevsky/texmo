@@ -194,7 +194,6 @@ class ResultSet(object):
               AND weights <= ?
               AND matches_template
               AND median_score IS NOT NULL
-            ORDER BY weights
             LIMIT 1
             """,
             (max_weights,),

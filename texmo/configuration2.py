@@ -241,7 +241,7 @@ def conf_neighbors(
 
 def default_from_template(template: Template, spec: Optional[str]) -> Configuration2:
     lr = template.lr.pick_default(1 / 32)
-    length = template.length.pick_default(1)
+    length = template.length.pick_default(8)
     batch = template.batch.pick_default(1)
     steps = template.steps.pick_default(2)
 

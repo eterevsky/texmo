@@ -93,7 +93,7 @@ def main(args: argparse.Namespace):
         logging.info(f"Default configuration: {default}")
         assert template.match(default)
 
-        result_db = ResultDB(args.db)
+        result_db = ResultDB.from_args(args.db)
         # predictr = Predictor2(args.sample_timing, args.train_timing, result_db, extra_dbs)
 
         train_time = tuple(map(float, args.train_time.split("-")))
@@ -205,8 +205,9 @@ def init_args(parser: argparse.ArgumentParser, config):
         "--db",
         type=str,
         default=config.DB,
-        help="path to the SQLite database with the results",
+        help="path to the SQLite database with the results, or a URL for a PostgreSQL database",
     )
+
     parser.add_argument(
         "--train-timing",
         type=str,

@@ -7,7 +7,7 @@ import numpy as np
 
 from .results import ResultSet
 from .configuration2 import Template
-from .common import INF
+from .common import INF, ttoa3
 
 
 def max_points(result_set: ResultSet, t: int, maxx: int):
@@ -44,7 +44,9 @@ def max_points(result_set: ResultSet, t: int, maxx: int):
     return x, y
 
 
-def draw_weight_loss_graph(result_set: ResultSet, template: Template, train_time: tuple[float, float]):
+def draw_weight_loss_graph(
+    result_set: ResultSet, template: Template, train_time: tuple[float, float]
+):
     fig, ax = plt.subplots()
     ax.set_ylabel("cross-entropy (bits per byte)")
     ax.set_xlabel("weights")
@@ -64,9 +66,7 @@ def draw_weight_loss_graph(result_set: ResultSet, template: Template, train_time
 
     while t <= train_time[1]:
         if t >= train_time[0]:
-            x, y = max_points(
-                result_set, t, top_conf_results.conf.model.weights * 4
-            )
+            x, y = max_points(result_set, t, top_conf_results.conf.model.weights * 4)
             ax.plot(x, y)
             legends.append(t)
         t *= 2
@@ -101,9 +101,7 @@ def draw_loss_by_time(result_set: ResultSet, template: Template):
     for t in times:
         best.append(result_set.top_conf(t).median_score)
         bytes_top_conf = result_set.top_conf_for_tokenset(t, "tokens256_raw_all")
-        best_for_bytes.append(
-            bytes_top_conf.median_score if bytes_top_conf else 4
-        )
+        best_for_bytes.append(bytes_top_conf.median_score if bytes_top_conf else 4)
 
     ax.plot(times, best, label="best")
     ax.plot(times, best_for_bytes, label="best for bytes")
@@ -112,29 +110,32 @@ def draw_loss_by_time(result_set: ResultSet, template: Template):
 
 
 def get_top_confs(
-    result_set: ResultSet, template: Template, min_max_weights: int,
-    train_time: tuple[float, float]
+    result_set: ResultSet,
+    template: Template,
+    min_max_weights: int,
+    train_time: tuple[float, float],
+    system: str,
 ):
     top_confs = {}  # (weights_limit, planned_time_s) -> (conf, score)
     count = {}  # (weights_limit, planned_time_s) -> count
     tlo, thi = train_time
     for conf_results in result_set.get_results_by_weights():
-        if not conf_results.runs:
+        t = conf_results.median_time(system)
+        if not conf_results.median_score or not t:
+            continue
+        t = 2 ** math.ceil(math.log2(t))
+        if not tlo <= t <= thi:
             continue
         conf = conf_results.conf
-        if not tlo <= conf.t <= thi:
-            continue
         weights = conf.model.weights
-        weights_bucket = max(
-            2 ** math.ceil(math.log2(weights)), min_max_weights
-        )
+        weights_bucket = max(2 ** math.ceil(math.log2(weights)), min_max_weights)
         try:
-            count[(weights_bucket, conf.t)] += len(conf_results.runs)
+            count[(weights_bucket, t)] += len(conf_results.runs)
         except KeyError:
-            count[(weights_bucket, conf.t)] = len(conf_results.runs)
+            count[(weights_bucket, t)] = len(conf_results.runs)
 
         while weights_bucket < 2**33:
-            key = (weights_bucket, conf.t)
+            key = (weights_bucket, t)
             if key in top_confs:
                 top_conf, top_score = top_confs[key]
                 if (
@@ -153,10 +154,9 @@ def get_top_confs(
 
 def print_top_confs(top_confs, run_count) -> str:
     out = StringIO()
-    report = ""
     spec_len = 0
     for conf, score in top_confs.values():
-        l = len(conf_tokens_name(conf)) + 1 + len(str(conf.model))
+        l = len(str(conf.model))
         if l > spec_len:
             spec_len = l
     for log_weights in range(6, 25):
@@ -187,7 +187,7 @@ def print_top_confs(top_confs, run_count) -> str:
             else:
                 print("|         | ", file=out, end="")
             print(f"{t:>4} | {count:>4} | ", file=out, end="")
-            model_str = conf_tokens_name(conf) + " " + str(conf.model)
+            model_str = str(conf.model)
             print(
                 model_str,
                 " " * (spec_len - len(model_str)),
@@ -196,23 +196,80 @@ def print_top_confs(top_confs, run_count) -> str:
             )
             print(f"| {score:.4f} | ", file=out, end="")
             print(f"B{conf.batch} LR{conf.lr:.4f}", file=out, end="")
-            if conf.sample_len != 128:
-                print(f" LEN{conf.sample_len}", file=out, end="")
+            print(f" LEN{conf.length}", file=out, end="")
 
             print(" |", file=out)
 
     return out.getvalue()
 
 
+# def generate_report_by_weight(
+#     result_set: ResultSet,
+#     template: Template,
+#     min_max_weights: int,
+#     train_time: tuple[float, float],
+#     system: str,
+# ) -> str:
+#     top_confs, run_count = get_top_confs(
+#         result_set, template, min_max_weights, train_time, system
+#     )
+#     return print_top_confs(top_confs, run_count)
+
+
 def generate_report_by_weight(
-    result_set: ResultSet, template: Template, min_max_weights: int,
-    train_time: tuple[float, float]
+    result_set: ResultSet,
+    template: Template,
+    min_max_weights: int,
+    train_time: tuple[float, float],
+    system: str,
 ) -> str:
-    top_confs, run_count = get_top_confs(result_set, template, min_max_weights, train_time)
-    return print_top_confs(top_confs, run_count)
+    max_weights = 64
+    while True:
+        print("\nW ≤", max_weights)
+        current_best = None
+        printed_conf = False
+        for conf_results in result_set.get_results_by_time(max_weights=max_weights):
+            if not conf_results.median_score:
+                continue
+            if (
+                current_best is not None
+                and conf_results.median_score > current_best.median_score
+            ):
+                continue
+            if (
+                current_best is not None
+                and current_best.median_time(system) < 1
+                and conf_results.median_time(system) > 1
+                and current_best.conf.model.weights > max_weights // 2
+            ):
+                print(
+                    f"{current_best.median_score:.4f} "
+                    + f"{ttoa3(current_best.median_time(system))}  "
+                    + f"{conf_results.conf}"
+                )
+                printed_conf = True
+
+            current_best = conf_results
+
+            if printed_conf or (
+                current_best.median_time(system) > 1
+                and current_best.conf.model.weights > max_weights // 2
+            ):
+                print(
+                    f"{current_best.median_score:.4f} "
+                    + f"{ttoa3(current_best.median_time(system))}  "
+                    + f"{conf_results.conf}"
+                )
+                printed_conf = True
+
+        if not printed_conf:
+            break
+        max_weights *= 2
 
 
-def generate_max_report(result_set: ResultSet, template: Template, train_time: tuple[float, float]) -> str:
+def generate_max_report(
+    result_set: ResultSet, template: Template, train_time: tuple[float, float]
+) -> str:
     out = StringIO()
     lo, hi = train_time
     assert 1 <= lo <= hi

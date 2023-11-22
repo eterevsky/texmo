@@ -19,8 +19,12 @@ from .tokens import set_tokens_dir
 from . import latency
 
 
-def generate_report(result_set, template, min_max_weights, train_time):
-    # print(generate_report_by_weight(result_set, template, min_max_weights, train_time))
+def generate_report(result_set, template, min_max_weights, train_time, system: str):
+    print(
+        generate_report_by_weight(
+            result_set, template, min_max_weights, train_time, system
+        )
+    )
     print()
     print(generate_max_report(result_set, template, train_time))
     # print("\nLearning Rate")
@@ -47,7 +51,9 @@ def generate_report(result_set, template, min_max_weights, train_time):
 
 
 def search_loop(
-    dataset: DataSet, search: Search, system: str,
+    dataset: DataSet,
+    search: Search,
+    system: str,
 ):
     logging.info("Starting search")
     while True:
@@ -112,7 +118,13 @@ def main(args: argparse.Namespace):
         except KeyboardInterrupt:
             logging.warning("Interrupted\n")
 
-        generate_report(search._result_set, template, args.min_max_weights, train_time=train_time)
+        generate_report(
+            search._result_set,
+            template,
+            args.min_max_weights,
+            train_time=train_time,
+            system=args.system,
+        )
         print()
         latency.report()
     finally:
@@ -187,9 +199,7 @@ def init_args(parser: argparse.ArgumentParser, config):
         default="1-16",
         help="range for the training time in seconds",
     )
-    parser.add_argument(
-        "--default-spec", type=str, default=None, help="default model"
-    )
+    parser.add_argument("--default-spec", type=str, default=None, help="default model")
 
     parser.add_argument(
         "--db",

@@ -280,7 +280,7 @@ class Search(object):
 
     def select_conf(self) -> Configuration2:
         with latency.timer("Search.select_conf"):
-            if random.random() < 1.0:
+            if random.random() < 0:
                 conf = self._select_untimed()
                 if conf is not None:
                     logging.info(f"Selecting untimed conf: {conf}")

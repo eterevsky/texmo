@@ -81,11 +81,11 @@ def ttoa3(t: float) -> str:
     elif t < 10: return f"{t:.2f} s"
     elif t < 60: return f"{t:.1f} s"
     elif t < 3600:
-        m = t // 60
+        m = round(t // 60)
         s = round(t % 60)
         return f"{m} m {s} s"
     else:
-        h = t // 3600
+        h = round(t // 3600)
         m = (t % 3600) // 60
         s = round(t % 60)
         return f"{h} h {m} m {s} s"

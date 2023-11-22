@@ -132,7 +132,9 @@ class ResultSet(object):
         with latency.timer("ResultSet._update_all_neighbors"):
             count = 0
             for conf_results in list(self._conf_results_by_id.values()):
-                if conf_results.median_score is None or not self._template.match(conf_results.conf):
+                if conf_results.median_score is None or not self._template.match(
+                    conf_results.conf
+                ):
                     continue
                 count += 1
                 for neighbor in conf_neighbors(conf_results.conf, self._template):
@@ -279,6 +281,22 @@ class ResultSet(object):
 
         self._check_consistency()
 
+    def get_results_by_weights(self):
+        return sorted(
+            self._conf_results_by_id.values(), key=lambda cr: cr.conf.model.weights
+        )
+
+    def get_results_by_time(self, max_weights: int):
+        return sorted(
+            (
+                cr
+                for cr in self._conf_results_by_id.values()
+                if cr.conf.model.weights <= max_weights
+                and cr.median_time(self._system) is not None
+            ),
+            key=lambda cr: cr.median_time(self._system),
+        )
+
     # def train_test_split(self) -> tuple:
     #     train_set = ResultSet(
     #         result_db=None, template=self._template, populate_neighbors=False
@@ -353,11 +371,6 @@ class ResultSet(object):
     #     self.add_run(conf_results, run, update_scores=update_scores)
 
     #     return conf_results
-
-    # def get_results_by_weights(self):
-    #     return sorted(
-    #         self._conf_results_by_id.values(), key=lambda cr: cr.conf.model.weights
-    #     )
 
     # def all_results_for_t(self, t: int) -> Iterable[ConfResults]:
     #     cur = self._db.execute(

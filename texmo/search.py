@@ -28,7 +28,6 @@ class Search(object):
         db: ResultDB,
         template: Template,
         init_conf: Configuration2,
-        min_max_weights: int,
         predictor: Predictor2,
         train_time: tuple[float, float],
         checkpoints_path: str = None,
@@ -45,7 +44,6 @@ class Search(object):
         assert isinstance(init_conf, Configuration2)
         self._init_conf = init_conf
 
-        self._min_max_weights = min_max_weights
         self._checkpoints_path = checkpoints_path
 
         logging.info("Creating ResultSet.")
@@ -198,9 +196,11 @@ class Search(object):
             if top_conf_results is None:
                 return self._min_max_weights
             maxw = 8 * top_conf_results.conf.model.weights
-            if self._min_max_weights >= maxw:
-                return self._min_max_weights
-            l = random.uniform(log2(self._min_max_weights), log2(maxw))
+            if self._template.max_weights.min >= maxw:
+                return self._template.max_weights.min
+            if self._template.max_weights.max <= maxw:
+                maxw = self._template.max_weights.max
+            l = random.uniform(log2(self._template.max_weights.min), log2(maxw))
             return int(2**l)
 
     def _select_by_neighbors_score(self, t: float, max_weights: int):
@@ -287,11 +287,7 @@ class Search(object):
                     return conf
 
             t = self._select_time()
-
-            if self._template.max_weights == INF:
-                max_weights = self._select_max_weights(t)
-            else:
-                max_weights = self._template.max_weights
+            max_weights = self._select_max_weights(t)
 
             self.print_top_confs(t, max_weights)
 

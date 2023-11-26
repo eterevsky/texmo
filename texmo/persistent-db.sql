@@ -11,7 +11,9 @@ CREATE TABLE conf (
     lr REAL NOT NULL,
     length INTEGER NOT NULL,
     batch INTEGER NOT NULL,
-    steps INTEGER NOT NULL
+    steps INTEGER NOT NULL,
+
+    UNIQUE (spec, lr, length, batch, steps)
 );
 
 CREATE INDEX conf_spec ON conf(spec);

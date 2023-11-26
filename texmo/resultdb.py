@@ -169,37 +169,35 @@ class ResultDBSQLite(ResultDB):
  
     def find_or_add_conf(self, conf: Configuration2) -> int:
         """Finds the conf in the db and returns the configuration id."""
-        print("find_or_add_conf")
-
         conf_dict = conf.to_dict()
         conf_dict["weights"] = conf.model.weights
 
-        with self._db.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id FROM conf
-                WHERE spec = :spec
-                AND lr = :lr
-                AND length = :length
-                AND batch = :batch
-                AND steps = :steps
-                """,
-                conf_dict,
-            )
-            rows = cur.fetchall()
+        cur = self._db.cursor()
+        cur.execute(
+            """
+            SELECT id FROM conf
+            WHERE spec = :spec
+            AND lr = :lr
+            AND length = :length
+            AND batch = :batch
+            AND steps = :steps
+            """,
+            conf_dict,
+        )
+        rows = cur.fetchall()
         assert len(rows) <= 1
         if rows:
             return rows[0][0]
         else:
-            with self._db.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO conf (spec, weights, lr, length, batch, steps)
-                    VALUES (:spec, :weights, :lr, :length, :batch, :steps)
-                    """,
-                    conf_dict,
-                )
-                return cur.lastrowid
+            cur = self._db.cursor()
+            cur.execute(
+                """
+                INSERT INTO conf (spec, weights, lr, length, batch, steps)
+                VALUES (:spec, :weights, :lr, :length, :batch, :steps)
+                """,
+                conf_dict,
+            )
+            return cur.lastrowid
     
     def _add_run_execute(self, run_dict: dict, commit: bool):
         with latency.timer("ResultDB.add_run-execute"):

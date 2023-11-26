@@ -19,10 +19,10 @@ from .tokens import set_tokens_dir
 from . import latency
 
 
-def generate_report(result_set, template, min_max_weights, train_time, system: str):
+def generate_report(result_set, template, train_time, system: str):
     print(
         generate_report_by_weight(
-            result_set, template, min_max_weights, train_time, system
+            result_set, template, template.max_weights.min // 2, train_time, system
         )
     )
     print()
@@ -106,7 +106,6 @@ def main(args: argparse.Namespace):
             result_db,
             template,
             default,
-            args.min_max_weights,
             checkpoints_path=None,
             predictor=None,
             # predictor=predictor,
@@ -121,7 +120,6 @@ def main(args: argparse.Namespace):
         generate_report(
             search._result_set,
             template,
-            args.min_max_weights,
             train_time=train_time,
             system=args.system,
         )
@@ -182,16 +180,11 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="range for the number of training steps; lower bound >= 2",
     )
     parser.add_argument(
-        "--max-weights",
-        type=int,
-        default=None,
-        help="max weights. Will vary if left undefined (default: unrestricted)",
-    )
-    parser.add_argument(
-        "--min-max-weights",
-        type=int,
-        default=32,
-        help="minimum max-weights value in search",
+        "-w",
+        "--weights",
+        type=str,
+        default="32-4294967296",
+        help="range for the _maximal_ number of weights in the model",
     )
     parser.add_argument(
         "-t",

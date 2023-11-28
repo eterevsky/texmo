@@ -194,7 +194,7 @@ class Search(object):
         with latency.timer("Search._select_max_weights"):
             top_conf_results = self._result_set.top_conf(t)
             if top_conf_results is None:
-                return self._min_max_weights
+                return self._template.max_weights.min
             maxw = 8 * top_conf_results.conf.model.weights
             if self._template.max_weights.min >= maxw:
                 return self._template.max_weights.min

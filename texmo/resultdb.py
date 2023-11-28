@@ -96,7 +96,7 @@ class ResultDB(object):
         total = cur.fetchone()["count"]
         assert isinstance(total, int)
         return total
-    
+
     def get_confs_runs(self) -> Iterable[tuple[int, Configuration2, Run]]:
         cur = self._db.cursor()
         cur.execute(
@@ -117,7 +117,7 @@ class ResultDB(object):
                    loss_model,
                    checkpoint
             FROM conf, run
-            WHERE conf.id = run.conf_id 
+            WHERE conf.id = run.conf_id
             """
         )
 
@@ -146,12 +146,10 @@ class ResultDB(object):
                 )
 
                 yield conf_id, conf, run
-        
-        print("get_confs_runs finished")
 
 
 class ResultDBSQLite(ResultDB):
-    def __init__(self, path: str):
+    def __init__(self, path: Optional[str] = None):
         if path is None:
             path = ":memory:"
         exists = path != ":memory:" and os.path.exists(path)
@@ -166,7 +164,7 @@ class ResultDBSQLite(ResultDB):
                 db.commit()
 
         super().__init__(db)
- 
+
     def find_or_add_conf(self, conf: Configuration2) -> int:
         """Finds the conf in the db and returns the configuration id."""
         conf_dict = conf.to_dict()
@@ -198,7 +196,7 @@ class ResultDBSQLite(ResultDB):
                 conf_dict,
             )
             return cur.lastrowid
-    
+
     def _add_run_execute(self, run_dict: dict, commit: bool):
         with latency.timer("ResultDB.add_run-execute"):
             self._db.execute(

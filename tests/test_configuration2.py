@@ -9,10 +9,12 @@ from texmo.configuration2 import (
 )
 from texmo.model3 import build_model
 from texmo.tokens import set_tokens_dir
+from texmo.common import INF
 
 
 logging.disable(level=logging.ERROR)
 set_tokens_dir(os.path.join(os.path.dirname(__file__), "../tokens"))
+
 
 class Configuration2Test(TestCase):
     def test_conf_neighbors(self):
@@ -22,6 +24,7 @@ class Configuration2Test(TestCase):
             length=(128, 128),
             batch=(128, 256),
             steps=(256, 256),
+            max_weights=(32, INF),
         )
 
         conf = Configuration2(
@@ -51,6 +54,7 @@ class Configuration2Test(TestCase):
             length=(128, 128),
             batch=(128, 128),
             steps=(256, 256),
+            max_weights=(32, INF),
         )
 
         conf = Configuration2(
@@ -77,6 +81,7 @@ class Configuration2Test(TestCase):
             length=(128, 128),
             batch=(128, 256),
             steps=(256, 256),
+            max_weights=(32, INF),
         )
 
         conf = Configuration2(

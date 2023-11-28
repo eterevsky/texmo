@@ -257,7 +257,7 @@ class Tokenizer(object):
                 l = max_bytes
             else:
                 assert max_tokens is not None
-                l = max_tokens // 2
+                l = max(max_tokens // 2, 1)
 
             end = start + l
             while end < len(data) and 128 <= data[end] < 192:

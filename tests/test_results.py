@@ -6,7 +6,7 @@ import numpy as np
 from texmo.common import INF
 from texmo.configuration2 import Configuration2, Template, conf_neighbors
 from texmo.model3 import build_model
-from texmo.resultdb import ResultDB
+from texmo.resultdb import ResultDBSQLite
 from texmo.results import ResultSet
 from texmo.run import LossTrendBase, Run
 from texmo.tokens import set_tokens_dir
@@ -115,7 +115,7 @@ class ResultSetTest(TestCase):
         self._results._check_consistency()
 
     def test_load_results_db(self):
-        db = ResultDB()
+        db = ResultDBSQLite()
         model = build_model("tokens.2|")
         conf = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=64)
         conf_mod = Configuration2(model=model, lr=0.125, length=32, batch=2, steps=64)
@@ -167,9 +167,9 @@ class ResultSetTest(TestCase):
 
         conf_runs = list(db.get_confs_runs())
         self.assertEqual(len(conf_runs), 5)
-    
+
     def test_median_time(self):
-        db = ResultDB()
+        db = ResultDBSQLite()
         model = build_model("tokens.2|")
         conf1 = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=64)
         conf2 = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=128)
@@ -214,7 +214,7 @@ class ResultSetTest(TestCase):
         self.assertIsNone(results.get_untimed_conf())
 
     def test_init_neighbors(self):
-        db = ResultDB()
+        db = ResultDBSQLite()
         model = build_model("tokens.2|")
         conf1 = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=64)
         run1 = Run(

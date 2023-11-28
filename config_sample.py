@@ -11,6 +11,5 @@ DB = "results/db.sqlite"
 # runs on the current system.
 SYSTEM_NAME = "system"
 
-EXTRA_DB = "results/db-other.sqlite"
 TRAIN_TIMING = "results/train-timing.jsonl"
 SAMPLE_TIMING = "results/sample-timing.jsonl"

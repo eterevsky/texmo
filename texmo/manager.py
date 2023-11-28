@@ -46,7 +46,6 @@ def deserialize_weights(saved_weights):
             elif value is None:
                 pass
             else:
-                print(repr(value))
                 assert False
             weights.append(value)
     else:
@@ -349,13 +348,13 @@ class Manager(object):
         step_start = perf_counter()
 
         while perf_counter() < finish_time and self.step < steps:
-            batch, sample_time = dataset.sample_tokens(
+            batch = dataset.sample_tokens(
                 ntokens=self.conf.length,
                 batch_size=self.conf.batch,
                 token_set_name=self.conf.tokens_name,
             )
 
-            sample_times.append(sample_time)
+            # sample_times.append(sample_time)
 
             # try:
             loss = self.train_step(batch)
@@ -398,7 +397,7 @@ class Manager(object):
                 finish_time = start + time_limit if time_limit else INF
 
         total_time = 0 if start is None else perf_counter() - start
-        return total_time, sample_times, step_times
+        return total_time, step_times
 
     def train_and_eval(
         self,
@@ -412,7 +411,7 @@ class Manager(object):
         quiet=False,
     ) -> tuple[TrainingRecord, Run]:
         try:
-            train_time, sample_times, step_times = self.train(
+            train_time, step_times = self.train(
                 steps,
                 time_limit,
                 train_set,
@@ -420,6 +419,7 @@ class Manager(object):
                 temp_dir,
                 quiet=quiet,
             )
+
             if output_dir is not None:
                 self.save(output_dir)
 

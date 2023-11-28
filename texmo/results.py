@@ -11,7 +11,7 @@ from .common import INF
 from .configuration2 import Configuration2, Template, conf_neighbors
 from .confresults import ConfResults
 from .record import TrainingRecord
-from .resultdb import ResultDB
+from .resultdb import ResultDB, ResultDBSQLite
 from .run import Run
 
 
@@ -35,7 +35,7 @@ class ResultSet(object):
         self._init_db()
 
         if result_db is None:
-            self._result_db = ResultDB()
+            self._result_db = ResultDBSQLite()
         else:
             self._result_db = result_db
             self._import_from_result_db()

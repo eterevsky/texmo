@@ -19,7 +19,7 @@ from .tokens import set_tokens_dir
 from . import latency
 
 
-def generate_report(result_set, template, train_time, system: str):
+def generate_report(result_set, template, train_time, system: str, draw_weight_loss: bool):
     print(
         generate_report_by_weight(
             result_set, template, template.max_weights.min // 2, train_time, system
@@ -46,7 +46,8 @@ def generate_report(result_set, template, train_time, system: str):
     #             result_set, template, lambda conf: conf.batch, is_float=False
     #         )
     #     )
-    draw_weight_loss_graph(result_set, template, train_time)
+    if draw_weight_loss:
+        draw_weight_loss_graph(result_set, template, train_time)
     # draw_loss_by_time(result_set, template)
 
 
@@ -113,7 +114,7 @@ def main(args: argparse.Namespace):
         )
 
         try:
-            search_loop(dataset, search, system=args.system)
+            search_loop(dataset, search, system=args.system, sync_tokens=args.sync_tokens)
         except KeyboardInterrupt:
             logging.warning("Interrupted\n")
 
@@ -122,6 +123,7 @@ def main(args: argparse.Namespace):
             template,
             train_time=train_time,
             system=args.system,
+            draw_weight_loss=args.weight_loss_graph,
         )
         print()
         latency.report()
@@ -232,5 +234,12 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="Load and tokenize training data concurrently with training in a separate thread.",
     )
     parser.set_defaults(sync_tokens=config.SYNC_TOKENS)
+    parser.add_argument(
+        "--no-weight-loss-graph",
+        dest="weight_loss_graph",
+        action="store_false",
+        help="Don't show the weight/loss graph after the search has finished",
+    )
+    parser.set_defaults(weight_loss_graph=True)
 
     parser.set_defaults(func=main)

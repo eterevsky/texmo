@@ -58,7 +58,10 @@ def mem_reader(data: bytes, request_queue: Queue, data_queues: dict[int, Queue])
 
 
 def create_tokens_sample(
-    chunk: bytes, tokenizer: Tokenizer, ntokens: int, start_paragraph: bool
+    chunk: bytes,
+    tokenizer: Tokenizer,
+    ntokens: int,
+    start_paragraph: bool,
 ) -> list[int]:
     if start_paragraph:
         start = chunk.find(b"\n\n")
@@ -74,9 +77,7 @@ def create_tokens_sample(
         end -= 1
     if start >= end:
         return None
-    # print(f"chunk: {chunk[start:end]} max_tokens={ntokens}", file=sys.stderr)
     tokens = tokenizer.tokenize_ids(chunk[start:end], max_tokens=ntokens)
-    # print("finished", file=sys.stderr)
     assert len(tokens) <= ntokens
     if len(tokens) < ntokens:
         return None
@@ -144,7 +145,7 @@ def create_bytes_batch(
         sample = create_bytes_sample(chunk, tokenizer, length, start_paragraph=False)
         if sample is None:
             bytes_size *= 2
-            assert bytes_size < len(sample) * 256
+            assert bytes_size < length * 256
             continue
         samples.append(sample)
         lengths.append(len(sample))

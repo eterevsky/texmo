@@ -54,6 +54,7 @@ def search_loop(
     dataset: DataSet,
     search: Search,
     system: str,
+    sync_tokens: bool,
 ):
     logging.info("Starting search")
     while True:
@@ -66,13 +67,12 @@ def search_loop(
         # # TODO: Train from the checkpoint
         # manager = Manager(conf, weights=weights)
 
-        manager = Manager(conf, system)
+        manager = Manager(conf, system, sync_tokens=sync_tokens, dataset=dataset)
         manager.init(quiet=True)
 
         run, weights = manager.train_and_eval(
             steps=conf.steps,
             time_limit=None,
-            train_set=dataset,
             temp_steps=None,
             temp_dir=None,
             output_dir=None,
@@ -86,7 +86,7 @@ def search_loop(
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
     try:
-        dataset = DataSet(path=args.data)
+        dataset = DataSet(path=args.data, in_process=args.sync_tokens)
         template = Template.from_args(args)
         logging.info(f"Template: {template}")
         default = default_from_template(template, spec=args.default_spec)
@@ -219,5 +219,18 @@ def init_args(parser: argparse.ArgumentParser, config):
         default=config.SYSTEM_NAME,
         help="the name of the system that will be used to identify runs in the DB",
     )
+    parser.add_argument(
+        "--sync-tokens",
+        dest="sync_tokens",
+        action="store_true",
+        help="Load and toknize training data synchronously, before the training start.",
+    )
+    parser.add_argument(
+        "--no-sync-tokens",
+        dest="sync_tokens",
+        action="store_false",
+        help="Load and tokenize training data concurrently with training in a separate thread.",
+    )
+    parser.set_defaults(sync_tokens=config.SYNC_TOKENS)
 
     parser.set_defaults(func=main)

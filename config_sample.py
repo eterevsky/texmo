@@ -13,3 +13,5 @@ SYSTEM_NAME = "system"
 
 TRAIN_TIMING = "results/train-timing.jsonl"
 SAMPLE_TIMING = "results/sample-timing.jsonl"
+
+SYNC_TOKENS = True

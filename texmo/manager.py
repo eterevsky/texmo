@@ -17,7 +17,7 @@ import optax
 from jaxlib.xla_extension import XlaRuntimeError
 
 from . import latency
-from .common import INF, ttoa3
+from .common import INF, ttoa3, itoa3
 from .configuration2 import Configuration2
 from .dataset import DataSet
 
@@ -75,16 +75,22 @@ class Manager(object):
         self,
         conf: Configuration2,
         system: str,
+        dataset: DataSet,
         weights: Optional[Weights] = None,
         test_sample_len: int = 1024,
         test_batch: int = 1024,
         pre_training: Optional[list] = None,
+        sync_tokens: bool = False,
     ):
         self._rng: Rng = Rng()
         assert isinstance(system, str), f"`system` must be a string, got {system}"
         self._system: str = system
         assert isinstance(conf, Configuration2)
         self.conf: Configuration2 = conf
+
+        assert isinstance(dataset, DataSet)
+        self.dataset: DataSet = dataset
+
         if weights is None:
             weights = self.model.init_weights(self._rng, 1.0)
         self.weights: Weights = weights
@@ -98,9 +104,11 @@ class Manager(object):
         self.pre_training: Optional[list] = pre_training
         self.run: Optional[Run] = None
 
-    # def __del__(self):
-    #     # Clear all GPU memory
-    #     release_device_buffers()
+        self.sync_tokens = sync_tokens
+
+        # Full training data, will be initialized in init() if self.sync_tokens
+        # is True.
+        self._training_data: Optional[jax.Array] = None
 
     @property
     def step(self):
@@ -194,6 +202,24 @@ class Manager(object):
         weights[: self.train_from] = self.weights[:-1]
         self.weights = weights
 
+    def _init_training_data(self):
+        with latency.timer("Manager._init_training_data") as timer:
+            self._training_data = jnp.array(
+                self.dataset.sample_tokens(
+                    ntokens=self.conf.length,
+                    batch_size=self.conf.batch * self.conf.steps,
+                    token_set_name=self.conf.tokens_name,
+                )
+            )
+            total_tokens = self.conf.length * self.conf.batch * self.conf.steps
+            total_bytes = round(
+                total_tokens *self.tokenizer.token_set.bytes_per_token
+            )
+            logging.info(
+                f"Prepared {itoa3(total_tokens)}T / {itoa3(total_bytes)}B"
+                + f" of training data in {ttoa3(timer.elapsed)}"
+            )
+
     def init(self, quiet=False, training=True):
         logging.info(f"Conf: {self.conf}")
 
@@ -220,6 +246,8 @@ class Manager(object):
 
             self.opt_state = self.optimizer.init(self.weights[self.train_from :])
             self.run = Run(loss_trend=LossTrend(), system=self._system)
+            if self.sync_tokens:
+                self._init_training_data()
         else:
             self._loss_grad = None
             self.optimizer = None
@@ -274,10 +302,10 @@ class Manager(object):
         logging.info("Can't evaluate the model even with shards 1. Assuming INF loss.")
         return INF
 
-    def eval(self, dataset: DataSet) -> float:
+    def eval(self) -> float:
         """Evaluate a model on a random sample from the training data."""
         with latency.timer("Manager.eval"):
-            batch, lengths = dataset.sample_bytes(
+            batch, lengths = self.dataset.sample_bytes(
                 length=self.test_sample_len,
                 batch_size=self.test_batch,
                 token_set_name=self.tokenizer.token_set.name,
@@ -298,7 +326,9 @@ class Manager(object):
 
         out = []
         while len(out) < l:
-            state, c = self.model.step_sample(self.weights, state, c, self._rng, temperature)
+            state, c = self.model.step_sample(
+                self.weights, state, c, self._rng, temperature
+            )
             out.append(c)
         return out
 
@@ -318,11 +348,25 @@ class Manager(object):
 
         return loss
 
+    def _get_batch(self, ):
+        if not self.sync_tokens:
+            return jnp.array(
+                self.dataset.sample_tokens(
+                    ntokens=self.conf.length,
+                    batch_size=self.conf.batch,
+                    token_set_name=self.conf.tokens_name,
+                )
+            )
+        assert self._training_data is not None
+        start = self.step * self.conf.batch
+        finish = start + self.conf.batch
+        assert finish <= self._training_data.shape[0]
+        return self._training_data[start:finish, :]
+
     def train(
         self,
         steps: Optional[int],
         time_limit: Optional[float],
-        dataset: DataSet,
         temp_steps=None,
         temp_dir=None,
         quiet=False,
@@ -348,13 +392,7 @@ class Manager(object):
         step_start = perf_counter()
 
         while perf_counter() < finish_time and self.step < steps:
-            batch = dataset.sample_tokens(
-                ntokens=self.conf.length,
-                batch_size=self.conf.batch,
-                token_set_name=self.conf.tokens_name,
-            )
-
-            # sample_times.append(sample_time)
+            batch = self._get_batch()
 
             # try:
             loss = self.train_step(batch)
@@ -403,7 +441,6 @@ class Manager(object):
         self,
         steps: Optional[int],
         time_limit: Optional[float],
-        train_set,
         temp_steps,
         temp_dir,
         output_dir,
@@ -414,7 +451,6 @@ class Manager(object):
             train_time, step_times = self.train(
                 steps,
                 time_limit,
-                train_set,
                 temp_steps,
                 temp_dir,
                 quiet=quiet,
@@ -423,7 +459,7 @@ class Manager(object):
             if output_dir is not None:
                 self.save(output_dir)
 
-            eval_loss = self.eval(train_set)
+            eval_loss = self.eval()
             if math.isnan(eval_loss):
                 eval_loss = INF
         except TrainingDiverged:
@@ -434,11 +470,15 @@ class Manager(object):
 
         # step_time = train_time / (len(step_times) - 1)
 
-        logging.info(f"{self.conf}:  loss {eval_loss:.4f} b/byte  T = {ttoa3(train_time)}")
+        logging.info(
+            f"{self.conf}:  loss {eval_loss:.4f} b/byte  T = {ttoa3(train_time)}"
+        )
 
         return (self.run, self.weights)
 
-    def continue_prefix(self, prefix: str, length: int, temperature: float) -> str | bytes:
+    def continue_prefix(
+        self, prefix: str, length: int, temperature: float
+    ) -> str | bytes:
         prefix_bytes: bytes = prefix.encode()  # convert str to bytes
         prefix_tokens = [t.id for t in self.tokenizer.tokenize(prefix_bytes)]
 

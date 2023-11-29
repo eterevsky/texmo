@@ -25,6 +25,11 @@ def is_power2_int(x):
     return isinstance(x, int) and x >= 1 and x & (x - 1) == 0
 
 
+def ceil_power2(x: float) -> int:
+    """Returns a closer power of 2 that is greater than or equal to x."""
+    return 2 ** math.ceil(math.log2(x))
+
+
 def total_size(shape):
     prod = 1
     for dim in shape:
@@ -53,7 +58,7 @@ def itoa3(x: int) -> str:
     for i in range(1, len(_BASES) - 1):
         if x >= _BASES[i][0] and x < _BASES[i + 1][0]:
             break
-    
+
     base, suffix = _BASES[i]
     prev_base, prev_suffix = _BASES[i - 1]
 

@@ -15,6 +15,7 @@ import numpy as np
 
 from . import latency
 from .tokens import Tokenizer, TokenSet, get_tokenizer, set_tokens_dir
+from .common import ceil_power2
 
 
 def file_reader(filename: str, request_queue: Queue, data_queues: dict[int, Queue]):
@@ -135,12 +136,16 @@ def create_bytes_batch(
 ) -> tuple[np.array, list[int]]:
     lengths = []
     samples = []
-    bytes_size = length
+    bytes_size = ceil_power2(length + 16)
     while len(samples) < batch:
         assert bytes_size is not None
         reader_request_queue.put(bytes_size)
         chunk = reader_data_queues[bytes_size].get()
         sample = create_bytes_sample(chunk, tokenizer, length, start_paragraph=False)
+        if sample is None:
+            bytes_size *= 2
+            assert bytes_size < len(sample) * 256
+            continue
         samples.append(sample)
         lengths.append(len(sample))
 

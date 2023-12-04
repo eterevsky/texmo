@@ -3,7 +3,7 @@ from math import sqrt
 import jax
 import jax.numpy as jnp
 
-from ..common import is_power2_int, power2_neighbors
+from ..common import is_power2_int, power2_neighbors, INF
 from ..layer import Layer, LayerState, LayerWeights
 from .registry import layer_cls
 
@@ -84,15 +84,23 @@ class Attention(Layer):
         }
 
         if self.multi_key:
-            weights["wkey"] = rng.he((self.heads, self._comp_size, self.input_size)) * init_scale,
+            weights["wkey"] = rng.he((self.heads, self._comp_size, self.input_size)) * init_scale
         else:
-            weights["wkey"] = rng.he((self._comp_size, self.input_size)) * init_scale,
+            weights["wkey"] = rng.he((self._comp_size, self.input_size)) * init_scale
+
+        return weights
 
     def init_state(self, _weights) -> LayerState:
-        return {
-            "keys": jnp.zeros((self.heads, self.length - 1, self._comp_size)),
-            "values": jnp.zeros((self.heads, self.length - 1, self._comp_size)),
-        }
+        if self.multi_key:
+            return {
+                "keys": None,
+                "values": None,
+            }
+        else:
+            return {
+                "keys": None,
+                "values": None,
+            }
 
     def step(
         self, weights: LayerWeights, state: LayerState, input: jnp.ndarray
@@ -100,37 +108,50 @@ class Attention(Layer):
         input = input.flatten()
 
         key = jnp.dot(weights["wkey"], input)
-        value = jnp.dot(weights["wvalue"], input)
+        value = jnp.dot(weights["wvalue"], input).reshape((self.heads, 1, self._comp_size))
         query = jnp.dot(weights["wquery"], input)
 
-        values = jnp.concatenate(
-            (state["values"], value.reshape((self.heads, 1, -1))), axis=1
-        )
+        if state["values"] is not None:
+            values = jnp.concatenate((state["values"], value), axis=1)
+        else:
+            values = value
 
         if self.multi_key:
-            keys = jnp.concatenate(
-                (state["keys"], key.reshape((self.heads, 1, -1))), axis=1
-            )
+            key = key.reshape((self.heads, 1, self._comp_size))
+            if state["keys"] is not None:
+                keys = jnp.concatenate((state["keys"], key), axis=1)
+            else:
+                keys = key
             # h = head, v = input vector dimension, p = position
-            scores = self._score_scale * jnp.einsum(
-                "hv,hpv->hp", query, keys
-            )
+            scores = jnp.einsum("hv,hpv->hp", query, keys)
         else:
-            keys = jnp.concatenate(
-                (state["keys"], key.reshape((1, -1))), axis=0
-            )
-            scores = self._score_scale * jnp.einsum(
-                "v,hpv->hp", query, keys
-            )
+            key = key.reshape((1, self._comp_size))
+            if state["keys"] is not None:
+                keys = jnp.concatenate((state["keys"], key), axis=0)
+            else:
+                keys = key
+            scores = jnp.einsum("hv,pv->hp", query, keys)
 
-        weight = jax.nn.softmax(scores)  # head,position -> weight
+        weight = jax.nn.softmax(self._score_scale * scores)  # head,position -> weight
         # softmax by default is calculated by the last dim
 
         attn_value = jnp.einsum("hp,hpv->hv", weight, values)
         attn_value = attn_value.flatten()
 
-        next_keys = keys[:, 1:, :]
-        next_values = values[:, 1:, :]
+        if self.multi_key:
+            if keys.shape[1] >= self.length:
+                next_keys = keys[:, 1:, :]
+            else:
+                next_keys = keys
+        else:
+            if keys.shape[0] >= self.length:
+                next_keys = keys[1:, :]
+            else:
+                next_keys = keys
+        if values.shape[1] >= self.length:
+            next_values = values[:, 1:, :]
+        else:
+            next_values = values
         return {"keys": next_keys, "values": next_values}, attn_value
 
     def _get_mask(self, input_length: int) -> jax.Array:
@@ -142,8 +163,11 @@ class Attention(Layer):
             row = []
             mask.append(row)
             for q in range(input_length):
-                row.append(q <= p and p - q < self.length)
-        mask = jnp.array(mask, dtype=jnp.bool_)
+                if q <= p and p - q < self.length:
+                    row.append(INF)
+                else:
+                    row.append(-INF)
+        mask = jnp.array(mask).reshape((1, input_length, 1, input_length))
         self._masks[input_length] = mask
         return mask
 
@@ -158,18 +182,20 @@ class Attention(Layer):
         """
         mask = self._get_mask(input.shape[1])
 
-        values = jnp.einsum("hoi,bpi->bhpo", weights["wvalue"], input)
-        queries = jnp.einsum("hoi,bpi->bhpo", weights["wquery"], input)
+        values = jnp.einsum("hoi,bpi->bpho", weights["wvalue"], input)
+        queries = jnp.einsum("hoi,bpi->bpho", weights["wquery"], input)
 
         if self.multi_key:
-            keys = jnp.einsum("hoi,bpi->bhpo", weights["wkey"], input)
-            scores = jnp.einsum("bhpv,bhqv,pq->bhpq", queries, keys, mask)
+            keys = jnp.einsum("hoi,bpi->bpho", weights["wkey"], input)
+            scores = jnp.einsum("bphv,bqhv->bphq", queries, keys)
         else:
-            keys = jnp.einsum("oi,bpi->bpo", weights["key"], input)
-            scores = jnp.einsum("bpv,bhqv,pq->bhpq", queries, keys, mask)
+            assert weights["wkey"] is not None
+            keys = jnp.einsum("oi,bpi->bpo", weights["wkey"], input)
+            scores = jnp.einsum("bphv,bqv->bphq", queries, keys)
 
-        weight = jax.nn.softmax(scores)
-        attn_value = jnp.einsum("bhpq,bhqv->bphv", weight, values)
+        scores = jnp.minimum(scores, mask)
+        weight = jax.nn.softmax(self._score_scale * scores)
+        attn_value = jnp.einsum("bphq,bqhv->bphv", weight, values)
 
         return attn_value.reshape(input.shape[0], input.shape[1], -1)
 

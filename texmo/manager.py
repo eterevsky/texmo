@@ -312,7 +312,7 @@ class Manager(object):
             )
             return self._eval(batch, lengths)
 
-    def sample(self, prefix, l, temperature=0.05):
+    def sample_(self, prefix, l, temperature=0.05):
         """Sample from the distribution to continue the given prefix."""
         self._rng = Rng()
         prefix = jnp.array(list(prefix))
@@ -331,6 +331,23 @@ class Manager(object):
             )
             out.append(c)
         return out
+
+    def sample(self, prefix, l, temperature=0.05):
+        """Sample from the distribution to continue the given prefix."""
+        self._rng = Rng()
+        state = self.model.init_state(self.weights)
+        for c in prefix[:-1]:
+            state, _ = self.model.step(self.weights, state, c)
+
+        c = prefix[-1]
+        out = []
+        while len(out) < l:
+            state, c = self.model.step_sample(
+                self.weights, state, c, self._rng, temperature
+            )
+            out.append(c)
+        return out
+
 
     def train_step(self, xs):
         trainable_weights = self.weights[self.train_from :]

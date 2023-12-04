@@ -287,15 +287,20 @@ class ResultSet(object):
         )
 
     def get_results_by_time(self, max_weights: int):
-        return sorted(
-            (
-                cr
-                for cr in self._conf_results_by_id.values()
-                if cr.conf.model.weights <= max_weights
-                and cr.median_time(self._system) is not None
-            ),
-            key=lambda cr: cr.median_time(self._system),
-        )
+            cur = self._db.execute(
+                """
+                SELECT id
+                FROM conf
+                WHERE median_score IS NOT NULL
+                  AND median_time IS NOT NULL
+                  AND weights <= :max_weights
+                  AND matches_template
+                ORDER BY median_time
+                """,
+                {"max_weights": max_weights},
+            )
+            for row in cur:
+                yield self._conf_results_by_id[row[0]]
 
     # def train_test_split(self) -> tuple:
     #     train_set = ResultSet(

@@ -223,7 +223,7 @@ def generate_report_by_weight(
     train_time: tuple[float, float],
     system: str,
 ) -> str:
-    max_weights = 64
+    max_weights = 32
     while True:
         print("\nW ≤", max_weights)
         current_best = None

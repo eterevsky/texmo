@@ -1,3 +1,4 @@
+import argparse
 import logging
 import math
 from datetime import datetime
@@ -14,6 +15,7 @@ from .common import INF
 from .configuration2 import Configuration2
 from .model3 import build_model
 from .run import Run
+from .tokens import set_tokens_dir
 
 
 def _pack_ndarray(step_loss):
@@ -51,6 +53,9 @@ class ResultDB(object):
 
     def __init__(self, db):
         self._db = db
+
+    def commit(self):
+        self._db.commit()
 
     def find_or_add_conf(self, conf: Configuration2) -> int:
         raise NotImplementedError()
@@ -97,7 +102,7 @@ class ResultDB(object):
         assert isinstance(total, int)
         return total
 
-    def get_confs_runs(self) -> Iterable[tuple[int, Configuration2, Run]]:
+    def get_confs_runs(self, with_timestamps: bool = False) -> Iterable[tuple[int, Configuration2, Run]]:
         cur = self._db.cursor()
         cur.execute(
             """
@@ -145,7 +150,14 @@ class ResultDB(object):
                     system=row[7],
                 )
 
-                yield conf_id, conf, run
+                if with_timestamps:
+                    if row[9] is None:
+                        timestamp = None
+                    else:
+                        timestamp = datetime.fromisoformat(row[9])
+                    yield conf_id, conf, run, timestamp
+                else:
+                    yield conf_id, conf, run
 
 
 class ResultDBSQLite(ResultDB):
@@ -276,3 +288,40 @@ class ResultDBPostgres(ResultDB):
         if commit:
             with latency.timer("ResultDB.add_run-commit"):
                 self._db.commit()
+
+
+def importdb(args: argparse.Namespace):
+    set_tokens_dir(args.tokens_dir)
+    db_from = ResultDB.from_args(args.db_from)
+    db_into = ResultDB.from_args(args.db_into)
+
+    for _, conf, run, timestamp in db_from.get_confs_runs(with_timestamps=True):
+        print(conf, run.loss, timestamp)
+        db_into.add_run(conf, run, timestamp=timestamp, commit=False)
+
+    db_into.commit()
+
+
+def importdb_init_args(parser: argparse.ArgumentParser, config):
+    parser.add_argument(
+        "--tokens-dir",
+        type=str,
+        default=config.TOKENS_DIR,
+        help="directory with token sets",
+    )
+
+    parser.add_argument(
+        "--db-from",
+        type=str,
+        required=True,
+        help="path to the database that will be imported",
+    )
+
+    parser.add_argument(
+        "--db-into",
+        type=str,
+        default=config.DB,
+        help="databased to which the results will be copied",
+    )
+
+    parser.set_defaults(func=importdb)

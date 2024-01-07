@@ -205,5 +205,5 @@ class Layer(object):
                 state, out = self.step(weights, state, input)
                 sample_out.append(out)
             outputs.append(sample_out)
-        return outputs
+        return jnp.array(outputs)
 

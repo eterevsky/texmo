@@ -63,15 +63,16 @@ class Attention(Layer):
             yield f"att.{self.length}.{self.heads}.{self.size}"
         else:
             yield f"att.{self.length}.{self.heads}.{self.size}.mk"
+        suffix = ".mk" if self.multi_key else ""
         for l in power2_neighbors(self.length):
             if l >= 2:
-                yield f"attn.{l}.{self.heads}.{self.size}"
+                yield f"att.{l}.{self.heads}.{self.size}{suffix}"
         for l in power2_neighbors(self.heads):
             if self.size % l == 0 and self.size >= l:
-                yield f"attn.{self.length}.{l}.{self.size}"
+                yield f"att.{self.length}.{l}.{self.size}{suffix}"
         for l in power2_neighbors(self.size):
             if l % self.heads == 0 and l >= self.heads:
-                yield f"attn.{self.length}.{self.heads}.{l}"
+                yield f"att.{self.length}.{self.heads}.{l}{suffix}"
 
     @property
     def weights(self) -> int:
@@ -106,11 +107,19 @@ class Attention(Layer):
                 "keys": None,
                 "values": None,
             }
+            # return {
+            #     "keys": jnp.zeros((self.heads, self.length, self._comp_size)),
+            #     "values": jnp.zeros((self.heads, self.length, self._comp_size)),
+            # }
         else:
             return {
                 "keys": None,
                 "values": None,
             }
+            # return {
+            #     "keys": jnp.zeros((self.length, self._comp_size)),
+            #     "values": jnp.zeros((self.heads, self.length, self._comp_size)),
+            # }
 
     def step(
         self, weights: LayerWeights, state: LayerState, input: jnp.ndarray
@@ -193,9 +202,7 @@ class Attention(Layer):
         Returns:
             a batch with dimensions (batch_size, sample_len, output_shape)
         """
-        print(input.shape)
         mask = self._get_mask(input.shape[1])
-        print(mask)
 
         values = jnp.einsum("hoi,bpi->bpho", weights["wvalue"], input)
         queries = jnp.einsum("hoi,bpi->bpho", weights["wquery"], input)
@@ -208,11 +215,7 @@ class Attention(Layer):
             keys = jnp.einsum("oi,bpi->bpo", weights["wkey"], input)
             scores = jnp.einsum("bphv,bqv->bphq", queries, keys)
 
-        print(scores)
-        print(mask)
-
         scores = jnp.minimum(scores, mask)
-        print(scores)
 
         weight = jax.nn.softmax(self._score_scale * scores)
         attn_value = jnp.einsum("bphq,bqhv->bphv", weight, values)
@@ -229,15 +232,17 @@ class Attention(Layer):
         Returns:
             a batch with dimensions (batch_size, sample_len, output_shape)
         """
+        slice_len = min(input.shape[1], self.length)
+        # if input.shape[1] % slice_len != 0:
+        #     return self._forward_batch_from_step_manual(weights, input)
+
         values = jnp.einsum("hoi,bpi->bpho", weights["wvalue"], input)
         queries = jnp.einsum("hoi,bpi->bpho", weights["wquery"], input)
+
         if self.multi_key:
             keys = jnp.einsum("hoi,bpi->bpho", weights["wkey"], input)
         else:
             keys = jnp.einsum("oi,bpi->bpo", weights["wkey"], input)
-
-        slice_len = min(input.shape[1], self.length)
-        assert input.shape[1] % slice_len == 0
 
         if self.multi_key:
             init_scores = jnp.einsum(
@@ -266,9 +271,18 @@ class Attention(Layer):
 
         for slice_from in range(slice_len, input.shape[1], slice_len):
             lo = slice_from - slice_len
-            hi = slice_from + slice_len
-            assert hi <= input.shape[1]
             mid = slice_from
+            hi = min(slice_from + slice_len, input.shape[1])
+
+            if hi - lo != 2 * slice_len:
+                mask = jnp.tril(jnp.transpose(
+                    jnp.tri(hi - lo, hi - mid, -1)),
+                    slice_len)
+               
+                mask = mask.reshape((1, hi - mid, 1, hi - lo))
+
+            assert hi <= input.shape[1]
+
             if self.multi_key:
                 scores = jnp.einsum(
                     "bphv,bqhv->bphq",
@@ -289,5 +303,5 @@ class Attention(Layer):
             )
 
             attn.append(attn_value)
-        
+
         return jnp.concatenate(attn, axis=1).reshape(input.shape[0], input.shape[1], -1)

@@ -111,7 +111,7 @@ class AttTest(TestCase):
         np.testing.assert_array_almost_equal(out_fb, out_step)
 
     def test_forward_batch2(self):
-        layer = Attention(length=4, heads=2, size=4, mk=False, input_shape=(3,))
+        layer = Attention(length=2, heads=2, size=4, mk=False, input_shape=(3,))
 
         weights = {
             "wvalue": jnp.array(
@@ -135,6 +135,57 @@ class AttTest(TestCase):
         out_step = layer._forward_batch_from_step_manual(weights, input)
         np.testing.assert_array_almost_equal(out_fb, out_step)
 
+    def test_forward_batch3(self):
+        layer = Attention(length=2, heads=2, size=4, mk=False, input_shape=(3,))
+
+        weights = {
+            "wvalue": jnp.array(
+                [
+                    [[1, 0, 0], [0, 1, 0]],
+                    [[0, 1, 0], [0, 0, 1]],
+                ]
+            ),
+            "wquery": jnp.array(
+                [
+                    [[0, 1, 0], [1, 0, 0]],
+                    [[0, 0, 1], [0, 1, 0]],
+                ]
+            ),
+            "wkey": jnp.array([[0, 1, 0], [1, 0, 0]]),
+        }
+
+        input = jnp.array([[[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]]])
+
+        out_fb = layer.forward_batch(weights, input)
+        out_step = layer._forward_batch_from_step_manual(weights, input)
+        np.testing.assert_array_almost_equal(out_fb, out_step)
+
+    def test_forward_batch4(self):
+        layer = Attention(length=2, heads=2, size=4, mk=False, input_shape=(3,))
+
+        weights = {
+            "wvalue": jnp.array(
+                [
+                    [[1, 0, 0], [0, 1, 0]],
+                    [[0, 1, 0], [0, 0, 1]],
+                ]
+            ),
+            "wquery": jnp.array(
+                [
+                    [[0, 1, 0], [1, 0, 0]],
+                    [[0, 0, 1], [0, 1, 0]],
+                ]
+            ),
+            "wkey": jnp.array([[0, 1, 0], [1, 0, 0]]),
+        }
+
+        input = jnp.array([[[0.1, 0.2, 0.3], [0.4, 0.5, 0.6],
+                            [0.7, 0.8, 0.9], [-0.1, -0.2, -0.3],
+                            [-0.4, -0.5, -0.6], [-0.7, -0.8, -0.9]]])
+
+        out_fb = layer.forward_batch(weights, input)
+        out_step = layer._forward_batch_from_step_manual(weights, input)
+        np.testing.assert_array_almost_equal(out_fb, out_step)
 
     def test_forward_batch_short(self):
         layer = Attention(length=4, heads=2, size=4, mk=False, input_shape=(3,))

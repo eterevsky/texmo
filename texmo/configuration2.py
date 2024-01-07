@@ -194,7 +194,7 @@ class Template(object):
 
     def __str__(self):
         return (f"Template({self.regex}, lr={self.lr}, length={self.length}, " +
-               f"batch={self.batch}, steps={self.steps}, max_weights={self.max_weights.max})")
+               f"batch={self.batch}, steps={self.steps}, max_weights={self.max_weights})")
 
     def match_model(self, model: Model3) -> bool:
         if model.weights > self.max_weights.max:

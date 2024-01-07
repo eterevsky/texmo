@@ -7,11 +7,14 @@ from ..common import is_power2_int, power2_neighbors, INF
 from ..layer import Layer, LayerState, LayerWeights
 from .registry import layer_cls
 
+
 @layer_cls
 class Attention(Layer):
     name = "att"
 
-    def __init__(self, length: int, heads: int, size: int, mk: bool = False, input_shape=None):
+    def __init__(
+        self, length: int, heads: int, size: int, mk: bool = False, input_shape=None
+    ):
         """Create a multi-headed attention layer.
 
         Args:
@@ -75,16 +78,23 @@ class Attention(Layer):
         if self.multi_key:
             return 3 * self.heads * self._comp_size * self.input_size
         else:
-            return 2 * self.heads * self._comp_size * self.input_size + self._comp_size * self.input_size
+            return (
+                2 * self.heads * self._comp_size * self.input_size
+                + self._comp_size * self.input_size
+            )
 
     def init_weights(self, rng, init_scale) -> None:
         weights = {
-            "wvalue": rng.he((self.heads, self._comp_size, self.input_size)) * init_scale,
-            "wquery": rng.he((self.heads, self._comp_size, self.input_size)) * init_scale,
+            "wvalue": rng.he((self.heads, self._comp_size, self.input_size))
+            * init_scale,
+            "wquery": rng.he((self.heads, self._comp_size, self.input_size))
+            * init_scale,
         }
 
         if self.multi_key:
-            weights["wkey"] = rng.he((self.heads, self._comp_size, self.input_size)) * init_scale
+            weights["wkey"] = (
+                rng.he((self.heads, self._comp_size, self.input_size)) * init_scale
+            )
         else:
             weights["wkey"] = rng.he((self._comp_size, self.input_size)) * init_scale
 
@@ -108,7 +118,9 @@ class Attention(Layer):
         input = input.flatten()
 
         key = jnp.dot(weights["wkey"], input)
-        value = jnp.dot(weights["wvalue"], input).reshape((self.heads, 1, self._comp_size))
+        value = jnp.dot(weights["wvalue"], input).reshape(
+            (self.heads, 1, self._comp_size)
+        )
         query = jnp.dot(weights["wquery"], input)
 
         if state["values"] is not None:
@@ -171,16 +183,19 @@ class Attention(Layer):
         self._masks[input_length] = mask
         return mask
 
-    def forward_batch(self, weights: LayerWeights, input: jax.Array) -> jax.Array:
+    def forward_batch_short(self, weights: LayerWeights, input: jax.Array) -> jax.Array:
         """
         Args:
             weights: a single set of weights
-            inputs: a batch of inputs with dimensions (batch_size, sample_len, input_shape)
+            inputs: a batch of inputs with dimensions
+                (batch_size, sample_len, input_shape)
 
         Returns:
             a batch with dimensions (batch_size, sample_len, output_shape)
         """
+        print(input.shape)
         mask = self._get_mask(input.shape[1])
+        print(mask)
 
         values = jnp.einsum("hoi,bpi->bpho", weights["wvalue"], input)
         queries = jnp.einsum("hoi,bpi->bpho", weights["wquery"], input)
@@ -193,10 +208,86 @@ class Attention(Layer):
             keys = jnp.einsum("oi,bpi->bpo", weights["wkey"], input)
             scores = jnp.einsum("bphv,bqv->bphq", queries, keys)
 
+        print(scores)
+        print(mask)
+
         scores = jnp.minimum(scores, mask)
+        print(scores)
+
         weight = jax.nn.softmax(self._score_scale * scores)
         attn_value = jnp.einsum("bphq,bqhv->bphv", weight, values)
 
         return attn_value.reshape(input.shape[0], input.shape[1], -1)
 
+    def forward_batch(self, weights: LayerWeights, input: jax.Array) -> jax.Array:
+        """
+        Args:
+            weights: a single set of weights
+            inputs: a batch of inputs with dimensions
+                (batch_size, sample_len, input_shape)
 
+        Returns:
+            a batch with dimensions (batch_size, sample_len, output_shape)
+        """
+        values = jnp.einsum("hoi,bpi->bpho", weights["wvalue"], input)
+        queries = jnp.einsum("hoi,bpi->bpho", weights["wquery"], input)
+        if self.multi_key:
+            keys = jnp.einsum("hoi,bpi->bpho", weights["wkey"], input)
+        else:
+            keys = jnp.einsum("oi,bpi->bpo", weights["wkey"], input)
+
+        slice_len = min(input.shape[1], self.length)
+        assert input.shape[1] % slice_len == 0
+
+        if self.multi_key:
+            init_scores = jnp.einsum(
+                "bphv,bqhv->bphq",
+                queries[:, :slice_len, :, :],
+                keys[:, :slice_len, :, :],
+            )
+        else:
+            init_scores = jnp.einsum(
+                "bphv,bqv->bphq", queries[:, :slice_len, :, :], keys[:, :slice_len, :]
+            )
+
+        init_mask = jnp.tri(slice_len, slice_len)
+        mask_reshaped = init_mask.reshape((1, slice_len, 1, slice_len))
+        init_scores = jnp.where(mask_reshaped, init_scores, -INF)
+
+        init_weight = jax.nn.softmax(self._score_scale * init_scores)
+        attn_value = jnp.einsum(
+            "bphq,bqhv->bphv", init_weight, values[:, :slice_len, :, :]
+        )
+
+        attn = [attn_value]
+
+        mask = jnp.tril(jnp.transpose(jnp.tri(2 * slice_len, slice_len, -1)), slice_len)
+        mask = mask.reshape((1, slice_len, 1, 2*slice_len))
+
+        for slice_from in range(slice_len, input.shape[1], slice_len):
+            lo = slice_from - slice_len
+            hi = slice_from + slice_len
+            assert hi <= input.shape[1]
+            mid = slice_from
+            if self.multi_key:
+                scores = jnp.einsum(
+                    "bphv,bqhv->bphq",
+                    queries[:, mid:hi, :, :],
+                    keys[:, lo:hi, :, :],
+                )
+            else:
+                scores = jnp.einsum(
+                    "bphv,bqv->bphq",
+                    queries[:, mid:hi, :, :],
+                    keys[:, lo:hi, :],
+                )
+
+            scores = jnp.where(mask, scores, -INF)
+            weights = jax.nn.softmax(self._score_scale * scores)
+            attn_value = jnp.einsum(
+                "bphq,bqhv->bphv", weights, values[:, lo:hi, :, :]
+            )
+
+            attn.append(attn_value)
+        
+        return jnp.concatenate(attn, axis=1).reshape(input.shape[0], input.shape[1], -1)

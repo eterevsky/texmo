@@ -20,11 +20,7 @@ from . import latency
 
 
 def generate_report(result_set, template, train_time, system: str, draw_weight_loss: bool):
-    print(
-        generate_report_by_weight(
-            result_set, template, template.max_weights.min // 2, train_time, system
-        )
-    )
+    print(generate_report_by_weight(result_set, template, system))
     print()
     print(generate_max_report(result_set, template, train_time))
     # print("\nLearning Rate")

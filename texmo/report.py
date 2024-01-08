@@ -216,7 +216,40 @@ def print_top_confs(top_confs, run_count) -> str:
 #     return print_top_confs(top_confs, run_count)
 
 
-def generate_report_by_weight(
+def generate_report_by_weight(result_set: ResultSet, template: Template, system: str) -> str:
+    out = StringIO()
+    best_loss = INF
+    prev_best = None
+    for conf_results in result_set.get_results_by_weights():
+        if prev_best is not None and conf_results.conf.model.weights > prev_best.conf.model.weights:
+            t = prev_best.median_time(system)
+            if t:
+                t = ttoa3(t)
+            else:
+                t = "?"
+            print(f"{prev_best.median_score:.4f}  {t}  {prev_best.conf}", file=out)
+            prev_best = None
+
+        if (conf_results.median_score is None or
+            conf_results.median_score > best_loss or
+            not template.match(conf_results.conf)):
+            continue
+
+        prev_best = conf_results
+        best_loss = conf_results.median_score
+
+    if prev_best is not None:
+        t = prev_best.median_time(system)
+        if t:
+            t = ttoa3(t)
+        else:
+            t = "?"
+        print(f"{prev_best.median_score:.4f}  {t}  {prev_best.conf}", file=out)
+
+    return out.getvalue()
+
+
+def generate_report_by_weight_(
     result_set: ResultSet,
     template: Template,
     min_max_weights: int,

@@ -33,7 +33,7 @@ class Attention(Layer):
         self.heads = heads
         assert type(size) is int
         assert size >= 1
-        assert size % heads == 0
+        assert size % heads == 0, f"length = {length}, heads = {heads}, size = {size}"
         self.size = size
 
         self.multi_key: bool = mk
@@ -57,7 +57,7 @@ class Attention(Layer):
         )
 
     def neighbors(self):
-        if self.heads == 4 and self.size == self.input_size:
+        if self.heads == 4 and self.size == self.input_size and not self.multi_key:
             yield f"suffix.{self.length}"
         if self.multi_key:
             yield f"att.{self.length}.{self.heads}.{self.size}"
@@ -278,7 +278,7 @@ class Attention(Layer):
                 mask = jnp.tril(jnp.transpose(
                     jnp.tri(hi - lo, hi - mid, -1)),
                     slice_len)
-               
+
                 mask = mask.reshape((1, hi - mid, 1, hi - lo))
 
             assert hi <= input.shape[1]

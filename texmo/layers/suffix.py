@@ -33,8 +33,8 @@ class Suffix(Layer):
             yield f"suffix.{l}"
         l = self.length * 2
         yield f"suffix.{l}"
-        input_size = max(8, self.input_size)
-        yield f"attn.{self.length}.4.{input_size}"
+        if self.input_size >= 4 and is_power2_int(self.input_size):
+            yield f"att.{self.length}.4.{self.input_size}"
 
     def init_weights(self, _rng: Rng, _init_scale: float = 1.0) -> LayerWeights:
         return None
@@ -68,5 +68,5 @@ class Suffix(Layer):
         slices = []
         for offset in range(self.length):
             slices.append(padded_input[:, offset : input_len - self.length + offset + 1])
-        
+
         return jnp.stack(slices, axis=2)

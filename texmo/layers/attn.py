@@ -49,8 +49,7 @@ class Attn(Layer):
         )
 
     def neighbors(self):
-        if self.heads == 4 and self.size == self.input_size:
-            yield f"suffix.{self.length}"
+        yield f"att.{self.length}.{self.heads}.{self.size}.mk"
         yield f"attnmq.{self.length}.{self.heads}.{self.size}"
         for l in power2_neighbors(self.length):
             if l >= 2:
@@ -202,9 +201,8 @@ class AttnMQ(Layer):
         )
 
     def neighbors(self):
-        if self.heads == 4 and self.size == self.input_size:
-            yield f"suffix.{self.length}"
         yield f"attn.{self.length}.{self.heads}.{self.size}"
+        yield f"att.{self.length}.{self.heads}.{self.size}"
         for l in power2_neighbors(self.length):
             if l >= 2:
                 yield f"attnmq.{l}.{self.heads}.{self.size}"

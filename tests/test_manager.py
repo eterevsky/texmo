@@ -19,12 +19,12 @@ class ManagerTest(TestCase):
             batch=8,
             steps=128,
         )
-        manager = Manager(conf, system="test")
+        manager = Manager(conf, system="test", dataset=dataset)
         manager.init()
 
-        manager.train(steps=None, time_limit=None, dataset=dataset, quiet=False)
+        manager.train(steps=None, time_limit=None, quiet=False)
 
-        loss = manager.eval(dataset)
+        loss = manager.eval()
         self.assertLess(loss, 2)
 
         s = manager.continue_prefix("abac", 2, temperature=0.01)

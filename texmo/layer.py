@@ -179,8 +179,8 @@ class Layer(object):
     use_step_batch = False
 
     def forward_batch(
-        self, weights: LayerWeights, inputs: jnp.ndarray
-    ) -> jnp.ndarray:
+        self, weights: LayerWeights, inputs: jax.Array
+    ) -> jax.Array:
         """Make a forward pass on a batch of inputs.
 
         Args:
@@ -195,3 +195,15 @@ class Layer(object):
             return self._forward_batch_from_step(weights, inputs)
         else:
             return self._forward_batch_from_forward(weights, inputs)
+
+    def _forward_batch_from_step_manual(self, weights: LayerWeights, inputs: jax.Array) -> jax.Array:
+        outputs = []
+        for sample in inputs:
+            sample_out = []
+            state = self.init_state(weights)
+            for input in sample:
+                state, out = self.step(weights, state, input)
+                sample_out.append(out)
+            outputs.append(sample_out)
+        return jnp.array(outputs)
+

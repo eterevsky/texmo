@@ -171,14 +171,14 @@ class Template(object):
         length: Limits,
         batch: Limits,
         steps: Limits,
-        max_weights: Optional[int] = None,
+        max_weights: Limits,
     ):
         self.regex = re.compile(spec_regex) if spec_regex else None
         self.lr = Bounds(lr, 0)
         self.length = Bounds(length, 1)
         self.batch = Bounds(batch, 1)
         self.steps = Bounds(steps, 2)
-        self.max_weights = max_weights or INF
+        self.max_weights = Bounds(max_weights, 16)
         self._conf_neighbors_cache = {}
 
     @staticmethod
@@ -189,7 +189,7 @@ class Template(object):
             length=_parse_interval(args.length, int),
             batch=_parse_interval(args.batch, int),
             steps=_parse_interval(args.steps, int),
-            max_weights=args.max_weights,
+            max_weights=_parse_interval(args.weights, int),
         )
 
     def __str__(self):
@@ -197,7 +197,7 @@ class Template(object):
                f"batch={self.batch}, steps={self.steps}, max_weights={self.max_weights})")
 
     def match_model(self, model: Model3) -> bool:
-        if model.weights > self.max_weights:
+        if model.weights > self.max_weights.max:
             return False
         return self.regex is None or bool(self.regex.fullmatch(str(model)))
 
@@ -241,7 +241,7 @@ def conf_neighbors(
 
 def default_from_template(template: Template, spec: Optional[str]) -> Configuration2:
     lr = template.lr.pick_default(1 / 32)
-    length = template.length.pick_default(1)
+    length = template.length.pick_default(8)
     batch = template.batch.pick_default(1)
     steps = template.steps.pick_default(2)
 

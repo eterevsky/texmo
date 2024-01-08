@@ -84,7 +84,7 @@ class LiteralBitsTokenizer(object):
         max_bytes=None,
     ) -> np.ndarray:
         if max_tokens is not None:
-            l = max_tokens // 8
+            l = (max_tokens + 7) // 8
         elif max_bytes is not None:
             l = max_bytes
             assert start + l <= len(string)
@@ -93,6 +93,9 @@ class LiteralBitsTokenizer(object):
 
         b = np.frombuffer(string[start : start + l], dtype=np.uint8)
         res = np.unpackbits(b)
+
+        if max_tokens is not None and max_tokens < 8:
+            res = res[0:max_tokens]
 
         if max_bytes is not None:
             assert len(res) == max_bytes * 8

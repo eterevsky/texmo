@@ -63,7 +63,7 @@ def train(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
 
     logging.info(f"Training data: {args.data}")
-    train_set = DataSet(path=args.data)
+    train_set = DataSet(path=args.data, in_process=args.sync_tokens)
     lr = parse_lr(args.lr)
 
     try:
@@ -73,6 +73,7 @@ def train(args: argparse.Namespace):
                 test_batch=args.test_batch,
                 test_sample_len=args.test_sample_len,
                 system=args.system,
+                sync_tokens=args.sync_tokens,
             )
             manager.update_conf(lr, args.sample_len, args.batch, args.time)
             if args.add_layers:
@@ -91,13 +92,14 @@ def train(args: argparse.Namespace):
                 test_batch=args.test_batch,
                 test_sample_len=args.test_sample_len,
                 system=args.system,
+                dataset=train_set,
+                sync_tokens=args.sync_tokens,
             )
             manager.init()
 
         manager.train_and_eval(
             args.steps,
             args.time,
-            train_set,
             args.temp_steps,
             args.temp_dir,
             args.output_dir,
@@ -265,5 +267,19 @@ def init_args(parser: argparse.ArgumentParser, config):
         default=config.SYSTEM_NAME,
         help="the name of the system that will be used to identify runs in the DB",
     )
+
+    parser.add_argument(
+        "--sync-tokens",
+        dest="sync_tokens",
+        action="store_true",
+        help="Load and toknize training data synchronously, before the training start.",
+    )
+    parser.add_argument(
+        "--no-sync-tokens",
+        dest="sync_tokens",
+        action="store_false",
+        help="Load and tokenize training data concurrently with training in a separate thread.",
+    )
+    parser.set_defaults(sync_tokens=False)
 
     parser.set_defaults(func=train)

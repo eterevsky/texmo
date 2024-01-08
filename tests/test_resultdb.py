@@ -7,7 +7,7 @@ import numpy as np
 from texmo.configuration2 import Configuration2
 from texmo.model3 import build_model
 from texmo.predict import build_loss_trend
-from texmo.resultdb import ResultDB
+from texmo.resultdb import ResultDBSQLite
 from texmo.run import Run
 from texmo.tokens import set_tokens_dir
 
@@ -31,7 +31,7 @@ def create_conf_run(spec="tokens.256-emb.64|gru.64", batch=256, loss=3.123):
 
 class ResultDBTest(TestCase):
     def setUp(self):
-        self.db = ResultDB(path=None)
+        self.db = ResultDBSQLite()
 
     def test_create(self):
         cur = self.db._db.execute("SELECT * FROM conf")
@@ -44,10 +44,10 @@ class ResultDBTest(TestCase):
         self.db.add_run(conf2, run2)
 
         cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
-        self.assertEqual(cur.fetchall()[0]["count"], 1)
+        self.assertEqual(cur.fetchall()[0][0], 1)
 
         cur = self.db._db.execute("SELECT COUNT(*) AS count FROM run")
-        self.assertEqual(cur.fetchall()[0]["count"], 2)
+        self.assertEqual(cur.fetchall()[0][0], 2)
 
     def test_add_record_two_specs(self):
         conf1, run1 = create_conf_run()
@@ -56,10 +56,10 @@ class ResultDBTest(TestCase):
         self.db.add_run(conf2, run2)
 
         cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
-        self.assertEqual(cur.fetchall()[0]["count"], 2)
+        self.assertEqual(cur.fetchall()[0][0], 2)
 
         cur = self.db._db.execute("SELECT COUNT(*) AS count FROM run")
-        self.assertEqual(cur.fetchall()[0]["count"], 2)
+        self.assertEqual(cur.fetchall()[0][0], 2)
 
     def test_get_confs(self):
         conf1, run1 = create_conf_run(loss=1)

@@ -43,7 +43,7 @@ class ConfResults(object):
         self.conf: Configuration2 = conf
         self.runs: list[Run] = []
         # Median losses for all neighbor configurations.
-        self.neighbor_media_scores: dict[int, float] = {}
+        self.neighbor_median_scores: dict[int, float] = {}
         self.pred_score: Optional[float] = None
 
         self._times: defaultdict[str, ConfTiming] = defaultdict(ConfTiming)
@@ -57,9 +57,9 @@ class ConfResults(object):
 
     @property
     def neighbors_score(self) -> Optional[float]:
-        if not self.runs and not self.neighbor_media_scores:
+        if not self.runs and not self.neighbor_median_scores:
             return None
-        return median(chain((r.loss for r in self.runs), self.neighbor_media_scores.values()))
+        return median(chain((r.loss for r in self.runs), self.neighbor_median_scores.values()))
 
     def ntimes(self, system: str) -> int:
         return len(self._times[system]._similar_times)
@@ -88,4 +88,4 @@ class ConfResults(object):
         else:
             self._times[run.system].add_neighbors_time(scaled_time)
 
-        self.neighbor_media_scores[neighbor.id] = neighbor.median_score
+        self.neighbor_median_scores[neighbor.id] = neighbor.median_score

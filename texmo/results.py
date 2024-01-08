@@ -11,7 +11,7 @@ from .common import INF
 from .configuration2 import Configuration2, Template, conf_neighbors
 from .confresults import ConfResults
 from .record import TrainingRecord
-from .resultdb import ResultDB
+from .resultdb import ResultDB, ResultDBSQLite
 from .run import Run
 
 
@@ -35,7 +35,7 @@ class ResultSet(object):
         self._init_db()
 
         if result_db is None:
-            self._result_db = ResultDB()
+            self._result_db = ResultDBSQLite()
         else:
             self._result_db = result_db
             self._import_from_result_db()
@@ -53,7 +53,7 @@ class ResultSet(object):
     def _populate_db(self):
         logging.info("Populating runtime DB")
         for conf_results in self._conf_results_by_id.values():
-            self._db.execute(
+            cur = self._db.execute(
                 """
                 UPDATE conf
                 SET weights = :weights,
@@ -74,6 +74,7 @@ class ResultSet(object):
                     "neighbors_score": conf_results.neighbors_score,
                 },
             )
+            assert cur.rowcount == 1
         logging.info(f"Populated runtime DB with {len(self._conf_results_by_id)} confs")
 
     def _import_from_result_db(self):
@@ -131,20 +132,20 @@ class ResultSet(object):
         with latency.timer("ResultSet._update_all_neighbors"):
             count = 0
             for conf_results in list(self._conf_results_by_id.values()):
-                if conf_results.median_score is None or not self._template.match(conf_results.conf):
+                if conf_results.median_score is None or not self._template.match(
+                    conf_results.conf
+                ):
                     continue
                 count += 1
                 for neighbor in conf_neighbors(conf_results.conf, self._template):
                     neighbor_results = self._find_or_add_conf(neighbor)
-                    neighbor_results.neighbor_media_scores[
-                        conf_results.id
-                    ] = conf_results.median_score
-                    self._update_conf_scores(neighbor_results)
+                    for run in conf_results.runs:
+                        neighbor_results.add_neighbor_run(conf_results, run)
             logging.info(f"Generated neighbors for {count} configurations")
 
     def _update_conf_scores(self, conf_results: ConfResults):
         with latency.timer("ResultSet._update_conf_scores"):
-            self._db.execute(
+            cur = self._db.execute(
                 """
                 UPDATE conf
                 SET median_score = :median_score,
@@ -161,6 +162,7 @@ class ResultSet(object):
                     "estimated_time": conf_results.estimated_time(self._system),
                 },
             )
+            assert cur.rowcount == 1
 
     def _check_consistency(self):
         """Checks the consistency of ConfResults with the values in the DB."""
@@ -184,6 +186,22 @@ class ResultSet(object):
 
     def get_conf_results(self, conf: Configuration2) -> Optional[ConfResults]:
         return self._conf_results_by_conf.get(conf)
+
+    def get_untimed_conf(self, max_weights: int = INF) -> Optional[ConfResults]:
+        cur = self._db.execute(
+            """
+            SELECT id
+            FROM conf
+            WHERE median_time IS NULL
+              AND weights <= ?
+              AND matches_template
+              AND median_score IS NOT NULL
+            LIMIT 1
+            """,
+            (max_weights,),
+        )
+        row = cur.fetchone()
+        return None if row is None else self._conf_results_by_id[row[0]].conf
 
     def top_by_neighbors_score(
         self, max_time: float, max_weights: float = INF, limit: Optional[int] = None
@@ -263,6 +281,27 @@ class ResultSet(object):
 
         self._check_consistency()
 
+    def get_results_by_weights(self):
+        return sorted(
+            self._conf_results_by_id.values(), key=lambda cr: cr.conf.model.weights
+        )
+
+    def get_results_by_time(self, max_weights: int):
+            cur = self._db.execute(
+                """
+                SELECT id
+                FROM conf
+                WHERE median_score IS NOT NULL
+                  AND median_time IS NOT NULL
+                  AND weights <= :max_weights
+                  AND matches_template
+                ORDER BY median_time
+                """,
+                {"max_weights": max_weights},
+            )
+            for row in cur:
+                yield self._conf_results_by_id[row[0]]
+
     # def train_test_split(self) -> tuple:
     #     train_set = ResultSet(
     #         result_db=None, template=self._template, populate_neighbors=False
@@ -337,11 +376,6 @@ class ResultSet(object):
     #     self.add_run(conf_results, run, update_scores=update_scores)
 
     #     return conf_results
-
-    # def get_results_by_weights(self):
-    #     return sorted(
-    #         self._conf_results_by_id.values(), key=lambda cr: cr.conf.model.weights
-    #     )
 
     # def all_results_for_t(self, t: int) -> Iterable[ConfResults]:
     #     cur = self._db.execute(

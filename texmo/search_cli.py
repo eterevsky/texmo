@@ -19,8 +19,8 @@ from .tokens import set_tokens_dir
 from . import latency
 
 
-def generate_report(result_set, template, min_max_weights, train_time):
-    # print(generate_report_by_weight(result_set, template, min_max_weights, train_time))
+def generate_report(result_set, template, train_time, system: str, draw_weight_loss: bool):
+    print(generate_report_by_weight(result_set, template, system))
     print()
     print(generate_max_report(result_set, template, train_time))
     # print("\nLearning Rate")
@@ -42,12 +42,16 @@ def generate_report(result_set, template, min_max_weights, train_time):
     #             result_set, template, lambda conf: conf.batch, is_float=False
     #         )
     #     )
-    draw_weight_loss_graph(result_set, template, train_time)
+    if draw_weight_loss:
+        draw_weight_loss_graph(result_set, template, train_time)
     # draw_loss_by_time(result_set, template)
 
 
 def search_loop(
-    dataset: DataSet, search: Search, system: str,
+    dataset: DataSet,
+    search: Search,
+    system: str,
+    sync_tokens: bool,
 ):
     logging.info("Starting search")
     while True:
@@ -60,13 +64,12 @@ def search_loop(
         # # TODO: Train from the checkpoint
         # manager = Manager(conf, weights=weights)
 
-        manager = Manager(conf, system)
+        manager = Manager(conf, system, sync_tokens=sync_tokens, dataset=dataset)
         manager.init(quiet=True)
 
         run, weights = manager.train_and_eval(
             steps=conf.steps,
             time_limit=None,
-            train_set=dataset,
             temp_steps=None,
             temp_dir=None,
             output_dir=None,
@@ -80,14 +83,14 @@ def search_loop(
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
     try:
-        dataset = DataSet(path=args.data)
+        dataset = DataSet(path=args.data, in_process=args.sync_tokens)
         template = Template.from_args(args)
         logging.info(f"Template: {template}")
         default = default_from_template(template, spec=args.default_spec)
         logging.info(f"Default configuration: {default}")
         assert template.match(default)
 
-        result_db = ResultDB(args.db)
+        result_db = ResultDB.from_args(args.db)
         # predictr = Predictor2(args.sample_timing, args.train_timing, result_db, extra_dbs)
 
         train_time = tuple(map(float, args.train_time.split("-")))
@@ -100,7 +103,6 @@ def main(args: argparse.Namespace):
             result_db,
             template,
             default,
-            args.min_max_weights,
             checkpoints_path=None,
             predictor=None,
             # predictor=predictor,
@@ -108,11 +110,17 @@ def main(args: argparse.Namespace):
         )
 
         try:
-            search_loop(dataset, search, system=args.system)
+            search_loop(dataset, search, system=args.system, sync_tokens=args.sync_tokens)
         except KeyboardInterrupt:
             logging.warning("Interrupted\n")
 
-        generate_report(search._result_set, template, args.min_max_weights, train_time=train_time)
+        generate_report(
+            search._result_set,
+            template,
+            train_time=train_time,
+            system=args.system,
+            draw_weight_loss=args.weight_loss_graph,
+        )
         print()
         latency.report()
     finally:
@@ -170,16 +178,11 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="range for the number of training steps; lower bound >= 2",
     )
     parser.add_argument(
-        "--max-weights",
-        type=int,
-        default=None,
-        help="max weights. Will vary if left undefined (default: unrestricted)",
-    )
-    parser.add_argument(
-        "--min-max-weights",
-        type=int,
-        default=32,
-        help="minimum max-weights value in search",
+        "-w",
+        "--weights",
+        type=str,
+        default="32-4294967296",
+        help="range for the _maximal_ number of weights in the model",
     )
     parser.add_argument(
         "-t",
@@ -187,16 +190,15 @@ def init_args(parser: argparse.ArgumentParser, config):
         default="1-16",
         help="range for the training time in seconds",
     )
-    parser.add_argument(
-        "--default-spec", type=str, default=None, help="default model"
-    )
+    parser.add_argument("--default-spec", type=str, default=None, help="default model")
 
     parser.add_argument(
         "--db",
         type=str,
         default=config.DB,
-        help="path to the SQLite database with the results",
+        help="path to the SQLite database with the results, or a URL for a PostgreSQL database",
     )
+
     parser.add_argument(
         "--train-timing",
         type=str,
@@ -215,5 +217,25 @@ def init_args(parser: argparse.ArgumentParser, config):
         default=config.SYSTEM_NAME,
         help="the name of the system that will be used to identify runs in the DB",
     )
+    parser.add_argument(
+        "--sync-tokens",
+        dest="sync_tokens",
+        action="store_true",
+        help="Load and toknize training data synchronously, before the training start.",
+    )
+    parser.add_argument(
+        "--no-sync-tokens",
+        dest="sync_tokens",
+        action="store_false",
+        help="Load and tokenize training data concurrently with training in a separate thread.",
+    )
+    parser.set_defaults(sync_tokens=config.SYNC_TOKENS)
+    parser.add_argument(
+        "--no-weight-loss-graph",
+        dest="weight_loss_graph",
+        action="store_false",
+        help="Don't show the weight/loss graph after the search has finished",
+    )
+    parser.set_defaults(weight_loss_graph=True)
 
     parser.set_defaults(func=main)

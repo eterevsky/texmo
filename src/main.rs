@@ -126,9 +126,11 @@ fn optimize_all_for_proc(
             Processing::Raw => (filename_raw.to_string(), None),
             Processing::Caps => unimplemented!("Caps processing no longer supported"),
             Processing::CapsWords => {
+                println!("Pre-processing the data file... ");
                 let mut temp_processed = NamedTempFile::new().unwrap();
                 let mut input = File::open(filename_raw).unwrap();
                 process_file(&mut input, &mut temp_processed).unwrap();
+                println!("done");
                 let filename = temp_processed.path().to_str().unwrap().to_string();
                 (filename, Some(temp_processed))
             }

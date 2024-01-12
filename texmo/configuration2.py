@@ -222,6 +222,8 @@ class Template(object):
             yield conf.replace(batch=batch)
         for steps in self.steps.neighbors(conf.steps):
             yield conf.replace(steps=steps)
+    
+    
 
 
 def conf_neighbors(

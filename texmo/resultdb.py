@@ -102,7 +102,9 @@ class ResultDB(object):
         assert isinstance(total, int)
         return total
 
-    def get_confs_runs(self, with_timestamps: bool = False) -> Iterable[tuple[int, Configuration2, Run]]:
+    def get_confs_runs(
+        self, with_timestamps: bool = False
+    ) -> Iterable[tuple[int, Configuration2, Run]]:
         cur = self._db.cursor()
         cur.execute(
             """
@@ -158,6 +160,23 @@ class ResultDB(object):
                     yield conf_id, conf, run, timestamp
                 else:
                     yield conf_id, conf, run
+    
+    def check_run_exists(self, conf: Configuration2, run: Run, timestamp: datetime) -> bool:
+        """Check if a run with the same configuration and timestamp exists."""
+        conf_id = self.find_or_add_conf(conf)
+        timestamp = timestamp.isoformat()
+        cur = self._db.cursor()
+        cur.execute(
+            """
+            SELECT 1
+            FROM run
+            WHERE conf_id = :conf_id
+            AND timestamp = :timestamp
+            AND system = :system
+            """,
+            {"conf_id": conf_id, "timestamp": timestamp, "system": run.system},
+        )
+        return cur.fetchone() is not None
 
 
 class ResultDBSQLite(ResultDB):
@@ -226,11 +245,11 @@ class ResultDBSQLite(ResultDB):
 
 
 class ResultDBPostgres(ResultDB):
-
     def __init__(self, url: str):
         url = urlparse(url)
 
         import psycopg2
+
         logging.info(f"Connecting to results DB {url.hostname}")
         conn = psycopg2.connect(
             user=url.username,
@@ -295,9 +314,24 @@ def importdb(args: argparse.Namespace):
     db_from = ResultDB.from_args(args.db_from)
     db_into = ResultDB.from_args(args.db_into)
 
+    present = {}
+    new = {}
+
     for _, conf, run, timestamp in db_from.get_confs_runs(with_timestamps=True):
-        print(conf, run.loss, timestamp)
-        db_into.add_run(conf, run, timestamp=timestamp, commit=False)
+        # print(run.system, conf, run.loss, timestamp)
+        assert timestamp is not None
+        assert run.system is not None
+        exists = db_into.check_run_exists(conf, run, timestamp)
+        if exists:
+            present[run.system] = present.get(run.system, 0) + 1
+        else:
+            new[run.system] = new.get(run.system, 0) + 1
+            print(run.system, conf, run.loss, timestamp)
+
+            db_into.add_run(conf, run, timestamp=timestamp, commit=False)
+            
+    print("Present:", present)
+    print("New:", new)
 
     db_into.commit()
 

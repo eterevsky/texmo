@@ -226,7 +226,7 @@ def generate_report_by_weight(result_set: ResultSet, template: Template, system:
             if t:
                 t = ttoa3(t)
             else:
-                t = "?"
+                t = "?    "
             print(f"{prev_best.median_score:.4f}  {t}  {prev_best.conf}", file=out)
             prev_best = None
 

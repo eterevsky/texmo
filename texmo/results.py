@@ -187,21 +187,21 @@ class ResultSet(object):
     def get_conf_results(self, conf: Configuration2) -> Optional[ConfResults]:
         return self._conf_results_by_conf.get(conf)
 
-    def get_untimed_conf(self, max_weights: int = INF) -> Optional[ConfResults]:
+    def top_confs_any_t(self, max_weights: int = INF, limit: int = INF) -> Iterable[ConfResults]:
         cur = self._db.execute(
             """
             SELECT id
             FROM conf
-            WHERE median_time IS NULL
-              AND weights <= ?
+            WHERE weights <= ?
               AND matches_template
               AND median_score IS NOT NULL
-            LIMIT 1
+            ORDER BY median_score
+            LIMIT ?
             """,
-            (max_weights,),
+            (max_weights, limit),
         )
-        row = cur.fetchone()
-        return None if row is None else self._conf_results_by_id[row[0]].conf
+        for row in cur:
+            yield self._conf_results_by_id[row[0]]
 
     def top_by_neighbors_score(
         self, max_time: float, max_weights: float = INF, limit: Optional[int] = None

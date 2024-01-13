@@ -275,19 +275,32 @@ class Search(object):
     # def _select_checkpoint(self, t):
     #     pass
 
-    def _select_untimed(self):
-        return self._result_set.get_untimed_conf(self._template.max_weights)
+    def _select_untimed(self, max_weights: int):
+        confs = list(self._result_set.top_confs_any_t(max_weights, 10))
+        if all(c.median_time(self._system) is not None for c in confs):
+            return None
+        print(f"Top confs W ≤ {itoa3(max_weights)}:")
+        for c in confs:
+            t = c.median_time(self._system)
+            if t is not None:
+                t = ttoa3(t)
+            else:
+                t = "?     "
+            print(f"{c.median_score:.4f}  {t}  {c.conf}")
+        for c in confs:
+            if c.median_time(self._system) is None:
+                return c.conf
+
 
     def select_conf(self) -> Configuration2:
         with latency.timer("Search.select_conf"):
-            if random.random() < 0:
-                conf = self._select_untimed()
-                if conf is not None:
-                    logging.info(f"Selecting untimed conf: {conf}")
-                    return conf
-
             t = self._select_time()
             max_weights = self._select_max_weights(t)
+
+            conf = self._select_untimed(max_weights)
+            if conf is not None:
+                logging.info(f"Selecting untimed conf: {conf}")
+                return conf
 
             self.print_top_confs(t, max_weights)
 

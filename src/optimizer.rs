@@ -627,10 +627,11 @@ pub fn optimize_all<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
         }
 
         for &literal_encoding in &[
-            LiteralEncoding::Bits1,
-            LiteralEncoding::Bits2,
-            LiteralEncoding::Bits4,
-            LiteralEncoding::All,
+            // LiteralEncoding::Bits1,
+            // LiteralEncoding::Bits2,
+            // LiteralEncoding::Bits4,
+            // LiteralEncoding::All,
+            LiteralEncoding::Dist4
         ] {
             if literal_encoding.reserved_tokens() > ntokens
                 || (literal_encoding == LiteralEncoding::Bits1 && ntokens >= 128)

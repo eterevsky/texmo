@@ -237,21 +237,22 @@ class Input(object):
                     emb_dim=None,
                     emb_norm=False,
                 )
+            tokens_or_raw = None if self._raw_bytes else self.ntokens
             if self._emb_size > 1:
                 yield Input(
-                    ntokens=self.ntokens,
+                    ntokens=tokens_or_raw,
                     positions=self._positions,
                     emb_dim=self._emb_size // 2,
                     emb_norm=self._emb_norm,
                 )
             yield Input(
-                ntokens=self.ntokens,
+                ntokens=tokens_or_raw,
                 positions=self._positions,
                 emb_dim=self._emb_size * 2,
                 emb_norm=self._emb_norm,
             )
             yield Input(
-                ntokens=self.ntokens,
+                ntokens=tokens_or_raw,
                 positions=self._positions,
                 emb_dim=self._emb_size,
                 emb_norm=not self._emb_norm,

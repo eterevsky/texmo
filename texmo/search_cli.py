@@ -90,6 +90,10 @@ def main(args: argparse.Namespace):
         logging.info(f"Default configuration: {default}")
         assert template.match(default)
 
+        if template.max_weights.min < default.model.weights:
+            logging.info(f"Adjusting minimal number of weights to match the default configuration: {default.model.weights}")
+            template.max_weights.min = default.model.weights
+
         result_db = ResultDB.from_args(args.db)
         # predictr = Predictor2(args.sample_timing, args.train_timing, result_db, extra_dbs)
 

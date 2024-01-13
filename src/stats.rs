@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use json::JsonValue;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TokenStats {
     literal_cost: u64,
     pub token_count: Vec<u64>,
@@ -52,17 +52,17 @@ impl TokenStats {
         self.token_count.iter().sum::<u64>() + self.literal_cost * self.literal_count.iter().sum::<u64>()
     }
 
-    pub fn average_token_entropy(&self) -> f64 {
-        let mut total_entropy = 0.0;
-        let total_tokens = self.total_tokens() as f64;
+    // pub fn average_token_entropy(&self) -> f64 {
+    //     let mut total_entropy = 0.0;
+    //     let total_tokens = self.total_tokens() as f64;
 
-        for token_count in self.token_count.iter() {
-            let token_count = *token_count as f64;
-            total_entropy += token_count * (token_count/ total_tokens).log2();
-        }
+    //     for token_count in self.token_count.iter() {
+    //         let token_count = *token_count as f64;
+    //         total_entropy += token_count * (token_count/ total_tokens).log2();
+    //     }
 
-        - total_entropy / total_tokens
-    }
+    //     - total_entropy / total_tokens
+    // }
 
     pub fn to_json(
         &self,
@@ -75,19 +75,16 @@ impl TokenStats {
         let final_tokens = self.total_tokens() + tokens_in_literal * self.total_literals();
         json::object! {
             ntokens: self.token_count.len() + reserved_tokens,
+            literal_cost: self.literal_cost,
             initial_size: initial_size,
-            processed_size: self.scanned_bytes,
+            scanned_bytes: self.scanned_bytes,
             total_cost: total_cost,
-            cost_per_token: initial_size as f64 / total_cost as f64,
             total_tokens: self.total_tokens(),
             total_literals: self.total_literals(),
             final_tokens: final_tokens,
             bytes_per_token: initial_size as f64 / final_tokens as f64,
             literal_dist_entropy: literal_dist_entropy,
-            literal_cost: self.literal_cost,
-            literal_entropy_per_input_byte: literal_dist_entropy * self.total_literals() as f64 / initial_size as f64,
-            literal_entropy_per_token: literal_dist_entropy * self.total_literals() as f64 / final_tokens as f64,
-            average_token_entropy: self.average_token_entropy()
+            cost_per_byte: total_cost as f64 / initial_size as f64,
         }
     }
 }

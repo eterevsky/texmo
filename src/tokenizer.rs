@@ -189,7 +189,7 @@ impl Tokenizer {
 
     fn update_stats(&self, cost_array: &[DynState], pair_stats: bool, stats: &mut TokenStats) {
         let mut pos = cost_array.len() - 1;
-        stats.scanned_bytes = pos as u64;
+        stats.scanned_bytes += pos as u64;
 
         let mut next_token_id = TokenIdx::None;
 
@@ -250,7 +250,10 @@ fn worker(
 
         assert!(!data.is_empty());
         tokenizer.process_slice(&data, &mut buffer, pair_stats, &mut stats);
+        // dbg!(stats.scanned_bytes);
     }
+
+    // dbg!(stats.scanned_bytes);
 
     results_tx.send(stats).unwrap();
     // println!("wait {:?}", wait.iter().sum::<u64>() as f64 / wait.len() as f64);
@@ -258,6 +261,7 @@ fn worker(
 
 pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S, pair_stats: bool) -> TokenStats {
     let nthreads = std::thread::available_parallelism().unwrap().get();
+    // dbg!(nthreads);
 
     let (jobs_tx, jobs_rx) = mpsc::sync_channel::<Sample>(4);
     let jobs_rx_shared = Arc::new(Mutex::new(jobs_rx));
@@ -280,7 +284,7 @@ pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S, p
         // let mut jobs_in_flight = 0;
 
         for sample in sampler.iter() {
-            // println!("sending sample");
+            // println!("sending sample of len {}", sample.len());
             jobs_tx.send(sample).unwrap();
             // jobs_in_flight += 1;
 
@@ -304,10 +308,14 @@ pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S, p
             total_stats.add(&result);
         }
         // while jobs_in_flight > 0 {
+        //     dbg!(jobs_in_flight);
         //     let result = results_rx.recv().unwrap();
+        //     dbg!(result.scanned_bytes);
         //     total_stats.add(&result);
         //     jobs_in_flight -= 1;
         // }
+        // dbg!(total_stats.scanned_bytes);
+
         if total_stats.scanned_bytes > 1 << 34 {
             let elapsed = std::time::Instant::now() - start;
             println!(

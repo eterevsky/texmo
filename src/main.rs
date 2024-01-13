@@ -194,14 +194,14 @@ fn optimize_all(
     min_tokens: usize,
     max_tokens: usize,
 ) {
-    // optimize_all_for_proc(
-    //     filename,
-    //     Some(filename),
-    //     Processing::Raw,
-    //     tokens_dir,
-    //     min_tokens,
-    //     max_tokens,
-    // );
+    optimize_all_for_proc(
+        filename,
+        Some(filename),
+        Processing::Raw,
+        tokens_dir,
+        min_tokens,
+        std::cmp::min(max_tokens, 256),
+    );
     optimize_all_for_proc(
         filename,
         filename_caps_words,
@@ -282,7 +282,8 @@ fn tokenize(
         tokenize_file(&token_set, &sampler, false)
     } else {
         let sampler = FileSampler::new(filename, chunk_size, None);
-        tokenize_file(&token_set, &sampler, false)
+        let stats = tokenize_file(&token_set, &sampler, false);
+        stats
     };
 
     let stats_json = stats.to_json(

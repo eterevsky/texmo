@@ -19,18 +19,16 @@
   ],
   "stats": {
     "ntokens": 16,
+    "literal_cost": 8,
     "initial_size": 108362047381,
-    "processed_size": 108362047381,
+    "scanned_bytes": 108362047381,
     "total_cost": 259372917097,
-    "cost_per_token": 0.4177847425006015,
     "total_tokens": 86789065993,
     "total_literals": 21572981388,
     "final_tokens": 108362047381,
     "bytes_per_token": 1,
     "literal_dist_entropy": 5.231550909167539,
-    "literal_cost": 8,
-    "literal_entropy_per_input_byte": 1.0415099485618845,
-    "literal_entropy_per_token": 1.0415099485618845
+    "cost_per_byte": 2.3935771182418428
   },
   "type": "fallback_distribution",
   "literal_count": [

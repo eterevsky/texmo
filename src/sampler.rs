@@ -9,6 +9,15 @@ pub enum Sample<'a> {
     Ref(&'a [u8]),
 }
 
+impl Sample<'_> {
+    pub fn len(&self) -> usize {
+        match self {
+            Sample::Data(data) => data.len(),
+            Sample::Ref(data) => data.len(),
+        }
+    }
+}
+
 pub trait Sampler<'a> {
     type Iter: Iterator<Item = Sample<'a>>;
 
@@ -53,6 +62,7 @@ impl<'a> Sampler<'a> for FileSampler {
                 chunk_size: self.chunk_size,
                 total_size: self._total_size,
                 sample_chunks_left: Some(chunks_selection),
+                read_bytes: 0,
             }
         } else {
             FileIterator {
@@ -61,6 +71,7 @@ impl<'a> Sampler<'a> for FileSampler {
                 chunk_size: self.chunk_size,
                 total_size: self._total_size,
                 sample_chunks_left: None,
+                read_bytes: 0,
             }
         }
     }
@@ -76,6 +87,8 @@ pub struct FileIterator<'a> {
     chunk_size: usize,
     total_size: u64,
     sample_chunks_left: Option<usize>,
+
+    pub read_bytes: usize,
 }
 
 impl<'a> Iterator for FileIterator<'a> {
@@ -99,6 +112,7 @@ impl<'a> Iterator for FileIterator<'a> {
                 let read_bytes = self.file.read(&mut buffer).unwrap();
 
                 buffer.truncate(read_bytes);
+                self.read_bytes += read_bytes;
                 Some(Sample::Data(buffer))
             }
         } else {
@@ -108,6 +122,10 @@ impl<'a> Iterator for FileIterator<'a> {
                 None
             } else {
                 buffer.truncate(read_bytes);
+                self.read_bytes += read_bytes;
+                // if self.read_bytes & ((1<<30) - 1) == 0 {
+                //     dbg!(self.read_bytes);
+                // }
                 Some(Sample::Data(buffer))
             }
         }

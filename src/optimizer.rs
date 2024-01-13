@@ -1,6 +1,5 @@
 use std::cmp::{min, Reverse};
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::io;
 use std::io::Write;
 use std::path::Path;
@@ -631,7 +630,8 @@ pub fn optimize_all<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
             // LiteralEncoding::Bits2,
             // LiteralEncoding::Bits4,
             // LiteralEncoding::All,
-            LiteralEncoding::Dist4
+            // LiteralEncoding::Dist4,
+            LiteralEncoding::Dist8
         ] {
             if literal_encoding.reserved_tokens() > ntokens
                 || (literal_encoding == LiteralEncoding::Bits1 && ntokens >= 128)

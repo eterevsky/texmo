@@ -299,7 +299,7 @@ class Search(object):
 
             conf = self._select_untimed(max_weights)
             if conf is not None:
-                logging.info(f"Selecting untimed conf: {conf}")
+                logging.info(f"Selecting untimed conf")
                 return conf
 
             self.print_top_confs(t, max_weights)

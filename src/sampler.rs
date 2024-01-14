@@ -142,6 +142,13 @@ impl MemorySampler {
         let data = std::fs::read(filename).unwrap();
         MemorySampler { data, chunk_size }
     }
+
+    pub fn new_from_str(data: &str, chunk_size: usize) -> Self {
+        MemorySampler {
+            data: data.as_bytes().to_vec(),
+            chunk_size,
+        }
+    }
 }
 
 impl<'a> Sampler<'a> for MemorySampler {

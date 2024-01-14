@@ -11,21 +11,30 @@ Self = ()
 
 
 _PREFERRED_TOKENSETS = {
-    2: "tokens2_raw_bits1",
-    4: "tokens4_raw_bits2",
-    8: "tokens8_raw_bits2",
-    16: "tokens16_raw_bits4",
-    32: "tokens32_capswords_bits4",
-    64: "tokens64_capswords_bits4",
-    128: "tokens128_capswords_bits4",
-    256: "tokens256_capswords_bits4",
-    512: "tokens512_capswords_bits4",
-    1024: "tokens1024_capswords_bits4",
-    2048: "tokens2048_capswords_bits4",
-    4096: "tokens4096_capswords_bits4",
-    8192: "tokens8192_capswords_bits4",
-    16384: "tokens16384_capswords_bits4",
+    2: "tokens2_raw_dist8",
+    4: "tokens4_raw_dist8",
+    8: "tokens8_raw_dist8",
+    16: "tokens16_raw_dist8",
+    32: "tokens32_capswords_dist8",
+    64: "tokens64_capswords_dist8",
+    128: "tokens128_capswords_dist8",
+    256: "tokens256_capswords_dist8",
+    512: "tokens512_capswords_dist8",
+    1024: "tokens1024_capswords_dist8",
+    2048: "tokens2048_capswords_dist8",
+    4096: "tokens4096_capswords_dist8",
+    8192: "tokens8192_capswords_dist8",
+    16384: "tokens16384_capswords_dist8",
 }
+
+_BITS_TOKENSETS = {
+    1: "tokens2_raw_bits1",
+    2: "tokens4_raw_bits2",
+    4: "tokens16_raw_bits4",
+    8: "tokens256_raw_all",
+}
+
+_POWERS = {2: 1, 4: 2, 16: 4, 256: 8}
 
 
 class Input(object):
@@ -38,6 +47,9 @@ class Input(object):
     Tokens spec is one of:
 
         tokens.<number of tokens>
+        bits.1
+        bits.2
+        bits.4
         bytes
 
     For each number of tokens there is a default tokenset that is used. `bytes`
@@ -75,6 +87,7 @@ class Input(object):
     def from_spec(spec: str) -> Self:
         # Defaults
         ntokens = None
+        nbits = None
         positions = None  # no position encoding
         emb_dim = None  # one-hot
         emb_norm = False
@@ -85,7 +98,9 @@ class Input(object):
                 case "tokens":
                     ntokens = int(parts[1])
                 case "bytes":
-                    ntokens = None
+                    nbits = 8
+                case "bits":
+                    nbits = int(parts[1])
                 case "pos":
                     positions = int(parts[1])
                 case "onehot":
@@ -95,19 +110,37 @@ class Input(object):
                     if len(parts) > 2 and parts[2] == "norm":
                         emb_norm = True
 
-        return Input(ntokens, positions, emb_dim, emb_norm)
+        assert (
+            ntokens is None
+            and nbits is not None
+            or ntokens is not None
+            and nbits is None
+        )
+
+        return Input(ntokens, nbits, positions, emb_dim, emb_norm)
 
     def __init__(
         self,
-        ntokens: Optional[int],  # "bytes" if None
+        ntokens: Optional[int],  # None if
+        nbits: Optional[int],
         positions: Optional[int],
         emb_dim: Optional[int],
         emb_norm: bool,
     ):
-        self._raw_bytes = ntokens is None
-        token_set = (
-            _PREFERRED_TOKENSETS[ntokens] if ntokens else "tokens256_raw_all"
+        assert (
+            ntokens is None
+            and nbits is not None
+            or ntokens is not None
+            and nbits is None
         )
+
+        self._ntokens = ntokens
+        self._nbits = nbits
+        if ntokens:
+            token_set = _PREFERRED_TOKENSETS[ntokens]
+        else:
+            token_set = _BITS_TOKENSETS[nbits]
+
         self.tokenizer = get_tokenizer(token_set)
         self._positions = positions
         self._emb_size = emb_dim
@@ -143,10 +176,12 @@ class Input(object):
 
     def __str__(self):
         parts = []
-        if self._raw_bytes:
+        if self._nbits == 8:
             parts.append("bytes")
+        elif self._nbits:
+            parts.append(f"bits.{self._nbits}")
         else:
-            parts.append(f"tokens.{self.ntokens}")
+            parts.append(f"tokens.{self._ntokens}")
 
         if self._positions:
             parts.append(f"pos.{self._positions}")
@@ -157,31 +192,39 @@ class Input(object):
         return "-".join(parts)
 
     def neighbors(self):
-        if self._raw_bytes:
+        if self._nbits:
             yield Input(
-                ntokens=256,
+                ntokens=2**self._nbits,
+                nbits=None,
                 positions=self._positions,
                 emb_dim=self._emb_size,
                 emb_norm=self._emb_norm,
             )
-        else:
-            if self.ntokens == 256:
+            for bits in (self._bits // 2, self._bits * 2):
+                if bits not in (1, 2, 4, 8):
+                    continue
                 yield Input(
                     ntokens=None,
+                    nbits=bits,
                     positions=self._positions,
                     emb_dim=self._emb_size,
                     emb_norm=self._emb_norm,
                 )
-            if self.ntokens > 2:
+        else:
+            if self._ntokens in _POWERS:
                 yield Input(
-                    ntokens=self.ntokens // 2,
+                    ntokens=None,
+                    nbits=_POWERS[self._ntokens],
                     positions=self._positions,
                     emb_dim=self._emb_size,
                     emb_norm=self._emb_norm,
                 )
-            if self.ntokens < 16384:
+            for ntokens in (self._ntokens // 2, self._ntokens * 2):
+                if ntokens not in _PREFERRED_TOKENSETS:
+                    continue
                 yield Input(
-                    ntokens=self.ntokens * 2,
+                    ntokens=ntokens,
+                    nbits=None,
                     positions=self._positions,
                     emb_dim=self._emb_size,
                     emb_norm=self._emb_norm,
@@ -281,9 +324,7 @@ class Input(object):
         else:
             return {}
 
-    def initial_step(
-        self, weights: LayerWeights
-    ) -> tuple[LayerState, jax.Array]:
+    def initial_step(self, weights: LayerWeights) -> tuple[LayerState, jax.Array]:
         """Return initial state and output for position 0.
 
         Args:
@@ -367,9 +408,7 @@ class Input(object):
             input = jnp.concatenate([padding, input], axis=1)
             emb = weights["tokens"][input]
             if self._positions:
-                positions = (
-                    jnp.arange(-padding_len, sample_len) % self._positions
-                )
+                positions = jnp.arange(-padding_len, sample_len) % self._positions
                 pos_emb = weights["positions"][positions]
                 emb += pos_emb
             if self._emb_norm:

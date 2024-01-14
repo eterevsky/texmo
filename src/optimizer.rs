@@ -1,5 +1,6 @@
 use std::cmp::{min, Reverse};
 use std::collections::HashMap;
+use std::fmt::format;
 use std::io;
 use std::io::Write;
 use std::path::Path;
@@ -111,7 +112,7 @@ fn add_tokens<'a, S: Sampler<'a>>(
     for (&key, &count) in stats.pair_count.iter() {
         let ifirst = key >> 16;
         let isecond = key & 0xFFFF;
-    // for (&(ifirst, isecond), &count) in stats.pair_count.iter() {
+        // for (&(ifirst, isecond), &count) in stats.pair_count.iter() {
         if count > 0 {
             let mut token_str = token_set.tokens[ifirst as usize].string.clone();
             token_str.extend(token_set.tokens[isecond as usize].string.clone());
@@ -263,20 +264,20 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
     //     / tokenizer.sampler.total_size() as u128) as u64;
 
     let mut token_ids: Vec<usize> = (0..token_set.tokens.len()).collect();
-    let mut rng = thread_rng();
-    let uniform = Uniform::new(0, 65536);
+    // let mut rng = thread_rng();
+    // let uniform = Uniform::new(0, 65536);
 
-    let mut order_shuffle = Vec::new();
-    for _ in 0..token_set.tokens.len() {
-        order_shuffle.push(uniform.sample(&mut rng))
-    }
+    // let mut order_shuffle = Vec::new();
+    // for _ in 0..token_set.tokens.len() {
+    //     order_shuffle.push(uniform.sample(&mut rng))
+    // }
 
     token_ids.sort_unstable_by_key(|&i| {
-        token_attempts
-            .get(&token_set.tokens[i].string)
-            .unwrap_or(&0)
-            * 65536
-            + order_shuffle[i]
+        initial_stats.token_count[i] as u64
+            + ((*token_attempts
+                .get(&token_set.tokens[i].string)
+                .unwrap_or(&0) as u64)
+                << 32)
     });
 
     // We construct a list of tokens to remove because the ids will change when
@@ -288,10 +289,13 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
         if token_to_remove.is_mandatory {
             continue;
         }
+        // println!("{} {}", format_token(&token_to_remove.string), initial_stats.token_count[token_id_to_remove]);
         token_strs.push(token_to_remove.string.clone());
     }
 
     let mut tries = 0;
+
+    // dbg!(initial_stats.cost());
 
     print!("Trying to remove:");
     io::stdout().flush().unwrap();
@@ -318,17 +322,22 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
 
         // let start = Instant::now();
         let added_str = add_token(fast_tokenizer, &mut new_token_set);
+        // dbg!(format_token(added_str.as_slice()));
         // print!(" add_token: {} ", start.elapsed().as_millis());
 
         if added_str == token_str {
             continue;
         }
 
+        new_token_set.add_token(added_str.as_slice());
+
         // let new_stats = fast_tokenizer.get_stats(&new_token_set);
 
         // if new_stats.cost() < initial_cost {
         // let start = Instant::now();
         let new_full_stats = tokenizer.get_stats(&new_token_set);
+        // dbg!(new_full_stats.cost());
+
         // print!(" mid get_stats: {} ", start.elapsed().as_millis());
         if new_full_stats.cost() < initial_stats.cost() {
             println!(
@@ -340,6 +349,7 @@ fn remove_and_add_token<'a, S1: Sampler<'a>, S2: Sampler<'a>>(
             return Some(new_token_set);
         }
         // }
+        // break;
     }
 
     println!("\nNo token to replace after {} tries", tries);
@@ -421,7 +431,7 @@ pub fn optimize_bpe<'a, S: Sampler<'a>>(
 /// tokens and literals make sure that the number of usages of tokens is
 /// strictly higher than that of literals. If this is not the case, turn
 /// the most common literals into a tokens and vice versa.
-/// 
+///
 /// Returns true if the token set was modified.
 fn optimize_byte_tokens(token_set: &mut TokenSet, stats: &TokenStats) -> bool {
     let mut byte_count = [0u64; 256];
@@ -511,16 +521,25 @@ fn optimize_token_set<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
     let mut tokenizer = TokenizerCache::new(sampler);
     let mut fast_tokenizer = TokenizerCache::new(fast_sampler);
 
+    // dbg!(token_set.ntokens());
+
     if token_set.ntokens() < ntokens {
         add_tokens_bpe(&mut tokenizer, &mut token_set, ntokens, block);
     }
 
     let mut stats = tokenize_file(&token_set, slow_sampler, false);
+    // for i in 0..token_set.tokens.len() {
+    //     println!(
+    //         "{}: {}",
+    //         format_token(&token_set.tokens[i].string),
+    //         stats.token_count[i]
+    //     );
+    // }
 
     let cost = stats.cost();
     if optimize_byte_tokens(&mut token_set, &stats) {
         stats = tokenize_file(&token_set, slow_sampler, false);
-        assert!(stats.cost() < cost);
+        assert!(stats.cost() <= cost);
     }
     let mut best_cost = stats.cost();
 
@@ -631,7 +650,7 @@ pub fn optimize_all<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
             // LiteralEncoding::Bits4,
             // LiteralEncoding::All,
             // LiteralEncoding::Dist4,
-            LiteralEncoding::Dist8
+            LiteralEncoding::Dist8,
         ] {
             if literal_encoding.reserved_tokens() > ntokens
                 || (literal_encoding == LiteralEncoding::Bits1 && ntokens >= 128)
@@ -673,5 +692,28 @@ pub fn optimize_all<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
         }
 
         ntokens *= 2;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::sampler::MemorySampler;
+
+    use super::*;
+
+    #[test]
+    fn test_remove_and_add() {
+        let mut sampler = MemorySampler::new_from_str("abc, abc", 4);
+        let mut tokenizer = TokenizerCache::new(&sampler);
+        let mut fast_tokenizer = TokenizerCache::new(&sampler);
+        let mut token_attempts = HashMap::new();
+        let mut token_set = TokenSet::new(LiteralEncoding::Dist8);
+
+        remove_and_add_token(
+            &mut tokenizer,
+            &mut fast_tokenizer,
+            &token_set,
+            &mut token_attempts,
+        );
     }
 }

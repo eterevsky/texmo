@@ -369,6 +369,7 @@ def write_tokenset(counts, groups, proc="raw", total_size=None):
         "groups": [],
         "byte_entropy": [],
         "type": "chars",
+        "processing": "capswords",
         "stats": {
             "ntokens": n,
             "total_entropy": entropy,

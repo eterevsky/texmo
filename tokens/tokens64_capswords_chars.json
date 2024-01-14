@@ -582,6 +582,7 @@
     26.638537651627868
   ],
   "type": "chars",
+  "processing": "capswords",
   "stats": {
     "ntokens": 64,
     "total_entropy": 2914110836.6315866,

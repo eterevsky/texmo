@@ -140,6 +140,17 @@ class Input(object):
         assert isinstance(token_type, str)
         self._token_type = token_type
 
+        match token_type:
+            case "tokens":
+                assert ntokens is not None
+                assert nbits is None
+            case "bits":
+                assert ntokens is None
+                assert nbits in (1, 2, 4, 8)
+            case "chars":
+                assert ntokens in (2, 4, 8, 16, 32, 64, 128, 256)
+                assert nbits is None
+
         assert (
             ntokens is None
             and nbits is not None
@@ -192,12 +203,13 @@ class Input(object):
 
     def __str__(self):
         parts = []
-        if self._nbits == 8:
-            parts.append("bytes")
-        elif self._nbits:
-            parts.append(f"bits.{self._nbits}")
-        else:
-            parts.append(f"tokens.{self._ntokens}")
+        match self._token_type:
+            case "tokens":
+                parts.append(f"tokens.{self._ntokens}")
+            case "chars":
+                parts.append(f"chars.{self._ntokens}")
+            case "bits":
+                parts.append(f"bits.{self._nbits}")
 
         if self._positions:
             parts.append(f"pos.{self._positions}")
@@ -210,16 +222,18 @@ class Input(object):
     def neighbors(self):
         if self._nbits:
             yield Input(
+                token_type="chars",
                 ntokens=2**self._nbits,
                 nbits=None,
                 positions=self._positions,
                 emb_dim=self._emb_size,
                 emb_norm=self._emb_norm,
             )
-            for bits in (self._bits // 2, self._bits * 2):
+            for bits in (self._nbits // 2, self._nbits * 2):
                 if bits not in (1, 2, 4, 8):
                     continue
                 yield Input(
+                    token_type="bits",
                     ntokens=None,
                     nbits=bits,
                     positions=self._positions,
@@ -229,8 +243,27 @@ class Input(object):
         else:
             if self._ntokens in _POWERS:
                 yield Input(
+                    token_type="bits",
                     ntokens=None,
                     nbits=_POWERS[self._ntokens],
+                    positions=self._positions,
+                    emb_dim=self._emb_size,
+                    emb_norm=self._emb_norm,
+                )
+            if self._token_type == "chars":
+                yield Input(
+                    token_type="tokens",
+                    ntokens=self._ntokens,
+                    nbits=None,
+                    positions=self._positions,
+                    emb_dim=self._emb_size,
+                    emb_norm=self._emb_norm,
+                )
+            elif self._token_type == "tokens" and self._ntokens <= 256:
+                yield Input(
+                    token_type="chars",
+                    ntokens=self._ntokens,
+                    nbits=None,
                     positions=self._positions,
                     emb_dim=self._emb_size,
                     emb_norm=self._emb_norm,
@@ -239,6 +272,7 @@ class Input(object):
                 if ntokens not in _PREFERRED_TOKENSETS:
                     continue
                 yield Input(
+                    token_type=self._token_type,
                     ntokens=ntokens,
                     nbits=None,
                     positions=self._positions,
@@ -248,7 +282,9 @@ class Input(object):
 
         if self._positions is None:
             yield Input(
-                ntokens=self.ntokens,
+                token_type=self._token_type,
+                ntokens=self._ntokens,
+                nbits=self._nbits,
                 positions=2,
                 emb_dim=self._emb_size,
                 emb_norm=self._emb_norm,
@@ -256,20 +292,26 @@ class Input(object):
         else:
             if self._positions == 2:
                 yield Input(
-                    ntokens=self.ntokens,
+                    token_type=self._token_type,
+                    ntokens=self._ntokens,
+                    nbits=self._nbits,
                     positions=None,
                     emb_dim=self._emb_size,
                     emb_norm=self._emb_norm,
                 )
             if self._positions > 2:
                 yield Input(
-                    ntokens=self.ntokens,
+                    token_type=self._token_type,
+                    ntokens=self._ntokens,
+                    nbits=self._nbits,
                     positions=self._positions // 2,
                     emb_dim=self._emb_size,
                     emb_norm=self._emb_norm,
                 )
             yield Input(
-                ntokens=self.ntokens,
+                token_type=self._token_type,
+                ntokens=self._ntokens,
+                nbits=self._nbits,
                 positions=self._positions * 2,
                 emb_dim=self._emb_size,
                 emb_norm=self._emb_norm,
@@ -277,13 +319,17 @@ class Input(object):
 
         if self._emb_size is None:
             yield Input(
-                ntokens=self.ntokens,
+                token_type=self._token_type,
+                ntokens=self._ntokens,
+                nbits=self._nbits,
                 positions=self._positions,
                 emb_dim=self.ntokens,
                 emb_norm=False,
             )
             yield Input(
-                ntokens=self.ntokens,
+                token_type=self._token_type,
+                ntokens=self._ntokens,
+                nbits=self._nbits,
                 positions=self._positions,
                 emb_dim=self.ntokens,
                 emb_norm=True,
@@ -291,27 +337,34 @@ class Input(object):
         else:
             if self._emb_size == self.ntokens:
                 yield Input(
-                    ntokens=self.ntokens,
+                    token_type=self._token_type,
+                    ntokens=self._ntokens,
+                    nbits=self._nbits,
                     positions=self._positions,
                     emb_dim=None,
                     emb_norm=False,
                 )
-            tokens_or_raw = None if self._raw_bytes else self.ntokens
             if self._emb_size > 1:
                 yield Input(
-                    ntokens=tokens_or_raw,
+                    token_type=self._token_type,
+                    ntokens=self._ntokens,
+                    nbits=self._nbits,
                     positions=self._positions,
                     emb_dim=self._emb_size // 2,
                     emb_norm=self._emb_norm,
                 )
             yield Input(
-                ntokens=tokens_or_raw,
+                token_type=self._token_type,
+                ntokens=self._ntokens,
+                nbits=self._nbits,
                 positions=self._positions,
                 emb_dim=self._emb_size * 2,
                 emb_norm=self._emb_norm,
             )
             yield Input(
-                ntokens=tokens_or_raw,
+                token_type=self._token_type,
+                ntokens=self._ntokens,
+                nbits=self._nbits,
                 positions=self._positions,
                 emb_dim=self._emb_size,
                 emb_norm=not self._emb_norm,

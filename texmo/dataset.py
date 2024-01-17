@@ -90,7 +90,7 @@ def create_bytes_sample(
     if start_paragraph:
         start = chunk.find(b"\n\n")
         if start < 0:
-            return None
+            return None, None
         start += 2  # Skip "\n\n"
     else:
         start = 0
@@ -100,7 +100,7 @@ def create_bytes_sample(
     while end < len(chunk) and 128 <= chunk[end] < 192:
         end += 1
     if end > len(chunk):
-        return None
+        return None, None
     return tokenizer.tokenize_ids(chunk[start:end])
 
 
@@ -150,6 +150,7 @@ def create_bytes_batch(
             assert bytes_size < length * 256
             continue
         samples.append(sample)
+        entropies.append(entropy)
         lengths.append(len(sample))
 
     max_len = max(lengths)

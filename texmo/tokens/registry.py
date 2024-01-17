@@ -55,7 +55,7 @@ class LiteralBytesTokenizer(object):
         else:
             l = len(string) - start
 
-        return np.frombuffer(string[start : start + l], dtype=np.uint8)
+        return np.frombuffer(string[start : start + l], dtype=np.uint8), 0
 
         # return list(string[start : start + l])
 
@@ -101,7 +101,7 @@ class LiteralBitsTokenizer(object):
         if max_bytes is not None:
             assert len(res) == max_bytes * 8
 
-        return res
+        return res, 0
 
     def untokenize(self, ids: list[int]) -> bytes:
         b = np.packbits(ids)

@@ -226,6 +226,8 @@ class TokenSet(object):
 
 
 class CharsTokenSet(object):
+    bytes_per_token = 1
+
     @staticmethod
     def from_json(tokens_dict: dict):
         processing = tokens_dict["processing"]
@@ -241,7 +243,7 @@ class CharsTokenSet(object):
         self,
         type: str,
         processing: bool,
-        tokens: list[int],
+        tokens: list[str],
         groups: np.array,
         entropy: np.array,
     ):
@@ -250,6 +252,13 @@ class CharsTokenSet(object):
         self.token_names = tokens
         self.groups = groups
         self.residual_entropy = entropy
+
+        for i, token in enumerate(tokens):
+            if isinstance(token, int):
+                tokens[i] = f"\\{token}"
+            elif isinstance(token, str) and ord(token[0]) < 32:
+                tokens[i] = repr(token)[1:-1]
+        self.tokens = tokens
 
     @property
     def ntokens(self):

@@ -63,6 +63,43 @@ CAPITALIZED_MARKER = "\x14"
 ALLCAPS_MARKER = "\x15"
 WORD_MARKER = "\x16"
 
+def process(s: bytes, mark_caps: bool, mark_words: bool) -> str:
+    try:
+        s = s.decode("utf-8")
+    except UnicodeDecodeError:
+        print(s[:1000])
+        raise
+
+    out = []
+    i = 0
+    words = WORD_BOUNDARY.split(s)
+
+    for i, word in enumerate(words):
+        if not word:
+            continue
+        if word.isalpha():
+            if (
+                mark_caps
+                and word[0].isupper()
+                and (len(word) == 1 or word[1:].islower())
+            ):
+                out.append(CAPITALIZED_MARKER)
+                out.append(word.lower())
+            elif mark_caps and word.isupper():
+                out.append(ALLCAPS_MARKER)
+                out.append(word.lower())
+            else:
+                out.append(word)
+            if mark_words:
+                out.append(WORD_MARKER)
+        else:
+            if mark_words and word == " " and 0 < i < len(words) - 1:
+                pass
+            else:
+                out.append(word)
+
+    return "".join(out).encode("utf-8")
+
 
 class Tokenizer(object):
     def __init__(self, token_set: TokenSet):
@@ -215,36 +252,8 @@ class Tokenizer(object):
 
         return "".join(words)
 
-    def _process(self, s: str) -> str:
-        out = []
-        i = 0
-        words = WORD_BOUNDARY.split(s)
-
-        for i, word in enumerate(words):
-            if not word:
-                continue
-            if word.isalpha():
-                if (
-                    self._mark_caps
-                    and word[0].isupper()
-                    and (len(word) == 1 or word[1:].islower())
-                ):
-                    out.append(CAPITALIZED_MARKER)
-                    out.append(word.lower())
-                elif self._mark_caps and word.isupper():
-                    out.append(ALLCAPS_MARKER)
-                    out.append(word.lower())
-                else:
-                    out.append(word)
-                if self._mark_words:
-                    out.append(WORD_MARKER)
-            else:
-                if self._mark_words and word == " " and 0 < i < len(words) - 1:
-                    pass
-                else:
-                    out.append(word)
-
-        return "".join(out)
+    def _process(self, s: bytes) -> str:
+        return process(s, self._mark_caps, self._mark_words)
 
     def _iterate_bytes(
         self, data: bytes, start: int, max_tokens: int, max_bytes: int
@@ -266,12 +275,7 @@ class Tokenizer(object):
             string = data[start:end]
 
             if self._mark_caps or self._mark_words:
-                try:
-                    string = string.decode("utf-8")
-                except UnicodeDecodeError:
-                    print(string[:1000])
-                    raise
-                string = self._process(string).encode("utf-8")
+                string = self._process(string)
 
             yield string
 

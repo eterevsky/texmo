@@ -427,8 +427,9 @@ def sample(args: argparse.Namespace):
             print(f"Prepared sample:\n{sample}")
             token_set = get_tokenizer(args.tokens).token_set
 
+            sep = "" if token_set.type == "chars" else "|"
             for token in sample[0]:
-                print(token_set.tokens[token], end="|")
+                print(token_set.tokens[token], end=sep)
             print()
         dataset.join()
 

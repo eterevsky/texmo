@@ -3,7 +3,7 @@ import numpy as np
 from typing import Optional
 
 from .tokenset import CharsTokenSet
-from .tokenizer import process
+from .tokenizer import process, unprocess
 
 
 class CharsTokenizer(object):
@@ -17,15 +17,17 @@ class CharsTokenizer(object):
         max_tokens=None,
         max_bytes=None,
     ) -> list[int]:
-        print(start, max_tokens, max_bytes, self.token_set.processing)
-
         if max_bytes is not None:
-            string = string[start : start + max_bytes]
+            end = start + max_bytes
+        elif max_tokens is not None:
+            end = start + max_tokens
         else:
-            string = string[start:]
+            end = len(string)
+        
+        while end < len(string) and 128 <= string[end] < 192:
+            end += 1
 
-        if max_tokens is not None:
-            string = string[:max_tokens]
+        string = string[start:end]
 
         if self.token_set.processing:
             string = process(string, True, True)
@@ -36,4 +38,14 @@ class CharsTokenizer(object):
             string = string[:max_tokens]
 
         byte_array = np.frombuffer(string, dtype=np.byte)
-        return self.token_set.groups[byte_array]
+
+        entropy = np.sum(self.token_set.residual_entropy[byte_array])
+        return self.token_set.groups[byte_array], entropy
+    
+    def untokenize(self, tokens: list[int]) -> bytes:
+        chars = []
+        for token in tokens:
+            chars.append(self.token_set.tokens[token])
+        print(chars)
+        s = b"".join(chars)
+        return unprocess(s)

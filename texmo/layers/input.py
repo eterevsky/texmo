@@ -91,16 +91,20 @@ class Input(object):
         positions = None  # no position encoding
         emb_dim = None  # one-hot
         emb_norm = False
+        token_type = None
 
         for comp_spec in spec.split("-"):
             parts = comp_spec.split(".")
             match parts[0]:
                 case "tokens":
                     ntokens = int(parts[1])
+                    token_type = "tokens"
                 case "bytes":
                     nbits = 8
+                    token_type = "bits"
                 case "bits":
                     nbits = int(parts[1])
+                    token_type = "bits"
                 case "pos":
                     positions = int(parts[1])
                 case "onehot":
@@ -109,6 +113,11 @@ class Input(object):
                     emb_dim = int(parts[1])
                     if len(parts) > 2 and parts[2] == "norm":
                         emb_norm = True
+                case "chars":
+                    ntokens = int(parts[1])
+                    token_type = "chars"
+                case _:
+                    raise ValueError(f"Unknown component spec: {comp_spec}")
 
         assert (
             ntokens is None
@@ -117,16 +126,20 @@ class Input(object):
             and nbits is None
         )
 
-        return Input(ntokens, nbits, positions, emb_dim, emb_norm)
+        return Input(token_type, ntokens, nbits, positions, emb_dim, emb_norm)
 
     def __init__(
         self,
-        ntokens: Optional[int],  # None if
+        token_type: str,
+        ntokens: Optional[int],
         nbits: Optional[int],
         positions: Optional[int],
         emb_dim: Optional[int],
         emb_norm: bool,
     ):
+        assert isinstance(token_type, str)
+        self._token_type = token_type
+
         assert (
             ntokens is None
             and nbits is not None
@@ -136,10 +149,13 @@ class Input(object):
 
         self._ntokens = ntokens
         self._nbits = nbits
-        if ntokens:
-            token_set = _PREFERRED_TOKENSETS[ntokens]
-        else:
-            token_set = _BITS_TOKENSETS[nbits]
+        match token_type:
+            case "tokens":
+                token_set = _PREFERRED_TOKENSETS[ntokens]
+            case "bits":
+                token_set = _BITS_TOKENSETS[nbits]
+            case "chars":
+                token_set = f"tokens{ntokens}_capswords_chars"
 
         self.tokenizer = get_tokenizer(token_set)
         self._positions = positions

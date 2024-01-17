@@ -249,16 +249,26 @@ class CharsTokenSet(object):
     ):
         self.type = type
         self.processing = processing
-        self.token_names = tokens
         self.groups = groups
         self.residual_entropy = entropy
+
+        self.tokens = []
+
+        for token in tokens:
+            if isinstance(token, str):
+                b = token.encode("utf-8")
+            else:
+                b = bytes([token])
+            self.tokens.append(b)
+        
+        print(self.tokens)
 
         for i, token in enumerate(tokens):
             if isinstance(token, int):
                 tokens[i] = f"\\{token}"
             elif isinstance(token, str) and ord(token[0]) < 32:
                 tokens[i] = repr(token)[1:-1]
-        self.tokens = tokens
+        self.token_names = tokens
 
     @property
     def ntokens(self):

@@ -101,6 +101,39 @@ def process(s: bytes, mark_caps: bool, mark_words: bool) -> str:
     return "".join(out).encode("utf-8")
 
 
+def unprocess(text: bytes) -> str:
+    try:
+        text = text.decode("utf-8")
+    except UnicodeDecodeError:
+        return text
+
+    words = WORD_BOUNDARY.split(text)
+
+    for i in range(len(words)):
+        word = words[i]
+        if not word.isalpha():
+            continue
+
+        if i > 0 and words[i - 1][-1] == "\x14":
+            words[i - 1] = words[i - 1][:-1]
+            words[i] = word.capitalize()
+        elif i > 0 and words[i - 1][-1] == "\x15":
+            words[i - 1] = words[i - 1][:-1]
+            words[i] = word.upper()
+
+        if i + 1 < len(words):
+            if words[i + 1] == WORD_MARKER:
+                words[i + 1] = " "
+            elif words[i + 1].startswith(WORD_MARKER) and words[i + 1][
+                1
+            ] in (CAPITALIZED_MARKER, ALLCAPS_MARKER):
+                words[i + 1] = " " + words[i + 1][1:]
+            elif words[i + 1].startswith(WORD_MARKER):
+                words[i + 1] = words[i + 1][1:]
+
+    return "".join(words)
+
+
 class Tokenizer(object):
     def __init__(self, token_set: TokenSet):
         self.token_set: TokenSet = token_set
@@ -183,10 +216,15 @@ class Tokenizer(object):
         max_tokens=None,
         max_bytes=None,
     ) -> list[int]:
-        return [
+        token_ids = [
             token.id
             for token in self.tokenize(string, start, max_tokens, max_bytes)
         ]
+        if self.token_set.entropy0 > 0:
+            entropy = token_ids.count(0) * self.token_set.entropy0
+            return token_ids, entropy
+        else:
+            return token_ids, 0            
 
     def untokenize(self, tokens: list[int]) -> bytes:
         chunks = []
@@ -220,37 +258,7 @@ class Tokenizer(object):
                 assert False, "Unsupported TokenSet type"
 
         text = b"".join(chunks)
-
-        try:
-            text = text.decode("utf-8")
-        except UnicodeDecodeError:
-            return text
-
-        words = WORD_BOUNDARY.split(text)
-
-        for i in range(len(words)):
-            word = words[i]
-            if not word.isalpha():
-                continue
-
-            if i > 0 and words[i - 1][-1] == "\x14":
-                words[i - 1] = words[i - 1][:-1]
-                words[i] = word.capitalize()
-            elif i > 0 and words[i - 1][-1] == "\x15":
-                words[i - 1] = words[i - 1][:-1]
-                words[i] = word.upper()
-
-            if i + 1 < len(words):
-                if words[i + 1] == WORD_MARKER:
-                    words[i + 1] = " "
-                elif words[i + 1].startswith(WORD_MARKER) and words[i + 1][
-                    1
-                ] in (CAPITALIZED_MARKER, ALLCAPS_MARKER):
-                    words[i + 1] = " " + words[i + 1][1:]
-                elif words[i + 1].startswith(WORD_MARKER):
-                    words[i + 1] = words[i + 1][1:]
-
-        return "".join(words)
+        return unprocess(text, self._mark_caps, self._mark_words)
 
     def _process(self, s: bytes) -> str:
         return process(s, self._mark_caps, self._mark_words)

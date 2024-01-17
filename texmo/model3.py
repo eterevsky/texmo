@@ -224,7 +224,7 @@ class Model3(object):
         """
         state, out_softmax = self.step_prob(weights, state, input_char, temperature)
         c_selected = jax.random.choice(rng.gen(), self.input.ntokens, p=out_softmax)
-        return state, c_selected
+        return state, int(c_selected)
 
     def _forward_batch(self, weights: Weights, batch: jax.Array) -> jax.Array:
         v = self.input.forward_batch(weights[0], batch[:, :-1], padding_len=1)

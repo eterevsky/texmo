@@ -280,6 +280,6 @@ def init_args(parser: argparse.ArgumentParser, config):
         action="store_false",
         help="Load and tokenize training data concurrently with training in a separate thread.",
     )
-    parser.set_defaults(sync_tokens=False)
+    parser.set_defaults(sync_tokens=config.SYNC_TOKENS)
 
     parser.set_defaults(func=train)

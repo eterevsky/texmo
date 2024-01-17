@@ -109,6 +109,7 @@ class Manager(object):
         # Full training data, will be initialized in init() if self.sync_tokens
         # is True.
         self._training_data: Optional[jax.Array] = None
+        self._residual_entropy: Optional[list[float]] = None
 
     @property
     def step(self):
@@ -204,13 +205,12 @@ class Manager(object):
 
     def _init_training_data(self):
         with latency.timer("Manager._init_training_data") as timer:
-            self._training_data = jnp.array(
-                self.dataset.sample_tokens(
+            self._training_data, self._residual_entropy = self.dataset.sample_tokens(
                     ntokens=self.conf.length,
                     batch_size=self.conf.batch * self.conf.steps,
                     token_set_name=self.conf.tokens_name,
                 )
-            )
+            self._training_data = jnp.array(self._training_data)
             total_tokens = self.conf.length * self.conf.batch * self.conf.steps
             total_bytes = round(
                 total_tokens *self.tokenizer.token_set.bytes_per_token
@@ -253,17 +253,11 @@ class Manager(object):
             self.optimizer = None
             self.opt_state = None
 
-    def _eval(self, xs, lengths):
+    def _eval(self, xs, lengths, entropies):
         lengths = np.array(lengths)
 
         assert self.tokenizer is not None
-        if self.tokenizer.token_set.entropy0 > 0:
-            zeros = 0
-            for sample, l in zip(xs, lengths):
-                zeros += l - np.count_nonzero(sample[:l])
-            total_entropy0 = zeros * self.tokenizer.token_set.entropy0
-        else:
-            total_entropy0 = 0
+        total_entropy0 = sum(entropies)
 
         shards = 4
         while shards <= xs.shape[0]:
@@ -305,12 +299,12 @@ class Manager(object):
     def eval(self) -> float:
         """Evaluate a model on a random sample from the training data."""
         with latency.timer("Manager.eval"):
-            batch, lengths = self.dataset.sample_bytes(
+            batch, lengths, entropies = self.dataset.sample_bytes(
                 length=self.test_sample_len,
                 batch_size=self.test_batch,
                 token_set_name=self.tokenizer.token_set.name,
             )
-            return self._eval(batch, lengths)
+            return self._eval(batch, lengths, entropies)
 
     def sample_(self, prefix, l, temperature=0.05):
         """Sample from the distribution to continue the given prefix."""
@@ -349,7 +343,7 @@ class Manager(object):
         return out
 
 
-    def train_step(self, xs):
+    def train_step(self, xs, residual_entropy):
         trainable_weights = self.weights[self.train_from :]
         loss, grads = self._loss_grad(trainable_weights, xs)
 
@@ -360,12 +354,11 @@ class Manager(object):
         self.weights[self.train_from :] = trainable_weights
 
         loss = float(loss)
-        byte_loss = self.tokenizer.token_set.byte_loss(loss)
-        self.run.add_step(byte_loss)
+        self.run.add_step(loss)
 
-        return loss
+        return loss + sum(residual_entropy) / (xs.shape[0] * xs.shape[1])
 
-    def _get_batch(self, ):
+    def _get_batch(self) -> tuple[jax.Array, list[float]]:
         if not self.sync_tokens:
             return jnp.array(
                 self.dataset.sample_tokens(
@@ -378,7 +371,7 @@ class Manager(object):
         start = self.step * self.conf.batch
         finish = start + self.conf.batch
         assert finish <= self._training_data.shape[0]
-        return self._training_data[start:finish, :]
+        return self._training_data[start:finish, :], self._residual_entropy[start:finish]
 
     def train(
         self,
@@ -409,10 +402,10 @@ class Manager(object):
         step_start = perf_counter()
 
         while perf_counter() < finish_time and self.step < steps:
-            batch = self._get_batch()
+            batch, entropies = self._get_batch()
 
             # try:
-            loss = self.train_step(batch)
+            loss = self.train_step(batch, entropies)
             # except (XlaRuntimeError, ValueError) as e:
             #     logging.warn("Internal XLA error, probably OOM. Returning +inf loss:\n" + str(e))
             #     step_times = []
@@ -497,11 +490,10 @@ class Manager(object):
         self, prefix: str, length: int, temperature: float
     ) -> str | bytes:
         prefix_bytes: bytes = prefix.encode()  # convert str to bytes
-        prefix_tokens = [t.id for t in self.tokenizer.tokenize(prefix_bytes)]
+        prefix_tokens, _ = self.tokenizer.tokenize_ids(prefix_bytes)
 
         out = self.sample(prefix_tokens, length, temperature)
-
-        full_text = prefix_tokens + out
+        full_text = list(prefix_tokens) + out
 
         out = self.tokenizer.untokenize(full_text) if self.tokenizer else bytes(out)
 

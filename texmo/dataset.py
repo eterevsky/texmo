@@ -62,7 +62,7 @@ def create_tokens_sample(
     tokenizer: Tokenizer,
     ntokens: int,
     start_paragraph: bool,
-) -> list[int]:
+) -> tuple[list[int], float]:
     if start_paragraph:
         start = chunk.find(b"\n\n")
         if start < 0:
@@ -76,17 +76,17 @@ def create_tokens_sample(
     while end > 0 and 128 <= chunk[end] < 192:
         end -= 1
     if start >= end:
-        return None
-    tokens = tokenizer.tokenize_ids(chunk[start:end], max_tokens=ntokens)
+        return None, None
+    tokens, entropy = tokenizer.tokenize_ids(chunk[start:end], max_tokens=ntokens)
     assert len(tokens) <= ntokens
     if len(tokens) < ntokens:
-        return None
-    return tokens
+        return None, None
+    return tokens, entropy
 
 
 def create_bytes_sample(
     chunk: bytes, tokenizer: Tokenizer, length: int, start_paragraph: bool
-) -> bytes:
+) -> tuple[list[int], float]:
     if start_paragraph:
         start = chunk.find(b"\n\n")
         if start < 0:
@@ -101,7 +101,6 @@ def create_bytes_sample(
         end += 1
     if end > len(chunk):
         return None
-    # assert end <= len(chunk)
     return tokenizer.tokenize_ids(chunk[start:end])
 
 
@@ -111,21 +110,23 @@ def create_tokens_batch(
     tokenizer: Tokenizer,
     ntokens: int,
     batch: int,
-) -> np.array:
+) -> (np.array, list[float]):
     bytes_size = 2 ** math.ceil(
         math.log2(ntokens * tokenizer.token_set.bytes_per_token + 16)
     )
     samples = []
+    entropies = []
     while len(samples) < batch:
         assert bytes_size is not None
         reader_request_queue.put(bytes_size)
         chunk = reader_data_queues[bytes_size].get()
-        sample = create_tokens_sample(chunk, tokenizer, ntokens, start_paragraph=False)
+        sample, entropy = create_tokens_sample(chunk, tokenizer, ntokens, start_paragraph=False)
         if sample is None:
             bytes_size *= 2
             continue
         samples.append(sample)
-    return np.array(samples, dtype=np.uint16)
+        entropies.append(entropy)
+    return np.array(samples, dtype=np.uint16), entropies
 
 
 def create_bytes_batch(
@@ -134,15 +135,16 @@ def create_bytes_batch(
     tokenizer: Tokenizer,
     length: int,
     batch: int,
-) -> tuple[np.array, list[int]]:
+) -> tuple[np.array, list[int], list[float]]:
     lengths = []
     samples = []
+    entropies = []
     bytes_size = ceil_power2(length + 16)
     while len(samples) < batch:
         assert bytes_size is not None
         reader_request_queue.put(bytes_size)
         chunk = reader_data_queues[bytes_size].get()
-        sample = create_bytes_sample(chunk, tokenizer, length, start_paragraph=False)
+        sample, entropy = create_bytes_sample(chunk, tokenizer, length, start_paragraph=False)
         if sample is None:
             bytes_size *= 2
             assert bytes_size < length * 256
@@ -164,7 +166,7 @@ def create_bytes_batch(
             padded_samples.append(sample)
 
     batch = np.array(padded_samples, dtype=np.uint16)
-    return batch, lengths
+    return batch, lengths, entropies
 
 
 SampleRequest = namedtuple(
@@ -177,8 +179,6 @@ class SamplerThread(Thread):
         self,
         reader_request_queue: Queue,
         reader_data_queues: dict[int, Queue],
-        processed_request_queue: Optional[Queue],
-        processed_data_queues: Optional[dict[int, Queue]],
         requests_queue: Queue,
         data_queues: dict[str, Queue],
         token_sets_lock: Lock,
@@ -186,10 +186,6 @@ class SamplerThread(Thread):
         super().__init__()
         self._reader_request_queue: Queue = reader_request_queue
         self._reader_data_queues: dict[int, Queue] = reader_data_queues
-
-        self._processed_request_queue = processed_request_queue
-        self._processed_data_queues: dict[int, Queue] = processed_data_queues
-
         self._requests_queue: Queue = requests_queue
         self._data_queues: dict[str, Queue] = data_queues
         self._token_sets_lock = token_sets_lock
@@ -210,26 +206,24 @@ class SamplerThread(Thread):
 
             if request.ntokens is not None:
                 assert request.length is None
-                batch = create_tokens_batch(
+                batch, entropies = create_tokens_batch(
                     self._reader_request_queue,
                     self._reader_data_queues,
-                    self._processed_request_queue,
-                    self._processed_data_queues,
                     tokenizer,
                     request.ntokens,
                     request.batch,
                 )
-                response_queue.put((batch, None))
+                response_queue.put((batch, None, entropies))
             else:
                 assert request.length is not None
-                batch, lengths = create_bytes_batch(
+                batch, lengths, entropies = create_bytes_batch(
                     self._reader_request_queue,
                     self._reader_data_queues,
                     tokenizer,
                     request.length,
                     request.batch,
                 )
-                response_queue.put((batch, lengths))
+                response_queue.put((batch, lengths, entropies))
 
 
 class DataSet(object):
@@ -241,7 +235,8 @@ class DataSet(object):
         in_process: bool = False,
         n_sampler_threads: int = 1,
     ):
-        logging.info("Creating DataSet")
+        in_process = "synch" if in_process else "concurrent"
+        logging.info(f"Creating DataSet ({in_process})")
         self._in_process = in_process
         self._init_reader_queues()
         self._init_reader_thread(path, data)
@@ -350,7 +345,7 @@ class DataSet(object):
 
     def sample_bytes(
         self, length: int, batch_size: int, token_set_name: str
-    ) -> tuple[np.ndarray, list]:
+    ) -> tuple[np.ndarray, list, list[float]]:
         with latency.timer("DataSet.sample_bytes"):
             if self._in_process:
                 tokenizer = get_tokenizer(token_set_name)
@@ -365,12 +360,12 @@ class DataSet(object):
                 request = SampleRequest(
                     token_set_name, ntokens=None, length=length, batch=batch_size
                 )
-                batch, lengths = self._send_request(request)
-                return batch, lengths
+                batch, lengths, entropies = self._send_request(request)
+                return batch, lengths, entropies
 
     def sample_tokens(
         self, ntokens, batch_size, token_set_name
-    ) -> tuple[np.ndarray, float, float]:
+    ) -> tuple[np.ndarray, list[float]]:
         with latency.timer("DataSet.sample_tokens"):
             if self._in_process:
                 tokenizer = get_tokenizer(token_set_name)
@@ -385,8 +380,8 @@ class DataSet(object):
                 request = SampleRequest(
                     token_set_name, ntokens=ntokens, length=None, batch=batch_size
                 )
-                batch, _lengths = self._send_request(request)
-                return batch
+                batch, _lengths, entropies = self._send_request(request)
+                return batch, entropies
 
 
 def build_dataset(path):

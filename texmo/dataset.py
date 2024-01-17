@@ -177,6 +177,8 @@ class SamplerThread(Thread):
         self,
         reader_request_queue: Queue,
         reader_data_queues: dict[int, Queue],
+        processed_request_queue: Optional[Queue],
+        processed_data_queues: Optional[dict[int, Queue]],
         requests_queue: Queue,
         data_queues: dict[str, Queue],
         token_sets_lock: Lock,
@@ -184,6 +186,10 @@ class SamplerThread(Thread):
         super().__init__()
         self._reader_request_queue: Queue = reader_request_queue
         self._reader_data_queues: dict[int, Queue] = reader_data_queues
+
+        self._processed_request_queue = processed_request_queue
+        self._processed_data_queues: dict[int, Queue] = processed_data_queues
+
         self._requests_queue: Queue = requests_queue
         self._data_queues: dict[str, Queue] = data_queues
         self._token_sets_lock = token_sets_lock
@@ -207,6 +213,8 @@ class SamplerThread(Thread):
                 batch = create_tokens_batch(
                     self._reader_request_queue,
                     self._reader_data_queues,
+                    self._processed_request_queue,
+                    self._processed_data_queues,
                     tokenizer,
                     request.ntokens,
                     request.batch,
@@ -229,6 +237,7 @@ class DataSet(object):
         self,
         path: Optional[str] = None,
         data: Optional[bytes] = None,
+        path_processed: Optional[str] = None,
         in_process: bool = False,
         n_sampler_threads: int = 1,
     ):
@@ -402,8 +411,8 @@ def sample(args: argparse.Namespace):
 
     dataset = DataSet(
         args.data,
-        debug=not args.benchmark,
         in_process=not args.benchmark,
+        path_processed=args.data_processed,
     )
 
     if args.benchmark:
@@ -414,9 +423,8 @@ def sample(args: argparse.Namespace):
             print(f"Prepared sample:\n{sample}")
             print(f"Lengths: {lengths}")
         else:
-            sample, timer = dataset.sample_tokens(args.ntokens, args.batch, args.tokens)
+            sample = dataset.sample_tokens(args.ntokens, args.batch, args.tokens)
             print(f"Prepared sample:\n{sample}")
-            print(f"Timer: {timer}")
             token_set = get_tokenizer(args.tokens).token_set
 
             for token in sample[0]:
@@ -432,6 +440,12 @@ def sample_init_args(parser: argparse.ArgumentParser, config):
         type=str,
         help="training data file",
         default=config.DATA,
+    )
+    parser.add_argument(
+        "--data-processed",
+        type=str,
+        help="training data that has been already processed with capswords filter",
+        default=config.DATA_CAPS_WORDS,
     )
     parser.add_argument(
         "--tokens-dir",

@@ -1,4 +1,5 @@
 import json
+import numpy as np
 from typing import Optional
 
 
@@ -36,7 +37,10 @@ class TokenSet(object):
     def from_json_file(filename: str):
         with open(filename, "rb") as file:
             tokens_dict = json.load(file)
-        return TokenSet.from_json(tokens_dict)
+        if tokens_dict["type"] == "chars":
+            return CharsTokenSet.from_json(tokens_dict)
+        else:
+            return TokenSet.from_json(tokens_dict)
 
     @staticmethod
     def from_json(tokens_dict: dict):
@@ -70,7 +74,9 @@ class TokenSet(object):
         bytes_per_token: Optional[float] = None,
     ):
         assert isinstance(fallback_bits, Optional[int])
-        token_set = TokenSet(type, processing, fallback_bits, stats, bytes_per_token=bytes_per_token)
+        token_set = TokenSet(
+            type, processing, fallback_bits, stats, bytes_per_token=bytes_per_token
+        )
         if type == "fallback_distribution":
             reserved_tokens = 1
         elif type == "fallback_bits":
@@ -104,8 +110,7 @@ class TokenSet(object):
             self.bytes_per_token = bytes_per_token
         else:
             self.bytes_per_token = stats["initial_size"] / (
-                stats["total_tokens"]
-                + self.tokens_in_literal * stats["total_literals"]
+                stats["total_tokens"] + self.tokens_in_literal * stats["total_literals"]
             )
 
     @property
@@ -156,7 +161,7 @@ class TokenSet(object):
     @property
     def ntokens(self):
         return len(self.tokens)
-    
+
     @property
     def name(self):
         return f"tokens{self.ntokens}_{self.processing}_{self.token_type}"
@@ -184,9 +189,7 @@ class TokenSet(object):
             if not token.string.endswith(string):
                 continue
             assert string != token.string
-            if isinstance(token.suffix, int) or len(token.suffix.string) < len(
-                string
-            ):
+            if isinstance(token.suffix, int) or len(token.suffix.string) < len(string):
                 token.suffix = new_token
 
         self.tokens.append(new_token)
@@ -220,3 +223,39 @@ class TokenSet(object):
                     fallbacks.append(literal)
                 # print(fallbacks)
                 return fallbacks
+
+
+class CharsTokenSet(object):
+    @staticmethod
+    def from_json(tokens_dict: dict):
+        processing = tokens_dict["processing"]
+        assert processing in ("raw", "capswords")
+        processing = processing == "capswords"
+        tokens = [t[0] for t in tokens_dict["tokens"]]
+        groups = np.array(tokens_dict["groups"], dtype=np.byte)
+        entropy = np.array(tokens_dict["byte_entropy"], dtype=np.float32)
+
+        return CharsTokenSet(tokens_dict["type"], processing, tokens, groups, entropy)
+
+    def __init__(
+        self,
+        type: str,
+        processing: bool,
+        tokens: list[int],
+        groups: np.array,
+        entropy: np.array,
+    ):
+        self.type = type
+        self.processing = processing
+        self.token_names = tokens
+        self.groups = groups
+        self.residual_entropy = entropy
+
+    @property
+    def ntokens(self):
+        return len(self.tokens)
+
+    @property
+    def name(self):
+        proc = "capswords" if self.processing else "raw"
+        return f"tokens{self.ntokens}_{proc}_chars"

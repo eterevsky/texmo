@@ -5,6 +5,7 @@ import os
 
 from .tokenset import TokenSet, Token
 from .tokenizer import Tokenizer
+from .chars_tokenizer import CharsTokenizer
 
 
 def _build_literal_bytes() -> TokenSet:
@@ -126,7 +127,10 @@ def get_tokenizer(name: str):
     try:
         token_set = TokenSet.from_json_file(path)
         logging.info(f"Loaded token set from {path}")
-        tokenizer = Tokenizer(token_set)
+        if token_set.type == "chars":
+            tokenizer = CharsTokenizer(token_set)
+        else:
+            tokenizer = Tokenizer(token_set)
     except FileNotFoundError:
         tokenizer = None
     _TOKENIZERS[name] = tokenizer

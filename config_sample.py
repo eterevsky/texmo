@@ -3,6 +3,7 @@
 import os
 
 DATA = "data/data.txt"
+DATA_CAPS_WORDS = "data/data_capswords.txt"
 TOKENS_DIR = "tokens"
 
 DB = "results/db.sqlite"

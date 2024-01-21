@@ -1,6 +1,7 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, BufRead};
 
 use clap::{Parser, Subcommand};
 
@@ -268,6 +269,48 @@ fn count_bytes_command(filename: &str) {
     println!();
 }
 
+fn count_chars(filename: &str) {
+    let file = File::open(filename).unwrap();
+    let mut reader = BufReader::new(file);
+
+    let mut total = 0;
+    let mut counts_low: [usize; 256] = [0; 256];
+    let mut counts = HashMap::new();
+
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(e) => panic!("{}", e),
+        }
+        let chars_in_line = line.chars().count();
+        let next_total = total + chars_in_line;
+        if total / 1000000000 != next_total / 1000000000 {
+            println!("{}", next_total);
+        }
+        total = next_total;
+
+        for c in line.chars() {
+            let c = c as u32;
+            if c < 256 {
+                counts_low[c as usize] += 1;
+            } else {
+                *counts.entry(c).or_insert(0) += 1;
+            }
+        }
+    }
+    println!("Total: {}", total);
+
+    for (c, count) in counts_low.iter().enumerate() {
+        if *count > 0 {
+            println!("{:?} {}", std::char::from_u32(c as u32).unwrap(), count);
+        }
+    }
+}
+
 fn tokenize(
     filename: &str,
     tokens_file: &str,
@@ -402,6 +445,10 @@ enum Command {
         #[arg(short, long)]
         data: String,
     },
+    CountChars {
+        #[arg(short, long)]
+        data: String,
+    },
 }
 
 fn main() {
@@ -467,5 +514,6 @@ fn main() {
 
         Command::CountHexDigits { data } => count_hex_digits(data.as_str()),
         Command::CountBytes { data } => count_bytes_command(data.as_str()),
+        Command::CountChars { data } => count_chars(data.as_str()),
     }
 }

@@ -3,7 +3,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::sampler::{Sample, Sampler};
+use crate::input::sample::{Sample, Sampler};
 use crate::stats::TokenStats;
 use crate::tokens::{TokenIdx, TokenSet};
 

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use rand::distributions::{Distribution, Uniform};
 use rand::thread_rng;
 
-use crate::sampler::{Sampler, SelectionSampler};
+use crate::input::sample::{Sampler, Sample};
 use crate::stats::TokenStats;
 use crate::tokenizer::tokenize_file;
 use crate::tokens::{LiteralEncoding, TokenSet};
@@ -379,11 +379,11 @@ fn add_tokens_bpe<'a, S: Sampler<'a>>(
     }
 }
 
-pub fn optimize_bpe<'a, S: Sampler<'a>>(
+pub fn optimize_bpe<'a, S: Sampler<'a>, FS: Sampler<'a>>(
     token_set: &TokenSet,
     ntokens: usize,
     sampler: &'a S,
-    fast_sampler: &'a SelectionSampler,
+    fast_sampler: &'a FS,
     add_block: usize,
 ) -> (TokenSet, TokenStats) {
     let mut token_set = token_set.clone();

@@ -10,16 +10,17 @@ use tempfile::NamedTempFile;
 mod char_tokens;
 mod optimizer;
 mod processing;
-mod sampler;
+mod input;
 mod stats;
 mod tokenizer;
 mod tokens;
 
-use crate::sampler::SelectionSampler;
-
 use self::optimizer::optimize_bpe;
 use self::processing::process_file;
-use self::sampler::{FileSampler, MemorySampler};
+use self::input::sample::{Sampler, Sample};
+use self::input::memory_sampler::MemorySampler; 
+use self::input::file_sampler::FileSampler;
+use self::input::preloaded_sampler::SelectionSampler;
 use self::tokenizer::tokenize_file;
 use self::tokens::{LiteralEncoding, TokenSet};
 

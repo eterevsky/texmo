@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 
 use tempfile::NamedTempFile;
 
+mod char_tokens;
 mod optimizer;
 mod processing;
 mod sampler;
@@ -309,6 +310,15 @@ fn count_chars(filename: &str) {
             println!("{:?} {}", std::char::from_u32(c as u32).unwrap(), count);
         }
     }
+
+    let mut max_c = 0;
+    for c in counts.keys() {
+        if *c > max_c {
+            max_c = *c;
+        }
+    }
+
+    println!("Max char: {:?}", std::char::from_u32(max_c).unwrap());
 }
 
 fn tokenize(

@@ -5,15 +5,33 @@ use std::io::{Read, Seek, SeekFrom};
 use std::iter::Iterator;
 
 pub enum Sample<'a> {
-    Data(Vec<u8>),
-    Ref(&'a [u8]),
+    Data(String),
+    Ref(&'a str),
 }
 
-impl Sample<'_> {
-    pub fn len(&self) -> usize {
+impl<'a> Sample<'a> {
+    fn from_vec(data: Vec<u8>) -> Self {
+        Sample::Data(String::from_utf8(data).unwrap())
+    }   
+
+    fn from_bytes(data: &'a [u8]) -> Self {
+        match String::from_utf8_lossy(data) {
+            std::borrow::Cow::Owned(s) => Sample::Data(s),
+            std::borrow::Cow::Borrowed(s) => Sample::Ref(s),
+        }
+    }
+
+    pub fn as_bytes(&'a self) -> &'a [u8] {
         match self {
-            Sample::Data(data) => data.len(),
-            Sample::Ref(data) => data.len(),
+            Sample::Data(data) => data.as_bytes(),
+            Sample::Ref(data) => data.as_bytes(),
+        }
+    }
+
+    pub fn as_str(&'a self) -> &'a str {
+        match self {
+            Sample::Data(data) => data.as_str(),
+            Sample::Ref(data) => data,
         }
     }
 }
@@ -28,23 +46,23 @@ pub trait Sampler<'a> {
 
 pub struct FileSampler {
     filename: String,
-    chunk_size: usize,
+    sample_size: usize,
     _total_size: u64,
-    chunks_selection: Option<usize>,
+    max_samples: Option<usize>,
 }
 
 impl FileSampler {
-    pub fn new(filename: &str, chunk_size: usize, chunks_selection: Option<usize>) -> Self {
-        let _total_size = if let Some(cs) = chunks_selection {
-            (chunk_size * cs) as u64
+    pub fn new(filename: &str, sample_size: usize, max_samples: Option<usize>) -> Self {
+        let _total_size = if let Some(cs) = max_samples {
+            (sample_size * cs) as u64
         } else {
             std::fs::metadata(filename).unwrap().len()
         };
         FileSampler {
             filename: filename.to_string(),
-            chunk_size,
+            sample_size,
             _total_size,
-            chunks_selection,
+            max_samples,
         }
     }
 }
@@ -55,22 +73,22 @@ impl<'a> Sampler<'a> for FileSampler {
     fn iter(&'a self) -> Self::Iter {
         let file = File::open(self.filename.as_str()).unwrap();
 
-        if let Some(chunks_selection) = self.chunks_selection {
+        if let Some(chunks_selection) = self.max_samples {
             FileIterator {
                 _sampler: self,
                 file,
-                chunk_size: self.chunk_size,
+                sample_size: self.sample_size,
                 total_size: self._total_size,
-                sample_chunks_left: Some(chunks_selection),
+                samples_left: Some(chunks_selection),
                 read_bytes: 0,
             }
         } else {
             FileIterator {
                 _sampler: self,
                 file,
-                chunk_size: self.chunk_size,
+                sample_size: self.sample_size,
                 total_size: self._total_size,
-                sample_chunks_left: None,
+                samples_left: None,
                 read_bytes: 0,
             }
         }
@@ -84,9 +102,9 @@ impl<'a> Sampler<'a> for FileSampler {
 pub struct FileIterator<'a> {
     _sampler: &'a FileSampler,
     file: File,
-    chunk_size: usize,
+    sample_size: usize,
     total_size: u64,
-    sample_chunks_left: Option<usize>,
+    samples_left: Option<usize>,
 
     pub read_bytes: usize,
 }
@@ -96,16 +114,16 @@ impl<'a> Iterator for FileIterator<'a> {
 
     fn next(&mut self) -> Option<Sample<'a>> {
         let mut buffer = Vec::new();
-        buffer.resize(self.chunk_size, 0);
+        buffer.resize(self.sample_size, 0);
 
-        if let Some(chunks_left) = self.sample_chunks_left {
+        if let Some(chunks_left) = self.samples_left {
             if chunks_left == 0 {
                 None
             } else {
-                self.sample_chunks_left = Some(chunks_left - 1);
+                self.samples_left = Some(chunks_left - 1);
 
                 let mut rng = rand::thread_rng();
-                let max_seek = self.total_size - self.chunk_size as u64;
+                let max_seek = self.total_size - self.sample_size as u64;
                 let start = rng.gen_range(0..max_seek);
 
                 self.file.seek(SeekFrom::Start(start)).unwrap();
@@ -113,7 +131,7 @@ impl<'a> Iterator for FileIterator<'a> {
 
                 buffer.truncate(read_bytes);
                 self.read_bytes += read_bytes;
-                Some(Sample::Data(buffer))
+                Some(Sample::from_vec(buffer))
             }
         } else {
             let read_bytes = self.file.read(&mut buffer).unwrap();
@@ -126,7 +144,7 @@ impl<'a> Iterator for FileIterator<'a> {
                 // if self.read_bytes & ((1<<30) - 1) == 0 {
                 //     dbg!(self.read_bytes);
                 // }
-                Some(Sample::Data(buffer))
+                Some(Sample::from_vec(buffer))
             }
         }
     }
@@ -178,7 +196,7 @@ impl<'a> Iterator for MemoryIterator<'a> {
         if self.position < self.sampler.data.len() {
             let start = self.position;
             self.position = std::cmp::min(start + self.sampler.chunk_size, self.sampler.data.len());
-            Some(Sample::Ref(&self.sampler.data[start..self.position]))
+            Some(Sample::from_bytes(&self.sampler.data[start..self.position]))
         } else {
             None
         }
@@ -259,7 +277,7 @@ impl<'a> Iterator for SelectionIterator<'a> {
         if self.position < self.sampler.chunks.len() {
             let chunk = &self.sampler.chunks[self.position];
             self.position += 1;
-            Some(Sample::Ref(chunk))
+            Some(Sample::from_bytes(chunk))
         } else {
             None
         }

@@ -240,8 +240,7 @@ fn worker(
         // wait.push(start.elapsed().as_millis() as u64);
         let data = {
             match job {
-                Ok(Sample::Data(ref data)) => data.as_slice(),
-                Ok(Sample::Ref(data_ref)) => data_ref,
+                Ok(ref sample) => sample.as_bytes(),
                 Err(_) => break,
             }
         };
@@ -249,7 +248,7 @@ fn worker(
         // println!("got sample {}", data.len());
 
         assert!(!data.is_empty());
-        tokenizer.process_slice(&data, &mut buffer, pair_stats, &mut stats);
+        tokenizer.process_slice(data, &mut buffer, pair_stats, &mut stats);
         // dbg!(stats.scanned_bytes);
     }
 
@@ -280,7 +279,7 @@ pub fn tokenize_file<'a, S: Sampler<'a>>(token_set: &TokenSet, sampler: &'a S, p
                 .push(s.spawn(|| worker(&tokenizer, jobs_rx_clone, results_tx_clone, pair_stats)));
         }
 
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         // let mut jobs_in_flight = 0;
 
         for sample in sampler.iter() {

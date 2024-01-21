@@ -20,7 +20,7 @@ use self::processing::process_file;
 use self::input::sample::{Sampler, Sample};
 use self::input::memory_sampler::MemorySampler; 
 use self::input::file_sampler::FileSampler;
-use self::input::preloaded_sampler::SelectionSampler;
+use self::input::preloaded_sampler::PreloadedSampler;
 use self::tokenizer::tokenize_file;
 use self::tokens::{LiteralEncoding, TokenSet};
 
@@ -72,11 +72,11 @@ fn optimize_tokens(
     let file_size = std::fs::metadata(data_filename).unwrap().len();
     let initial_size = initial_size.unwrap_or(file_size);
 
-    let fast_sampler = SelectionSampler::new(data_filename, 16384, 1024);
+    let fast_sampler = PreloadedSampler::new(data_filename, 16384, 1024);
 
     let (token_set, token_stats) = if nchunks.is_some() {
         let nchunks = nchunks.unwrap();
-        let sampler = SelectionSampler::new(data_filename, chunk_size, nchunks);
+        let sampler = PreloadedSampler::new(data_filename, chunk_size, nchunks);
         let (token_set, _) = optimize_bpe(&token_set, ntokens, &sampler, &fast_sampler, add_block);
 
         let full_sampler = FileSampler::new(data_filename, chunk_size, None);
@@ -84,7 +84,7 @@ fn optimize_tokens(
 
         (token_set, stats)
     } else if in_memory {
-        let sampler = MemorySampler::new(data_filename, chunk_size);
+        let sampler = MemorySampler::from_file(data_filename, chunk_size);
         optimize_bpe(&token_set, ntokens, &sampler, &fast_sampler, add_block)
     } else {
         let sampler = FileSampler::new(data_filename, chunk_size, None);
@@ -141,9 +141,9 @@ fn optimize_all_for_proc(
     };
 
     if initial_size < 1 << 24 {
-        let fast_sampler = MemorySampler::new(&filename, 16384);
-        let sampler = MemorySampler::new(&filename, 1 << 20);
-        let slow_sampler = MemorySampler::new(&filename, 1 << 24);
+        let fast_sampler = MemorySampler::from_file(&filename, 16384);
+        let sampler = MemorySampler::from_file(&filename, 1 << 20);
+        let slow_sampler = MemorySampler::from_file(&filename, 1 << 24);
 
         optimizer::optimize_all(
             initial_size,
@@ -156,8 +156,8 @@ fn optimize_all_for_proc(
             &processing.to_string(),
         );
     } else if initial_size < 1 << 32 {
-        let fast_sampler = SelectionSampler::new(&filename, 16384, 1024);
-        let sampler = MemorySampler::new(&filename, 1 << 24);
+        let fast_sampler = PreloadedSampler::new(&filename, 16384, 1024);
+        let sampler = MemorySampler::from_file(&filename, 1 << 24);
         let slow_sampler = FileSampler::new(&filename, 1 << 24, None);
 
         optimizer::optimize_all(
@@ -174,7 +174,7 @@ fn optimize_all_for_proc(
         let fast_sampler = FileSampler::new(
             &filename, 131072, Some(1024));
         // let sampler = FileSampler::new(&filename, 1 << 20, Some(4096));
-        let sampler = SelectionSampler::new(&filename, 1 << 20, 1 << 14);
+        let sampler = PreloadedSampler::new(&filename, 1 << 20, 1 << 14);
         let slow_sampler = FileSampler::new(&filename, 1 << 24, None);
 
         optimizer::optimize_all(
@@ -332,7 +332,7 @@ fn tokenize(
     let token_set = TokenSet::from_json(tokens_file);
 
     let stats = if in_memory {
-        let sampler = MemorySampler::new(filename, chunk_size);
+        let sampler = MemorySampler::from_file(filename, chunk_size);
         tokenize_file(&token_set, &sampler, false)
     } else {
         let sampler = FileSampler::new(filename, chunk_size, None);

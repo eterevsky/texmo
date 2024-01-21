@@ -4,6 +4,8 @@ pub enum Sample<'a> {
 }
 
 impl<'a> Sample<'a> {
+    /// Create a new Sample from a vector of bytes.
+    /// The bytes should be valid UTF-8.
     pub fn from_vec(data: Vec<u8>) -> Self {
         Sample::Data(String::from_utf8(data).unwrap())
     }   

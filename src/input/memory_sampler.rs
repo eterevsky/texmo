@@ -2,19 +2,19 @@ use crate::input::sample::{Sample, Sampler};
 
 pub struct MemorySampler {
     data: Vec<u8>,
-    chunk_size: usize,
+    sample_size: usize,
 }
 
 impl MemorySampler {
-    pub fn new(filename: &str, chunk_size: usize) -> Self {
+    pub fn from_file(filename: &str, sample_size: usize) -> Self {
         let data = std::fs::read(filename).unwrap();
-        MemorySampler { data, chunk_size }
+        MemorySampler { data, sample_size }
     }
 
-    pub fn new_from_str(data: &str, chunk_size: usize) -> Self {
+    pub fn from_str(data: &str, chunk_size: usize) -> Self {
         MemorySampler {
             data: data.as_bytes().to_vec(),
-            chunk_size,
+            sample_size: chunk_size,
         }
     }
 }
@@ -45,7 +45,7 @@ impl<'a> Iterator for MemoryIterator<'a> {
     fn next(&mut self) -> Option<Sample<'a>> {
         if self.position < self.sampler.data.len() {
             let start = self.position;
-            self.position = std::cmp::min(start + self.sampler.chunk_size, self.sampler.data.len());
+            self.position = std::cmp::min(start + self.sampler.sample_size, self.sampler.data.len());
             Some(Sample::from_bytes(&self.sampler.data[start..self.position]))
         } else {
             None

@@ -10,22 +10,17 @@ use crate::input::sample::{Sample, Sampler};
 pub struct FileSampler {
     filename: String,
     sample_size: usize,
-    _total_size: u64,
     max_samples: Option<usize>,
+    file_size: u64,
 }
 
 impl FileSampler {
     pub fn new(filename: &str, sample_size: usize, max_samples: Option<usize>) -> Self {
-        let _total_size = if let Some(cs) = max_samples {
-            (sample_size * cs) as u64
-        } else {
-            std::fs::metadata(filename).unwrap().len()
-        };
         FileSampler {
             filename: filename.to_string(),
             sample_size,
-            _total_size,
             max_samples,
+            file_size: std::fs::metadata(filename).unwrap().len()
         }
     }
 }
@@ -41,35 +36,35 @@ impl<'a> Sampler<'a> for FileSampler {
                 _sampler: self,
                 file,
                 sample_size: self.sample_size,
-                total_size: self._total_size,
+                file_size: self.file_size,
                 samples_left: Some(chunks_selection),
-                read_bytes: 0,
             }
         } else {
             FileIterator {
                 _sampler: self,
                 file,
                 sample_size: self.sample_size,
-                total_size: self._total_size,
+                file_size: self.file_size,
                 samples_left: None,
-                read_bytes: 0,
             }
         }
     }
 
     fn total_size(&self) -> u64 {
-        self._total_size
+        if let Some(cs) = self.max_samples {
+            (self.sample_size * cs) as u64
+        } else {
+            self.file_size
+        }
     }
 }
 
 pub struct FileIterator<'a> {
     _sampler: &'a FileSampler,
     file: File,
+    file_size: u64,
     sample_size: usize,
-    total_size: u64,
     samples_left: Option<usize>,
-
-    pub read_bytes: usize,
 }
 
 impl<'a> Iterator for FileIterator<'a> {
@@ -79,21 +74,20 @@ impl<'a> Iterator for FileIterator<'a> {
         let mut buffer = Vec::new();
         buffer.resize(self.sample_size, 0);
 
-        if let Some(chunks_left) = self.samples_left {
-            if chunks_left == 0 {
+        if let Some(samples_left) = self.samples_left {
+            if samples_left == 0 {
                 None
             } else {
-                self.samples_left = Some(chunks_left - 1);
+                self.samples_left = Some(samples_left - 1);
 
                 let mut rng = rand::thread_rng();
-                let max_seek = self.total_size - self.sample_size as u64;
+                let max_seek = self.file_size - self.sample_size as u64;
                 let start = rng.gen_range(0..max_seek);
 
                 self.file.seek(SeekFrom::Start(start)).unwrap();
                 let read_bytes = self.file.read(&mut buffer).unwrap();
 
                 buffer.truncate(read_bytes);
-                self.read_bytes += read_bytes;
                 Some(Sample::from_vec(buffer))
             }
         } else {
@@ -101,12 +95,24 @@ impl<'a> Iterator for FileIterator<'a> {
 
             if read_bytes == 0 {
                 None
-            } else {
+            } else if read_bytes < self.sample_size {
                 buffer.truncate(read_bytes);
-                self.read_bytes += read_bytes;
-                // if self.read_bytes & ((1<<30) - 1) == 0 {
-                //     dbg!(self.read_bytes);
-                // }
+                Some(Sample::from_vec(buffer))
+            } else {
+                let mut end = read_bytes;
+                for pos in (0..read_bytes).rev() {
+                    if buffer[pos] < 128 {
+                        end = pos + 1;
+                        break;
+                    } else if buffer[pos] >= 192 {
+                        end = pos;
+                        break;
+                    }
+                }
+                if end < read_bytes {
+                    buffer.truncate(end);
+                    self.file.seek(SeekFrom::Current(end as i64 - read_bytes as i64)).unwrap();
+                }
                 Some(Sample::from_vec(buffer))
             }
         }

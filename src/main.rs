@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
 
 use tempfile::NamedTempFile;
 
-mod char_tokens;
+mod chars;
 mod optimizer;
 mod processing;
 mod input;
@@ -17,12 +17,12 @@ mod tokens;
 
 use self::optimizer::optimize_bpe;
 use self::processing::process_file;
-use self::input::sample::{Sampler, Sample};
 use self::input::memory_sampler::MemorySampler; 
 use self::input::file_sampler::FileSampler;
 use self::input::preloaded_sampler::PreloadedSampler;
 use self::tokenizer::tokenize_file;
 use self::tokens::{LiteralEncoding, TokenSet};
+use self::chars::optimize_chars_tokens;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Processing {
@@ -421,6 +421,11 @@ enum Command {
         add_block: usize,
     },
 
+    OptimizeCharsTokens {
+        #[arg(short, long)]
+        data: String,
+    },
+
     OptimizeAll {
         #[arg(short, long)]
         data: String,
@@ -526,5 +531,10 @@ fn main() {
         Command::CountHexDigits { data } => count_hex_digits(data.as_str()),
         Command::CountBytes { data } => count_bytes_command(data.as_str()),
         Command::CountChars { data } => count_chars(data.as_str()),
+
+        Command::OptimizeCharsTokens { data } => {
+            let sampler = FileSampler::new(data, 1 << 32, None);
+            optimize_chars_tokens(&sampler, &sampler, &sampler);
+        }
     }
 }

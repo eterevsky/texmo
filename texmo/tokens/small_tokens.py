@@ -156,7 +156,7 @@ def main(args):
 
     tokens.sort(key=lambda t: 256 * t.bits + t.value)
     out = {
-        "type": "bits",
+        "type": "smol",
         "tokens": []
     }
     for t in tokens:

@@ -1,3 +1,5 @@
+use serde_json::json;
+
 use super::tokens::{CharsToken, CharsTokenSet};
 
 const MAX_UNICODE: usize = 0x110000;
@@ -40,5 +42,16 @@ impl CharsTokenStats {
         let cost = self.token_set.char_cost(ch);
         self.total_tokens_count += cost as u64;
         self.literals_count += 1;
+    }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        json!({
+            "type": "chars",
+            "tokens": self.token_set.tokens_to_json(),
+            "encodings": self.token_set.encodings_to_json(),
+            "stats": {
+                "ntokens": self.token_set.ntokens(),
+            }
+        })
     }
 }

@@ -1,5 +1,6 @@
 use std::cmp::max;
 use std::{collections::HashMap, fmt};
+use serde_json::json;
 
 #[derive(Clone, Debug)]
 pub(super) enum CharsToken {
@@ -23,6 +24,22 @@ impl CharsToken {
             CharsToken::Str(s) => s.as_bytes().len(),
         }
     }
+
+    // pub fn to_json(&self) -> json::JsonValue {
+    //     match self {
+    //         CharsToken::Ext(n) => (*n).into(),
+    //         CharsToken::Char(ch) => ch.to_string().into(),
+    //         CharsToken::Str(s) => s.as_str().into(),
+    //     }
+    // }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        match self {
+            CharsToken::Ext(n) => (*n).into(),
+            CharsToken::Char(ch) => ch.to_string().into(),
+            CharsToken::Str(s) => s.as_str().into(),
+        }
+    }
 }
 
 impl fmt::Display for CharsToken {
@@ -39,8 +56,8 @@ impl fmt::Display for CharsToken {
 pub struct CharsTokenIdx(u32);
 
 impl CharsTokenIdx {
-    pub fn id(self) -> u32 {
-        self.0
+    pub fn id(self) -> usize {
+        self.0 as usize
     }
 }
 
@@ -69,6 +86,10 @@ impl CharsTokenSet {
         }
     }
 
+    pub fn ntokens(&self) -> usize {
+        self.tokens.len()
+    }
+
     pub fn add_char_token(&mut self, ch: char) -> CharsTokenIdx {
         let idx = CharsTokenIdx(self.tokens.len() as u32);
         self.tokens.push(CharsToken::Char(ch));
@@ -95,7 +116,9 @@ impl CharsTokenSet {
         idx
     }
 
-    pub fn ext_token(idx: u32) -> CharsTokenIdx { CharsTokenIdx(idx) }
+    pub fn ext_token(idx: u32) -> CharsTokenIdx {
+        CharsTokenIdx(idx)
+    }
 
     pub fn char_encoding<'a>(&'a self, ch: char) -> &'a [CharsTokenIdx] {
         // TODO: fix for missing chars
@@ -112,7 +135,7 @@ impl CharsTokenSet {
         } else {
             match self.hi_chars_enc.get(&ch) {
                 Some(enc) => enc.len() as u8,
-                None => 32,  // TODO: calculate
+                None => 32, // TODO: calculate
             }
         }
     }
@@ -122,7 +145,7 @@ impl CharsTokenSet {
     }
 
     pub fn max_bytes_in_token(&self) -> usize {
-        let mut max_bytes = 1;
+        let mut max_bytes = 4; // Maximum size of a UTF-8 char
         for token in self.tokens.iter() {
             let nbytes = match token {
                 CharsToken::Ext(_) => continue,
@@ -132,6 +155,54 @@ impl CharsTokenSet {
             max_bytes = max(max_bytes, nbytes);
         }
         max_bytes
+    }
+
+    pub fn tokens_to_json(&self) -> Vec<serde_json::Value> {
+        let mut out = Vec::new();
+
+        for token in self.tokens.iter() {
+            let value = match token {
+                CharsToken::Ext(n) => (*n).into(),
+                CharsToken::Char(ch) => ch.to_string().into(),
+                CharsToken::Str(s) => s.as_str().into(),
+            };
+            out.push(value);
+        }
+
+        out
+    }
+
+    pub fn encodings_to_json(&self) -> serde_json::Value {
+        let mut out = json!({});
+
+        for (ch, enc) in self.lo_chars_enc.iter().enumerate() {
+            if enc.len() <= 1 {
+                continue;
+            };
+            let ch = char::from_u32(ch as u32).unwrap();
+            let encoding: Vec<serde_json::Value> = 
+                enc.iter()
+                    .map(|t| self.tokens[t.id()].to_json())
+                    .collect::<Vec<_>>();
+            out[ch.to_string().as_str()] = json!(encoding);
+        }
+
+        let mut keys: Vec<_> = self.hi_chars_enc.keys().collect();
+        keys.sort();
+
+        for ch in keys {
+            let enc = self.hi_chars_enc.get(ch).unwrap();
+            if enc.len() <= 1 {
+                continue;
+            };
+            let encoding: Vec<serde_json::Value> = 
+                enc.iter()
+                    .map(|t| self.tokens[t.id()].to_json())
+                    .collect::<Vec<_>>();
+            out[ch.to_string().as_str()] = json!(encoding);
+        }
+
+        out
     }
 }
 

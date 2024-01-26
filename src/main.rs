@@ -424,6 +424,12 @@ enum Command {
     OptimizeCharsTokens {
         #[arg(short, long)]
         data: String,
+
+        #[arg(short, long)]
+        ntokens: usize, 
+
+        #[arg(short, long)]
+        output: String,
     },
 
     OptimizeAll {
@@ -532,9 +538,9 @@ fn main() {
         Command::CountBytes { data } => count_bytes_command(data.as_str()),
         Command::CountChars { data } => count_chars(data.as_str()),
 
-        Command::OptimizeCharsTokens { data } => {
+        Command::OptimizeCharsTokens { data , ntokens, output } => {
             let sampler = FileSampler::new(data, 1 << 32, None);
-            optimize_chars_tokens(&sampler, &sampler, &sampler);
+            optimize_chars_tokens(&sampler, &sampler, &sampler, *ntokens, output);
         }
     }
 }

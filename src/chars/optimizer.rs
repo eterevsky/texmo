@@ -1,16 +1,16 @@
 use std::cmp::min;
 use std::mem;
+use std::path::Path;
 
 use super::token_stats::CharsTokenStats;
 use super::tokenizer::CharsTokenizer;
 use super::tokens::CharsTokenSet;
 use crate::input::sample::Sampler;
 
-fn count_chars<'a, S: Sampler<'a>>(sampler: &'a S) -> Vec<u64> {
+fn count_chars<'a, S: Sampler<'a>>(sampler: &'a S) -> Vec<(char, u64)> {
     let mut counts = Vec::new();
 
     for sample in sampler.iter() {
-        eprint!(".");
         for c in sample.as_str().chars() {
             let idx = c as usize;
             if idx >= counts.len() {
@@ -19,9 +19,13 @@ fn count_chars<'a, S: Sampler<'a>>(sampler: &'a S) -> Vec<u64> {
             counts[idx] += 1;
         }
     }
-    eprintln!();
 
     counts
+        .iter()
+        .enumerate()
+        .filter(|&(_, &c)| c > 0)
+        .map(|(idx, &c)| (char::from_u32(idx as u32).unwrap(), c))
+        .collect::<Vec<_>>()
 }
 
 fn tokenize<'a, S: Sampler<'a>>(tokenizer: &CharsTokenizer, sampler: &'a S) -> CharsTokenStats {
@@ -240,40 +244,21 @@ pub fn optimize_chars_tokens<'a, SS: Sampler<'a>, S: Sampler<'a>, FS: Sampler<'a
     slow_sampler: &'a SS,
     sampler: &'a S,
     fast_sampler: &'a FS,
+    ntokens: usize,
+    output_path: &str,
 ) {
     let counts = count_chars(slow_sampler);
-    let counts: Vec<(char, u64)> = counts
-        .iter()
-        .enumerate()
-        .filter(|&(_, &c)| c > 0)
-        .map(|(idx, &c)| (char::from_u32(idx as u32).unwrap(), c))
-        .collect::<Vec<_>>();
     let total_chars = counts.iter().map(|&(_, c)| c).sum::<u64>();
 
-    let token_set = optimize_chars_by_ext(counts.as_slice(), 64);
-    println!("{}", token_set);
-
-    let mut total = 0;
-    for (c, count) in counts.iter() {
-        let enc = token_set.char_encoding(*c);
-        total += enc.len() as u64 * count;
-    }
-
-    println!(
-        "total: {}, {} t/ch",
-        total,
-        total as f64 / total_chars as f64
-    );
+    let token_set = optimize_chars_by_ext(
+        counts.as_slice(), ntokens);
+    // println!("{}", token_set);
 
     let tokenizer = CharsTokenizer::new(token_set);
+
+    let stats = tokenize(&tokenizer, slow_sampler);
+
+    std::fs::write(std::path::Path::new(output_path), 
+    // json::stringify_pretty(stats.to_json(), 2)).unwrap();
+    serde_json::to_string_pretty(&stats.to_json()).unwrap()).unwrap();
 }
-
-// 2/2 total: 25531435, 2.625872554735772 t/ch
-// 1/3 total: 26807758, 2.7571405988812745 t/ch
-
-// 6/2 total: 17389788, 1.788515492445821 t/ch
-// 5/3 total: 16995225, 1.7479352370542143 t/ch
-// 4/4 total: 17670461, 1.8173823198511492 t/ch
-// 3/5 total: 19028020, 1.9570053735312318 t/ch
-// 2/6 total: 19617895, 2.0176731962848202 t/ch
-// 1/7 total: 22345268, 2.2981797133383024 t/ch

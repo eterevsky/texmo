@@ -47,19 +47,15 @@ impl CharsTokenizer {
             let mut best_cost = None;
             let mut best_token = TokenId::Invalid;
 
-            dbg!(pos);
             for from in pos.saturating_sub(max_bytes_in_token)..=(pos - 1) {
                 let prev_state = state[from];
-                dbg!(from, prev_state);
                 if let TokenId::Invalid = prev_state.token {
                     continue;
                 }
                 let s = &bytes[from..pos];
                 let (cost, token) = if let Ok(string) = String::from_utf8(s.to_vec()) {
-                    dbg!(&string);
                     if let Some(token_idx) = self.token_set.token_by_str(&string) {
-                        dbg!(token_idx);
-                        (prev_state.cost + 1, TokenId::Token(token_idx.id()))
+                        (prev_state.cost + 1, TokenId::Token(token_idx.id() as u32))
                     } else {
                         if string.chars().count() == 1 {
                             let ch = string.chars().next().unwrap();
@@ -84,7 +80,6 @@ impl CharsTokenizer {
                 cost: best_cost.unwrap(),
                 token: best_token,
             };
-            dbg!(&new_state);
             state.push(new_state);
 
         }
@@ -138,6 +133,20 @@ mod tests {
 
         let stats = tokenizer.process_slice("DAAA".as_bytes());
         assert_eq!(stats.total_tokens(), 3);
+        assert_eq!(stats.total_literals(), 2);
+    }
+
+    #[test]
+    fn test_tokenize_utf8() {
+        let mut token_set = CharsTokenSet::new(2);
+        let a_id = token_set.add_char_token('а');
+        let b_id = token_set.add_string("бв");
+        token_set.add_encoding('г', vec![a_id, CharsTokenSet::ext_token(0)]);
+
+        let tokenizer = CharsTokenizer::new(token_set);
+
+        let stats = tokenizer.process_slice("абвг".as_bytes());
+        assert_eq!(stats.total_tokens(), 4);
         assert_eq!(stats.total_literals(), 2);
     }
 }

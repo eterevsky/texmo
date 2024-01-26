@@ -1,10 +1,10 @@
 use std::cmp::min;
 use std::mem;
 
-use crate::chars::tokens::CharsTokenSet;
+use super::token_stats::CharsTokenStats;
+use super::tokenizer::CharsTokenizer;
+use super::tokens::CharsTokenSet;
 use crate::input::sample::Sampler;
-
-use super::tokens::CharsTokenIdx;
 
 fn count_chars<'a, S: Sampler<'a>>(sampler: &'a S) -> Vec<u64> {
     let mut counts = Vec::new();
@@ -22,6 +22,17 @@ fn count_chars<'a, S: Sampler<'a>>(sampler: &'a S) -> Vec<u64> {
     eprintln!();
 
     counts
+}
+
+fn tokenize<'a, S: Sampler<'a>>(tokenizer: &CharsTokenizer, sampler: &'a S) -> CharsTokenStats {
+    let mut stats = CharsTokenStats::new(tokenizer.token_set.clone());
+
+    for sample in sampler.iter() {
+        let sample_stats = tokenizer.process_slice(sample.as_bytes());
+        stats.merge(&sample_stats);
+    }
+
+    stats
 }
 
 #[derive(Debug)]
@@ -156,7 +167,11 @@ fn optimize_ext_encoding(counts: &[(char, u64)], n_ext_tokens: usize) -> Vec<(ch
     encodings
 }
 
-fn optimize_chars(counts: &[(char, u64)], n_char_tokens: usize, n_ext_tokens: usize) -> CharsTokenSet {
+fn optimize_chars(
+    counts: &[(char, u64)],
+    n_char_tokens: usize,
+    n_ext_tokens: usize,
+) -> CharsTokenSet {
     let mut token_set = CharsTokenSet::new(n_ext_tokens);
 
     let top_splits = optimize_splits(counts, n_char_tokens);
@@ -167,10 +182,14 @@ fn optimize_chars(counts: &[(char, u64)], n_char_tokens: usize, n_ext_tokens: us
         let counts_hi = if i == top_splits.len() - 1 {
             counts.len()
         } else {
-            counts.binary_search(&(top_splits[i + 1].lo, 0)).unwrap_err()
+            counts
+                .binary_search(&(top_splits[i + 1].lo, 0))
+                .unwrap_err()
         };
 
-        if counts_hi == counts_lo + 1 { continue; }
+        if counts_hi == counts_lo + 1 {
+            continue;
+        }
 
         let mut sub_counts = counts[counts_lo..counts_hi].to_vec();
 
@@ -179,8 +198,11 @@ fn optimize_chars(counts: &[(char, u64)], n_char_tokens: usize, n_ext_tokens: us
 
         let encs = optimize_ext_encoding(sub_counts.as_slice(), n_ext_tokens);
         for (ch, mut enc) in encs {
-            enc.insert(0,  (n_ext_tokens + i) as u32);
-            let tokens = enc.iter().map(|idx| CharsTokenSet::ext_token(*idx)).collect::<Vec<_>>();
+            enc.insert(0, (n_ext_tokens + i) as u32);
+            let tokens = enc
+                .iter()
+                .map(|idx| CharsTokenSet::ext_token(*idx))
+                .collect::<Vec<_>>();
             token_set.add_encoding(ch, tokens);
         }
     }
@@ -197,8 +219,7 @@ fn optimize_chars_by_ext(counts: &[(char, u64)], ntokens: usize) -> CharsTokenSe
     for n_ext_tokens in 2..=max_ext_tokens {
         let n_char_tokens = ntokens - n_ext_tokens;
 
-        let token_set =
-            optimize_chars(counts, n_char_tokens, n_ext_tokens);
+        let token_set = optimize_chars(counts, n_char_tokens, n_ext_tokens);
 
         let mut total = 0;
         for (c, count) in counts.iter() {
@@ -207,8 +228,8 @@ fn optimize_chars_by_ext(counts: &[(char, u64)], ntokens: usize) -> CharsTokenSe
         }
 
         if best_total_tokens.is_none() || total < best_total_tokens.unwrap() {
-        best_token_set = Some(token_set);
-        best_total_tokens = Some(total);
+            best_token_set = Some(token_set);
+            best_total_tokens = Some(total);
         }
     }
 
@@ -238,7 +259,13 @@ pub fn optimize_chars_tokens<'a, SS: Sampler<'a>, S: Sampler<'a>, FS: Sampler<'a
         total += enc.len() as u64 * count;
     }
 
-    println!("total: {}, {} t/ch", total, total as f64 / total_chars as f64);
+    println!(
+        "total: {}, {} t/ch",
+        total,
+        total as f64 / total_chars as f64
+    );
+
+    let tokenizer = CharsTokenizer::new(token_set);
 }
 
 // 2/2 total: 25531435, 2.625872554735772 t/ch

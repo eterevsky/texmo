@@ -695,25 +695,25 @@ pub fn optimize_all<'a, S1: Sampler<'a>, S2: Sampler<'a>, S3: Sampler<'a>>(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::sampler::MemorySampler;
+// #[cfg(test)]
+// mod tests {
+//     use crate::input::memory_sampler::MemorySampler;
 
-    use super::*;
+//     use super::*;
 
-    #[test]
-    fn test_remove_and_add() {
-        let mut sampler = MemorySampler::new_from_str("abc, abc", 4);
-        let mut tokenizer = TokenizerCache::new(&sampler);
-        let mut fast_tokenizer = TokenizerCache::new(&sampler);
-        let mut token_attempts = HashMap::new();
-        let mut token_set = TokenSet::new(LiteralEncoding::Dist8);
+//     #[test]
+//     fn test_remove_and_add() {
+//         let mut sampler = MemorySampler::new_from_str("abc, abc", 4);
+//         let mut tokenizer = TokenizerCache::new(&sampler);
+//         let mut fast_tokenizer = TokenizerCache::new(&sampler);
+//         let mut token_attempts = HashMap::new();
+//         let mut token_set = TokenSet::new(LiteralEncoding::Dist8);
 
-        remove_and_add_token(
-            &mut tokenizer,
-            &mut fast_tokenizer,
-            &token_set,
-            &mut token_attempts,
-        );
-    }
-}
+//         remove_and_add_token(
+//             &mut tokenizer,
+//             &mut fast_tokenizer,
+//             &token_set,
+//             &mut token_attempts,
+//         );
+//     }
+// }

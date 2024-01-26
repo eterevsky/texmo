@@ -1,7 +1,8 @@
+use std::cmp::max;
 use std::{collections::HashMap, fmt};
 
 #[derive(Clone, Debug)]
-enum CharsToken {
+pub(super) enum CharsToken {
     /// Used as extensions after an Ext token to specify characters for which
     /// there are no dedicated tokens.
     Ext(u8),
@@ -12,6 +13,16 @@ enum CharsToken {
     Char(char),
     /// Tokens indicating a given string.
     Str(String),
+}
+
+impl CharsToken {
+    pub fn bytes_len(&self) -> usize {
+        match self {
+            CharsToken::Ext(_) => unreachable!(),
+            CharsToken::Char(ch) => ch.len_utf8(),
+            CharsToken::Str(s) => s.as_bytes().len(),
+        }
+    }
 }
 
 impl fmt::Display for CharsToken {
@@ -27,13 +38,20 @@ impl fmt::Display for CharsToken {
 #[derive(Clone, Copy, Debug)]
 pub struct CharsTokenIdx(u32);
 
-const HI_CHAR_THRESHOLD: usize = 256;
+impl CharsTokenIdx {
+    pub fn id(self) -> u32 {
+        self.0
+    }
+}
+
+pub const HI_CHAR_THRESHOLD: usize = 256;
 
 #[derive(Clone, Debug)]
 pub struct CharsTokenSet {
-    tokens: Vec<CharsToken>,
+    pub(super) tokens: Vec<CharsToken>,
     lo_chars_enc: [Vec<CharsTokenIdx>; HI_CHAR_THRESHOLD],
     hi_chars_enc: HashMap<char, Vec<CharsTokenIdx>>,
+    tokens_by_str: HashMap<String, CharsTokenIdx>,
 }
 
 impl CharsTokenSet {
@@ -47,12 +65,14 @@ impl CharsTokenSet {
             tokens,
             lo_chars_enc: [(); HI_CHAR_THRESHOLD].map(|_| Vec::new()),
             hi_chars_enc: HashMap::new(),
+            tokens_by_str: HashMap::new(),
         }
     }
 
     pub fn add_char_token(&mut self, ch: char) -> CharsTokenIdx {
         let idx = CharsTokenIdx(self.tokens.len() as u32);
         self.tokens.push(CharsToken::Char(ch));
+        self.tokens_by_str.insert(ch.to_string(), idx);
 
         self.add_encoding(ch, vec![idx]);
 
@@ -67,6 +87,14 @@ impl CharsTokenSet {
         }
     }
 
+    pub fn add_string(&mut self, string: &str) -> CharsTokenIdx {
+        let idx = CharsTokenIdx(self.tokens.len() as u32);
+        self.tokens.push(CharsToken::Str(string.to_string()));
+        self.tokens_by_str.insert(string.to_string(), idx);
+
+        idx
+    }
+
     pub fn ext_token(idx: u32) -> CharsTokenIdx { CharsTokenIdx(idx) }
 
     pub fn char_encoding<'a>(&'a self, ch: char) -> &'a [CharsTokenIdx] {
@@ -77,6 +105,34 @@ impl CharsTokenSet {
             self.hi_chars_enc.get(&ch).unwrap()
         }
     }
+
+    pub fn char_cost(&self, ch: char) -> u8 {
+        if (ch as usize) < HI_CHAR_THRESHOLD {
+            self.lo_chars_enc[ch as usize].len() as u8
+        } else {
+            match self.hi_chars_enc.get(&ch) {
+                Some(enc) => enc.len() as u8,
+                None => 32,  // TODO: calculate
+            }
+        }
+    }
+
+    pub fn token_by_str(&self, s: &str) -> Option<CharsTokenIdx> {
+        self.tokens_by_str.get(s).map(|&idx| idx)
+    }
+
+    pub fn max_bytes_in_token(&self) -> usize {
+        let mut max_bytes = 1;
+        for token in self.tokens.iter() {
+            let nbytes = match token {
+                CharsToken::Ext(_) => continue,
+                CharsToken::Char(ch) => ch.to_string().as_bytes().len(),
+                CharsToken::Str(s) => s.as_bytes().len(),
+            };
+            max_bytes = max(max_bytes, nbytes);
+        }
+        max_bytes
+    }
 }
 
 impl fmt::Display for CharsTokenSet {
@@ -85,7 +141,7 @@ impl fmt::Display for CharsTokenSet {
             writeln!(f, "{}  {}", i, token)?;
         }
 
-        writeln!(f);
+        writeln!(f)?;
 
         for (ch, enc) in self.lo_chars_enc.iter().enumerate() {
             if !enc.is_empty() {
@@ -103,7 +159,7 @@ impl fmt::Display for CharsTokenSet {
 
         for ch in keys {
             let enc = self.hi_chars_enc.get(ch).unwrap();
-            write!(f, "{:?} ", ch);
+            write!(f, "{:?} ", ch)?;
             for &CharsTokenIdx(idx) in enc {
                 write!(f, " {}", self.tokens[idx as usize])?;
             }

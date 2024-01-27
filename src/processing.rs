@@ -1,4 +1,12 @@
+use serde::Serialize;
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Processing {
+    Raw,
+    CapsWords,
+}
 
 enum CharType {
     Letter,

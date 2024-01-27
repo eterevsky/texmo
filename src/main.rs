@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
@@ -14,21 +16,16 @@ mod processing;
 mod stats;
 mod tokenizer;
 mod tokens;
+mod tokenset;
 
 use self::chars::optimize_chars_tokens;
 use self::input::file_sampler::FileSampler;
 use self::input::memory_sampler::MemorySampler;
 use self::input::preloaded_sampler::PreloadedSampler;
 use self::optimizer::optimize_bpe;
-use self::processing::process_file;
+use self::processing::{process_file, Processing};
 use self::tokenizer::tokenize_file;
 use self::tokens::{LiteralEncoding, TokenSet};
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Processing {
-    Raw,
-    CapsWords,
-}
 
 impl fmt::Display for Processing {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -377,6 +374,8 @@ struct Args {
     command: Command,
 }
 
+const DEFAULT_PROCESSING: &str = "raw";
+
 #[derive(Subcommand, Debug)]
 enum Command {
     Tokenize {
@@ -457,7 +456,7 @@ enum Command {
         output: String,
 
         /// Processing: one of "raw" and "capswords"
-        #[arg(long, default_value_t = ("raw".to_string()))]
+        #[arg(long, default_value_t = DEFAULT_PROCESSING.to_string())]  
         processing: String,
     },
 

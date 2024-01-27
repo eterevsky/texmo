@@ -28,8 +28,12 @@ fn count_chars<'a, S: Sampler<'a>>(sampler: &'a S) -> Vec<(char, u64)> {
         .collect::<Vec<_>>()
 }
 
-fn tokenize<'a, S: Sampler<'a>>(tokenizer: &CharsTokenizer, sampler: &'a S) -> CharsTokenStats {
-    let mut stats = CharsTokenStats::new(tokenizer.token_set.clone());
+fn tokenize<'a, S: Sampler<'a>>(
+    tokenizer: &CharsTokenizer,
+    sampler: &'a S,
+    initial_size: u64,
+) -> CharsTokenStats {
+    let mut stats = CharsTokenStats::new(tokenizer.token_set.clone(), Some(initial_size));
 
     for sample in sampler.iter() {
         let sample_stats = tokenizer.process_slice(sample.as_bytes());
@@ -240,25 +244,58 @@ fn optimize_chars_by_ext(counts: &[(char, u64)], ntokens: usize) -> CharsTokenSe
     best_token_set.unwrap()
 }
 
+fn select_token_bpe(stats: &CharsTokenStats) -> String {
+    let mut best_pair = None;
+    let mut best_count = 0;
+
+    for (&pair, &count) in stats.pair_counts.iter() {
+        if best_pair == None || count > best_count {
+            best_pair = Some(pair);
+            best_count = count;
+        }
+    }
+
+    let best_pair = best_pair.unwrap();
+
+    let mut string = stats.token_set.tokens[best_pair.0 as usize].to_string().unwrap();
+    string.push_str(&stats.token_set.tokens[best_pair.1 as usize].to_string().unwrap());
+    string
+}
+
 pub fn optimize_chars_tokens<'a, SS: Sampler<'a>, S: Sampler<'a>, FS: Sampler<'a>>(
     slow_sampler: &'a SS,
     sampler: &'a S,
     fast_sampler: &'a FS,
     ntokens: usize,
+    initial_size: u64,
     output_path: &str,
 ) {
     let counts = count_chars(slow_sampler);
     let total_chars = counts.iter().map(|&(_, c)| c).sum::<u64>();
 
-    let token_set = optimize_chars_by_ext(
-        counts.as_slice(), ntokens);
-    // println!("{}", token_set);
+    let token_set = optimize_chars_by_ext(counts.as_slice(), ntokens);
+    let mut best_tokenizer = CharsTokenizer::new(token_set);
+    let mut best_stats = tokenize(&best_tokenizer, slow_sampler, initial_size);
 
-    let tokenizer = CharsTokenizer::new(token_set);
+    loop {
+        if best_stats.ntokens() < ntokens {
+            println!("{} -> {}", best_stats.ntokens(), ntokens);
+            let string = select_token_bpe(&best_stats);
+            println!("Adding {:?}", string);
+            let mut token_set = best_stats.token_set.clone();
+            token_set.add_string(&string);
+            best_tokenizer = CharsTokenizer::new(token_set);
+            best_stats = tokenize(&best_tokenizer, slow_sampler, initial_size);
+            continue;
+        }
 
-    let stats = tokenize(&tokenizer, slow_sampler);
+        break;
+    }
 
-    std::fs::write(std::path::Path::new(output_path), 
-    // json::stringify_pretty(stats.to_json(), 2)).unwrap();
-    serde_json::to_string_pretty(&stats.to_json()).unwrap()).unwrap();
+    std::fs::write(
+        std::path::Path::new(output_path),
+        // json::stringify_pretty(stats.to_json(), 2)).unwrap();
+        serde_json::to_string_pretty(&best_stats.to_json()).unwrap(),
+    )
+    .unwrap();
 }

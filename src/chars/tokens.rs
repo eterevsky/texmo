@@ -25,19 +25,19 @@ impl CharsToken {
         }
     }
 
-    // pub fn to_json(&self) -> json::JsonValue {
-    //     match self {
-    //         CharsToken::Ext(n) => (*n).into(),
-    //         CharsToken::Char(ch) => ch.to_string().into(),
-    //         CharsToken::Str(s) => s.as_str().into(),
-    //     }
-    // }
-
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             CharsToken::Ext(n) => (*n).into(),
             CharsToken::Char(ch) => ch.to_string().into(),
             CharsToken::Str(s) => s.as_str().into(),
+        }
+    }
+
+    pub fn to_string(&self) -> Option<String> {
+        match self {
+            CharsToken::Ext(_) => None,
+            CharsToken::Char(ch) => Some(ch.to_string()),
+            CharsToken::Str(s) => Some(s.clone()),
         }
     }
 }

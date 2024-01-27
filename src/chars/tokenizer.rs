@@ -1,7 +1,4 @@
-use crate::tokens::Token;
-
 use super::token_stats::CharsTokenStats;
-use super::tokens::CharsTokenIdx;
 use super::tokens::CharsTokenSet;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -81,21 +78,32 @@ impl CharsTokenizer {
                 token: best_token,
             };
             state.push(new_state);
-
         }
 
-        let mut stats = CharsTokenStats::new(self.token_set.clone());
+        let mut stats = CharsTokenStats::new(self.token_set.clone(), None);
 
         let mut pos = bytes.len();
+        let mut next_token = None;
         while pos > 0 {
             let s = state[pos];
             match s.token {
                 TokenId::Token(idx) => {
                     stats.count_token(idx as usize);
+
+                    // dbg!(idx);
+                    // dbg!(next_token);
+
+                    if let Some(next) = next_token {
+                        // dbg!("updating");
+                        *stats.pair_counts.entry((idx as u16, next)).or_insert(0) += 1;
+                    }
+
+                    next_token = Some(idx as u16);
                     pos -= self.token_set.tokens[idx as usize].bytes_len();
                 }
                 TokenId::Literal(ch) => {
                     stats.count_literal(ch);
+                    next_token = None;
                     pos -= ch.len_utf8();
                 }
                 TokenId::Invalid => unreachable!(),

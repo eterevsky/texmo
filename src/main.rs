@@ -1,33 +1,32 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
-use std::io::{BufReader, Read, BufRead};
+use std::io::{BufRead, BufReader, Read};
 
 use clap::{Parser, Subcommand};
 
 use tempfile::NamedTempFile;
 
 mod chars;
+mod input;
 mod optimizer;
 mod processing;
-mod input;
 mod stats;
 mod tokenizer;
 mod tokens;
 
+use self::chars::optimize_chars_tokens;
+use self::input::file_sampler::FileSampler;
+use self::input::memory_sampler::MemorySampler;
+use self::input::preloaded_sampler::PreloadedSampler;
 use self::optimizer::optimize_bpe;
 use self::processing::process_file;
-use self::input::memory_sampler::MemorySampler; 
-use self::input::file_sampler::FileSampler;
-use self::input::preloaded_sampler::PreloadedSampler;
 use self::tokenizer::tokenize_file;
 use self::tokens::{LiteralEncoding, TokenSet};
-use self::chars::optimize_chars_tokens;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Processing {
     Raw,
-    Caps,
     CapsWords,
 }
 
@@ -38,7 +37,6 @@ impl fmt::Display for Processing {
             "{}",
             match *self {
                 Processing::Raw => "raw",
-                Processing::Caps => "caps",
                 Processing::CapsWords => "capswords",
             }
         )
@@ -112,6 +110,26 @@ fn optimize_tokens(
     }
 }
 
+fn maybe_process_file(
+    filename_raw: &str,
+    filename_processed: Option<&str>,
+    processing: Processing,
+) -> (String, Option<NamedTempFile>) {
+    match (filename_processed, processing) {
+        (_, Processing::Raw) => (filename_raw.to_string(), None),
+        (Some(f), Processing::CapsWords) => (f.to_string(), None),
+        (None, Processing::CapsWords) => {
+            println!("Pre-processing the data file... ");
+            let mut temp_processed = NamedTempFile::new().unwrap();
+            let mut input = File::open(filename_raw).unwrap();
+            process_file(&mut input, &mut temp_processed).unwrap();
+            println!("done");
+            let filename = temp_processed.path().to_str().unwrap().to_string();
+            (filename, Some(temp_processed))
+        }
+    }
+}
+
 fn optimize_all_for_proc(
     filename_raw: &str,
     filename_processed: Option<&str>,
@@ -123,22 +141,7 @@ fn optimize_all_for_proc(
     let initial_size = std::fs::metadata(filename_raw).unwrap().len();
     println!("Optimizing for proc '{}'", processing);
 
-    let (filename, _temp) = match filename_processed {
-        Some(f) => (f.to_string(), None),
-        None => match processing {
-            Processing::Raw => (filename_raw.to_string(), None),
-            Processing::Caps => unimplemented!("Caps processing no longer supported"),
-            Processing::CapsWords => {
-                println!("Pre-processing the data file... ");
-                let mut temp_processed = NamedTempFile::new().unwrap();
-                let mut input = File::open(filename_raw).unwrap();
-                process_file(&mut input, &mut temp_processed).unwrap();
-                println!("done");
-                let filename = temp_processed.path().to_str().unwrap().to_string();
-                (filename, Some(temp_processed))
-            }
-        },
-    };
+    let (filename, _temp) = maybe_process_file(filename_raw, filename_processed, processing);
 
     if initial_size < 1 << 24 {
         let fast_sampler = MemorySampler::from_file(&filename, 16384);
@@ -171,8 +174,7 @@ fn optimize_all_for_proc(
             &processing.to_string(),
         );
     } else {
-        let fast_sampler = FileSampler::new(
-            &filename, 131072, Some(1024));
+        let fast_sampler = FileSampler::new(&filename, 131072, Some(1024));
         // let sampler = FileSampler::new(&filename, 1 << 20, Some(4096));
         let sampler = PreloadedSampler::new(&filename, 1 << 20, 1 << 14);
         let slow_sampler = FileSampler::new(&filename, 1 << 24, None);
@@ -349,6 +351,26 @@ fn tokenize(
     println!("{}", json::stringify_pretty(stats_json, 2));
 }
 
+fn optimize_chars_tokens_proc(
+    filename_raw: &str,
+    filename_processed: Option<&str>,
+    processing: &str,
+    ntokens: usize,
+    output: &str,
+) {
+    let processing = match processing {
+        "raw" => Processing::Raw,
+        "capswords" => Processing::CapsWords,
+        _ => panic!("Unexpected processing type"),
+    };
+    let initial_size = std::fs::metadata(filename_raw).unwrap().len();
+    let (filename, _temp) = maybe_process_file(filename_raw, filename_processed, processing);
+
+    let sampler = FileSampler::new(&filename, 1 << 32, None);
+
+    optimize_chars_tokens(&sampler, &sampler, &sampler, ntokens, initial_size, output)
+}
+
 #[derive(Parser, Debug)]
 struct Args {
     #[command(subcommand)]
@@ -425,11 +447,18 @@ enum Command {
         #[arg(short, long)]
         data: String,
 
+        #[arg(long)]
+        processed_data: Option<String>,
+
         #[arg(short, long)]
-        ntokens: usize, 
+        ntokens: usize,
 
         #[arg(short, long)]
         output: String,
+
+        /// Processing: one of "raw" and "capswords"
+        #[arg(long, default_value_t = ("raw".to_string()))]
+        processing: String,
     },
 
     OptimizeAll {
@@ -538,9 +567,14 @@ fn main() {
         Command::CountBytes { data } => count_bytes_command(data.as_str()),
         Command::CountChars { data } => count_chars(data.as_str()),
 
-        Command::OptimizeCharsTokens { data , ntokens, output } => {
-            let sampler = FileSampler::new(data, 1 << 32, None);
-            optimize_chars_tokens(&sampler, &sampler, &sampler, *ntokens, output);
+        Command::OptimizeCharsTokens {
+            data,
+            processed_data,
+            processing,
+            ntokens,
+            output,
+        } => {
+            optimize_chars_tokens_proc(data, processed_data.as_deref(), processing, *ntokens, output);
         }
     }
 }

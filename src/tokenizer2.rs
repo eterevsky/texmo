@@ -212,7 +212,7 @@ impl Tokenizer for FragmentTokenizer {
             cost_state.push(best_cost_state.unwrap());
         }
 
-        stats.total_tokens += cost_state[cost_state.len() - 1].cost;
+        stats.total_tokens += cost_state.last().unwrap().cost;
     }
 }
 

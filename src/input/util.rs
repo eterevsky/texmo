@@ -16,3 +16,12 @@ pub fn extract_valid_utf8_slice<'a>(data: &'a [u8]) -> &'a [u8] {
     }
     &data[start..end]
 }
+
+pub fn find_paragraph_end(data: &[u8], end: usize) -> usize {
+    let mut pos = end;
+    while pos >= 2 && (data[pos - 1] != 10 || data[pos - 2] != 10) {
+        pos -= 1;
+    }
+
+    if pos < 2 { end } else { pos }
+}

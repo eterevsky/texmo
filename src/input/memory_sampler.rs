@@ -1,5 +1,7 @@
 use crate::input::sample::{Sample, Sampler};
 
+use super::util::find_paragraph_end;
+
 pub struct MemorySampler {
     data: Vec<u8>,
     sample_size: usize,
@@ -45,11 +47,15 @@ impl<'a> Iterator for MemoryIterator<'a> {
     fn next(&mut self) -> Option<Sample<'a>> {
         if self.position < self.sampler.data.len() {
             let start = self.position;
-            self.position = std::cmp::min(start + self.sampler.sample_size, self.sampler.data.len());
+            self.position =
+                std::cmp::min(start + self.sampler.sample_size, self.sampler.data.len());
+            let paragraph_end = find_paragraph_end(&self.sampler.data, self.position);
+            if self.position < self.sampler.data.len() && paragraph_end > start {
+                self.position = paragraph_end;
+            }
             Some(Sample::from_bytes(&self.sampler.data[start..self.position]))
         } else {
             None
         }
     }
 }
-

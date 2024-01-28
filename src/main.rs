@@ -4,10 +4,9 @@ use clap::{Parser, Subcommand};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use tempfile::NamedTempFile;
 
-mod chars;
 mod input;
 mod optimizer;
 mod processing;
@@ -18,7 +17,6 @@ mod tokenizer2;
 mod tokens;
 mod tokenset;
 
-use self::chars::optimize_chars_tokens;
 use self::input::file_sampler::FileSampler;
 use self::input::memory_sampler::MemorySampler;
 use self::input::preloaded_sampler::PreloadedSampler;

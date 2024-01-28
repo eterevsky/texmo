@@ -3,7 +3,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::iter::Iterator;
 
 use crate::input::sample::{Sample, Sampler};
-use crate::input::util::extract_valid_utf8_slice;
+use crate::input::util::{extract_valid_utf8_slice, find_paragraph_end};
 
 pub struct PreloadedSampler {
     chunks: Vec<Vec<u8>>,
@@ -41,9 +41,12 @@ impl PreloadedSampler {
             let read_bytes = file.read(&mut chunk).unwrap();
             chunk.truncate(read_bytes);
 
-            let valid_chunk = extract_valid_utf8_slice(&chunk);
+            let paragraph_end = find_paragraph_end(&chunk, chunk.len());
+            let chunk = &chunk[..paragraph_end];
+            let valid_chunk = extract_valid_utf8_slice(chunk);
+
             if valid_chunk.len() == chunk.len() {
-                chunks.push(chunk);
+                chunks.push(chunk.to_vec());
             } else {
                 chunks.push(valid_chunk.to_vec());
             };

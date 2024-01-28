@@ -6,6 +6,7 @@ use std::iter::Iterator;
 
 use crate::input::sample::{Sample, Sampler};
 
+use super::util::find_paragraph_end;
 
 pub struct FileSampler {
     filename: String,
@@ -20,7 +21,7 @@ impl FileSampler {
             filename: filename.to_string(),
             sample_size,
             max_samples,
-            file_size: std::fs::metadata(filename).unwrap().len()
+            file_size: std::fs::metadata(filename).unwrap().len(),
         }
     }
 }
@@ -88,6 +89,8 @@ impl<'a> Iterator for FileIterator<'a> {
                 let read_bytes = self.file.read(&mut buffer).unwrap();
 
                 buffer.truncate(read_bytes);
+                let paragraph_end = find_paragraph_end(&buffer, buffer.len());
+                buffer.truncate(paragraph_end);
                 Some(Sample::from_vec(buffer))
             }
         } else {
@@ -99,23 +102,15 @@ impl<'a> Iterator for FileIterator<'a> {
                 buffer.truncate(read_bytes);
                 Some(Sample::from_vec(buffer))
             } else {
-                let mut end = read_bytes;
-                for pos in (0..read_bytes).rev() {
-                    if buffer[pos] < 128 {
-                        end = pos + 1;
-                        break;
-                    } else if buffer[pos] >= 192 {
-                        end = pos;
-                        break;
-                    }
-                }
+                let end = find_paragraph_end(&buffer, read_bytes);
                 if end < read_bytes {
                     buffer.truncate(end);
-                    self.file.seek(SeekFrom::Current(end as i64 - read_bytes as i64)).unwrap();
+                    self.file
+                        .seek(SeekFrom::Current(end as i64 - read_bytes as i64))
+                        .unwrap();
                 }
                 Some(Sample::from_vec(buffer))
             }
         }
     }
 }
-

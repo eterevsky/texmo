@@ -1,15 +1,11 @@
 use std::cmp::{min, Reverse};
 use std::collections::HashMap;
-use std::fmt::format;
 use std::io;
 use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use rand::distributions::{Distribution, Uniform};
-use rand::thread_rng;
-
-use crate::input::sample::{Sampler, Sample};
+use crate::input::sample::Sampler;
 use crate::stats::TokenStats;
 use crate::tokenizer::tokenize_file;
 use crate::tokens::{LiteralEncoding, TokenSet};
@@ -106,8 +102,6 @@ fn add_tokens<'a, S: Sampler<'a>>(
             ))
         }
     }
-
-    let set_size = token_set.tokens.len();
 
     for (&key, &count) in stats.pair_count.iter() {
         let ifirst = key >> 16;

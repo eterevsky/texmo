@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::fmt;
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize)]
@@ -6,6 +7,19 @@ use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 pub enum Processing {
     Raw,
     CapsWords,
+}
+
+impl fmt::Display for Processing {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Processing::Raw => "raw",
+                Processing::CapsWords => "capswords",
+            }
+        )
+    }
 }
 
 enum CharType {

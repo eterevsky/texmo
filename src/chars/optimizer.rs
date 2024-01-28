@@ -1,6 +1,5 @@
 use std::cmp::min;
 use std::mem;
-use std::path::Path;
 
 use super::token_stats::CharsTokenStats;
 use super::tokenizer::CharsTokenizer;
@@ -184,7 +183,7 @@ fn optimize_chars(
 
     let top_splits = optimize_splits(counts, n_char_tokens);
     for (i, split) in top_splits.iter().enumerate() {
-        let char_token_id = token_set.add_char_token(split.top);
+        let _char_token_id = token_set.add_char_token(split.top);
 
         let counts_lo = counts.binary_search(&(split.lo, 0)).unwrap_err();
         let counts_hi = if i == top_splits.len() - 1 {
@@ -264,14 +263,14 @@ fn select_token_bpe(stats: &CharsTokenStats) -> String {
 
 pub fn optimize_chars_tokens<'a, SS: Sampler<'a>, S: Sampler<'a>, FS: Sampler<'a>>(
     slow_sampler: &'a SS,
-    sampler: &'a S,
-    fast_sampler: &'a FS,
+    _sampler: &'a S,
+    _fast_sampler: &'a FS,
     ntokens: usize,
     initial_size: u64,
     output_path: &str,
 ) {
     let counts = count_chars(slow_sampler);
-    let total_chars = counts.iter().map(|&(_, c)| c).sum::<u64>();
+    let _total_chars = counts.iter().map(|&(_, c)| c).sum::<u64>();
 
     let token_set = optimize_chars_by_ext(counts.as_slice(), ntokens);
     let mut best_tokenizer = CharsTokenizer::new(token_set);

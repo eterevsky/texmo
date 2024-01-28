@@ -1,12 +1,10 @@
 #![allow(dead_code)]
 
+use clap::{Parser, Subcommand};
+use serde_json::Value;
 use std::collections::HashMap;
-use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
-
-use clap::{Parser, Subcommand};
-
 use tempfile::NamedTempFile;
 
 mod chars;
@@ -26,19 +24,6 @@ use self::optimizer::optimize_bpe;
 use self::processing::{process_file, Processing};
 use self::tokenizer::tokenize_file;
 use self::tokens::{LiteralEncoding, TokenSet};
-
-impl fmt::Display for Processing {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match *self {
-                Processing::Raw => "raw",
-                Processing::CapsWords => "capswords",
-            }
-        )
-    }
-}
 
 fn optimize_tokens(
     data_filename: &str,
@@ -368,6 +353,22 @@ fn optimize_chars_tokens_proc(
     optimize_chars_tokens(&sampler, &sampler, &sampler, ntokens, initial_size, output)
 }
 
+fn load_save_tokens(_filename: &str, input_tokens_path: &str, tokens_dir: &str) {
+    let tokens_dir_path = std::path::Path::new(tokens_dir);
+    println!("Reading the token set from {}.", input_tokens_path);
+    let input_tokens_file = File::open(input_tokens_path).expect("Input tokens file not found");
+    let reader = BufReader::new(input_tokens_file);
+
+    // Deserialize the JSON data into a serde_json::Value
+    let tokenset_json: Value = serde_json::from_reader(reader).unwrap();
+    let token_set = tokenset::TokenSet::from_json(tokenset_json);
+    let output_path = tokens_dir_path.join(format!("{}.json", token_set.name()));
+
+    println!("Writing the token set to {}.", output_path.display());
+    let serialized = serde_json::to_string(&token_set.to_json()).unwrap();
+    std::fs::write(&output_path, serialized).unwrap();
+}
+
 #[derive(Parser, Debug)]
 struct Args {
     #[command(subcommand)]
@@ -456,7 +457,7 @@ enum Command {
         output: String,
 
         /// Processing: one of "raw" and "capswords"
-        #[arg(long, default_value_t = DEFAULT_PROCESSING.to_string())]  
+        #[arg(long, default_value_t = DEFAULT_PROCESSING.to_string())]
         processing: String,
     },
 
@@ -499,12 +500,29 @@ enum Command {
         #[arg(short, long)]
         data: String,
     },
+
+    ConvertTokens {
+        #[arg(short, long)]
+        data: String,
+
+        #[arg(short, long)]
+        input_tokens: String,
+
+        #[arg(short, long)]
+        tokens_dir: String,
+    },
 }
 
 fn main() {
     let args = Args::parse();
 
     match &args.command {
+        Command::ConvertTokens {
+            data,
+            input_tokens,
+            tokens_dir,
+        } => load_save_tokens(data, input_tokens, tokens_dir),
+
         Command::Tokenize {
             data,
             tokens,
@@ -573,7 +591,13 @@ fn main() {
             ntokens,
             output,
         } => {
-            optimize_chars_tokens_proc(data, processed_data.as_deref(), processing, *ntokens, output);
+            optimize_chars_tokens_proc(
+                data,
+                processed_data.as_deref(),
+                processing,
+                *ntokens,
+                output,
+            );
         }
     }
 }

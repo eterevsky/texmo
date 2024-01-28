@@ -89,7 +89,7 @@ impl Tokenizer {
             suffix_states.push(suffix_state);
         }
 
-        for mut state in suffix_states.iter_mut() {
+        for state in suffix_states.iter_mut() {
             let mut suffix = state.suffix.to_vec();
 
             for last_byte in 0..=255 {

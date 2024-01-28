@@ -209,55 +209,6 @@ fn process(filename: &str, output: &str) {
     process_file(&mut input, &mut output).unwrap();
 }
 
-fn count_hex_digits(filename: &str) {
-    let input = File::open(filename).unwrap();
-    let reader = BufReader::new(input);
-
-    let mut counts: [usize; 16] = [0; 16];
-
-    for byte in reader.bytes() {
-        let byte = byte.unwrap();
-        counts[(byte >> 4) as usize] += 1;
-        counts[(byte & 15) as usize] += 1;
-    }
-
-    let mut digits = (0..16).collect::<Vec<usize>>();
-    digits.sort_unstable_by_key(|&d| counts[d]);
-
-    for &d in digits.iter() {
-        println!("{:x}  {}", d, counts[d]);
-    }
-}
-
-pub const CHUNK_SIZE: usize = 16 * 1024 * 1024;
-
-fn count_bytes(filename: &str) -> [u64; 256] {
-    let mut file = File::open(filename).unwrap();
-    let mut buffer = Vec::new();
-    buffer.resize(CHUNK_SIZE, 0);
-
-    let mut counts = [0; 256];
-
-    let mut read_bytes = file.read(&mut buffer).unwrap();
-    while read_bytes > 0 {
-        for byte in buffer[..read_bytes].iter() {
-            counts[*byte as usize] += 1;
-        }
-        read_bytes = file.read(&mut buffer).unwrap();
-    }
-
-    counts
-}
-
-fn count_bytes_command(filename: &str) {
-    let counts = count_bytes(filename);
-
-    for c in counts.iter() {
-        print!(" {}", c);
-    }
-    println!();
-}
-
 fn count_chars(filename: &str) {
     let file = File::open(filename).unwrap();
     let mut reader = BufReader::new(file);
@@ -309,53 +260,6 @@ fn count_chars(filename: &str) {
     println!("Max char: {:?}", std::char::from_u32(max_c).unwrap());
 }
 
-fn tokenize(
-    filename: &str,
-    tokens_file: &str,
-    initial_size: u64,
-    chunk_size: usize,
-    in_memory: bool,
-) {
-    let token_set = TokenSet::from_json(tokens_file);
-
-    let stats = if in_memory {
-        let sampler = MemorySampler::from_file(filename, chunk_size);
-        tokenize_file(&token_set, &sampler, false)
-    } else {
-        let sampler = FileSampler::new(filename, chunk_size, None);
-        let stats = tokenize_file(&token_set, &sampler, false);
-        stats
-    };
-
-    let stats_json = stats.to_json(
-        initial_size,
-        token_set.literal_encoding.tokens_in_literal(),
-        token_set.dist_entropy(&stats),
-        token_set.reserved_tokens(),
-    );
-    println!("{}", json::stringify_pretty(stats_json, 2));
-}
-
-fn optimize_chars_tokens_proc(
-    filename_raw: &str,
-    filename_processed: Option<&str>,
-    processing: &str,
-    ntokens: usize,
-    output: &str,
-) {
-    let processing = match processing {
-        "raw" => Processing::Raw,
-        "capswords" => Processing::CapsWords,
-        _ => panic!("Unexpected processing type"),
-    };
-    let initial_size = std::fs::metadata(filename_raw).unwrap().len();
-    let (filename, _temp) = maybe_process_file(filename_raw, filename_processed, processing);
-
-    let sampler = FileSampler::new(&filename, 1 << 32, None);
-
-    optimize_chars_tokens(&sampler, &sampler, &sampler, ntokens, initial_size, output)
-}
-
 fn load_save_tokens(
     filename_raw: &str,
     filename_processed: Option<&str>,
@@ -375,10 +279,14 @@ fn load_save_tokens(
         maybe_process_file(filename_raw, filename_processed, token_set.processing);
     let initial_size = std::fs::metadata(filename_raw).unwrap().len();
 
-    println!("Reading {}", &filename);    
+    println!("Reading {}", &filename);
     let contents = std::fs::read(&filename).unwrap();
 
-    println!("Tokenizing {} using token set {}.", &filename, token_set.name());
+    println!(
+        "Tokenizing {} using token set {}.",
+        &filename,
+        token_set.name()
+    );
     let tokenizer = tokenizer2::FragmentTokenizer::new(token_set.clone());
     let mut stats = stats2::TokenStats::new(token_set.clone(), Some(initial_size));
     tokenizer.process_slice(&contents, &mut stats);
@@ -399,25 +307,6 @@ const DEFAULT_PROCESSING: &str = "raw";
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    Tokenize {
-        #[arg(short, long)]
-        data: String,
-
-        #[arg(short, long)]
-        tokens: String,
-
-        /// If the input is pre-processed, this argument specifies the size
-        /// of the input before pre-processing.
-        #[arg(long)]
-        initial_size: u64,
-
-        #[arg(long, default_value_t = 1024 * 1024)]
-        chunk_size: usize,
-
-        #[arg(long)]
-        in_memory: bool,
-    },
-
     OptimizeTokens {
         #[arg(short, long)]
         data: String,
@@ -463,24 +352,6 @@ enum Command {
         add_block: usize,
     },
 
-    OptimizeCharsTokens {
-        #[arg(short, long)]
-        data: String,
-
-        #[arg(long)]
-        processed_data: Option<String>,
-
-        #[arg(short, long)]
-        ntokens: usize,
-
-        #[arg(short, long)]
-        output: String,
-
-        /// Processing: one of "raw" and "capswords"
-        #[arg(long, default_value_t = DEFAULT_PROCESSING.to_string())]
-        processing: String,
-    },
-
     OptimizeAll {
         #[arg(short, long)]
         data: String,
@@ -508,14 +379,6 @@ enum Command {
         output: String,
     },
 
-    CountHexDigits {
-        #[arg(short, long)]
-        data: String,
-    },
-    CountBytes {
-        #[arg(short, long)]
-        data: String,
-    },
     CountChars {
         #[arg(short, long)]
         data: String,
@@ -546,20 +409,6 @@ fn main() {
             input_tokens,
             tokens_dir,
         } => load_save_tokens(data, processed_data.as_deref(), input_tokens, tokens_dir),
-
-        Command::Tokenize {
-            data,
-            tokens,
-            initial_size,
-            chunk_size,
-            in_memory,
-        } => tokenize(
-            data.as_str(),
-            tokens,
-            *initial_size,
-            *chunk_size,
-            *in_memory,
-        ),
 
         Command::OptimizeTokens {
             data,
@@ -604,24 +453,6 @@ fn main() {
 
         Command::Process { data, output } => process(data.as_str(), output.as_str()),
 
-        Command::CountHexDigits { data } => count_hex_digits(data.as_str()),
-        Command::CountBytes { data } => count_bytes_command(data.as_str()),
         Command::CountChars { data } => count_chars(data.as_str()),
-
-        Command::OptimizeCharsTokens {
-            data,
-            processed_data,
-            processing,
-            ntokens,
-            output,
-        } => {
-            optimize_chars_tokens_proc(
-                data,
-                processed_data.as_deref(),
-                processing,
-                *ntokens,
-                output,
-            );
-        }
     }
 }

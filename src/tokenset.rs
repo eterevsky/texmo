@@ -1,7 +1,8 @@
-use super::processing::Processing;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::fmt;
+
+use super::processing::Processing;
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -39,7 +40,8 @@ impl fmt::Display for TokenType {
 }
 
 /// A single token that will be part of the final tokenization.
-enum Token {
+#[derive(Clone)]
+pub enum Token {
     /// A token representing a string of bytes.
     Str(Vec<u8>),
     /// A token which is used to represent bytes/characters that aren't
@@ -65,15 +67,14 @@ impl Token {
 
 /// A substring of text covered by one token or a sequence of tokens in such
 /// a way that it couldn't be subdivided into smaller strings
-struct Span {
-    string: Vec<u8>,
+#[derive(Clone)]
+pub struct Sequence {
+    pub string: Vec<u8>,
     /// Sequence of one or more token indices that encode this string.
-    tokens: Vec<usize>,
-    /// The longest suffix of `string` which is itself a different Span.
-    suffix: Option<SpanIdx>,
+    pub tokens: Vec<usize>,
 }
 
-impl Span {
+impl Sequence {
     fn to_json(&self, token_set: &TokenSet) -> Value {
         let seq = self
             .tokens
@@ -89,18 +90,19 @@ impl Span {
 
 struct SpanIdx(usize);
 
+#[derive(Clone)]
 pub struct TokenSet {
     /// The type of the token set, specifying how it encodes bytes or characters
     /// that don't have specific tokens associated with them.
     token_type: TokenType,
     /// Type of pre-processing that should be done to the text before tokenization.
-    processing: Processing,
+    pub processing: Processing,
     /// If true, the tokens can span accross paragraphs, i.e. a token can't have
     /// any non '\n' characters after "\n\n".
     split_paragraphs: bool,
 
-    tokens: Vec<Token>,
-    spans: Vec<Span>,
+    pub tokens: Vec<Token>,
+    pub sequences: Vec<Sequence>,
 }
 
 impl TokenSet {
@@ -119,7 +121,7 @@ impl TokenSet {
             token_type,
             processing,
             tokens,
-            spans: Vec::new(),
+            sequences: Vec::new(),
             split_paragraphs,
         }
     }
@@ -134,7 +136,7 @@ impl TokenSet {
                 rem >>= 1;
             }
             bits.reverse();
-            token_set.add_span(vec![c as u8], bits);
+            token_set.add_sequence(vec![c as u8], bits);
         }
 
         token_set
@@ -150,7 +152,7 @@ impl TokenSet {
                 rem >>= 2;
             }
             digits.reverse();
-            token_set.add_span(vec![c as u8], digits);
+            token_set.add_sequence(vec![c as u8], digits);
         }
 
         token_set
@@ -159,7 +161,7 @@ impl TokenSet {
     pub fn new_bits4(processing: Processing, split_paragraphs: bool) -> Self {
         let mut token_set = Self::new(16, processing, TokenType::Bits4, split_paragraphs);
         for c in 0..256 {
-            token_set.add_span(vec![c as u8], vec![c >> 4, c & 15]);
+            token_set.add_sequence(vec![c as u8], vec![c >> 4, c & 15]);
         }
 
         token_set
@@ -244,17 +246,13 @@ impl TokenSet {
         )
     }
 
-    pub fn add_span(&mut self, string: Vec<u8>, tokens: Vec<usize>) {
-        let span = Span {
-            string,
-            tokens,
-            suffix: None,
-        };
-        self.spans.push(span);
+    pub fn add_sequence(&mut self, string: Vec<u8>, tokens: Vec<usize>) {
+        let sequence = Sequence { string, tokens };
+        self.sequences.push(sequence);
     }
 
     pub fn add_token(&mut self, token: &[u8]) {
-        self.spans.retain(|s| s.string != token);
+        self.sequences.retain(|s| s.string != token);
         let token = Token::Str(token.to_vec());
         self.tokens.push(token);
     }
@@ -271,7 +269,7 @@ impl TokenSet {
             "split_paragraphs": self.split_paragraphs,
         });
         let sequences = self
-            .spans
+            .sequences
             .iter()
             .filter(|s| s.tokens.len() > 1)
             .map(|s| s.to_json(self))

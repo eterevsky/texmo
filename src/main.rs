@@ -12,7 +12,9 @@ mod input;
 mod optimizer;
 mod processing;
 mod stats;
+mod stats2;
 mod tokenizer;
+mod tokenizer2;
 mod tokens;
 mod tokenset;
 
@@ -23,6 +25,7 @@ use self::input::preloaded_sampler::PreloadedSampler;
 use self::optimizer::optimize_bpe;
 use self::processing::{process_file, Processing};
 use self::tokenizer::tokenize_file;
+use self::tokenizer2::Tokenizer;
 use self::tokens::{LiteralEncoding, TokenSet};
 
 fn optimize_tokens(
@@ -353,7 +356,12 @@ fn optimize_chars_tokens_proc(
     optimize_chars_tokens(&sampler, &sampler, &sampler, ntokens, initial_size, output)
 }
 
-fn load_save_tokens(_filename: &str, input_tokens_path: &str, tokens_dir: &str) {
+fn load_save_tokens(
+    filename_raw: &str,
+    filename_processed: Option<&str>,
+    input_tokens_path: &str,
+    tokens_dir: &str,
+) {
     let tokens_dir_path = std::path::Path::new(tokens_dir);
     println!("Reading the token set from {}.", input_tokens_path);
     let input_tokens_file = File::open(input_tokens_path).expect("Input tokens file not found");
@@ -362,10 +370,22 @@ fn load_save_tokens(_filename: &str, input_tokens_path: &str, tokens_dir: &str) 
     // Deserialize the JSON data into a serde_json::Value
     let tokenset_json: Value = serde_json::from_reader(reader).unwrap();
     let token_set = tokenset::TokenSet::from_json(tokenset_json);
-    let output_path = tokens_dir_path.join(format!("{}.json", token_set.name()));
 
+    let (filename, _temp) =
+        maybe_process_file(filename_raw, filename_processed, token_set.processing);
+    let initial_size = std::fs::metadata(filename_raw).unwrap().len();
+
+    println!("Reading {}", &filename);    
+    let contents = std::fs::read(&filename).unwrap();
+
+    println!("Tokenizing {} using token set {}.", &filename, token_set.name());
+    let tokenizer = tokenizer2::FragmentTokenizer::new(token_set.clone());
+    let mut stats = stats2::TokenStats::new(token_set.clone(), Some(initial_size));
+    tokenizer.process_slice(&contents, &mut stats);
+
+    let output_path = tokens_dir_path.join(format!("{}.json", token_set.name()));
     println!("Writing the token set to {}.", output_path.display());
-    let serialized = serde_json::to_string(&token_set.to_json()).unwrap();
+    let serialized = serde_json::to_string(&stats.to_json()).unwrap();
     std::fs::write(&output_path, serialized).unwrap();
 }
 
@@ -505,6 +525,9 @@ enum Command {
         #[arg(short, long)]
         data: String,
 
+        #[arg(long)]
+        processed_data: Option<String>,
+
         #[arg(short, long)]
         input_tokens: String,
 
@@ -519,9 +542,10 @@ fn main() {
     match &args.command {
         Command::ConvertTokens {
             data,
+            processed_data,
             input_tokens,
             tokens_dir,
-        } => load_save_tokens(data, input_tokens, tokens_dir),
+        } => load_save_tokens(data, processed_data.as_deref(), input_tokens, tokens_dir),
 
         Command::Tokenize {
             data,

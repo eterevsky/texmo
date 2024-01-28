@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn test_tokenize() {
         let mut token_set = CharsTokenSet::new(2);
-        let a_id = token_set.add_char_token('A');
+        token_set.add_char_token('A');
         let b_id = token_set.add_char_token('B');
         token_set.add_encoding('C', vec![b_id, CharsTokenSet::ext_token(0)]);
         token_set.add_encoding(
@@ -148,7 +148,7 @@ mod tests {
     fn test_tokenize_utf8() {
         let mut token_set = CharsTokenSet::new(2);
         let a_id = token_set.add_char_token('а');
-        let b_id = token_set.add_string("бв");
+        token_set.add_string("бв");
         token_set.add_encoding('г', vec![a_id, CharsTokenSet::ext_token(0)]);
 
         let tokenizer = CharsTokenizer::new(token_set);

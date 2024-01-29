@@ -6,6 +6,7 @@ pub struct TokenStats {
     pub token_set: TokenSet,
     pub total_tokens: u64,
     pub initial_size: Option<u64>,
+    pub scanned_bytes: u64,
 }
 
 impl TokenStats {
@@ -14,6 +15,7 @@ impl TokenStats {
             token_set,
             total_tokens: 0,
             initial_size,
+            scanned_bytes: 0,
         }
     }
 
@@ -26,7 +28,8 @@ impl TokenStats {
 
         let mut stats = json!({
             "ntokens": self.ntokens(),
-            "total_tokens": self.total_tokens
+            "total_tokens": self.total_tokens,
+            "scanned_bytes": self.scanned_bytes,
         });
         if let Some(s) = self.initial_size {
             stats["initial_size"] = s.into();
@@ -36,5 +39,10 @@ impl TokenStats {
         result["stats"] = stats;
 
         result
+    }
+
+    pub fn merge(&mut self, other: &TokenStats) {
+        self.total_tokens += other.total_tokens;
+        self.scanned_bytes += other.scanned_bytes;
     }
 }

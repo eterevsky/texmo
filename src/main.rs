@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use tempfile::NamedTempFile;
 
+mod batch_tokenize;
 mod input;
 mod optimizer;
 mod processing;
@@ -23,7 +24,6 @@ use self::input::preloaded_sampler::PreloadedSampler;
 use self::optimizer::optimize_bpe;
 use self::processing::{process_file, Processing};
 use self::tokenizer::tokenize_file;
-use self::tokenizer2::Tokenizer;
 use self::tokens::{LiteralEncoding, TokenSet};
 
 fn optimize_tokens(
@@ -277,17 +277,15 @@ fn load_save_tokens(
         maybe_process_file(filename_raw, filename_processed, token_set.processing);
     let initial_size = std::fs::metadata(filename_raw).unwrap().len();
 
-    println!("Reading {}", &filename);
-    let contents = std::fs::read(&filename).unwrap();
+    println!("Opening {}", &filename);
+    let sampler = FileSampler::new(&filename, 1 << 24, None);
 
     println!(
         "Tokenizing {} using token set {}.",
         &filename,
         token_set.name()
     );
-    let tokenizer = tokenizer2::FragmentTokenizer::new(token_set.clone());
-    let mut stats = stats2::TokenStats::new(token_set.clone(), Some(initial_size));
-    tokenizer.process_slice(&contents, &mut stats);
+    let stats = batch_tokenize::tokenize_file(&token_set, &sampler, Some(initial_size));
 
     let output_path = tokens_dir_path.join(format!("{}.json", token_set.name()));
     println!("Writing the token set to {}.", output_path.display());

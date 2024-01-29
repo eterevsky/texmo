@@ -3,10 +3,6 @@ use std::collections::HashMap;
 use super::stats2::TokenStats;
 use super::tokenset::{Token, TokenSet};
 
-pub trait Tokenizer {
-    fn process_slice(&self, bytes: &[u8], stats: &mut TokenStats);
-}
-
 enum SpanContent {
     None, // Empty span
     Token(usize),
@@ -43,14 +39,14 @@ impl SuffixState {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct CostState {
+pub struct CostState {
     cost: u64,
     span: usize,
 }
 
 // A synchronous tokenizer,
 pub struct FragmentTokenizer {
-    token_set: TokenSet,
+    pub token_set: TokenSet,
     spans: Vec<Span>,
     suffix_states: Vec<SuffixState>,
 }
@@ -182,11 +178,11 @@ impl FragmentTokenizer {
 
         suffix_states
     }
-}
 
-impl Tokenizer for FragmentTokenizer {
-    fn process_slice(&self, bytes: &[u8], stats: &mut TokenStats) {
-        let mut cost_state = vec![CostState { cost: 0, span: 0 }];
+    pub fn process_slice(&self, bytes: &[u8], stats: &mut TokenStats, cost_state: &mut Vec<CostState>) {
+        // let mut cost_state = vec![CostState { cost: 0, span: 0 }];
+        cost_state.clear();
+        cost_state.push(CostState { cost: 0, span: 0 });
         let mut state = &self.suffix_states[0];
 
         for &byte in bytes.iter() {
@@ -213,6 +209,7 @@ impl Tokenizer for FragmentTokenizer {
         }
 
         stats.total_tokens += cost_state.last().unwrap().cost;
+        stats.scanned_bytes += bytes.len() as u64;
     }
 }
 

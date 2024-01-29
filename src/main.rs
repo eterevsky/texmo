@@ -9,6 +9,7 @@ use tempfile::NamedTempFile;
 
 mod batch_tokenize;
 mod input;
+mod optimize;
 mod optimizer;
 mod processing;
 mod stats;
@@ -21,10 +22,12 @@ mod tokenset;
 use self::input::file_sampler::FileSampler;
 use self::input::memory_sampler::MemorySampler;
 use self::input::preloaded_sampler::PreloadedSampler;
+use self::optimize::optimize_tokenset;
 use self::optimizer::optimize_bpe;
 use self::processing::{process_file, Processing};
 use self::tokenizer::tokenize_file;
 use self::tokens::{LiteralEncoding, TokenSet};
+use self::tokenset::TokenType;
 
 fn optimize_tokens(
     data_filename: &str,
@@ -293,6 +296,37 @@ fn load_save_tokens(
     std::fs::write(&output_path, serialized).unwrap();
 }
 
+fn optimize(
+    ntokens: usize,
+    filename_raw: &str,
+    filename_processed: Option<&str>,
+    tokens_dir: &str,
+    processing: Processing,
+    token_type: TokenType,
+) {
+    let tokens_dir_path = std::path::Path::new(tokens_dir);
+
+    let (filename, _temp) = maybe_process_file(filename_raw, filename_processed, processing);
+    let initial_size = std::fs::metadata(filename_raw).unwrap().len();
+
+    println!("Opening {}", &filename);
+    let sampler = FileSampler::new(&filename, 1 << 24, None);
+
+    println!("Optimizing a token set with {} tokens", ntokens);
+    let stats = optimize_tokenset(
+        ntokens,
+        &sampler,
+        processing,
+        token_type,
+        Some(initial_size),
+    );
+
+    let output_path = tokens_dir_path.join(format!("{}.json", stats.token_set.name()));
+    println!("Writing the token set to {}.", output_path.display());
+    let serialized = serde_json::to_string(&stats.to_json()).unwrap();
+    std::fs::write(&output_path, serialized).unwrap();
+}
+
 #[derive(Parser, Debug)]
 struct Args {
     #[command(subcommand)]
@@ -393,6 +427,26 @@ enum Command {
         #[arg(short, long)]
         tokens_dir: String,
     },
+
+    Optimize {
+        #[arg(short, long)]
+        data: String,
+
+        #[arg(long)]
+        processed_data: Option<String>,
+
+        #[arg(short, long)]
+        tokens_dir: String,
+
+        #[arg(short, long)]
+        processing: Processing,
+
+        #[arg(id = "type", long)]
+        token_type: TokenType,
+
+        #[arg(short, long)]
+        ntokens: usize,
+    },
 }
 
 fn main() {
@@ -405,6 +459,22 @@ fn main() {
             input_tokens,
             tokens_dir,
         } => load_save_tokens(data, processed_data.as_deref(), input_tokens, tokens_dir),
+
+        Command::Optimize {
+            data,
+            processed_data,
+            tokens_dir,
+            processing,
+            token_type,
+            ntokens,
+        } => optimize(
+            *ntokens,
+            data,
+            processed_data.as_deref(),
+            tokens_dir,
+            *processing,
+            *token_type,
+        ),
 
         Command::OptimizeTokens {
             data,

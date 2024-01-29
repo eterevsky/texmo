@@ -1,8 +1,9 @@
+use clap::ValueEnum;
 use serde::Serialize;
 use std::fmt;
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum Processing {
     Raw,

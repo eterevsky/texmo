@@ -1,10 +1,11 @@
+use clap::ValueEnum;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::fmt;
 
 use super::processing::Processing;
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum TokenType {
     /// Ext tokens 0 and 1 are used to encode bytes bit by bit. (≥2 tokens)
@@ -40,7 +41,7 @@ impl fmt::Display for TokenType {
 }
 
 /// A single token that will be part of the final tokenization.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Token {
     /// A token representing a string of bytes.
     Str(Vec<u8>),
@@ -67,7 +68,7 @@ impl Token {
 
 /// A substring of text covered by one token or a sequence of tokens in such
 /// a way that it couldn't be subdivided into smaller strings
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Sequence {
     pub string: Vec<u8>,
     /// Sequence of one or more token indices that encode this string.
@@ -90,16 +91,17 @@ impl Sequence {
 
 struct SpanIdx(usize);
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TokenSet {
+    pub n_ext_tokens: usize, 
     /// The type of the token set, specifying how it encodes bytes or characters
     /// that don't have specific tokens associated with them.
-    token_type: TokenType,
+    pub token_type: TokenType,
     /// Type of pre-processing that should be done to the text before tokenization.
     pub processing: Processing,
     /// If true, the tokens can span accross paragraphs, i.e. a token can't have
     /// any non '\n' characters after "\n\n".
-    split_paragraphs: bool,
+    pub split_paragraphs: bool,
 
     pub tokens: Vec<Token>,
     pub sequences: Vec<Sequence>,
@@ -118,6 +120,7 @@ impl TokenSet {
             .collect::<Vec<_>>();
 
         TokenSet {
+            n_ext_tokens,
             token_type,
             processing,
             tokens,

@@ -208,8 +208,43 @@ impl FragmentTokenizer {
             cost_state.push(best_cost_state.unwrap());
         }
 
+        self.update_stats(cost_state, bytes, stats);
+    }
+
+    fn update_stats(&self, cost_state: &Vec<CostState>, bytes: &[u8], stats: &mut TokenStats) {
         stats.total_tokens += cost_state.last().unwrap().cost;
         stats.scanned_bytes += bytes.len() as u64;
+
+        let mut span_counts = vec![0; self.spans.len()];
+        let mut pos = bytes.len();
+
+        while pos > 0 {
+            let span_idx = cost_state[pos].span;
+            span_counts[span_idx] += 1;
+            pos -= self.spans[span_idx].string.len();
+        }
+
+        for span_idx in 1..self.spans.len() {
+            let count = span_counts[span_idx];
+            let span = &self.spans[span_idx];
+            match span.content {
+                SpanContent::Sequence(seq_id) => {
+                    stats.seq_counts[seq_id] += count;
+                    let seq = &stats.token_set.sequences[seq_id];
+                    for &token_id in seq.tokens.iter() {
+                        stats.token_counts[token_id] += count;
+                    }
+                },
+                SpanContent::Token(token_id) => {
+                    stats.token_counts[token_id] += count
+                },
+                SpanContent::None => {
+                    dbg!(cost_state);
+                    dbg!(span_idx);
+                    unreachable!()
+                }
+            }
+        }
     }
 }
 

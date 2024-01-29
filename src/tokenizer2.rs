@@ -227,8 +227,9 @@ mod tests {
 
         let tokenizer = FragmentTokenizer::new(token_set.clone());
         let mut stats = TokenStats::new(token_set, Some(3));
+        let mut buffer = Vec::new();
 
-        tokenizer.process_slice("abc".as_bytes(), &mut stats);
+        tokenizer.process_slice("abc".as_bytes(), &mut stats, &mut buffer);
         assert_eq!(stats.total_tokens, 2);
     }
 
@@ -244,8 +245,9 @@ mod tests {
 
         let tokenizer = FragmentTokenizer::new(token_set.clone());
         let mut stats = TokenStats::new(token_set, Some(3));
+        let mut buffer = Vec::new();
 
-        tokenizer.process_slice("abcde".as_bytes(), &mut stats);
+        tokenizer.process_slice("abcde".as_bytes(), &mut stats, &mut buffer);
         assert_eq!(stats.total_tokens, 3);
     }
 }

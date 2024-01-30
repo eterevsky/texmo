@@ -58,6 +58,13 @@ fn bytes_to_json(bytes: &[u8]) -> Value {
     }
 }
 
+pub fn show_bytes(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => format!("{:?}", s),
+        Err(_) => format!("{:?}", bytes),
+    }
+}
+
 impl Token {
     fn to_json(&self) -> Value {
         match self {
@@ -308,6 +315,19 @@ impl TokenSet {
 
     pub fn ntokens(&self) -> usize {
         self.tokens.len()
+    }
+
+    pub fn n_long_tokens(&self) -> usize {
+        self.tokens
+            .iter()
+            .filter(|t| {
+                if let Token::Str(s) = t {
+                    s.len() > 1
+                } else {
+                    false
+                }
+            })
+            .count()
     }
 
     pub fn to_json(&self) -> Value {

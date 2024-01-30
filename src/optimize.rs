@@ -2,7 +2,7 @@ use crate::batch_tokenize::tokenize_file;
 use crate::input::sample::Sampler;
 use crate::processing::Processing;
 use crate::stats2::TokenStats;
-use crate::tokenset::{Token, TokenSet, TokenType};
+use crate::tokenset::{Token, TokenSet, TokenType, show_bytes};
 
 trait BytesOptimizer {
     fn optimize_bytes(token_stats: &TokenStats, n_byte_tokens: usize) -> TokenSet;
@@ -59,8 +59,6 @@ impl BytesOptimizer for SimpleBytesOptimizer {
             }
         }
 
-        new_token_set.sort();
-
         new_token_set
     }
 }
@@ -73,16 +71,111 @@ impl BytesOptimizer for NoopBytesOptimizer {
     }
 }
 
-fn optimize_tokenset_impl<'a, S: Sampler<'a>, BO: BytesOptimizer>(
-    token_set: TokenSet,
+fn add_remove_token<'a, S: Sampler<'a>, BO: BytesOptimizer>(
+    stats: &TokenStats,
     ntokens: usize,
     sampler: &'a S,
     _bytes_optimizer: &BO,
+) -> Option<TokenStats> {
+    let pair_idx = (0..stats.pair_counts.len())
+        .max_by_key(|&i| stats.pair_counts[i])
+        .unwrap();
+    let itoken1 = pair_idx / stats.ntokens();
+    let itoken2 = pair_idx % stats.ntokens();
+
+    let new_token = match (
+        &stats.token_set.tokens[itoken1],
+        &stats.token_set.tokens[itoken2],
+    ) {
+        (Token::Str(s1), Token::Str(s2)) => {
+            s1.iter().chain(s2.iter()).cloned().collect::<Vec<u8>>()
+        }
+        _ => unreachable!(),
+    };
+
+    let mut new_token_set = stats.token_set.clone();
+    new_token_set.add_token(&new_token);
+
+    if new_token_set.ntokens() <= ntokens {
+        let new_stats = tokenize_file(&new_token_set, sampler, None);
+        if new_stats.total_tokens < stats.total_tokens {
+            println!("Added token {}", show_bytes(&new_token));
+            return Some(new_stats);
+        }
+    } else {
+        assert_eq!(new_token_set.ntokens(), ntokens + 1);
+
+        if new_token_set.n_ext_tokens + new_token_set.n_long_tokens() < ntokens {
+            let new_stats = tokenize_file(&new_token_set, sampler, None);
+            let token_set_new_bytes = BO::optimize_bytes(
+                &new_stats,
+                ntokens - new_token_set.n_ext_tokens - new_token_set.n_long_tokens(),
+            );
+            let new_stats = tokenize_file(&token_set_new_bytes, sampler, None);
+            if new_stats.total_tokens < stats.total_tokens {
+                println!("Added token {} and updated 1-byte tokens", show_bytes(&new_token));
+                return Some(new_stats);
+            }
+        }
+    }
+
+    None
+}
+
+fn optimization_step<'a, S: Sampler<'a>, BO: BytesOptimizer>(
+    token_set: &TokenSet,
+    ntokens: usize,
+    sampler: &'a S,
+    bytes_optimizer: &BO,
+) -> Option<TokenSet> {
+    let stats = tokenize_file(&token_set, sampler, None);
+
+    let n_ext_tokens = token_set.n_ext_tokens;
+    let n_long_tokens = token_set.n_long_tokens();
+
+    let new_token_set = BO::optimize_bytes(&stats, ntokens - n_ext_tokens - n_long_tokens);
+    let new_stats = tokenize_file(&new_token_set, sampler, None);
+    if new_stats.total_tokens < stats.total_tokens {
+        println!(
+            "Updated encoding of single bytes. New bytes/token: {}",
+            stats.bytes_per_token()
+        );
+        return Some(new_stats.token_set);
+    }
+
+    if let Some(new_stats) = add_remove_token(&stats, ntokens, sampler, bytes_optimizer) {
+        return Some(new_stats.token_set);
+    }
+
+    None
+}
+
+fn optimize_tokenset_impl<'a, S: Sampler<'a>, BO: BytesOptimizer>(
+    mut token_set: TokenSet,
+    ntokens: usize,
+    sampler: &'a S,
+    bytes_optimizer: &BO,
     initial_size: Option<u64>,
 ) -> TokenStats {
     let stats = tokenize_file(&token_set, sampler, initial_size);
-    let new_token_set = BO::optimize_bytes(&stats, ntokens - token_set.n_ext_tokens);
-    tokenize_file(&new_token_set, sampler, initial_size)
+    println!(
+        "Initial tokens: {}, bytes/token = {}",
+        token_set.ntokens(),
+        stats.bytes_per_token()
+    );
+
+    loop {
+        if let Some(new_token_set) =
+            optimization_step(&token_set, ntokens, sampler, bytes_optimizer)
+        {
+            token_set = new_token_set;
+        } else {
+            break;
+        }
+    }
+
+    token_set.sort();
+    tokenize_file(&token_set, sampler, initial_size)
 }
 
 pub fn optimize_tokenset<'a, S: Sampler<'a>>(

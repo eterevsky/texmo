@@ -10,6 +10,9 @@ pub struct TokenStats {
     pub scanned_bytes: u64,
     pub token_counts: Vec<u64>,
     pub seq_counts: Vec<u64>,
+    /// Counts for pairs of tokens (token1, token2). Indexed by
+    /// token1_id * ntokens + token2_id
+    pub pair_counts: Vec<u64>,
 }
 
 impl TokenStats {
@@ -23,11 +26,16 @@ impl TokenStats {
             scanned_bytes: 0,
             token_counts: vec![0; ntokens],
             seq_counts: vec![0; nseqs],
+            pair_counts: vec![0; ntokens*ntokens],
         }
     }
 
     pub fn ntokens(&self) -> usize {
         self.token_set.ntokens()
+    }
+
+    pub fn bytes_per_token(&self) -> f64 {
+        self.scanned_bytes as f64 / self.total_tokens as f64
     }
 
     pub fn to_json(&self) -> Value {

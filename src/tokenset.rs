@@ -1,6 +1,7 @@
 use clap::ValueEnum;
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::cmp::Ordering;
 use std::fmt;
 
 use super::processing::Processing;
@@ -41,7 +42,7 @@ impl fmt::Display for TokenType {
 }
 
 /// A single token that will be part of the final tokenization.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Token {
     /// A token representing a string of bytes.
     Str(Vec<u8>),
@@ -66,9 +67,26 @@ impl Token {
     }
 }
 
+impl Ord for Token {
+    fn cmp(&self, other: &Token) -> Ordering {
+        match (self, other) {
+            (Token::Ext(x), Token::Ext(y)) => x.cmp(y),
+            (Token::Ext(_), Token::Str(_)) => Ordering::Less,
+            (Token::Str(_), Token::Ext(_)) => Ordering::Greater,
+            (Token::Str(x), Token::Str(y)) => x.cmp(y),
+        }
+    }
+}
+
+impl PartialOrd for Token {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 /// A substring of text covered by one token or a sequence of tokens in such
 /// a way that it couldn't be subdivided into smaller strings
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Sequence {
     pub string: Vec<u8>,
     /// Sequence of one or more token indices that encode this string.
@@ -89,11 +107,21 @@ impl Sequence {
     }
 }
 
-struct SpanIdx(usize);
+impl Ord for Sequence {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.string.cmp(&other.string)
+    }
+}
+
+impl PartialOrd for Sequence {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct TokenSet {
-    pub n_ext_tokens: usize, 
+    pub n_ext_tokens: usize,
     /// The type of the token set, specifying how it encodes bytes or characters
     /// that don't have specific tokens associated with them.
     pub token_type: TokenType,
@@ -282,6 +310,26 @@ impl TokenSet {
         }
         value
     }
+
+    pub fn sort(&mut self) {
+        let mut token_idxs = (0..self.tokens.len()).collect::<Vec<usize>>();
+        token_idxs.sort_by_key(|&id| &self.tokens[id]);
+
+        let mut new_indices = vec![0; self.tokens.len()];
+        for (new_pos, &current_pos) in token_idxs.iter().enumerate() {
+            new_indices[current_pos] = new_pos;
+        }
+
+        for seq in self.sequences.iter_mut() {
+            for i in 0..seq.tokens.len() {
+                // println!("{} {}", i, seq.tokens[i], );
+                seq.tokens[i] = new_indices[seq.tokens[i]];
+            }
+        }
+
+        self.tokens.sort();
+        self.sequences.sort();
+    }
 }
 
 #[cfg(test)]
@@ -326,5 +374,41 @@ mod tests {
         token_set.add_token("c".as_bytes());
 
         assert_eq!(token_set.name(), "tokens19_raw_bits4");
+    }
+
+    #[test]
+    fn sort() {
+        let mut token_set = TokenSet::new(2, Processing::Raw, TokenType::BytesHuff, true);
+        token_set.add_token("b".as_bytes()); // 2
+        token_set.add_token("a".as_bytes()); // 3
+        token_set.add_token("c".as_bytes()); // 4
+
+        token_set.add_sequence("e".as_bytes().to_vec(), vec![3, 0]); // "a", 0
+        token_set.add_sequence("d".as_bytes().to_vec(), vec![2, 3, 1]); // "b", "a", 1
+
+        token_set.sort();
+
+        dbg!(&token_set);
+
+        assert_eq!(token_set.tokens[0], Token::Ext(0));
+        assert_eq!(token_set.tokens[1], Token::Ext(1));
+        assert_eq!(token_set.tokens[2], Token::Str("a".as_bytes().to_vec()));
+        assert_eq!(token_set.tokens[3], Token::Str("b".as_bytes().to_vec()));
+        assert_eq!(token_set.tokens[4], Token::Str("c".as_bytes().to_vec()));
+
+        assert_eq!(
+            token_set.sequences[0],
+            Sequence {
+                string: "d".as_bytes().to_vec(),
+                tokens: vec![3, 2, 1]
+            }
+        );
+        assert_eq!(
+            token_set.sequences[1],
+            Sequence {
+                string: "e".as_bytes().to_vec(),
+                tokens: vec![2, 0]
+            }
+        );
     }
 }

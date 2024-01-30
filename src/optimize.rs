@@ -44,7 +44,7 @@ impl BytesOptimizer for SimpleBytesOptimizer {
             TokenType::Bits4 => {
                 TokenSet::new_bits4(stats.token_set.processing, stats.token_set.split_paragraphs)
             }
-            _ => unreachable!(),
+            _ => panic!("BytesOptimizer only works for Bits* TokenSet's"),
         };
 
         for &byte in selected_bytes.iter() {
@@ -58,6 +58,8 @@ impl BytesOptimizer for SimpleBytesOptimizer {
                 }
             }
         }
+
+        new_token_set.sort();
 
         new_token_set
     }

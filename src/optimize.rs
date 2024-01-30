@@ -2,7 +2,7 @@ use crate::batch_tokenize::tokenize_file;
 use crate::input::sample::Sampler;
 use crate::processing::Processing;
 use crate::stats2::TokenStats;
-use crate::tokenset::{Token, TokenSet, TokenType, show_bytes};
+use crate::tokenset::{show_bytes, Token, TokenSet, TokenType};
 
 trait BytesOptimizer {
     fn optimize_bytes(token_stats: &TokenStats, n_byte_tokens: usize) -> TokenSet;
@@ -113,10 +113,39 @@ fn add_remove_token<'a, S: Sampler<'a>, BO: BytesOptimizer>(
             );
             let new_stats = tokenize_file(&token_set_new_bytes, sampler, None);
             if new_stats.total_tokens < stats.total_tokens {
-                println!("Added token {} and updated 1-byte tokens", show_bytes(&new_token));
+                println!(
+                    "Added token {} and updated 1-byte tokens",
+                    show_bytes(&new_token)
+                );
                 return Some(new_stats);
             }
         }
+
+        println!("Trying to add token {}", show_bytes(&new_token));
+        print!("Trying to remove tokens:");
+        for (token_idx, token) in new_token_set.tokens.iter().enumerate() {
+            if let Token::Str(s) = token {
+                if s.len() > 1 && s != &new_token {
+                    print!(" {}", show_bytes(&s));
+                    let mut newer_token_set = new_token_set.clone();
+                    newer_token_set.remove_token(token_idx);
+
+                    let newer_stats = tokenize_file(&newer_token_set, sampler, None);
+                    let newer_token_set = BO::optimize_bytes(
+                        &newer_stats,
+                        ntokens - newer_token_set.n_ext_tokens - newer_token_set.n_long_tokens(),
+                    );
+                    let newer_stats = tokenize_file(&newer_token_set, sampler, None);
+
+                    if newer_stats.total_tokens < stats.total_tokens {
+                        println!();
+                        println!("Removed {}", show_bytes(s));
+                        return Some(newer_stats);
+                    }
+                }
+            }
+        }
+        println!()
     }
 
     None

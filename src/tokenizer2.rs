@@ -215,13 +215,29 @@ impl FragmentTokenizer {
         stats.total_tokens += cost_state.last().unwrap().cost;
         stats.scanned_bytes += bytes.len() as u64;
 
+        let ntokens = stats.token_set.ntokens();
+
         let mut span_counts = vec![0; self.spans.len()];
+        let mut next_token = None;
         let mut pos = bytes.len();
 
         while pos > 0 {
             let span_idx = cost_state[pos].span;
             span_counts[span_idx] += 1;
-            pos -= self.spans[span_idx].string.len();
+
+            let span = &self.spans[span_idx];
+            next_token = if let SpanContent::Token(token) = span.content {
+                if let Some(next) = next_token {
+                    let pair_id = token * ntokens + next;
+                    stats.pair_counts[pair_id] += 1;
+                }
+
+                Some(token)
+            } else {
+                None
+            };
+
+            pos -= span.string.len();
         }
 
         for span_idx in 1..self.spans.len() {

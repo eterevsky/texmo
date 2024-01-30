@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use super::input::sample::{Sample, Sampler};
 use super::stats2::TokenStats;
-use super::tokenizer2::{FragmentTokenizer};
+use super::tokenizer2::FragmentTokenizer;
 use super::tokenset::TokenSet;
 
 pub fn tokenize_file_sync<'a, S: Sampler<'a>>(
@@ -53,10 +53,13 @@ pub fn tokenize_file<'a, S: Sampler<'a>>(
     sampler: &'a S,
     initial_size: Option<u64>,
 ) -> TokenStats {
+    if sampler.total_size() < 1 << 25 {
+        return tokenize_file_sync(token_set, sampler, initial_size);
+    }
+
     let tokenizer = FragmentTokenizer::new(token_set.clone());
     let mut stats = TokenStats::new(token_set.clone(), initial_size);
     let nthreads = std::thread::available_parallelism().unwrap().get();
-    dbg!(nthreads);
 
     let (jobs_tx, jobs_rx) = mpsc::sync_channel::<Sample>(4);
     let jobs_rx_shared = Arc::new(Mutex::new(jobs_rx));

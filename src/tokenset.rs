@@ -288,6 +288,24 @@ impl TokenSet {
         self.tokens.push(token);
     }
 
+    pub fn remove_token(&mut self, token_idx: usize) {
+        for seq in self.sequences.iter() {
+            assert!(!seq.tokens.contains(&token_idx));
+        }
+
+        let last_idx = self.tokens.len() - 1;
+        let last_token = self.tokens.pop().unwrap();
+        self.tokens[token_idx] = last_token;
+
+        for seq in self.sequences.iter_mut() {
+            for tok in seq.tokens.iter_mut() {
+                if *tok == last_idx {
+                    *tok = token_idx
+                }
+            }
+        }
+    }
+
     pub fn ntokens(&self) -> usize {
         self.tokens.len()
     }
@@ -388,8 +406,6 @@ mod tests {
 
         token_set.sort();
 
-        dbg!(&token_set);
-
         assert_eq!(token_set.tokens[0], Token::Ext(0));
         assert_eq!(token_set.tokens[1], Token::Ext(1));
         assert_eq!(token_set.tokens[2], Token::Str("a".as_bytes().to_vec()));
@@ -408,6 +424,37 @@ mod tests {
             Sequence {
                 string: "e".as_bytes().to_vec(),
                 tokens: vec![2, 0]
+            }
+        );
+    }
+
+    #[test]
+    fn remove_token() {
+        let mut token_set = TokenSet::new(2, Processing::Raw, TokenType::BytesHuff, true);
+        token_set.add_token("a".as_bytes()); // 2
+        token_set.add_token("bc".as_bytes()); // 3
+        token_set.add_token("c".as_bytes()); // 4
+
+        token_set.add_sequence("d".as_bytes().to_vec(), vec![2, 0]); // "a", 0
+        token_set.add_sequence("e".as_bytes().to_vec(), vec![4, 2, 1]); // "c", "a", 1
+
+        token_set.remove_token(3);
+
+        assert_eq!(token_set.tokens.len(), 4);
+        assert_eq!(token_set.tokens[3], Token::Str("c".as_bytes().to_vec()));
+
+        assert_eq!(
+            token_set.sequences[0],
+            Sequence {
+                string: "d".as_bytes().to_vec(),
+                tokens: vec![2, 0]
+            }
+        );
+        assert_eq!(
+            token_set.sequences[1],
+            Sequence {
+                string: "e".as_bytes().to_vec(),
+                tokens: vec![3, 2, 1]
             }
         );
     }

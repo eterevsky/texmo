@@ -77,11 +77,11 @@ def create_tokens_sample(
         end -= 1
     if start >= end:
         return None, None
-    tokens, entropy = tokenizer.tokenize_ids(chunk[start:end], max_tokens=ntokens)
+    tokens = tokenizer.tokenize_ids(chunk[start:end], max_tokens=ntokens)
     assert len(tokens) <= ntokens
     if len(tokens) < ntokens:
         return None, None
-    return tokens, entropy
+    return tokens
 
 
 def create_bytes_sample(
@@ -92,6 +92,8 @@ def create_bytes_sample(
         if start < 0:
             return None, None
         start += 2  # Skip "\n\n"
+        while start < len(chunk) and chunk[start] == 10:
+            start += 1
     else:
         start = 0
         while start < len(chunk) and chunk[start] > 127:
@@ -115,18 +117,16 @@ def create_tokens_batch(
         math.log2(ntokens * tokenizer.token_set.bytes_per_token + 16)
     )
     samples = []
-    entropies = []
     while len(samples) < batch:
         assert bytes_size is not None
         reader_request_queue.put(bytes_size)
         chunk = reader_data_queues[bytes_size].get()
-        sample, entropy = create_tokens_sample(chunk, tokenizer, ntokens, start_paragraph=False)
+        sample = create_tokens_sample(chunk, tokenizer, ntokens, start_paragraph=False)
         if sample is None:
             bytes_size *= 2
             continue
         samples.append(sample)
-        entropies.append(entropy)
-    return np.array(samples, dtype=np.uint16), entropies
+    return np.array(samples, dtype=np.uint16)
 
 
 def create_bytes_batch(
@@ -236,7 +236,7 @@ class DataSet(object):
         in_process: bool = False,
         n_sampler_threads: int = 1,
     ):
-        in_process = "synch" if in_process else "concurrent"
+        in_process = "sync" if in_process else "concurrent"
         logging.info(f"Creating DataSet ({in_process})")
         self._in_process = in_process
         self._init_reader_queues()
@@ -361,8 +361,8 @@ class DataSet(object):
                 request = SampleRequest(
                     token_set_name, ntokens=None, length=length, batch=batch_size
                 )
-                batch, lengths, entropies = self._send_request(request)
-                return batch, lengths, entropies
+                batch, lengths = self._send_request(request)
+                return batch, lengths
 
     def sample_tokens(
         self, ntokens, batch_size, token_set_name
@@ -381,8 +381,8 @@ class DataSet(object):
                 request = SampleRequest(
                     token_set_name, ntokens=ntokens, length=None, batch=batch_size
                 )
-                batch, _lengths, entropies = self._send_request(request)
-                return batch, entropies
+                batch, _lengths = self._send_request(request)
+                return batch
 
 
 def build_dataset(path):
@@ -411,22 +411,24 @@ def sample(args: argparse.Namespace):
         path_processed=args.data_processed,
     )
 
-    if args.benchmark:
-        benchmark(dataset, args.length, args.ntokens, args.batch, args.tokens)
-    else:
-        if args.length:
-            sample, lengths = dataset.sample_bytes(args.length, args.batch, args.tokens)
-            print(f"Prepared sample:\n{sample}")
-            print(f"Lengths: {lengths}")
+    try:
+        if args.benchmark:
+            benchmark(dataset, args.length, args.ntokens, args.batch, args.tokens)
         else:
-            sample = dataset.sample_tokens(args.ntokens, args.batch, args.tokens)
-            print(f"Prepared sample:\n{sample}")
-            token_set = get_tokenizer(args.tokens).token_set
+            if args.length:
+                sample, lengths = dataset.sample_bytes(args.length, args.batch, args.tokens)
+                print(f"Prepared sample:\n{sample}")
+                print(f"Lengths: {lengths}")
+            else:
+                sample = dataset.sample_tokens(args.ntokens, args.batch, args.tokens)
+                print(f"Prepared sample:\n{sample}")
+                token_set = get_tokenizer(args.tokens).token_set
 
-            sep = "" if token_set.type == "chars" else "|"
-            for token in sample[0]:
-                print(token_set.tokens[token], end=sep)
-            print()
+                for token in sample[0]:
+                    print(token)
+                    print(token_set.tokens[token], end="|")
+                print()
+    finally:
         dataset.join()
 
 

@@ -1,207 +1,162 @@
-import mmap
-
-from ..common import INF
 from .tokenset import Token, TokenSet
-from .processing import process, unprocess
+from .processing import unprocess
+
+
+class Span(object):
+    def __init__(self, string: bytes, tokens: list[int]):
+        self.string = string
+        self.len = len(string)
+        self.reversed_tokens = list(reversed(tokens))
+        self.cost = len(tokens)
+        self.suffix_span = None
 
 
 class SuffixState(object):
-    
-    def __init__(self, suffix: bytes):
-        self.suffix: bytes = suffix
-        # The longest token which is a suffix of the current suffix.
-        self.token: Token | int = None
-        self.next: list[Self] = [None] * 256
+    def __init__(self, string: bytes, span: Span):
+        self.string = string
+        self.span: Span = span
+        self.next: list[SuffixState | None] = [None] * 256
 
 
-def _populate_suffix_states(token_set: TokenSet):
+def _find_suffix_span(spans: dict[bytes, Span], string: bytes) -> Span:
+    """Find the longest span which is the suffix of the string.
+
+        The full string is considered its own suffix.
+    """
+    for start in range(0, len(string) + 1):
+        suffix = string[start:]
+        suffix_span = spans.get(suffix)
+        if suffix_span is not None:
+            return suffix_span
+    assert False, f"Unreachable: {string}"
+
+
+def _build_suffix_states(spans: dict[bytes, Span]) -> dict[bytes, SuffixState]:
     states = {}
+    states[b""] = SuffixState(b"", spans[b""])
 
-    states[b""] = SuffixState(b"")
-
-    # Add empty states for literals
-    for i in range(256):
-        s = bytes([i])
-        states[s] = SuffixState(s)
-
-    # Add states for all prefixes of all tokens (except len 1, since it's
-    # already covered)
-    for token in token_set.tokens:
-        if token.string is not None:
-            for l in range(2, len(token.string) + 1):
-                s = token.string[:l]
-                if s not in states:
-                    states[s] = SuffixState(s)
-
+    for span in spans.values():
+        for end in range(1, len(span.string) + 1):
+            prefix = span.string[:end]
+            if prefix not in states:
+                states[prefix] = SuffixState(prefix, _find_suffix_span(spans, prefix))
+    
     for state in states.values():
-        # Looking for the suffix token
-        for start in range(len(state.suffix)):
-            s = state.suffix[start:]
-            token = token_set.tokens_by_str.get(s)
-            if token is not None:
-                state.token = token
-                break
-        if state.token is None and state.suffix:
-            state.token = state.suffix[-1]
-
-        # Populating next
         for byte in range(256):
-            s = state.suffix + bytes([byte])
-
-            for start in range(len(s)):
-                next_state = states.get(s[start:])
+            string = state.string + bytes([byte])
+            for start in range(len(string) + 1):
+                suffix = string[start:]
+                next_state = states.get(suffix)
                 if next_state is not None:
                     state.next[byte] = next_state
                     break
-
-            assert state.next[byte] is not None
-
+    
     return states
 
 
+class DecoderState(object):
+    def __init__(self, tokens: list[int], string: bytes):
+        self.tokens: tuple = tokens
+        self.string = string
+        self.next: list[tuple[DecoderState, bytes]] = []
+
+
+class Decoder(object):
+    def __init__(self, tokenset: TokenSet):
+        self.tokens_to_string: dict[tuple, bytes] = {}
+        self.has_longer: set[tuple] = set()
+
+        for token in tokenset.tokens:
+            if token.string is not None:
+                self.tokens_to_string[(token.id,)] = token.string
+
+        for string, tokens in tokenset.sequences.items():
+            tokens = tuple(t.id for t in tokens)
+            self.tokens_to_string[tokens] = string
+            for end in range(1, len(tokens)):
+                self.has_longer.add(tuple(tokens[:end]))
+
+    def decode(self, tokens: list[int]) -> bytes:
+        out = b""
+        fragment = []
+        for c in tokens:
+            fragment.append(c)
+            if tuple(fragment) in self.has_longer:
+                continue
+            tail = []
+            while tuple(fragment) not in self.tokens_to_string:
+                tail.append(fragment.pop())
+            out += self.tokens_to_string[tuple(fragment)]
+            fragment = tail
+            fragment.reverse()
+
+        if fragment:
+            while fragment and (tuple(fragment) not in self.tokens_to_string):
+                fragment.pop()
+            if fragment:
+                out += self.tokens_to_string[tuple(fragment)]
+        return out
+
+
 class Tokenizer(object):
-    def __init__(self, token_set: TokenSet):
-        self.token_set: TokenSet = token_set
-        self._suffix_states: dict[bytes, SuffixState] = _populate_suffix_states(
-            token_set
-        )
-        self._literals = token_set.literal_encodings()
-        self._mark_caps = "caps" in token_set.processing
-        self._mark_words = "words" in token_set.processing
+    def __init__(self, tokenset: TokenSet):
+        self.tokenset: TokenSet = tokenset
+        self.spans: dict[bytes, Span] = {
+            b"": Span(b"", []),
+        }
 
-    def tokenize(
-        self,
-        string: bytes | mmap.mmap,
-        start=0,
-        max_tokens=None,
-        max_bytes=None,
-    ) -> list[Token]:
-        suffix_state = self._suffix_states[b""]
-        cost_state = [(0, None)]
+        for token in self.tokenset.tokens:
+            if token.string is not None:
+                span = Span(token.string, [token.id])
+                self.spans[span.string] = span
+        
+        for string, tokens in self.tokenset.sequences.items():
+            span = Span(string, list(t.id for t in tokens))
+            self.spans[string] = span
+        
+        for span in self.spans.values():
+            if span.string:
+                span.suffix_span = _find_suffix_span(self.spans, span.string[1:])
+        
+        self._suffixes = _build_suffix_states(self.spans)
+        self._decoder = Decoder(tokenset)
 
-        finished = False
+    def tokenize_processed(self, chunk: bytes) -> list[int]:
+        state = self._suffixes[b""]
+        cost = [0]
+        spans = [self.spans[b""]]
 
-        for chunk in self._iterate_bytes(string, start, max_tokens, max_bytes):
-            if finished:
-                break
-            for byte in chunk:
-                if max_bytes is not None and len(cost_state) - 1 >= max_bytes:
-                    finished = True
-                    break
-                suffix_state = suffix_state.next[byte]
-                token = suffix_state.token
+        for c in chunk:
+            state = state.next[c]
+            span = state.span
 
-                if isinstance(token, int):
-                    best_cost = cost_state[-1][0] + len(self._literals[token])
-                    best_token = token
-                else:
-                    best_cost = cost_state[-len(token.string)][0] + 1
-                    best_token = token
+            best_span = span
+            best_cost = cost[-span.len] + span.cost
 
-                    token = token.suffix
-                    while isinstance(token, Token):
-                        cost = cost_state[-len(token.string)][0] + 1
-                        if cost < best_cost:
-                            best_cost = cost
-                            best_token = token
-                        token = token.suffix
-
-                    if token is not None:
-                        cost = cost_state[-1][0] + len(self._literals[token])
-                        if cost < best_cost:
-                            best_cost = cost
-                            best_token = token
-
-                cost_state.append((best_cost, best_token))
-                if max_tokens is not None and best_cost >= max_tokens + 10:
-                    finished = True
-                    break
-
+            span = span.suffix_span
+            while span.len > 0:
+                new_cost = cost[-span.len] + span.cost
+                if new_cost < best_cost:
+                    best_cost = new_cost
+                    best_span = span
+                span = span.suffix_span
+            
+            cost.append(best_cost)
+            spans.append(best_span)
+        
         tokens = []
-        pos = len(cost_state) - 1
+        pos = len(spans) - 1
         while pos > 0:
-            token = cost_state[pos][1]
-
-            if isinstance(token, Token):
-                tokens.append(token)
-                pos -= len(token.string)
-            else:
-                tokens.extend(self._literals[token])
-                pos -= 1
+            span = spans[pos]
+            tokens.extend(span.reversed_tokens)
+            pos -= span.len
 
         tokens.reverse()
-        if max_tokens is not None:
-            tokens = tokens[:max_tokens]
         return tokens
 
-    def tokenize_ids(
-        self,
-        string: bytes | mmap.mmap,
-        start=0,
-        max_tokens=None,
-        max_bytes=None,
-    ) -> list[int]:
-        return [token.id for token in self.tokenize(string, start, max_tokens, max_bytes)]
-
-    def untokenize(self, tokens: list[int]) -> bytes:
-        chunks = []
-        sub_byte_buf = []
-
-        for token_id in tokens:
-            token = self.token_set.tokens[token_id]
-            if token.string is not None:
-                if sub_byte_buf:
-                    chunks.append(b"?")
-                    sub_byte_buf.clear()
-                chunks.append(token.string)
-            elif self.token_set.type in (
-                "fallback_distribution",
-                "str_with_fallback_distribution",
-            ):
-                chunks.append(b"?")
-            elif self.token_set.type in (
-                "str_with_fallback_bits",
-                "fallback_bits",
-            ):
-                sub_byte_buf.append(token.value)
-                if len(sub_byte_buf) == 8 // self.token_set.fallback_bits:
-                    value = 0
-                    for v in sub_byte_buf:
-                        value <<= self.token_set.fallback_bits
-                        value += v
-                    chunks.append(bytes([value]))
-                    sub_byte_buf.clear()
-            else:
-                assert False, "Unsupported TokenSet type"
-
-        text = b"".join(chunks)
-        return unprocess(text, self._mark_caps, self._mark_words)
-
-    def _process(self, s: bytes) -> str:
-        return process(s, self._mark_caps, self._mark_words)
-
-    def _iterate_bytes(
-        self, data: bytes, start: int, max_tokens: int, max_bytes: int
-    ):
-        while start < len(data):
-            if max_bytes is None and max_tokens is None:
-                l = len(data) - start
-            elif max_bytes is not None:
-                assert max_tokens is None
-                l = max_bytes
-            else:
-                assert max_tokens is not None
-                l = max(max_tokens // 2, 1)
-
-            end = start + l
-            while end < len(data) and 128 <= data[end] < 192:
-                end += 1
-
-            string = data[start:end]
-
-            if self._mark_caps or self._mark_words:
-                string = self._process(string)
-
-            yield string
-
-            start = end
+    def untokenize(self, token_ids: list[int]) -> bytes:
+        text = self._decoder.decode(token_ids)
+        if self.tokenset.processing == "capswords":
+            text = unprocess(text)
+        
+        return text

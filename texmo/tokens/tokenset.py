@@ -10,10 +10,10 @@ def parse_token_set_name(name: str) -> tuple[int, str, str]:
 
 
 class Token(object):
-    def __init__(self, id: int, string: bytes, value: Optional[int] = None):
+    def __init__(self, id: int, string: bytes | None, value: int | None = None):
         self.id: int = id
-        self.string: bytes = string
-        self.value: Optional[int] = value
+        self.string: bytes | None = string
+        self.value: int | None = value
         self.suffix = None
 
     def __str__(self):
@@ -32,14 +32,20 @@ class Token(object):
             return f"Token({id}, {self.value})"
 
 
+def _parse_token(string: str|list[int]|int) -> bytes|int:
+    if isinstance(string, str):
+        return string.encode("utf-8")
+    if isinstance(string, list):
+        return bytes(string)
+    assert isinstance(string, int)
+    return string
+
+
 class TokenSet(object):
     @staticmethod
     def from_json_file(filename: str):
         with open(filename, "rb") as file:
             tokens_dict = json.load(file)
-        if tokens_dict["type"] == "chars":
-            return CharsTokenSet.from_json(tokens_dict)
-        else:
             return TokenSet.from_json(tokens_dict)
 
     @staticmethod
@@ -50,113 +56,53 @@ class TokenSet(object):
         token_set = TokenSet(
             tokens_dict["type"],
             tokens_dict["processing"],
-            fallback_bits,
             tokens_dict.get("stats"),
         )
-        for i, token in enumerate(tokens_dict["tokens"]):
-            if type(token) is str:
-                b = token.encode("utf-8")
-                token_set.add_token(b)
-            elif type(token) is list:
-                b = bytes(token)
-                token_set.add_token(b)
-            elif type(token) is int:
-                token_set._add_special_token(token)
+        
+        for token_str in tokens_dict["tokens"]:
+            token = _parse_token(token_str)
+            if isinstance(token, bytes):
+                token_set.add_token(token)
+            else:
+                assert isinstance(token, int)
+                token_set.add_ext_token(token)
+        
+        for seq in tokens_dict["sequences"]:
+            string = _parse_token(seq["string"])
+            assert isinstance(string, bytes)
+            tokens = []
+            for token_str in seq["tokens"]:
+                token_str = _parse_token(token_str)
+                token = token_set.get_token(token_str)
+                tokens.append(token)
+            
+            token_set.add_sequence(string, tokens)
+        
         return token_set
 
-    @staticmethod
-    def build(
-        type: str,
-        fallback_bits: Optional[int],
-        processing: str,
-        tokens: list[bytes],
-        stats: dict,
-        bytes_per_token: Optional[float] = None,
-    ):
-        assert isinstance(fallback_bits, Optional[int])
-        token_set = TokenSet(
-            type, processing, fallback_bits, stats, bytes_per_token=bytes_per_token
-        )
-        if type == "fallback_distribution":
-            reserved_tokens = 1
-        elif type == "fallback_bits":
-            reserved_tokens = 2**fallback_bits
-        else:
-            reserved_tokens = 0
-        for i in range(reserved_tokens):
-            token_set._add_special_token(i)
-        for t in tokens:
-            token_set.add_token(t)
-        return token_set
-
-    # TODO: Instead of `stats` argument provide important stats as separate
-    # arguments.
     def __init__(
         self,
-        token_set_type,
-        processing,
-        fallback_bits,
-        stats,
-        bytes_per_token=None,
+        token_type: str,
+        processing: str,
+        stats: dict,
     ):
-        self.type = token_set_type
+        self.type = token_type
         self.processing = processing
-        self.fallback_bits = fallback_bits
         self.stats = stats
-        self.tokens = []
-        self.tokens_by_str = {}
-
-        if bytes_per_token is not None:
-            self.bytes_per_token = bytes_per_token
-        else:
-            self.bytes_per_token = stats["initial_size"] / (
-                stats["total_tokens"] + self.tokens_in_literal * stats["total_literals"]
-            )
-
-    @property
-    def token_type(self) -> str:
-        if self.type in (
-            "dist",
-            "fallback_distribution",
-            "str_with_fallback_distribution",
-        ):
-            cost = self.stats["literal_cost"]
-            return f"dist{cost}"
-        elif self.type in ("bits", "fallback_bits"):
-            return f"bits{self.fallback_bits}"
-        elif self.type == "all":
-            return "all"
-
-    @property
-    def tokens_in_literal(self) -> int:
-        match self.type:
-            case "fallback_distribution" | "str_with_fallback_distribution" | "all" | "all_tokens" | "dist2" | "dist4" | "dist8":
-                return 1
-            case "fallback_bits":
-                return 8 // self.fallback_bits
-            case "bits1":
-                return 8
-            case "bits2":
-                return 4
-            case "bits4":
-                return 2
-
-    @property
-    def entropy0(self) -> float:
-        return self.stats["literal_dist_entropy"]
+        self.tokens: list[Token] = []
+        self.tokens_by_str: dict[bytes|int, Token] = {}
+        self.sequences: dict[bytes, list[Token]] = {}
 
     def byte_loss(self, token_loss: float) -> float:
-        loss = token_loss / self.bytes_per_token
-        if self.type in (
-            "fallback_distribution",
-            "str_with_fallback_distribution",
-        ):
-            loss += (
-                self.stats["literal_dist_entropy"]
-                * self.stats["total_literals"]
-                / (self.stats["total_literals"] + self.stats["total_tokens"])
-            )
-        return loss
+        raise NotImplementedError()
+
+    @property
+    def avg_bytes_per_token(self):
+        return self.stats["bytes_per_token"]
+    
+    @property
+    def avg_proc_bytes_per_token(self):
+        return self.stats["scanned_bytes"] / self.stats["total_tokens"]
 
     @property
     def ntokens(self):
@@ -164,117 +110,23 @@ class TokenSet(object):
 
     @property
     def name(self):
-        return f"tokens{self.ntokens}_{self.processing}_{self.token_type}"
+        return f"tokens{self.ntokens}_{self.processing}_{self.type}"
 
-    def _add_special_token(self, n: int):
+    def get_token(self, token_str: bytes|int) -> Token:
+        return self.tokens_by_str[token_str]
+
+    def add_ext_token(self, n: int):
         assert n == len(self.tokens)
-        self.tokens.append(Token(len(self.tokens), None, n))
+        token = Token(len(self.tokens), None, n)
+        self.tokens.append(token)
+        self.tokens_by_str[n] = token
 
     def add_token(self, string: bytes):
         assert isinstance(string, bytes)
         new_token = Token(len(self.tokens), string)
 
-        if len(string) > 1:
-            new_token.suffix = string[-1]  # int
-
-            for start in range(1, len(string)):
-                suffix_token = self.tokens_by_str.get(string[start:])
-                if suffix_token is not None:
-                    new_token.suffix = suffix_token
-                    break
-
-        for token in self.tokens:
-            if token.string is None:
-                continue
-            if not token.string.endswith(string):
-                continue
-            assert string != token.string
-            if isinstance(token.suffix, int) or len(token.suffix.string) < len(string):
-                token.suffix = new_token
-
         self.tokens.append(new_token)
         self.tokens_by_str[string] = new_token
 
-    def literal_encodings(self):
-        match self.type:
-            case "fallback_distribution" | "str_with_fallback_distribution":
-                return [[self.tokens[0]] for _ in range(256)]
-            case "fallback16":
-                fallbacks = []
-                for i in range(256):
-                    s = f"{i:02x}".encode("utf-8")
-                    fallbacks.append(
-                        [
-                            self.tokens_by_str[s[1:]],
-                            self.tokens_by_str[s[:1]],
-                            self.tokens_by_str[bytes([0x10])],
-                        ]
-                    )
-                return fallbacks
-            case "str_with_fallback_bits" | "fallback_bits":
-                fallbacks = []
-                for value in range(256):
-                    literal = []
-                    for i in range(8 // self.fallback_bits):
-                        digit = value % 2**self.fallback_bits
-                        literal.append(self.tokens[digit])
-                        value //= 2**self.fallback_bits
-                    # print(literal)
-                    fallbacks.append(literal)
-                # print(fallbacks)
-                return fallbacks
-
-
-class CharsTokenSet(object):
-    bytes_per_token = 1
-
-    @staticmethod
-    def from_json(tokens_dict: dict):
-        processing = tokens_dict["processing"]
-        assert processing in ("raw", "capswords")
-        processing = processing == "capswords"
-        tokens = [t[0] for t in tokens_dict["tokens"]]
-        groups = np.array(tokens_dict["groups"], dtype=np.byte)
-        entropy = np.array(tokens_dict["byte_entropy"], dtype=np.float32)
-
-        return CharsTokenSet(tokens_dict["type"], processing, tokens, groups, entropy)
-
-    def __init__(
-        self,
-        type: str,
-        processing: bool,
-        tokens: list[str],
-        groups: np.array,
-        entropy: np.array,
-    ):
-        self.type = type
-        self.processing = processing
-        self.groups = groups
-        self.residual_entropy = entropy
-
-        self.tokens = []
-
-        for token in tokens:
-            if isinstance(token, str):
-                b = token.encode("utf-8")
-            else:
-                b = bytes([token])
-            self.tokens.append(b)
-        
-        print(self.tokens)
-
-        for i, token in enumerate(tokens):
-            if isinstance(token, int):
-                tokens[i] = f"\\{token}"
-            elif isinstance(token, str) and ord(token[0]) < 32:
-                tokens[i] = repr(token)[1:-1]
-        self.token_names = tokens
-
-    @property
-    def ntokens(self):
-        return len(self.tokens)
-
-    @property
-    def name(self):
-        proc = "capswords" if self.processing else "raw"
-        return f"tokens{self.ntokens}_{proc}_chars"
+    def add_sequence(self, string: bytes, tokens: list[Token]):
+        self.sequences[string] = tokens

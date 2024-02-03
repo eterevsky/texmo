@@ -7,7 +7,7 @@ ALLCAPS_MARKER = "\x15"
 WORD_MARKER = "\x16"
 
 
-def process(s: bytes, mark_caps: bool, mark_words: bool) -> str:
+def process(s: bytes, mark_caps: bool = True, mark_words: bool = True) -> bytes:
     try:
         s = s.decode("utf-8")
     except UnicodeDecodeError:
@@ -45,7 +45,7 @@ def process(s: bytes, mark_caps: bool, mark_words: bool) -> str:
     return "".join(out).encode("utf-8")
 
 
-def unprocess(text: bytes) -> str:
+def unprocess(text: bytes) -> bytes:
     try:
         text = text.decode("utf-8")
     except UnicodeDecodeError:
@@ -75,4 +75,4 @@ def unprocess(text: bytes) -> str:
             elif words[i + 1].startswith(WORD_MARKER):
                 words[i + 1] = words[i + 1][1:]
 
-    return "".join(words)
+    return "".join(words).encode("utf-8")

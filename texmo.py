@@ -6,7 +6,7 @@ import numpy as np
 import sys
 
 import config
-from texmo import dataset, latency, search_cli, train_cli, resultdb
+from texmo import sample_cli, latency, search_cli, train_cli, resultdb
 from texmo.predict import predict_cli, predictor2, sample_timing, traintiming2
 from texmo.tokens import small_tokens
 
@@ -31,7 +31,7 @@ def parse_args():
     parser_sample = subparsers.add_parser(
         "sample", help="generate a typical sample of training data"
     )
-    dataset.sample_init_args(parser_sample, config)
+    sample_cli.sample_init_args(parser_sample, config)
 
     parser_count_bytes = subparsers.add_parser(
         "small-tokens", help="generate a set of sub-byte tokens"
@@ -69,7 +69,7 @@ def parse_args():
     parser_benchmark_dataset = subparsers.add_parser(
         "benchmark-dataset", help="benchmark sampling the training data"
     )
-    dataset.benchmark_init_args(parser_benchmark_dataset)
+    sample_cli.benchmark_init_args(parser_benchmark_dataset, config)
 
     parser_importdb = subparsers.add_parser(
         "importdb", help="Import configurations and runs from one databased into another"

@@ -68,10 +68,11 @@ class Run(object):
         assert self.loss_trend is not None
         self.loss_trend.fit(self.step_loss)
 
-    def report_recent_loss(self, token_set: TokenSet):
+    def report_recent_loss(self, tokenset: TokenSet):
         step = len(self.step_loss)
         loss = sum(self.step_loss[-10:]) / 10 if step >= 10 else self.step_loss[-1]
-        return f"{step}  {loss:.4f} b/byte"
+        byte_loss = loss / tokenset.avg_bytes_per_token
+        return f"{step}  {byte_loss:.4f} b/B"
 
     def to_dict(self):
         loss_trend = self.loss_trend.to_dict() if self.loss_trend else self.loss_trend

@@ -175,7 +175,7 @@ class Input(object):
 
     @property
     def ntokens(self) -> int:
-        return self.tokenizer.token_set.ntokens
+        return self.tokenizer.tokenset.ntokens
 
     @property
     def output_size(self) -> int:

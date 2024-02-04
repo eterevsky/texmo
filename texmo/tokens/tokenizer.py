@@ -1,5 +1,5 @@
-from .tokenset import Token, TokenSet
-from .processing import unprocess
+from .tokenset import TokenSet
+from .processing import process, unprocess
 
 
 class Span(object):
@@ -120,6 +120,11 @@ class Tokenizer(object):
         
         self._suffixes = _build_suffix_states(self.spans)
         self._decoder = Decoder(tokenset)
+
+    def tokenize(self, chunk: bytes) -> list[int]:
+        if self.tokenset.processing == "capswords":
+            chunk = process(chunk)
+        return self.tokenize_processed(chunk)
 
     def tokenize_processed(self, chunk: bytes) -> list[int]:
         state = self._suffixes[b""]

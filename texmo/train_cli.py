@@ -44,69 +44,47 @@ def parse_lr(x: str) -> float:
 
 
 def train(args: argparse.Namespace):
-    # if args.tokens:
-    #     token_set = TokenSet.from_json_file(args.tokens)
-    #     name =
-    #     ntokens = token_set.ntokens
-    #     token_sets = {ntokens: token_set}
-    #     logging.info(
-    #         f"Loaded token set {args.tokens} with {token_set.ntokens} tokens"
-    #     )
-    # elif args.tokens_dir:
-    #     token_set = None
-    #     name = args.token_set
-    # else:
-    #     token_set = None
-    #     ntokens = 256
-    #     token_sets = {}
-    #     logging.info(f"No token set")
     set_tokens_dir(args.tokens_dir)
 
-    logging.info(f"Training data: {args.data}")
-    train_set = DataSet(path=args.data, in_process=args.sync_tokens)
+    train_set = DataSet(path=args.data, path_processed=args.data_processed)
     lr = parse_lr(args.lr)
 
-    try:
-        if args.model_path is not None:
-            manager = Manager.load(
-                args.model_path,
-                test_batch=args.test_batch,
-                test_sample_len=args.test_sample_len,
-                system=args.system,
-                sync_tokens=args.sync_tokens,
-            )
-            manager.update_conf(lr, args.sample_len, args.batch, args.time)
-            if args.add_layers:
-                manager.add_layers(args.add_layers)
-            manager.init()
-        else:
-            conf = Configuration2(
-                build_model(args.spec),
-                lr=lr,
-                length=args.length,
-                batch=args.batch,
-                steps=args.steps,
-            )
-            manager = Manager(
-                conf,
-                test_batch=args.test_batch,
-                test_sample_len=args.test_sample_len,
-                system=args.system,
-                dataset=train_set,
-                sync_tokens=args.sync_tokens,
-            )
-            manager.init()
-
-        manager.train_and_eval(
-            args.steps,
-            args.time,
-            args.temp_steps,
-            args.temp_dir,
-            args.output_dir,
-            args.log,
+    if args.model_path is not None:
+        manager = Manager.load(
+            args.model_path,
+            test_batch=args.test_batch,
+            test_sample_len=args.test_sample_len,
+            system=args.system,
         )
-    finally:
-        train_set.join()
+        manager.update_conf(lr, args.sample_len, args.batch, args.time)
+        if args.add_layers:
+            manager.add_layers(args.add_layers)
+        manager.init()
+    else:
+        conf = Configuration2(
+            build_model(args.spec),
+            lr=lr,
+            length=args.length,
+            batch=args.batch,
+            steps=args.steps,
+        )
+        manager = Manager(
+            conf,
+            test_batch=args.test_batch,
+            test_sample_len=args.test_sample_len,
+            system=args.system,
+            dataset=train_set,
+        )
+        manager.init()
+
+    manager.train_and_eval(
+        args.steps,
+        args.time,
+        args.temp_steps,
+        args.temp_dir,
+        args.output_dir,
+        args.log,
+    )
 
     if args.prefix is not None:
         s = manager.continue_prefix(args.prefix, 256, temperature=args.temperature)
@@ -125,7 +103,13 @@ def init_args(parser: argparse.ArgumentParser, config):
         "--data",
         type=str,
         default=config.DATA,
-        help="a file with",
+        help=f"a file with (default: '{config.DATA}')",
+    )
+    parser.add_argument(
+        "--data-processed",
+        type=str,
+        help=f"training data that has been already processed with capswords filter (default: '{config.DATA}')",
+        default=config.DATA_CAPS_WORDS,
     )
 
     # Model
@@ -168,7 +152,7 @@ def init_args(parser: argparse.ArgumentParser, config):
         "--tokens-dir",
         type=str,
         default=config.TOKENS_DIR,
-        help="directory with token sets",
+        help=f"directory with token sets (default: '{config.TOKENS_DIR}')",
     )
     parser.add_argument(
         "--tokens",
@@ -182,21 +166,21 @@ def init_args(parser: argparse.ArgumentParser, config):
         type=int,
         metavar="N",
         default=32,
-        help="batch size",
+        help="batch size (default: 32)",
     )
     parser.add_argument(
         "-l",
         "--lr",
         type=str,
         default="0.0625",
-        help="learning rate, could be written as a float or as 2^-10",
+        help="learning rate, could be written as a float or as 2^-10 (default: 0.0625)",
     )
     parser.add_argument(
         "--length",
         type=int,
         default=128,
         metavar="NTOKENS",
-        help="length in tokens of text fragments used for training",
+        help="length in tokens of text fragments used for training (default: 128)",
     )
     parser.add_argument(
         "-t",
@@ -241,7 +225,7 @@ def init_args(parser: argparse.ArgumentParser, config):
         "--test-batch",
         type=int,
         default=1024,
-        help="Size of the test batch, used for final evaluation",
+        help="Size of the test batch, used for final evaluation (default: 1024)",
     )
     parser.add_argument(
         "--test-sample-len",
@@ -259,27 +243,13 @@ def init_args(parser: argparse.ArgumentParser, config):
         "--temperature",
         type=float,
         default=0.1,
-        help="temperature for sampling",
+        help="temperature for sampling (default: 0.1)",
     )
     parser.add_argument(
         "--system",
         type=str,
         default=config.SYSTEM_NAME,
-        help="the name of the system that will be used to identify runs in the DB",
+        help=f"the name of the system that will be used to identify runs in the DB (default: '{config.SYSTEM_NAME}')",
     )
-
-    parser.add_argument(
-        "--sync-tokens",
-        dest="sync_tokens",
-        action="store_true",
-        help="Load and toknize training data synchronously, before the training start.",
-    )
-    parser.add_argument(
-        "--no-sync-tokens",
-        dest="sync_tokens",
-        action="store_false",
-        help="Load and tokenize training data concurrently with training in a separate thread.",
-    )
-    parser.set_defaults(sync_tokens=config.SYNC_TOKENS)
 
     parser.set_defaults(func=train)

@@ -104,7 +104,7 @@ class Configuration2(object):
     
     @property
     def tokens_name(self) -> str:
-        return self.tokenizer.token_set.name
+        return self.tokenizer.tokenset.name
 
 
 class Bounds(object):
@@ -278,5 +278,3 @@ def default_from_template(template: Template, spec: Optional[str]) -> Configurat
                             steps=steps,
                         )
     raise RuntimeError("Can't pick up a default model that would fit the template")
-
-

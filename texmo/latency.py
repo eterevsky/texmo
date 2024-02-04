@@ -1,6 +1,7 @@
 from statistics import quantiles
 from time import perf_counter_ns
 
+from .common import itoa3, ttoa3
 
 _measures: dict[str, list[float]] = {}
 
@@ -40,15 +41,15 @@ def timer(name):
 def report():
     for name, measures in sorted(_measures.items()):
         if len(measures) == 1:
-            val = measures[0] / 1e9
-            print(f"{name}(1)  {val:.3f} s")
+            val = measures[0] * 1E-9
+            print(f"{name}(1)  {ttoa3(val)}")
         else:
             percentiles = quantiles(measures, n=100)
-            p50th = percentiles[48] * 1e-6
-            p90th = percentiles[88] * 1e-6
-            p99th = percentiles[98] * 1e-6
-            avg = sum(measures) / len(measures) * 1e-6
+            p50th = percentiles[48] * 1e-9
+            p90th = percentiles[88] * 1e-9
+            p99th = percentiles[98] * 1e-9
+            avg = sum(measures) / len(measures) * 1e-9
             total = len(measures)
             print(
-                f"{name}({total})  {p50th:.3f} ms  {p90th:.3f} ms  {p99th:.3f} ms  AVG {avg:.3f} ms"
+                f"{name}({itoa3(total)})  {ttoa3(p50th)}  {ttoa3(p90th)}  {ttoa3(p99th)}  AVG {ttoa3(avg)}"
             )

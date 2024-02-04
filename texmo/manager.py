@@ -299,12 +299,12 @@ class Manager(object):
     def eval(self) -> float:
         """Evaluate a model on a random sample from the training data."""
         with latency.timer("Manager.eval"):
-            batch, lengths, entropies = self.dataset.sample_bytes(
+            batch, lengths = self.dataset.sample_bytes(
                 length=self.test_sample_len,
                 batch_size=self.test_batch,
                 token_set_name=self.tokenizer.token_set.name,
             )
-            return self._eval(batch, lengths, entropies)
+            return self._eval(batch, lengths)
 
     def sample_(self, prefix, l, temperature=0.05):
         """Sample from the distribution to continue the given prefix."""

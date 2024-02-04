@@ -2,10 +2,12 @@ import logging
 import mmap
 import numpy as np
 import random
+import itertools
 
 from .common import itoa3
 from .tokens import get_tokenizer
 from .tokens.processing import process
+from .latency import timer
 
 
 def _open_mmap(path: str) -> mmap.mmap:
@@ -64,13 +66,13 @@ class DataSet(object):
         Returns:
             (data, start offset, whether the data needs processing)
         """
-        if processing and self.processed_data:
-            start = _find_random_paragraph_start(self.processed_data)
-            return self.processed_data, start, False
+        with timer('DataSet._select_chunk_start'):
+            if processing and self.processed_data:
+                start = _find_random_paragraph_start(self.processed_data)
+                return self.processed_data, start, False
 
-        start = _find_random_paragraph_start(self.data)
-        print(repr(self.data[start: start + 10]))
-        return self.data, start, processing
+            start = _find_random_paragraph_start(self.data)
+            return self.data, start, processing
 
     def sample_tokens(self, ntokens: int, batch: int, tokenset_name: str) -> np.ndarray:
         """Generate a random sample of input data.
@@ -78,12 +80,12 @@ class DataSet(object):
         Returns:
             An array with the shape (batch, ntokens) of the type np.int32.
         """
-        samples = []
         tokenizer = get_tokenizer(tokenset_name)
         tokenset = tokenizer.tokenset
         assert tokenset.processing in ("raw", "capswords")
         processing = tokenset.processing == "capswords"
 
+        samples = []
         while len(samples) < batch:
             data, start, need_processing = self._select_chunk_start(processing)
 
@@ -99,7 +101,6 @@ class DataSet(object):
                 if need_processing:
                     chunk = process(chunk)
 
-                print(f"initial chunk: {chunk}")
                 sample = tokenizer.tokenize_processed(chunk)
                 if len(sample) >= ntokens:
                     break
@@ -111,3 +112,43 @@ class DataSet(object):
             samples.append(sample[:ntokens])
 
         return np.array(samples, dtype=np.int32)
+    
+    def sample_bytes(self, nbytes: int, batch: int, tokenset_name: str) -> tuple[np.ndarray, np.ndarray]:
+        """Generate random samples of fixed length in bytes.
+
+        Since the samples might have different length due to tokenization, the
+        maximal length is used as the second dimension of the array.
+        The remainders of the samples are filled with 0s. The actual lengths
+        are returned in the second array.
+
+        Returns:
+            (An array with the shape (batch, *) of np.int32 with tokens,
+             an array with the shape (batch,) with lengths of significant
+             portions of each sample)
+        """
+        tokenizer = get_tokenizer(tokenset_name)
+        tokenset = tokenizer.tokenset
+        assert tokenset.processing in ("raw", "capswords")
+        processing = tokenset.processing == "capswords"
+
+        samples = []
+        while len(samples) < batch:
+            start = _find_random_paragraph_start(self.data)
+            if start + nbytes > len(self.data):
+                continue
+            chunk = self.data[start:start + nbytes]
+            if processing:
+                chunk = process(chunk)
+            
+            sample = tokenizer.tokenize_processed(chunk)
+            samples.append(sample)
+
+        lengths = list(map(len, samples))
+        max_len = max(lengths)
+        for sample in samples:
+            l = len(sample)
+            sample.extend(itertools.repeat(0, max_len - l))
+
+        samples = np.array(samples, dtype=np.int32)
+        length = np.array(lengths)
+        return samples, lengths

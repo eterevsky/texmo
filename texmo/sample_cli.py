@@ -9,17 +9,34 @@ def sample(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
 
     dataset = DataSet(path=args.data, path_processed=args.data_processed)
+    tokenizer = get_tokenizer(args.tokens)
+    tokenset = tokenizer.tokenset
 
     if args.length:
-        sample, lengths = dataset.sample_bytes(args.length, args.batch, args.tokens)
-        print(f"Prepared sample:\n{sample}")
-        print(f"Lengths: {lengths}")
+        samples, lengths = dataset.sample_bytes(args.length, args.batch, args.tokens)
+        print(f"Array:\n{samples}\n")
+        print(f"Lengths: {lengths}\n")
+
+        for sample, length in zip(samples, lengths):
+            sample = sample[:length]
+
+            print("Sample:\n")
+            untokenized = tokenizer.untokenize(sample)
+
+            try:
+                untokenized = untokenized.decode("utf-8")
+            except UnicodeError:
+                pass
+            print(untokenized)
+            print()
+
+            for token in sample:
+                print(tokenset.tokens[token], end="|")
+            print()
+
     else:
         samples = dataset.sample_tokens(args.ntokens, args.batch, args.tokens)
         print(f"Array:\n{samples}\n")
-
-        tokenizer = get_tokenizer(args.tokens)
-        tokenset = tokenizer.tokenset
 
         for sample in samples:
             print("Sample:\n")

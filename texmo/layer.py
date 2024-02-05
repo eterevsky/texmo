@@ -206,4 +206,3 @@ class Layer(object):
                 sample_out.append(out)
             outputs.append(sample_out)
         return jnp.array(outputs)
-

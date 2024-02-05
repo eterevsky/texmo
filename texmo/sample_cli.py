@@ -1,7 +1,11 @@
 import argparse
+import mmap
+import os
+import random
 import time
 
 from .dataset import DataSet
+from . import latency
 from .tokens import get_tokenizer, set_tokens_dir
 
 
@@ -99,13 +103,9 @@ def sample_init_args(parser: argparse.ArgumentParser, config):
 
 def benchmark(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
+    dataset = DataSet(path=args.data, path_processed=args.data_processed)
 
-    dataset = DataSet(
-        path=args.data,
-        tokens_dir=args.tokens_dir,
-    )
-
-    ntokens = args.sample_len
+    ntokens = args.ntokens
     batch = args.batch
     token_set = args.token_set
 
@@ -126,6 +126,7 @@ def benchmark(args: argparse.Namespace):
     tokens_per_sec = total_tokens / (finish - start)
     print(f"{samples_per_sec:.1f} samples/s")
     print(f"{tokens_per_sec:.1f} tokens/s")
+    latency.report()
 
 
 def benchmark_init_args(parser: argparse.ArgumentParser, config):
@@ -133,9 +134,14 @@ def benchmark_init_args(parser: argparse.ArgumentParser, config):
         "-d",
         "--data",
         type=str,
-        required=True,
         help="a file with training data",
         default=config.DATA,
+    )
+    parser.add_argument(
+        "--data-processed",
+        type=str,
+        help="training data that has been already processed with capswords filter",
+        default=config.DATA_CAPS_WORDS,
     )
     parser.add_argument(
         "--tokens-dir",
@@ -145,7 +151,7 @@ def benchmark_init_args(parser: argparse.ArgumentParser, config):
     )
     parser.add_argument(
         "--token-set",
-        default="tokens256_raw_all",
+        default="tokens256_capswords_byteshuff",
         type=str,
         help="token set name",
     )
@@ -157,7 +163,8 @@ def benchmark_init_args(parser: argparse.ArgumentParser, config):
         help='range of acceptable batch sizes, for example "1-256" (default: unrestricted)',
     )
     parser.add_argument(
-        "--sample-len",
+        "-n",
+        "--ntokens",
         type=int,
         default=256,
         help="range of acceptable sample lens (default: 128)",

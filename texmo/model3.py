@@ -52,6 +52,8 @@ class Model3(object):
         return str(self) == str(other)
 
     def is_valid(self) -> bool:
+        if not self.input.is_valid():
+            return False
         for layer1, layer2 in zip(self.layers[:-1], self.layers[1:]):
             if (
                 layer1.name in _SUFFIX_LIKE_LAYERS

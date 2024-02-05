@@ -51,7 +51,6 @@ def search_loop(
     dataset: DataSet,
     search: Search,
     system: str,
-    sync_tokens: bool,
 ):
     logging.info("Starting search")
     while True:
@@ -64,7 +63,7 @@ def search_loop(
         # # TODO: Train from the checkpoint
         # manager = Manager(conf, weights=weights)
 
-        manager = Manager(conf, system, sync_tokens=sync_tokens, dataset=dataset)
+        manager = Manager(conf, system, dataset=dataset)
         manager.init(quiet=True)
 
         run, weights = manager.train_and_eval(
@@ -82,53 +81,50 @@ def search_loop(
 
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
+    dataset = DataSet(path=args.data, path_processed=args.data_processed)
+    template = Template.from_args(args)
+    logging.info(f"Template: {template}")
+    default = default_from_template(template, spec=args.default_spec)
+    logging.info(f"Default configuration: {default}")
+    assert template.match(default)
+
+    if template.max_weights.min < default.model.weights:
+        logging.info(f"Adjusting minimal number of weights to match the default configuration: {default.model.weights}")
+        template.max_weights.min = default.model.weights
+
+    result_db = ResultDB.from_args(args.db)
+    # predictr = Predictor2(args.sample_timing, args.train_timing, result_db, extra_dbs)
+
+    train_time = tuple(map(float, args.train_time.split("-")))
+    assert len(train_time) in (1, 2)
+    if len(train_time) == 1:
+        train_time.append(train_time[0])
+
+    search = Search(
+        args.system,
+        result_db,
+        template,
+        default,
+        checkpoints_path=None,
+        predictor=None,
+        # predictor=predictor,
+        train_time=train_time,
+    )
+
     try:
-        dataset = DataSet(path=args.data, in_process=args.sync_tokens)
-        template = Template.from_args(args)
-        logging.info(f"Template: {template}")
-        default = default_from_template(template, spec=args.default_spec)
-        logging.info(f"Default configuration: {default}")
-        assert template.match(default)
+        search_loop(dataset, search, system=args.system)
+    except KeyboardInterrupt:
+        logging.warning("Interrupted\n")
 
-        if template.max_weights.min < default.model.weights:
-            logging.info(f"Adjusting minimal number of weights to match the default configuration: {default.model.weights}")
-            template.max_weights.min = default.model.weights
-
-        result_db = ResultDB.from_args(args.db)
-        # predictr = Predictor2(args.sample_timing, args.train_timing, result_db, extra_dbs)
-
-        train_time = tuple(map(float, args.train_time.split("-")))
-        assert len(train_time) in (1, 2)
-        if len(train_time) == 1:
-            train_time.append(train_time[0])
-
-        search = Search(
-            args.system,
-            result_db,
-            template,
-            default,
-            checkpoints_path=None,
-            predictor=None,
-            # predictor=predictor,
-            train_time=train_time,
-        )
-
-        try:
-            search_loop(dataset, search, system=args.system, sync_tokens=args.sync_tokens)
-        except KeyboardInterrupt:
-            logging.warning("Interrupted\n")
-
-        generate_report(
-            search._result_set,
-            template,
-            train_time=train_time,
-            system=args.system,
-            draw_weight_loss=args.weight_loss_graph,
-        )
-        print()
-        latency.report()
-    finally:
-        dataset.join()
+    generate_report(
+        search._result_set,
+        template,
+        train_time=train_time,
+        system=args.system,
+        draw_weight_loss=args.weight_loss_graph,
+    )
+    print()
+    latency.report()
 
 
 def init_args(parser: argparse.ArgumentParser, config):
@@ -139,6 +135,12 @@ def init_args(parser: argparse.ArgumentParser, config):
         type=str,
         default=config.DATA,
         help="a file with training data",
+    )
+    parser.add_argument(
+        "--data-processed",
+        type=str,
+        help=f"training data that has been already processed with capswords filter (default: '{config.DATA_CAPS_WORDS}')",
+        default=config.DATA_CAPS_WORDS,
     )
     parser.add_argument(
         "--tokens-dir",
@@ -221,19 +223,6 @@ def init_args(parser: argparse.ArgumentParser, config):
         default=config.SYSTEM_NAME,
         help="the name of the system that will be used to identify runs in the DB",
     )
-    parser.add_argument(
-        "--sync-tokens",
-        dest="sync_tokens",
-        action="store_true",
-        help="Load and toknize training data synchronously, before the training start.",
-    )
-    parser.add_argument(
-        "--no-sync-tokens",
-        dest="sync_tokens",
-        action="store_false",
-        help="Load and tokenize training data concurrently with training in a separate thread.",
-    )
-    parser.set_defaults(sync_tokens=config.SYNC_TOKENS)
     parser.add_argument(
         "--no-weight-loss-graph",
         dest="weight_loss_graph",

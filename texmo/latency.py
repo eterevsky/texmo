@@ -3,6 +3,7 @@ from time import perf_counter_ns
 
 from .common import itoa3, ttoa3
 
+_start = perf_counter_ns()
 _measures: dict[str, list[float]] = {}
 
 
@@ -39,6 +40,7 @@ def timer(name):
 
 
 def report():
+    total_time = perf_counter_ns() - _start
     for name, measures in sorted(_measures.items()):
         if len(measures) == 1:
             val = measures[0] * 1E-9
@@ -50,6 +52,7 @@ def report():
             p99th = percentiles[98] * 1e-9
             avg = sum(measures) / len(measures) * 1e-9
             total = len(measures)
+            percent = (sum(measures) / total_time) * 100
             print(
-                f"{name}({itoa3(total)})  {ttoa3(p50th)}  {ttoa3(p90th)}  {ttoa3(p99th)}  AVG {ttoa3(avg)}"
+                f"{name}({itoa3(total)})  {ttoa3(p50th)}  {ttoa3(p90th)}  {ttoa3(p99th)}  AVG {ttoa3(avg)}  {percent:.1f}%"
             )

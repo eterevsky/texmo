@@ -108,7 +108,7 @@ def init_args(parser: argparse.ArgumentParser, config):
     parser.add_argument(
         "--data-processed",
         type=str,
-        help=f"training data that has been already processed with capswords filter (default: '{config.DATA}')",
+        help=f"training data that has been already processed with capswords filter (default: '{config.DATA_CAPS_WORDS}')",
         default=config.DATA_CAPS_WORDS,
     )
 

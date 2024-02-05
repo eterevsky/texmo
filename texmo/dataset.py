@@ -3,6 +3,8 @@ import mmap
 import numpy as np
 import random
 import itertools
+from queue import Queue
+from threading import Thread
 
 from .common import itoa3
 from .tokens import get_tokenizer
@@ -15,14 +17,21 @@ def _open_mmap(path: str) -> tuple["file", mmap.mmap]:
     return (file, mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ))
 
 
-def _find_random_paragraph_start(data: bytes | mmap.mmap) -> int:
+def _find_random_paragraph_start(data: bytes | mmap.mmap, size: int = None) -> int:
     """Find the first character of the paragraph by iterating backwards."""
-    start = random.randrange(len(data))
+    size = size or len(data)
+    start = random.randrange(size)
     end_paragraph = data.rfind(b"\n\n", 0, start)
     if end_paragraph == -1:
         return 0
     else:
         return end_paragraph + 2
+
+
+def _sample_start_thread(jobs: Queue, results: Queue, data: bytes | mmap.mmap):
+    size = len(data)
+    while jobs.get():
+        results.put(_find_random_paragraph_start(data, size))
 
 
 class DataSet(object):
@@ -31,6 +40,7 @@ class DataSet(object):
         path: str | None = None,
         path_processed: str | None = None,
         data: bytes | mmap.mmap | None = None,
+        parallel_chunks: bool = False,
     ):
         if data is not None:
             assert path is None
@@ -51,6 +61,45 @@ class DataSet(object):
             else:
                 self.processed_file = None
                 self.processed_data = None
+        
+        self._parallel_chunks = parallel_chunks
+        if self._parallel_chunks:
+            self._data_jobs = Queue()
+            self._data_results = Queue()
+            self._data_thread = Thread(
+                target=_sample_start_thread,
+                args=(self._data_jobs, self._data_results, self.data),
+            )
+            self._data_thread.start()
+            for _ in range(4):
+                self._data_jobs.put(True)
+
+            if path_processed:
+                self._processed_jobs = Queue()
+                self._processed_results = Queue()
+                self._processed_thread = Thread(
+                    target=_sample_start_thread,
+                    args=(self._processed_jobs, self._processed_results, self.processed_data),
+                )
+                self._processed_thread.start()
+                for _ in range(4):
+                    self._processed_jobs.put(True)
+
+    def __del__(self):
+        if hasattr(self, "_data_jobs"):
+            self._data_jobs.put(False)
+        if hasattr(self, "_processed_jobs"):
+            self._processed_jobs.put(False)
+        if hasattr(self, "data_file"):
+            self.data_file.close()
+        if hasattr(self, "processed_file"):
+            self.processed_file.close()
+
+    def join(self):
+        if hasattr(self, "_data_jobs"):
+            self._data_jobs.put(False)
+        if hasattr(self, "_processed_jobs"):
+            self._processed_jobs.put(False)
 
     def _select_chunk_start(
         self, processing: bool
@@ -61,10 +110,18 @@ class DataSet(object):
         """
         with timer("DataSet._select_chunk_start"):
             if processing and self.processed_data:
-                start = _find_random_paragraph_start(self.processed_data)
+                if self._parallel_chunks:
+                    self._processed_jobs.put(True)
+                    start = self._processed_results.get()
+                else:
+                    start = _find_random_paragraph_start(self.processed_data)
                 return self.processed_data, start, False
 
-            start = _find_random_paragraph_start(self.data)
+            if self._parallel_chunks:
+                self._data_jobs.put(True)
+                start = self._data_results.get()
+            else:
+                start = _find_random_paragraph_start(self.data)
             return self.data, start, processing
 
     def _sample_tokens_impl(

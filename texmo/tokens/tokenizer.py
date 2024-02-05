@@ -1,5 +1,6 @@
 from .tokenset import TokenSet
 from .processing import process, unprocess
+from .. import latency
 
 
 class Span(object):
@@ -126,7 +127,7 @@ class Tokenizer(object):
             chunk = process(chunk)
         return self.tokenize_processed(chunk)
 
-    def tokenize_processed(self, chunk: bytes) -> list[int]:
+    def tokenize_processed_impl(self, chunk: bytes) -> list[int]:
         state = self._suffixes[b""]
         cost = [0]
         spans = [self.spans[b""]]
@@ -158,6 +159,10 @@ class Tokenizer(object):
 
         tokens.reverse()
         return tokens
+
+    def tokenize_processed(self, chunk: bytes) -> list[int]:
+        with latency.timer("Tokenizer.tokenize_processed"):
+            return self.tokenize_processed_impl(chunk)
 
     def untokenize(self, token_ids: list[int]) -> bytes:
         text = self._decoder.decode(token_ids)

@@ -2,7 +2,7 @@ import argparse
 import logging
 
 from .configuration2 import Configuration2, Template, default_from_template
-from .dataset import DataSet
+from .dataset import DataSet, DataSetWrapper
 from .manager import Manager
 from .model2 import build_model
 from .report import (
@@ -82,6 +82,7 @@ def search_loop(
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
     dataset = DataSet(path=args.data, path_processed=args.data_processed)
+    dataset_wrapper = DataSetWrapper(dataset)
     template = Template.from_args(args)
     logging.info(f"Template: {template}")
     default = default_from_template(template, spec=args.default_spec)
@@ -112,9 +113,12 @@ def main(args: argparse.Namespace):
     )
 
     try:
-        search_loop(dataset, search, system=args.system)
-    except KeyboardInterrupt:
-        logging.warning("Interrupted\n")
+        try:
+            search_loop(dataset_wrapper, search, system=args.system)
+        except KeyboardInterrupt:
+            logging.warning("Interrupted\n")
+    finally:
+        dataset_wrapper.join()
 
     generate_report(
         search._result_set,

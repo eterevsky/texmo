@@ -1,10 +1,11 @@
 import logging
 import mmap
+from typing import Any
 import numpy as np
 import random
 import itertools
 from queue import Queue
-from threading import Thread
+from threading import Thread, Lock
 
 from .common import itoa3
 from .tokens import get_tokenizer
@@ -72,9 +73,12 @@ class DataSet(object):
         start = random.randint(0, size)
         return data, size, start, processing
 
-    def _sample_tokens_impl(
-        self, ntokens: int, batch: int, tokenset_name: str
-    ) -> np.ndarray:
+    def sample_tokens(self, ntokens: int, batch: int, tokenset_name: str) -> np.ndarray:
+        """Generate a random sample of input data.
+
+        Returns:
+            An array with the shape (batch, ntokens) of the type np.int32.
+        """
         tokenizer = get_tokenizer(tokenset_name)
         tokenset = tokenizer.tokenset
         assert tokenset.processing in ("raw", "capswords")
@@ -119,18 +123,21 @@ class DataSet(object):
 
         return np.array(samples, dtype=np.int32)
 
-    def sample_tokens(self, ntokens: int, batch: int, tokenset_name: str) -> np.ndarray:
-        """Generate a random sample of input data.
-
-        Returns:
-            An array with the shape (batch, ntokens) of the type np.int32.
-        """
-        with timer("DataSet.sample_tokens"):
-            return self._sample_tokens_impl(ntokens, batch, tokenset_name)
-
-    def _sample_bytes_impl(
+    def sample_bytes(
         self, nbytes: int, batch: int, tokenset_name: str
     ) -> tuple[np.ndarray, np.ndarray]:
+        """Generate random samples of fixed length in bytes.
+
+        Since the samples might have different length due to tokenization, the
+        maximal length is used as the second dimension of the array.
+        The remainders of the samples are filled with 0s. The actual lengths
+        are returned in the second array.
+
+        Returns:
+            (An array with the shape (batch, *) of np.int32 with tokens,
+             an array with the shape (batch,) with lengths of significant
+             portions of each sample)
+        """
         tokenizer = get_tokenizer(tokenset_name)
         tokenset = tokenizer.tokenset
         assert tokenset.processing in ("raw", "capswords")
@@ -158,23 +165,50 @@ class DataSet(object):
             sample.extend(itertools.repeat(0, max_len - l))
 
         samples = np.array(samples, dtype=np.int32)
-        length = np.array(lengths)
+        lengths = np.array(lengths)
         return samples, lengths
 
+class DataSetWrapper(object):
+    def __init__(self, dataset: DataSet):
+        self.dataset = dataset
+        self.jobs_queue = Queue()
+        self.results_queues: dict[tuple[int, int, str], Queue] = {}
+        self.results_queues_lock = Lock()
+        self.thread = Thread(target=self._thread)
+        self.thread.start()
+    
+    def join(self):
+        self.jobs_queue.put(None)
+    
+    def sample_tokens(
+        self, ntokens: int, batch: int, tokenset_name: str
+    ) -> np.ndarray:
+        with timer("DataSet.sample_tokens"):
+            key = (ntokens, batch, tokenset_name)
+            
+            with self.results_queues_lock:
+                if key not in self.results_queues:
+                    logging.info(f"Initializating data queue for {key}")
+                    self.results_queues[key] = Queue()
+                    self.jobs_queue.put(key)
+                    self.jobs_queue.put(key)
+                results_queue = self.results_queues[key]
+            
+            self.jobs_queue.put(key)
+            return results_queue.get()
+
     def sample_bytes(
-        self, nbytes: int, batch: int, tokenset_name: str
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Generate random samples of fixed length in bytes.
-
-        Since the samples might have different length due to tokenization, the
-        maximal length is used as the second dimension of the array.
-        The remainders of the samples are filled with 0s. The actual lengths
-        are returned in the second array.
-
-        Returns:
-            (An array with the shape (batch, *) of np.int32 with tokens,
-             an array with the shape (batch,) with lengths of significant
-             portions of each sample)
-        """
+            self, nbytes: int, batch: int, tokenset_name: str) -> tuple[np.ndarray, np.ndarray]:
         with timer("DataSet.sample_bytes"):
-            return self._sample_bytes_impl(nbytes, batch, tokenset_name)
+            return self.dataset.sample_bytes(nbytes, batch, tokenset_name)
+
+    def _thread(self):
+        while True:
+            key = self.jobs_queue.get()
+            if key is None:
+                break
+            with timer("DataSet.sample_tokens"):
+                sample = self.dataset.sample_tokens(*key)
+            with self.results_queues_lock:
+                results_queue = self.results_queues[key]
+            results_queue.put(sample)

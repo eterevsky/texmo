@@ -19,7 +19,7 @@ from jaxlib.xla_extension import XlaRuntimeError
 from . import latency
 from .common import INF, ttoa3, itoa3
 from .configuration2 import Configuration2
-from .dataset import DataSet
+from .dataset import DataSet, DataSetWrapper
 
 # from .model2 import Model2, Weights
 from .model3 import Model3, Weights
@@ -87,7 +87,7 @@ class Manager(object):
         assert isinstance(conf, Configuration2)
         self.conf: Configuration2 = conf
 
-        assert isinstance(dataset, DataSet)
+        assert isinstance(dataset, DataSet) or isinstance(dataset, DataSetWrapper)
         self.dataset: DataSet = dataset
 
         if weights is None:
@@ -200,21 +200,22 @@ class Manager(object):
         self.weights = weights
 
     def _init_training_data(self):
-        with latency.timer("Manager._init_training_data") as timer:
-            self._training_data = self.dataset.sample_tokens(
-                    ntokens=self.conf.length,
-                    batch=self.conf.batch * self.conf.steps,
-                    tokenset_name=self.conf.tokens_name,
-                )
-            self._training_data = jnp.array(self._training_data)
-            total_tokens = self.conf.length * self.conf.batch * self.conf.steps
-            total_bytes = round(
-                total_tokens * self.tokenizer.tokenset.avg_bytes_per_token
-            )
-            logging.info(
-                f"Prepared {itoa3(total_tokens)}T / ~{itoa3(total_bytes)}B"
-                + f" of training data in {ttoa3(timer.elapsed)}"
-            )
+        pass
+        # with latency.timer("Manager._init_training_data") as timer:
+        #     self._training_data = self.dataset.sample_tokens(
+        #             ntokens=self.conf.length,
+        #             batch=self.conf.batch * self.conf.steps,
+        #             tokenset_name=self.conf.tokens_name,
+        #         )
+        #     self._training_data = jnp.array(self._training_data)
+        #     total_tokens = self.conf.length * self.conf.batch * self.conf.steps
+        #     total_bytes = round(
+        #         total_tokens * self.tokenizer.tokenset.avg_bytes_per_token
+        #     )
+        #     logging.info(
+        #         f"Prepared {itoa3(total_tokens)}T / ~{itoa3(total_bytes)}B"
+        #         + f" of training data in {ttoa3(timer.elapsed)}"
+        #     )
 
     def init(self, quiet=False, training=True):
         logging.info(f"Conf: {self.conf}")
@@ -334,7 +335,6 @@ class Manager(object):
             out.append(c)
         return out
 
-
     def train_step(self, xs):
         trainable_weights = self.weights[self.train_from :]
         loss, grads = self._loss_grad(trainable_weights, xs)
@@ -351,11 +351,17 @@ class Manager(object):
         return loss / (xs.shape[0] * xs.shape[1])
 
     def _get_batch(self) -> jax.Array:
-        assert self._training_data is not None
-        start = self.step * self.conf.batch
-        finish = start + self.conf.batch
-        assert finish <= self._training_data.shape[0]
-        return self._training_data[start:finish, :]
+        with latency.timer("Manager._get_batch"):
+            return self.dataset.sample_tokens(
+                ntokens=self.conf.length,
+                batch=self.conf.batch,
+                tokenset_name=self.conf.tokens_name,
+            )
+        # assert self._training_data is not None
+        # start = self.step * self.conf.batch
+        # finish = start + self.conf.batch
+        # assert finish <= self._training_data.shape[0]
+        # return self._training_data[start:finish, :]
 
     def train(
         self,

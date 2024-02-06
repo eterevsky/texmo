@@ -4,6 +4,7 @@ import os
 import random
 import time
 
+from .common import itoa3
 from .dataset import DataSet
 from . import latency
 from .tokens import get_tokenizer, set_tokens_dir
@@ -113,23 +114,20 @@ def benchmark(args: argparse.Namespace):
     total_tokens = 0
     start = time.time()
 
-    try:
-        while time.time() - start < 10:
-            _sample = dataset.sample_tokens(ntokens, batch, token_set)
-            total_tokens += ntokens * batch
-            samples += 1
-            if samples % 100 == 0:
-                print(".", end="", flush=True)
+    while time.time() - start < 10:
+        _sample = dataset.sample_tokens(ntokens, batch, token_set)
+        total_tokens += ntokens * batch
+        samples += 1
+        if samples % 100 == 0:
+            print(".", end="", flush=True)
 
-        finish = time.time()
-        print()
-    finally:
-        dataset.join()
+    finish = time.time()
+    print()
 
     samples_per_sec = samples / (finish - start)
     tokens_per_sec = total_tokens / (finish - start)
-    print(f"{samples_per_sec:.1f} samples/s")
-    print(f"{tokens_per_sec:.1f} tokens/s")
+    print(f"{itoa3(samples_per_sec)} samples/s")
+    print(f"{itoa3(tokens_per_sec)} tokens/s")
     latency.report()
 
 

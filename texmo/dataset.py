@@ -17,30 +17,13 @@ def _open_mmap(path: str) -> tuple["file", mmap.mmap]:
     return (file, mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ))
 
 
-def _find_random_paragraph_start(data: bytes | mmap.mmap, size: int = None) -> int:
-    """Find the first character of the paragraph by iterating backwards."""
-    size = size or len(data)
-    start = random.randrange(size)
-    end_paragraph = data.rfind(b"\n\n", 0, start)
-    if end_paragraph == -1:
-        return 0
-    else:
-        return end_paragraph + 2
-
-
-def _sample_start_thread(jobs: Queue, results: Queue, data: bytes | mmap.mmap):
-    size = len(data)
-    while jobs.get():
-        results.put(_find_random_paragraph_start(data, size))
-
-
 class DataSet(object):
     def __init__(
         self,
         path: str | None = None,
         path_processed: str | None = None,
         data: bytes | mmap.mmap | None = None,
-        parallel_chunks: bool = False,
+        parallel_chunks: bool = True,
     ):
         if data is not None:
             assert path is None
@@ -62,67 +45,32 @@ class DataSet(object):
                 self.processed_file = None
                 self.processed_data = None
         
-        self._parallel_chunks = parallel_chunks
-        if self._parallel_chunks:
-            self._data_jobs = Queue()
-            self._data_results = Queue()
-            self._data_thread = Thread(
-                target=_sample_start_thread,
-                args=(self._data_jobs, self._data_results, self.data),
-            )
-            self._data_thread.start()
-            for _ in range(4):
-                self._data_jobs.put(True)
-
-            if path_processed:
-                self._processed_jobs = Queue()
-                self._processed_results = Queue()
-                self._processed_thread = Thread(
-                    target=_sample_start_thread,
-                    args=(self._processed_jobs, self._processed_results, self.processed_data),
-                )
-                self._processed_thread.start()
-                for _ in range(4):
-                    self._processed_jobs.put(True)
+        self.data_size = len(self.data)
+        self.processed_data_size = len(self.processed_data) if self.processed_data else None
 
     def __del__(self):
-        if hasattr(self, "_data_jobs"):
-            self._data_jobs.put(False)
-        if hasattr(self, "_processed_jobs"):
-            self._processed_jobs.put(False)
         if hasattr(self, "data_file"):
             self.data_file.close()
         if hasattr(self, "processed_file"):
             self.processed_file.close()
 
-    def join(self):
-        if hasattr(self, "_data_jobs"):
-            self._data_jobs.put(False)
-        if hasattr(self, "_processed_jobs"):
-            self._processed_jobs.put(False)
-
     def _select_chunk_start(
         self, processing: bool
-    ) -> tuple[bytes | mmap.mmap, int, bool]:
+    ) -> tuple[bytes | mmap.mmap, int, int, bool]:
         """
         Returns:
             (data, start offset, whether the data needs processing)
         """
-        with timer("DataSet._select_chunk_start"):
-            if processing and self.processed_data:
-                if self._parallel_chunks:
-                    self._processed_jobs.put(True)
-                    start = self._processed_results.get()
-                else:
-                    start = _find_random_paragraph_start(self.processed_data)
-                return self.processed_data, start, False
-
-            if self._parallel_chunks:
-                self._data_jobs.put(True)
-                start = self._data_results.get()
-            else:
-                start = _find_random_paragraph_start(self.data)
-            return self.data, start, processing
+        if processing and self.processed_data:
+            data = self.processed_data
+            size = self.processed_data_size
+            processing = False
+        else:
+            data = self.data
+            size = self.data_size
+        
+        start = random.randint(0, size)
+        return data, size, start, processing
 
     def _sample_tokens_impl(
         self, ntokens: int, batch: int, tokenset_name: str
@@ -134,17 +82,29 @@ class DataSet(object):
 
         samples = []
         while len(samples) < batch:
-            data, start, need_processing = self._select_chunk_start(processing)
+            data, data_size, start, need_processing = self._select_chunk_start(processing)
 
             if need_processing:
                 size = max(round(ntokens * tokenset.avg_bytes_per_token * 1.2), 1)
             else:
                 size = max(round(ntokens * tokenset.avg_proc_bytes_per_token * 1.2), 1)
 
+            assert size <= data_size
+
             while True:
-                if start + size > len(data):
+                if start + size > data_size:
                     break
-                chunk = data[start : start + size]
+
+                with timer("DataSet.sample_tokens.read"):
+                    chunk = data[start : start + size]
+                valid_start = 0
+                while 128 <= chunk[valid_start] < 192:
+                    valid_start += 1
+                valid_end = len(chunk) - 1
+                while 128 <= chunk[valid_end] < 192:
+                    valid_end -= 1
+                chunk = chunk[valid_start : valid_end]
+
                 if need_processing:
                     chunk = process(chunk)
 
@@ -153,9 +113,8 @@ class DataSet(object):
                     break
                 size *= 2
 
-            if start + size > len(data):
+            if start + size > data_size:
                 continue
-
             samples.append(sample[:ntokens])
 
         return np.array(samples, dtype=np.int32)
@@ -179,11 +138,11 @@ class DataSet(object):
 
         samples = []
         while len(samples) < batch:
-            start = _find_random_paragraph_start(self.data)
-            if start + nbytes > len(self.data):
-                continue
+            start = random.randint(0, self.data_size - nbytes)
+            while 128 <= self.data[start] < 192:
+                start += 1
             end = start + nbytes
-            while 128 <= self.data[end] < 192:
+            while end < self.data_size and 128 <= self.data[end] < 192:
                 end += 1
             chunk = self.data[start : end]
             if processing:

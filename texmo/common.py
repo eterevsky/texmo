@@ -54,7 +54,7 @@ _BASES = (
 
 def itoa3(x: int) -> str:
     """Convert integer to a string with 3 significant digits."""
-    if x < 2000: return str(x)
+    if x < 1: return f"{x:.3f}"
     for i in range(1, len(_BASES) - 1):
         if x >= _BASES[i][0] and x < _BASES[i + 1][0]:
             break

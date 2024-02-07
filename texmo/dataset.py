@@ -89,9 +89,9 @@ class DataSet(object):
             data, data_size, start, need_processing = self._select_chunk_start(processing)
 
             if need_processing:
-                size = max(round(ntokens * tokenset.avg_bytes_per_token * 1.2), 1)
+                size = max(round(ntokens * tokenset.avg_bytes_per_token * 1.2), 16)
             else:
-                size = max(round(ntokens * tokenset.avg_proc_bytes_per_token * 1.2), 1)
+                size = max(round(ntokens * tokenset.avg_proc_bytes_per_token * 1.2), 16)
 
             assert size <= data_size
 

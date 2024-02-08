@@ -81,8 +81,6 @@ def search_loop(
 
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
-    dataset = DataSet(path=args.data, path_processed=args.data_processed)
-    dataset_wrapper = DataSetWrapper(dataset)
     template = Template.from_args(args)
     logging.info(f"Template: {template}")
     default = default_from_template(template, spec=args.default_spec)
@@ -112,6 +110,8 @@ def main(args: argparse.Namespace):
         train_time=train_time,
     )
 
+    dataset = DataSet(path=args.data, path_processed=args.data_processed)
+    dataset_wrapper = DataSetWrapper(dataset)
     try:
         try:
             search_loop(dataset_wrapper, search, system=args.system)

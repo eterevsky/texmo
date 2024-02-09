@@ -21,6 +21,7 @@ class ResultSet(object):
         result_db: Optional[ResultDB],
         template: Template,
         system: str,
+        generate_neighbors: bool = True,
     ):
         assert isinstance(template, Template)
         self._template: Template = template
@@ -40,8 +41,9 @@ class ResultSet(object):
             self._result_db = result_db
             self._import_from_result_db()
 
-        logging.info("Generating all neighbors")
-        self._update_all_neighbors()
+        if generate_neighbors:
+            logging.info("Generating all neighbors")
+            self._update_all_neighbors()
         self._populate_db()
 
     def _init_db(self):

@@ -1,3 +1,5 @@
+import argparse
+import logging
 import math
 from io import StringIO
 
@@ -5,9 +7,11 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 
+from .resultdb import ResultDB
 from .results import ResultSet
 from .configuration2 import Template
 from .common import INF, ttoa3
+from .tokens import set_tokens_dir
 
 
 def max_points(result_set: ResultSet, t: int, maxx: int):
@@ -362,3 +366,91 @@ def generate_param_report(
         t *= 2
 
     return out.getvalue()
+
+def main(args: argparse.Namespace):
+    set_tokens_dir(args.tokens_dir)
+    template = Template.from_args(args)
+    logging.info(f"Template: {template}")
+
+    train_time = tuple(map(float, args.train_time.split("-")))
+    assert len(train_time) in (1, 2)
+    if len(train_time) == 1:
+        train_time.append(train_time[0])
+
+    result_db = ResultDB.from_args(args.db)
+    result_set = ResultSet(system=args.system, result_db=result_db, template=template, generate_neighbors=False)
+
+    print(generate_report_by_weight(result_set, template, args.system))
+    print()
+    print(generate_max_report(result_set, template, train_time))
+
+def report_init_args(parser: argparse.ArgumentParser, config):
+    parser.add_argument(
+        "--tokens-dir",
+        type=str,
+        default=config.TOKENS_DIR,
+        help="directory with tokensets",
+    )
+
+    # Template args
+    parser.add_argument(
+        "-s",
+        "--spec-regex",
+        type=str,
+        default=None,
+        help="regex covering the acceptable specs",
+    )
+    parser.add_argument(
+        "-b",
+        "--batch",
+        type=str,
+        default=None,
+        help='range of acceptable batch sizes, for example "1-256"',
+    )
+    parser.add_argument(
+        "-l",
+        "--lr",
+        type=str,
+        default=None,
+        help="range of acceptable learning rates",
+    )
+    parser.add_argument(
+        "--length",
+        type=str,
+        default=None,
+        help="range of acceptable training sample lengths",
+    )
+    parser.add_argument(
+        "--steps",
+        type=str,
+        default=None,
+        help="range for the number of training steps; lower bound >= 2",
+    )
+    parser.add_argument(
+        "-w",
+        "--weights",
+        type=str,
+        default="32-4294967296",
+        help="range for the _maximal_ number of weights in the model",
+    )
+    parser.add_argument(
+        "-t",
+        "--train-time",
+        default="1-16",
+        help="range for the training time in seconds",
+    )
+    parser.add_argument(
+        "--db",
+        type=str,
+        default=config.DB,
+        help="path to the SQLite database with the results, or a URL for a PostgreSQL database",
+    )
+    parser.add_argument(
+        "--system",
+        type=str,
+        default=config.SYSTEM_NAME,
+        help="the name of the system that will be used to identify runs in the DB",
+    )
+
+    parser.set_defaults(func=main)
+ 

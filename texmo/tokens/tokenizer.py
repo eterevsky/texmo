@@ -161,8 +161,8 @@ class Tokenizer(object):
         return tokens
 
     def tokenize_processed(self, chunk: bytes) -> list[int]:
-        with latency.timer("Tokenizer.tokenize_processed"):
-            return self.tokenize_processed_impl(chunk)
+        # with latency.timer("Tokenizer.tokenize_processed"):
+        return self.tokenize_processed_impl(chunk)
 
     def untokenize(self, token_ids: list[int]) -> bytes:
         text = self._decoder.decode(token_ids)

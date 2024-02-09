@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-from typing import Self
 
 from ..layer import LayerState, LayerWeights
 from ..prng import Rng
@@ -84,7 +83,7 @@ class Input(object):
     """
 
     @staticmethod
-    def from_spec(spec: str) -> Self:
+    def from_spec(spec: str) -> "Input":
         # Defaults
         ntokens = None
         nbits = None

@@ -22,7 +22,7 @@ from . import latency
 def generate_report(result_set, template, train_time, system: str, draw_weight_loss: bool):
     print(generate_report_by_weight(result_set, template, system))
     print()
-    print(generate_max_report(result_set, template, train_time))
+    print(generate_max_report(result_set, template, train_time, system))
     # print("\nLearning Rate")
     # print(generate_param_report(result_set, template, lambda conf: conf.lr))
     # if template.sample_len[0] < template.sample_len[1]:

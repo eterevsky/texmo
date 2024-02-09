@@ -312,7 +312,7 @@ class Search(object):
             for conf_results in self._result_set.top_confs(max_time=t, max_weights=max_weights, limit=100):
                 
                 i = len(confs)
-                nruns = min(len(conf_results.runs), conf_results.ntimes(self._system))
+                nruns = len(conf_results.runs)
                 confs.append((conf_results.conf, nruns))
                 expected_runs = 1
                 while i > 0:
@@ -341,11 +341,11 @@ class Search(object):
                 logging.info(f"Selecting untimed conf")
                 return conf
 
-            if random.choice([True, False]):
-                self.print_top_median(t, max_weights)
-                conf = self._select_median_neighbor(t, max_weights)
-                if conf is not None:
-                    return conf
+            # if random.choice([True, False]):
+            #     self.print_top_median(t, max_weights)
+            #     conf = self._select_median_neighbor(t, max_weights)
+            #     if conf is not None:
+            #         return conf
 
             self.print_top_confs(t, max_weights)
 

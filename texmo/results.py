@@ -297,10 +297,22 @@ class ResultSet(object):
 
         self._check_consistency()
 
-    def get_results_by_weights(self):
-        return sorted(
-            self._conf_results_by_id.values(), key=lambda cr: cr.conf.model.weights
-        )
+    def get_results_by_weights(self, max_time=None):
+        if max_time is None:
+            return sorted(
+                self._conf_results_by_id.values(), key=lambda cr: cr.conf.model.weights
+            )
+        else:
+            valid_crs = []
+            for cr in self._conf_results_by_id.values():
+                if not self._template.match(cr.conf):
+                    continue
+                median_time = cr.median_time(self._system)
+                if median_time is not None and median_time <= max_time:
+                    valid_crs.append(cr)
+            valid_crs.sort(key=lambda cr: cr.conf.model.weights)
+            return valid_crs
+
 
     def get_results_by_time(self, max_weights: int):
             cur = self._db.execute(

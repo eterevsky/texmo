@@ -129,6 +129,9 @@ class ResultSet(object):
             )
 
             return conf_results
+    
+    def get_conf_results(self, conf: Configuration2) -> ConfResults:
+        return self._find_or_add_conf(conf)
 
     def _update_all_neighbors(self):
         with latency.timer("ResultSet._update_all_neighbors"):
@@ -244,23 +247,34 @@ class ResultSet(object):
         row = cur.fetchone()
         return None if row is None else self._conf_results_by_id[row[0]]
 
-    def top_confs(self, max_time: float, limit: int) -> Iterable[ConfResults]:
+    def top_confs(self, max_time: float, limit: int, max_weights: int | None = None) -> Iterable[ConfResults]:
         """A configuration with the highest (self) score with time = t."""
 
+        params = {
+            "max_time": max_time,
+            "limit": limit,
+        }
+        if max_weights is None:
+            weights_condition = ""
+        else:
+            weights_condition = "AND weights <= :max_weights"
+            params["max_weights"] = max_weights
+
         cur = self._db.execute(
-            """
+            f"""
             SELECT id FROM conf
             WHERE matches_template
               AND median_time IS NOT NULL
-              AND median_time <= ?
+              AND median_time <= :max_time
+              {weights_condition}
               AND median_score IS NOT NULL
-            ORDER BY median_score LIMIT ?
+            ORDER BY median_score LIMIT :limit
             """,
-            (max_time, limit),
+            params
         )
         for row in cur:
             yield self._conf_results_by_id[row[0]]
-
+    
     def add_run(self, conf: Configuration2, run: Run):
         with latency.timer("ResultSet.add_run"):
             conf_results = self._find_or_add_conf(conf)

@@ -48,6 +48,8 @@ class Attention(Layer):
         return f"att.{self.length}.{self.heads}.{self.size}{mk}"
 
     def is_valid(self) -> bool:
+        # Temporarily disable until I figure out how to correcl
+        return False
         return (
             is_power2_int(self.length)
             and self.length > 1

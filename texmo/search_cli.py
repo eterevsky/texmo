@@ -22,7 +22,7 @@ from . import latency
 def generate_report(result_set, template, train_time, system: str, draw_weight_loss: bool):
     print(generate_report_by_weight(result_set, template, system))
     print()
-    print(generate_max_report(result_set, template, train_time))
+    print(generate_max_report(result_set, template, train_time, system))
     # print("\nLearning Rate")
     # print(generate_param_report(result_set, template, lambda conf: conf.lr))
     # if template.sample_len[0] < template.sample_len[1]:
@@ -81,8 +81,6 @@ def search_loop(
 
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
-    dataset = DataSet(path=args.data, path_processed=args.data_processed)
-    dataset_wrapper = DataSetWrapper(dataset)
     template = Template.from_args(args)
     logging.info(f"Template: {template}")
     default = default_from_template(template, spec=args.default_spec)
@@ -112,6 +110,8 @@ def main(args: argparse.Namespace):
         train_time=train_time,
     )
 
+    dataset = DataSet(path=args.data, path_processed=args.data_processed)
+    dataset_wrapper = DataSetWrapper(dataset)
     try:
         try:
             search_loop(dataset_wrapper, search, system=args.system)

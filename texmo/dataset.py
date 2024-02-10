@@ -99,8 +99,8 @@ class DataSet(object):
                 if start + size > data_size:
                     break
 
-                with timer("DataSet.sample_tokens.read"):
-                    chunk = data[start : start + size]
+                # with timer("DataSet.sample_tokens.read"):
+                chunk = data[start : start + size]
                 valid_start = 0
                 while 128 <= chunk[valid_start] < 192:
                     valid_start += 1

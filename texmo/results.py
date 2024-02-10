@@ -21,6 +21,7 @@ class ResultSet(object):
         result_db: Optional[ResultDB],
         template: Template,
         system: str,
+        generate_neighbors: bool = True,
     ):
         assert isinstance(template, Template)
         self._template: Template = template
@@ -40,8 +41,9 @@ class ResultSet(object):
             self._result_db = result_db
             self._import_from_result_db()
 
-        logging.info("Generating all neighbors")
-        self._update_all_neighbors()
+        if generate_neighbors:
+            logging.info("Generating all neighbors")
+            self._update_all_neighbors()
         self._populate_db()
 
     def _init_db(self):
@@ -127,6 +129,9 @@ class ResultSet(object):
             )
 
             return conf_results
+    
+    def get_conf_results(self, conf: Configuration2) -> ConfResults:
+        return self._find_or_add_conf(conf)
 
     def _update_all_neighbors(self):
         with latency.timer("ResultSet._update_all_neighbors"):
@@ -242,23 +247,34 @@ class ResultSet(object):
         row = cur.fetchone()
         return None if row is None else self._conf_results_by_id[row[0]]
 
-    def top_confs(self, max_time: float, limit: int) -> Iterable[ConfResults]:
+    def top_confs(self, max_time: float, limit: int, max_weights: int | None = None) -> Iterable[ConfResults]:
         """A configuration with the highest (self) score with time = t."""
 
+        params = {
+            "max_time": max_time,
+            "limit": limit,
+        }
+        if max_weights is None:
+            weights_condition = ""
+        else:
+            weights_condition = "AND weights <= :max_weights"
+            params["max_weights"] = max_weights
+
         cur = self._db.execute(
-            """
+            f"""
             SELECT id FROM conf
             WHERE matches_template
               AND median_time IS NOT NULL
-              AND median_time <= ?
+              AND median_time <= :max_time
+              {weights_condition}
               AND median_score IS NOT NULL
-            ORDER BY median_score LIMIT ?
+            ORDER BY median_score LIMIT :limit
             """,
-            (max_time, limit),
+            params
         )
         for row in cur:
             yield self._conf_results_by_id[row[0]]
-
+    
     def add_run(self, conf: Configuration2, run: Run):
         with latency.timer("ResultSet.add_run"):
             conf_results = self._find_or_add_conf(conf)
@@ -281,10 +297,22 @@ class ResultSet(object):
 
         self._check_consistency()
 
-    def get_results_by_weights(self):
-        return sorted(
-            self._conf_results_by_id.values(), key=lambda cr: cr.conf.model.weights
-        )
+    def get_results_by_weights(self, max_time=None):
+        if max_time is None:
+            return sorted(
+                self._conf_results_by_id.values(), key=lambda cr: cr.conf.model.weights
+            )
+        else:
+            valid_crs = []
+            for cr in self._conf_results_by_id.values():
+                if not self._template.match(cr.conf):
+                    continue
+                median_time = cr.median_time(self._system)
+                if median_time is not None and median_time <= max_time:
+                    valid_crs.append(cr)
+            valid_crs.sort(key=lambda cr: cr.conf.model.weights)
+            return valid_crs
+
 
     def get_results_by_time(self, max_weights: int):
             cur = self._db.execute(

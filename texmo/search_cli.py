@@ -3,13 +3,12 @@ import logging
 
 from .configuration2 import Configuration2, Template, default_from_template
 from .dataset import DataSet, DataSetWrapper
-from .manager import Manager
+from .manager import Manager, release_device_buffers
 from .model2 import build_model
 from .report import (
     draw_weight_loss_graph,
     draw_loss_by_time,
     generate_max_report,
-    generate_param_report,
     generate_report_by_weight,
 )
 from .resultdb import ResultDB
@@ -77,6 +76,7 @@ def search_loop(
         )
 
         search.add_run(conf, run, weights)
+        release_device_buffers()
 
 
 def main(args: argparse.Namespace):

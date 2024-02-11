@@ -341,11 +341,11 @@ class Search(object):
                 logging.info(f"Selecting untimed conf")
                 return conf
 
-            # if random.choice([True, False]):
-            #     self.print_top_median(t, max_weights)
-            #     conf = self._select_median_neighbor(t, max_weights)
-            #     if conf is not None:
-            #         return conf
+            if random.choice([True, False]):
+                self.print_top_median(t, max_weights)
+                conf = self._select_median_neighbor(t, max_weights)
+                if conf is not None:
+                    return conf
 
             self.print_top_confs(t, max_weights)
 

@@ -74,7 +74,7 @@ class ConfResults(object):
         self.runs.append(run)
         self._times[run.system].add_similar_time(run.train_time)
 
-    def add_neighbor_run(self, neighbor: Self, run: Run):
+    def add_neighbor_run(self, neighbor: "Self", run: Run):
         assert neighbor.conf != self.conf
 
         scaled_time = run.train_time * self.conf.steps / neighbor.conf.steps

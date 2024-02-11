@@ -276,45 +276,6 @@ def generate_max_report(
     return out.getvalue()
 
 
-def generate_param_report(
-    result_set: ResultSet, template: Template, extract_param, is_float=True
-) -> str:
-    out = StringIO()
-    lo, hi = template.t
-
-    t = lo
-    while t <= hi:
-        top_confs: dict = {}  # bucket -> (conf, score)
-        count = {}  # bucket -> count
-
-        for conf_results in result_set.all_results_for_t(t):
-            conf = conf_results.conf
-            bucket = extract_param(conf)
-
-            if bucket not in top_confs:
-                top_confs[bucket] = (conf, conf_results.median_score)
-                count[bucket] = len(conf_results.runs)
-            else:
-                if top_confs[bucket][1] > conf_results.median_score:
-                    top_confs[bucket] = (conf, conf_results.median_score)
-
-                count[bucket] += len(conf_results.runs)
-
-        print(f"\nT = {t}", file=out)
-        for bucket in sorted(top_confs.keys()):
-            conf, score = top_confs[bucket]
-            runs = count[bucket]
-            c = conf_to_string(conf)
-            if is_float:
-                b = f"{bucket:.3f}"
-            else:
-                b = f"{bucket:5}"
-            print(f"{b}  {score:.4f} ({runs:5})  {c}", file=out)
-
-        t *= 2
-
-    return out.getvalue()
-
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
     template = Template.from_args(args)

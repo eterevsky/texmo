@@ -47,7 +47,7 @@ class ResultSet(object):
         self._populate_db()
 
     def _init_db(self):
-        self._db = sqlite3.connect(":memory:")
+        self._db = sqlite3.connect(":memory:", check_same_thread=False)
         schema_path = os.path.join(os.path.dirname(__file__), "runtime-db.sql")
         with open(schema_path) as schema:
             self._db.executescript(schema.read())

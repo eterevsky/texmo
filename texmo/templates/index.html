@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>TexMo</title>
+        <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='normalize.css') }}">
+        <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
+    </head>
+    <body>
+        <main>
+        <h2>Template</h1>
+        <form action="/update" method="post">
+            Spec regex: <input type="text" name="spec" value="{{ spec }}"><br>
+            <input type="submit" value="Update">
+        </form>
+        </main>
+    </body>
+</html>

@@ -6,7 +6,7 @@ import numpy as np
 import sys
 
 import config
-from texmo import sample_cli, latency, search_cli, train_cli, resultdb, report
+from texmo import sample_cli, latency, search_cli, train_cli, resultdb, report, server
 from texmo.predict import predict_cli, predictor2, sample_timing, traintiming2
 from texmo.tokens import small_tokens
 
@@ -79,7 +79,12 @@ def parse_args():
     parser_report = subparsers.add_parser(
         "report", help="Print a report of the results in the database"
     )
-    report.report_init_args(parser_report, config)
+    report.init_args(parser_report, config)
+
+    parser_server = subparsers.add_parser(
+        "server", help="Start the search server"
+    )
+    server.init_args(parser_server, config)
 
     parser_help = subparsers.add_parser("help")
     parser_help.set_defaults(func=lambda _: help(parser), parser=parser)

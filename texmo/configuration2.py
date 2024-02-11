@@ -195,6 +195,9 @@ class Template(object):
     def __str__(self):
         return (f"Template({self.regex}, lr={self.lr}, length={self.length}, " +
                f"batch={self.batch}, steps={self.steps}, max_weights={self.max_weights})")
+    
+    def update_regex(self, regex: Optional[str]):
+        self.regex = re.compile(regex) if regex else None
 
     def match_model(self, model: Model3) -> bool:
         if model.weights > self.max_weights.max:
@@ -222,8 +225,6 @@ class Template(object):
             yield conf.replace(batch=batch)
         for steps in self.steps.neighbors(conf.steps):
             yield conf.replace(steps=steps)
-    
-    
 
 
 def conf_neighbors(

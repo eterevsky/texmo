@@ -186,7 +186,7 @@ class ResultDBSQLite(ResultDB):
         exists = path != ":memory:" and os.path.exists(path)
         if path != ":memory:":
             logging.info(f"Connecting to results DB {path}")
-        db = sqlite3.connect(path)
+        db = sqlite3.connect(path, check_same_thread=False)
 
         if not exists:
             schema_path = os.path.join(os.path.dirname(__file__), "persistent-db.sql")

@@ -293,7 +293,7 @@ def main(args: argparse.Namespace):
     print(generate_max_report(result_set, template, train_time, args.system))
     print(generate_report_by_weight(result_set, template, args.system))
 
-def report_init_args(parser: argparse.ArgumentParser, config):
+def init_args(parser: argparse.ArgumentParser, config):
     parser.add_argument(
         "--tokens-dir",
         type=str,

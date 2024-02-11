@@ -128,68 +128,6 @@ class Search(object):
         assert 0 < tmin < tmax
         return 2 ** random.uniform(log2(tmin), log2(tmax))
 
-    # def _select_time(self):
-    #     with latency.timer("Search._select_time"):
-    #         lo, hi = self._template.t
-    #         assert 1 <= lo <= hi
-    #         if lo == hi:
-    #             return lo
-
-    #         times = [lo]
-    #         weights = [1]
-
-    #         runs_count = self._result_set.runs_count_per_t()
-    #         runs = runs_count.get(lo, 0)
-    #         logging.info(f"t = {lo:3}  complete = {runs:5}")
-
-    #         prev_runs = runs
-
-    #         t = 2 * lo
-    #         while t <= hi:
-    #             times.append(t)
-    #             weights.append(0.6 * weights[-1])
-
-    #             runs = runs_count.get(t, 0)
-    #             ratio = runs / (prev_runs + 1)
-    #             logging.info(f"t = {t:3}  complete = {runs:5}  ratio = {ratio:.2f}")
-    #             prev_runs = runs
-    #             t *= 2
-
-    #         return random.choices(times, weights)[0]
-
-    # def _select_time_deterministic(self):
-    #     with latency.timer("Search._select_time"):
-    #         lo, hi = self._template.t
-    #         assert 1 <= lo <= hi
-    #         if lo == hi:
-    #             return lo
-
-    #         runs_count = self._result_set.runs_count_per_t()
-    #         runs = runs_count.get(lo, 0)
-    #         logging.info(f"t = {lo:3}  complete = {runs:5}")
-
-    #         if runs == 0:
-    #             return lo
-
-    #         min_ratio = RUNS_EXP
-    #         best_t = lo
-    #         prev_runs = runs
-
-    #         t = 2 * lo
-    #         while t <= hi:
-    #             runs = runs_count.get(t, 0)
-    #             ratio = runs / prev_runs
-    #             logging.info(f"t = {t:3}  complete = {runs:5}  ratio = {ratio:.2f}")
-    #             if runs == 0:
-    #                 return t
-    #             if ratio < min_ratio:
-    #                 min_ratio = ratio
-    #                 best_t = t
-    #             prev_runs = runs
-    #             t *= 2
-
-    #         return best_t
-
     def _select_max_weights(self, t):
         with latency.timer("Search._select_max_weights"):
             top_conf_results = self._result_set.top_conf(t)
@@ -235,22 +173,6 @@ class Search(object):
     #                 expected_runs += 1
     #     return None, None
 
-    # def _select_neighbor(self, t: int, max_weights: int):
-    #     """Select a neighbor of a top-scoring conf."""
-    #     with latency.timer("Search._select_neighbor"):
-    #         for i, conf_results in enumerate(
-    #             self._result_set.top_confs(t, max_weights)
-    #         ):
-    #             conf = conf_results.conf
-    #             neighbors = list(conf_neighbors(conf, self._template))
-    #             random.shuffle(neighbors)
-    #             for neighbor in neighbors:
-    #                 assert neighbor is not None
-    #                 assert neighbor != conf
-    #                 if not self._result_set.has_runs(neighbor):
-    #                     return i, neighbor, conf
-    #     return None, None, None
-
     def print_top_confs(self, t, max_weights):
         with latency.timer("Search.print_top_confs"):
             report = [f"T ≤ {ttoa3(t)}  W ≤ {itoa3(max_weights)}  by neighbors score"]
@@ -286,9 +208,6 @@ class Search(object):
                 )
             report.append("")
             logging.info("\n".join(report))
-
-    # def _select_checkpoint(self, t):
-    #     pass
 
     def _select_untimed(self, max_weights: int):
         confs = list(self._result_set.top_confs_any_t(max_weights, 10))

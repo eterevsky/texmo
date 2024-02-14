@@ -67,7 +67,7 @@ class TokenSet(object):
                 assert isinstance(token, int)
                 token_set.add_ext_token(token)
         
-        for seq in tokens_dict["sequences"]:
+        for seq in tokens_dict.get("sequences", []):
             string = _parse_token(seq["string"])
             assert isinstance(string, bytes)
             tokens = []

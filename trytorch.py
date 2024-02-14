@@ -28,18 +28,24 @@ class Model(nn.Module):
         x = self.output(x)
         return x, (hidden0, hidden1)
     
-    def init_hidden(self, batch_size, device):
-        hidden0 = torch.zeros(1, batch_size, 256, device=device)
-        hidden1 = torch.zeros(1, batch_size, 512, device=device)
-        return hidden0, hidden1
+def init_hidden(batch_size, device):
+    hidden0 = torch.zeros(1, batch_size, 256, device=device)
+    hidden1 = torch.zeros(1, batch_size, 512, device=device)
+    return hidden0, hidden1
     
 
+initial_hidden = init_hidden(batch, device)
 model = Model().to(device)
-print(model)
+
+
+sample = dataset.sample_tokens(length, batch, "tokens256_raw_bytes")
+x = torch.tensor(sample, dtype=torch.int64, device=device)
+x = nn.functional.one_hot(x, num_classes=256).to(torch.float32)
+
+model = torch.jit.trace(model, (x, initial_hidden))
 
 loss_fn = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0078)
-initial_hidden = model.init_hidden(batch, device)
 
 for step in range(steps):
     sample = dataset.sample_tokens(length, batch, "tokens256_raw_bytes")

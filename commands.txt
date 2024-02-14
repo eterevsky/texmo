@@ -1,1 +1,0 @@
-cargo run --release -- optimize-all -d data/books3.txt -t tokens

@@ -4,11 +4,10 @@ import logging
 import numpy as np
 
 from .. import latency
-from ..configuration import Template
+from ..configuration2 import Template
 from ..resultdb import ResultDB
 from ..results import ResultSet
 from ..tokens import set_tokens_dir
-from .loss_predictor_v1 import LossPredictorV1
 from .loss_predictor_flat import LossPredictorFlat
 
 

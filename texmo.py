@@ -1,13 +1,10 @@
 import argparse
 import logging
 
-import jax
 import numpy as np
-import sys
 
 import config
 from texmo import sample_cli, latency, search_cli, train_cli, resultdb, report, server
-from texmo.predict import predict_cli, predictor2, sample_timing, traintiming2
 from texmo.tokens import small_tokens
 
 
@@ -46,25 +43,25 @@ def parse_args():
     )
     search_cli.init_args(parser_search, config)
 
-    parser_predict = subparsers.add_parser(
-        "predict", help="train loss prediction model"
-    )
-    predict_cli.init_args(parser_predict)
+    # parser_predict = subparsers.add_parser(
+    #     "predict", help="train loss prediction model"
+    # )
+    # predict_cli.init_args(parser_predict)
 
-    parser_predict2 = subparsers.add_parser(
-        "predict2", help="train the new loss prediction model"
-    )
-    predictor2.init_args(parser_predict2, config)
+    # parser_predict2 = subparsers.add_parser(
+    #     "predict2", help="train the new loss prediction model"
+    # )
+    # predictor2.init_args(parser_predict2, config)
 
-    parser_predict_sample = subparsers.add_parser(
-        "predict-sample", help="sample timing prediction model"
-    )
-    sample_timing.init_args(parser_predict_sample)
+    # parser_predict_sample = subparsers.add_parser(
+    #     "predict-sample", help="sample timing prediction model"
+    # )
+    # sample_timing.init_args(parser_predict_sample)
 
-    parser_predict_train = subparsers.add_parser(
-        "predict-train", help="train timing prediction model"
-    )
-    traintiming2.init_args(parser_predict_train)
+    # parser_predict_train = subparsers.add_parser(
+    #     "predict-train", help="train timing prediction model"
+    # )
+    # traintiming2.init_args(parser_predict_train)
 
     parser_benchmark_dataset = subparsers.add_parser(
         "benchmark-dataset", help="benchmark sampling the training data"

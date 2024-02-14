@@ -21,13 +21,12 @@ from .common import INF, ttoa3, itoa3
 from .configuration2 import Configuration2
 from .dataset import DataSet, DataSetWrapper
 
-# from .model2 import Model2, Weights
 from .model3 import Model3, Weights
 from .prng import Rng
 from .record import TrainingRecord
 from .run import Run
-from .predict import SampleTiming, LossTrend, TrainTiming
-from .tokens import Tokenizer, TokenSet, get_tokenizer
+from .predict import LossTrend
+from .tokens import Tokenizer
 
 LOG2 = 1 / math.log(2)
 

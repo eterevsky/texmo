@@ -7,9 +7,6 @@ from . import latency
 from .common import INF, itoa3, ttoa3
 from .configuration2 import Configuration2, Template, conf_neighbors
 from .model2 import Weights
-from .predict import Predictor2
-from .pretrained import Checkpoint
-from .record import TrainingRecord
 from .resultdb import ResultDB
 from .results import ResultSet
 from .run import Run
@@ -28,9 +25,9 @@ class Search(object):
         db: ResultDB,
         template: Template,
         init_conf: Configuration2,
-        predictor: Predictor2,
+        predictor: None,
         train_time: tuple[float, float],
-        checkpoints_path: str = None,
+        checkpoints_path: None = None,
     ):
         assert isinstance(system, str)
         self._system = system
@@ -71,7 +68,7 @@ class Search(object):
         conf: Configuration2,
         run: Run,
         weights: Weights,
-        parent_checkpoint: Optional[Checkpoint] = None,
+        parent_checkpoint: None = None,
     ):
         assert isinstance(conf, Configuration2)
         assert isinstance(run, Run)

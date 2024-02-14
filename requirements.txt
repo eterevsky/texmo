@@ -1,6 +1,5 @@
 matplotlib
 numpy
 optax
-psycopg2
 regex
 scikit-learn

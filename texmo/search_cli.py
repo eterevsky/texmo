@@ -13,7 +13,6 @@ from .report import (
 )
 from .resultdb import ResultDB
 from .search import Search
-from .predict import Predictor2
 from .tokens import set_tokens_dir
 from . import latency
 
@@ -22,25 +21,6 @@ def generate_report(result_set, template, train_time, system: str, draw_weight_l
     print(generate_report_by_weight(result_set, template, system))
     print()
     print(generate_max_report(result_set, template, train_time, system))
-    # print("\nLearning Rate")
-    # print(generate_param_report(result_set, template, lambda conf: conf.lr))
-    # if template.sample_len[0] < template.sample_len[1]:
-    #     print("\nSample Length")
-    #     print(
-    #         generate_param_report(
-    #             result_set,
-    #             template,
-    #             lambda conf: conf.sample_len,
-    #             is_float=False,
-    #         )
-    #     )
-    # if template.batch is None or template.batch[0] < template.batch[1]:
-    #     print("\nBatch")
-    #     print(
-    #         generate_param_report(
-    #             result_set, template, lambda conf: conf.batch, is_float=False
-    #         )
-    #     )
     if draw_weight_loss:
         draw_weight_loss_graph(result_set, template, train_time)
     # draw_loss_by_time(result_set, template)

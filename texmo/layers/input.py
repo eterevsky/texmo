@@ -237,12 +237,12 @@ class Input(object):
             yield Input(
                 ntokens=256,
                 processing=self._processing,
-                token_type="all",
+                token_type="b8",
                 positions=self._positions,
                 emb_dim=self._emb_size,
                 emb_norm=self._emb_norm,
             )
-        elif (self.ntokens, self._token_type) == (256, "all"):
+        elif (self.ntokens, self._token_type) == (256, "b8"):
             yield Input(
                 ntokens=16,
                 processing=self._processing,

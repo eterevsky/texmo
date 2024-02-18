@@ -295,8 +295,6 @@ class ResultSet(object):
 
             logging.info(f"Updated scores for {count} configurations")
 
-        self._check_consistency()
-
     def get_results_by_weights(self, max_time=None):
         if max_time is None:
             return sorted(

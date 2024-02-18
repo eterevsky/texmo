@@ -1,3 +1,5 @@
+import logging
+
 from statistics import quantiles
 from time import perf_counter_ns
 
@@ -41,10 +43,11 @@ def timer(name):
 
 def report():
     total_time = perf_counter_ns() - _start
+    report = "Latency report:\n"
     for name, measures in sorted(_measures.items()):
         if len(measures) == 1:
             val = measures[0] * 1E-9
-            print(f"{name}(1)  {ttoa3(val)}")
+            report += f"{name}(1)  {ttoa3(val)}\n"
         else:
             percentiles = quantiles(measures, n=100)
             p50th = percentiles[48] * 1e-9
@@ -53,6 +56,6 @@ def report():
             avg = sum(measures) / len(measures) * 1e-9
             total = len(measures)
             percent = (sum(measures) / total_time) * 100
-            print(
-                f"{name}({itoa3(total)})  {ttoa3(p50th)}  {ttoa3(p90th)}  {ttoa3(p99th)}  AVG {ttoa3(avg)}  {percent:.1f}%"
-            )
+            report += f"{name}({itoa3(total)})  {ttoa3(p50th)}  {ttoa3(p90th)}  {ttoa3(p99th)}  AVG {ttoa3(avg)}  {percent:.1f}%\n"
+    
+    logging.info(report)

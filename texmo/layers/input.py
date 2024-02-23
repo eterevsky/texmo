@@ -11,15 +11,15 @@ _TOKEN_TYPE_NAMES = {
     "b1": "bits1",
     "b2": "bits2",
     "b4": "bits4",
-    "all": "all",
+    "b8": "bytes",
     "bh": "byteshuff",
 }
 _TOKEN_TYPE_NEIGHBORS = {
     "b1": ["b2"],
     "b2": ["b1", "b4", "bh"],
-    "b4": ["b2", "all"],
-    "all": ["b4", "bh"],
-    "bh": ["b2", "all"],
+    "b4": ["b2", "b8"],
+    "b8": ["b4", "bh"],
+    "bh": ["b2", "b8"],
 }
 _DEFAULT_EMB_SIZE = {
     2: 1,
@@ -100,7 +100,9 @@ class Input(object):
                     processing = parts[2]
                     assert processing in ("raw", "cw")
                     token_type = parts[3]
-                    assert token_type in ("b1", "b2", "b4", "all", "bh")
+                    if token_type == "all":
+                        token_type = "b8"
+                    assert token_type in ("b1", "b2", "b4", "b8", "bh")
                 case "pos":
                     positions = int(parts[1])
                 case "onehot":
@@ -235,12 +237,12 @@ class Input(object):
             yield Input(
                 ntokens=256,
                 processing=self._processing,
-                token_type="all",
+                token_type="b8",
                 positions=self._positions,
                 emb_dim=self._emb_size,
                 emb_norm=self._emb_norm,
             )
-        elif (self.ntokens, self._token_type) == (256, "all"):
+        elif (self.ntokens, self._token_type) == (256, "b8"):
             yield Input(
                 ntokens=16,
                 processing=self._processing,

@@ -290,8 +290,8 @@ def main(args: argparse.Namespace):
     result_set = ResultSet(system=args.system, result_db=result_db, template=template, generate_neighbors=False)
 
     # print()
-    print(generate_max_report(result_set, template, train_time, args.system))
-    print(generate_report_by_weight(result_set, template, args.system))
+    logging.info(generate_max_report(result_set, template, train_time, args.system))
+    logging.info(generate_report_by_weight(result_set, template, args.system))
 
 def init_args(parser: argparse.ArgumentParser, config):
     parser.add_argument(

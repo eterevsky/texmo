@@ -88,6 +88,7 @@ class Search(object):
             # ):
             #     checkpoint.save(weights, self._checkpoints_path)
 
+            assert self._predictor is None
             if self._predictor:
                 self._predictor.add_run(conf, run)
             self._result_set.add_run(conf, run)
@@ -210,14 +211,15 @@ class Search(object):
         confs = list(self._result_set.top_confs_any_t(max_weights, 10))
         if all(c.median_time(self._system) is not None for c in confs):
             return None
-        print(f"Top confs W ≤ {itoa3(max_weights)}:")
+        report = f"Top confs W ≤ {itoa3(max_weights)}:\n"
         for c in confs:
             t = c.median_time(self._system)
             if t is not None:
                 t = ttoa3(t)
             else:
                 t = "?     "
-            print(f"{c.median_score:.4f}  {t}  {c.conf}")
+            report += f"{c.median_score:.4f}  {t}  {c.conf}\n"
+        logging.info(report)
         for c in confs:
             if c.median_time(self._system) is None:
                 return c.conf

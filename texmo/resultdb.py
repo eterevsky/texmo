@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from typing import Optional
 from urllib.parse import urlparse
 import sqlite3
+from statistics import median, StatisticsError
 
 import numpy as np
 
@@ -44,35 +45,181 @@ def _build_loss_trend(step_loss, model_version, params):
 class ResultDB(object):
     @staticmethod
     def from_args(db: Optional[str]) -> "ResultDB":
-        if db is None:
-            return ResultDB.connect_sqlite(None)
-        elif db.startswith("postgres://"):
-            return ResultDBPostgres(db)
-        else:
-            return ResultDBSQLite(db)
+        return ResultDB(db)
 
-    def __init__(self, db):
-        self._db = db
+    def __init__(self, path: Optional[str] = None):
+        if path is None:
+            path = ":memory:"
+        exists = path != ":memory:" and os.path.exists(path)
+        if path != ":memory:":
+            logging.info(f"Connecting to results DB {path}")
+        self._db = sqlite3.connect(path, check_same_thread=False)
+
+        if not exists:
+            schema_path = os.path.join(os.path.dirname(__file__), "persistent-db.sql")
+            with open(schema_path) as schema:
+                self._db.executescript(schema.read())
+                self._db.commit()
 
     def commit(self):
         self._db.commit()
 
-    def find_or_add_conf(self, conf: Configuration2) -> int:
-        raise NotImplementedError()
+    def _init_neighbors(self, cur: sqlite3.Cursor, conf: Configuration2, conf_id: int):
+        with latency.timer("ResultDB._init_neighbors"):
+            for neighbor in conf.neighbors():
+                neighbor_id = self._find_or_add_conf(
+                    cur, neighbor, init_neighbors=False
+                )
+                cur.execute(
+                    """
+                    INSERT OR IGNORE INTO neighbors (conf_id, neighbor_id)
+                    VALUES (:conf_id, :neighbor_id)
+                    """,
+                    {"conf_id": conf_id, "neighbor_id": neighbor_id},
+                )
+                cur.execute(
+                    """
+                    INSERT OR IGNORE INTO neighbors (conf_id, neighbor_id)
+                    VALUES (:neighbor_id, :conf_id)
+                    """,
+                    {"conf_id": conf_id, "neighbor_id": neighbor_id},
+                )
+            cur.execute(
+                """
+                UPDATE conf
+                SET has_neighbors = 1
+                WHERE id = :conf_id
+                """,
+                {"conf_id": conf_id},
+            )
 
-    def add_run(
+    def _find_or_add_conf(
+        self, cur: sqlite3.Cursor, conf: Configuration2, init_neighbors: bool
+    ) -> int:
+        conf_dict = conf.to_dict()
+        conf_dict["weights"] = conf.model.weights
+        cur.execute(
+            """
+            SELECT id, has_neighbors FROM conf
+            WHERE spec = :spec
+              AND lr = :lr
+              AND length = :length
+              AND batch = :batch
+              AND steps = :steps
+            """,
+            conf_dict,
+        )
+        rows = cur.fetchall()
+        assert len(rows) <= 1
+        if rows:
+            conf_id, has_neighbors = rows[0]
+            if init_neighbors and not has_neighbors:
+                self._init_neighbors(conf, conf_id)
+            return conf_id
+        else:
+            cur = self._db.cursor()
+            cur.execute(
+                """
+                INSERT INTO conf (spec, weights, lr, length, batch, steps, has_neighbors)
+                VALUES (:spec, :weights, :lr, :length, :batch, :steps, 0)
+                """,
+                conf_dict,
+            )
+            conf_id = cur.lastrowid
+            if init_neighbors:
+                self._init_neighbors(cur, conf, conf_id)
+            return conf_id
+
+    def find_or_add_conf(self, conf: Configuration2, init_neighbors: bool) -> int:
+        """Finds the conf in the db and returns the configuration id."""
+        with latency.timer("ResultDB.find_or_add_conf"):
+            cur = self._db.cursor()
+            cur.execute("BEGIN TRANSACTION")
+            conf_id = self._find_or_add_conf(cur, conf, init_neighbors)
+            cur.execute("COMMIT")
+            return conf_id
+
+    def _add_run_execute(self, cur: sqlite3.Cursor, run_dict: dict):
+        with latency.timer("ResultDB._add_run_execute"):
+            cur.execute(
+                """
+                INSERT INTO run(conf_id, system, train_time, timestamp, loss, step_loss,
+                                loss_model_v, loss_model)
+                VALUES (:conf_id, :system, :train_time, :timestamp, :loss, :step_loss,
+                        :loss_model_v, :loss_model)
+                """,
+                run_dict,
+            )
+
+    def _update_median_score(self, cur: sqlite3.Cursor, conf_id: int):
+        with latency.timer("ResultDB._update_median_score"):
+            cur.execute(
+                """
+                SELECT loss FROM run WHERE conf_id = :conf_id
+                """,
+                {"conf_id": conf_id},
+            )
+            try:
+                median_score = median(row[0] for row in cur)
+            except StatisticsError:
+                median_score = None
+            cur.execute(
+                """
+                UPDATE conf
+                SET median_score = :median_score
+                WHERE id = :conf_id
+                """,
+                {"median_score": median_score, "conf_id": conf_id},
+            )
+
+    def _update_median_time(self, cur: sqlite3.Cursor, conf_id: int, system: str):
+        with latency.timer("ResultDB._update_median_time"):
+            cur.execute(
+                """
+                SELECT train_time
+                FROM run
+                WHERE conf_id = :conf_id AND system = :system
+                """,
+                {"conf_id": conf_id, "system": system},
+            )
+            try:
+                median_time = median(row[0] for row in cur)
+            except StatisticsError:
+                median_time = None
+            cur.execute(
+                """
+                INSERT OR REPLACE system_time(conf_id, system, median_time)
+                VALUES (:conf_id, :system, :median_time)
+                """,
+                {"median_time": median_time, "conf_id": conf_id, "system": system},
+            )
+
+    def _update_scores(self, cur: sqlite3.Cursor, conf_id: int, system: str):
+        # cur.execute(
+        #     """SELECT neighbor_id FROM neighbors WHERE conf_id = :conf_id""",
+        #     {"conf_id": conf_id}
+        # )
+        # neighbors = [row[0] for row in cur]
+        self._update_median_score(cur, conf_id)
+        self._update_median_time(cur, conf_id, system)
+        # self._update_neighbor_score(cur, conf_id)
+        # for neighbor_id in neighbors:
+        #     self._update_neighbor_score(cur, neighbor_id)
+
+    def _add_run(
         self,
         conf: Configuration2,
         run: Run,
         conf_id: Optional[int] = None,
         timestamp: Optional[datetime] = None,
-        commit: bool = True,
     ):
-        # TODO: Checkpoints are temporarily not supported
         assert run.checkpoint is None
 
+        cur = self._db.cursor()
+        cur.execute("BEGIN TRANSACTION")
+
         if conf_id is None:
-            conf_id = self.find_or_add_conf(conf)
+            conf_id = self._find_or_add_conf(cur, conf, init_neighbors=True)
 
         if run.loss_trend is None:
             loss_model_v = None
@@ -94,13 +241,45 @@ class ResultDB(object):
             "loss_model": loss_model,
         }
 
-        self._add_run_execute(run_dict, commit)
+        self._add_run_execute(cur, run_dict)
+        self._update_scores(cur, conf_id, run.system)
+        cur.execute("COMMIT")
+
+    def add_run(
+        self,
+        conf: Configuration2,
+        run: Run,
+        conf_id: Optional[int] = None,
+        timestamp: Optional[datetime] = None,
+    ):
+        with latency.timer("ResultDB.add_run"):
+            self._add_run(conf, run, conf_id, timestamp)
 
     def total_runs(self) -> int:
         cur = self._db.execute("SELECT COUNT(*) AS count FROM run")
         total = cur.fetchone()["count"]
         assert isinstance(total, int)
         return total
+
+    def get_top_by_median_all_systems(
+        self, max_weights: int, limit: int
+    ) -> Iterable[tuple[int, Configuration2, float]]:
+        cur = self._db.execute(
+            """
+            SELECT conf.id, spec, lr, length, batch, steps, median_score
+            FROM conf
+            WHERE weights <= :max_weights
+            ORDER BY median_score ASC
+            LIMIT :limit
+            """,
+            {"max_weights": max_weights, "limit": limit},
+        )
+
+        for row in cur:
+            conf_id = row[0]
+            model = build_model(row[1])
+            conf = Configuration2(model, row[2], row[3], row[4], row[5])
+            yield conf_id, conf, row[6]
 
     def get_confs_runs(
         self, with_timestamps: bool = False
@@ -160,8 +339,10 @@ class ResultDB(object):
                     yield conf_id, conf, run, timestamp
                 else:
                     yield conf_id, conf, run
-    
-    def check_run_exists(self, conf: Configuration2, run: Run, timestamp: datetime) -> bool:
+
+    def check_run_exists(
+        self, conf: Configuration2, run: Run, timestamp: datetime
+    ) -> bool:
         """Check if a run with the same configuration and timestamp exists."""
         conf_id = self.find_or_add_conf(conf)
         timestamp = timestamp.isoformat()
@@ -177,136 +358,6 @@ class ResultDB(object):
             {"conf_id": conf_id, "timestamp": timestamp, "system": run.system},
         )
         return cur.fetchone() is not None
-
-
-class ResultDBSQLite(ResultDB):
-    def __init__(self, path: Optional[str] = None):
-        if path is None:
-            path = ":memory:"
-        exists = path != ":memory:" and os.path.exists(path)
-        if path != ":memory:":
-            logging.info(f"Connecting to results DB {path}")
-        db = sqlite3.connect(path, check_same_thread=False)
-
-        if not exists:
-            schema_path = os.path.join(os.path.dirname(__file__), "persistent-db.sql")
-            with open(schema_path) as schema:
-                db.executescript(schema.read())
-                db.commit()
-
-        super().__init__(db)
-
-    def find_or_add_conf(self, conf: Configuration2) -> int:
-        """Finds the conf in the db and returns the configuration id."""
-        conf_dict = conf.to_dict()
-        conf_dict["weights"] = conf.model.weights
-
-        cur = self._db.cursor()
-        cur.execute(
-            """
-            SELECT id FROM conf
-            WHERE spec = :spec
-            AND lr = :lr
-            AND length = :length
-            AND batch = :batch
-            AND steps = :steps
-            """,
-            conf_dict,
-        )
-        rows = cur.fetchall()
-        assert len(rows) <= 1
-        if rows:
-            return rows[0][0]
-        else:
-            cur = self._db.cursor()
-            cur.execute(
-                """
-                INSERT INTO conf (spec, weights, lr, length, batch, steps)
-                VALUES (:spec, :weights, :lr, :length, :batch, :steps)
-                """,
-                conf_dict,
-            )
-            return cur.lastrowid
-
-    def _add_run_execute(self, run_dict: dict, commit: bool):
-        with latency.timer("ResultDB.add_run-execute"):
-            self._db.execute(
-                """
-                INSERT INTO run(conf_id, system, train_time, timestamp, loss, step_loss,
-                                loss_model_v, loss_model)
-                VALUES (:conf_id, :system, :train_time, :timestamp, :loss, :step_loss,
-                        :loss_model_v, :loss_model)
-                """,
-                run_dict,
-            )
-        if commit:
-            with latency.timer("ResultDB.add_run-commit"):
-                self._db.commit()
-
-
-class ResultDBPostgres(ResultDB):
-    def __init__(self, url: str):
-        url = urlparse(url)
-
-        import psycopg2
-
-        logging.info(f"Connecting to results DB {url.hostname}")
-        conn = psycopg2.connect(
-            user=url.username,
-            password=url.password,
-            host=url.hostname,
-        )
-
-        super().__init__(conn)
-
-    def find_or_add_conf(self, conf: Configuration2) -> int:
-        """Finds the conf in the db and returns the configuration id."""
-        conf_dict = conf.to_dict()
-        conf_dict["weights"] = conf.model.weights
-
-        with self._db.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id FROM conf
-                WHERE spec = %(spec)s
-                AND lr = %(lr)s
-                AND length = %(length)s
-                AND batch = %(batch)s
-                AND steps = %(steps)s
-                """,
-                conf_dict,
-            )
-            rows = cur.fetchall()
-        assert len(rows) <= 1
-        if rows:
-            return rows[0][0]
-        else:
-            with self._db.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO conf (spec, weights, lr, length, batch, steps)
-                    VALUES (%(spec)s, %(weights)s, %(lr)s, %(length)s, %(batch)s, %(steps)s)
-                    RETURNING id
-                    """,
-                    conf_dict,
-                )
-                return cur.fetchone()[0]
-
-    def _add_run_execute(self, run_dict: dict, commit: bool):
-        with latency.timer("ResultDB.add_run-execute"):
-            with self._db.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO run(conf_id, system, train_time, timestamp, loss, step_loss,
-                                    loss_model_v, loss_model)
-                    VALUES (%(conf_id)s, %(system)s, %(train_time)s, %(timestamp)s,
-                            %(loss)s, %(step_loss)s, %(loss_model_v)s, %(loss_model)s)
-                    """,
-                    run_dict,
-                )
-        if commit:
-            with latency.timer("ResultDB.add_run-commit"):
-                self._db.commit()
 
 
 def importdb(args: argparse.Namespace):
@@ -329,7 +380,7 @@ def importdb(args: argparse.Namespace):
             print(run.system, conf, run.loss, timestamp)
 
             db_into.add_run(conf, run, timestamp=timestamp, commit=False)
-            
+
     print("Present:", present)
     print("New:", new)
 

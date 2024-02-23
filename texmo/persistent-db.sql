@@ -1,4 +1,4 @@
-PRAGMA journal_mode=WAL;
+-- PRAGMA journal_mode=WAL;
 
 CREATE TABLE conf (
     id INTEGER NOT NULL PRIMARY KEY, -- for SQLite
@@ -15,10 +15,28 @@ CREATE TABLE conf (
     batch INTEGER NOT NULL,
     steps INTEGER NOT NULL,
 
+    -- Scores based on the runs.
+    median_score REAL,
+    neighbor_score REAL,
+
+    -- Set to true if all the neighbor configurations are added to the DB.
+    has_neighbors BOOLEAN NOT NULL DEFAULT FALSE,
+
     UNIQUE (spec, lr, length, batch, steps)
 );
 
 CREATE INDEX conf_spec ON conf(spec);
+
+CREATE TABLE neighbor (
+    conf1_id INTEGER NOT NULL,
+    conf2_id INTEGER NOT NULL,
+
+    UNIQUE (conf1_id, conf2_id),
+    FOREIGN KEY (conf1_id) REFERENCES conf(id),
+    FOREIGN KEY (conf2_id) REFERENCES conf(id),
+);
+
+CREATE INDEX neighbor_conf1_id ON neighbor(conf1_id);
 
 CREATE TABLE run (
     id INTEGER NOT NULL PRIMARY KEY, -- for SQLite
@@ -62,3 +80,10 @@ CREATE TABLE run (
 );
 
 CREATE INDEX run_conf_id ON run(conf_id);
+
+CREATE TABLE system_time (
+    conf_id INTEGER NOT NULL,
+    system TEXT NOT NULL,
+    median_time REAL NOT NULL,
+    UNIQUE (conf_id, system)
+);

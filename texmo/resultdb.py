@@ -68,19 +68,15 @@ class ResultDB(object):
                 neighbor_id = self._find_or_add_conf(
                     cur, neighbor, init_neighbors=False
                 )
-                cur.execute(
+                cur.executemany(
                     """
-                    INSERT OR IGNORE INTO neighbors (conf_id, neighbor_id)
-                    VALUES (:conf_id, :neighbor_id)
+                    INSERT OR IGNORE INTO neighbor (conf1_id, conf2_id)
+                    VALUES (:conf1_id, :conf2_id)
                     """,
-                    {"conf_id": conf_id, "neighbor_id": neighbor_id},
-                )
-                cur.execute(
-                    """
-                    INSERT OR IGNORE INTO neighbors (conf_id, neighbor_id)
-                    VALUES (:neighbor_id, :conf_id)
-                    """,
-                    {"conf_id": conf_id, "neighbor_id": neighbor_id},
+                    [
+                        {"conf1_id": conf_id, "conf2_id": neighbor_id},
+                        {"conf1_id": neighbor_id, "conf2_id": conf_id},
+                    ]
                 )
             cur.execute(
                 """
@@ -112,7 +108,7 @@ class ResultDB(object):
         if rows:
             conf_id, has_neighbors = rows[0]
             if init_neighbors and not has_neighbors:
-                self._init_neighbors(conf, conf_id)
+                self._init_neighbors(cur, conf, conf_id)
             return conf_id
         else:
             cur = self._db.cursor()
@@ -186,10 +182,10 @@ class ResultDB(object):
                 median_time = None
             cur.execute(
                 """
-                INSERT OR REPLACE system_time(conf_id, system, median_time)
-                VALUES (:conf_id, :system, :median_time)
+                INSERT OR REPLACE INTO conf_time(conf_id, sys, median_time)
+                VALUES (:conf_id, :sys, :median_time)
                 """,
-                {"median_time": median_time, "conf_id": conf_id, "system": system},
+                {"median_time": median_time, "conf_id": conf_id, "sys": system},
             )
 
     def _update_scores(self, cur: sqlite3.Cursor, conf_id: int, system: str):
@@ -208,8 +204,9 @@ class ResultDB(object):
         self,
         conf: Configuration2,
         run: Run,
-        conf_id: Optional[int] = None,
-        timestamp: Optional[datetime] = None,
+        conf_id: Optional[int],
+        timestamp: Optional[datetime],
+        init_neighbors: bool,
     ):
         assert run.checkpoint is None
 
@@ -217,7 +214,7 @@ class ResultDB(object):
         cur.execute("BEGIN TRANSACTION")
 
         if conf_id is None:
-            conf_id = self._find_or_add_conf(cur, conf, init_neighbors=True)
+            conf_id = self._find_or_add_conf(cur, conf, init_neighbors)
 
         if run.loss_trend is None:
             loss_model_v = None
@@ -249,9 +246,10 @@ class ResultDB(object):
         run: Run,
         conf_id: Optional[int] = None,
         timestamp: Optional[datetime] = None,
+        init_neighbors: bool = True,
     ):
         with latency.timer("ResultDB.add_run"):
-            self._add_run(conf, run, conf_id, timestamp)
+            self._add_run(conf, run, conf_id, timestamp, init_neighbors)
 
     def total_runs(self) -> int:
         cur = self._db.execute("SELECT COUNT(*) AS count FROM run")
@@ -356,4 +354,3 @@ class ResultDB(object):
             {"conf_id": conf_id, "timestamp": timestamp, "system": run.system},
         )
         return cur.fetchone() is not None
-

@@ -2,18 +2,26 @@ import logging
 from unittest import TestCase
 
 from texmo.configuration2 import Configuration2
-from texmo.dataset import build_fake_dataset
+from texmo.dataset import DataSet
 from texmo.manager import Manager
 from texmo.model3 import build_model
 
 logging.disable(level=logging.ERROR)
 
 
+def build_fake_dataset():
+    s = b"a"
+    for c in range(ord("b"), ord("m")):
+        s = s + bytes([c]) + s
+    return DataSet(data=s)
+
+
+
 class ManagerTest(TestCase):
     def test_train(self):
         dataset = build_fake_dataset()
         conf = Configuration2(
-            build_model("bytes-emb.16|gru.32"),
+            build_model("tokens.256.raw.b8-emb.16|gru.32"),
             lr=0.03125,
             length=32,
             batch=8,

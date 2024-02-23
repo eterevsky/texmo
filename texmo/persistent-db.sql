@@ -33,7 +33,7 @@ CREATE TABLE neighbor (
 
     UNIQUE (conf1_id, conf2_id),
     FOREIGN KEY (conf1_id) REFERENCES conf(id),
-    FOREIGN KEY (conf2_id) REFERENCES conf(id),
+    FOREIGN KEY (conf2_id) REFERENCES conf(id)
 );
 
 CREATE INDEX neighbor_conf1_id ON neighbor(conf1_id);
@@ -81,9 +81,10 @@ CREATE TABLE run (
 
 CREATE INDEX run_conf_id ON run(conf_id);
 
-CREATE TABLE system_time (
+CREATE TABLE conf_time (
     conf_id INTEGER NOT NULL,
-    system TEXT NOT NULL,
+    sys TEXT NOT NULL,
     median_time REAL NOT NULL,
-    UNIQUE (conf_id, system)
+    UNIQUE (conf_id, sys),
+    FOREIGN KEY (conf_id) REFERENCES conf(id)
 );

@@ -8,17 +8,27 @@ logging.disable(level=logging.ERROR)
 
 
 def tokenize(string, tokens, fallback_bits=4):
-    stats = {
-        "initial_size": sum(len(t) for t in tokens) + 256,
-        "total_tokens": len(tokens),
-        "total_literals": 256,
-    }
-    token_set = TokenSet.build(
-        "fallback_bits", fallback_bits, "raw", tokens, stats
-    )
-    tokenizer = Tokenizer(token_set)
+    tokenset = TokenSet(f"bits{fallback_bits}", "raw", {})
+
+    for i in range(2**fallback_bits):
+        tokenset.add_ext_token(i)
+
+    for token in tokens:
+        tokenset.add_token(token)
+
+    for c in range(256):
+        s = chr(c).encode("utf-8")
+        if s in tokens:
+            continue
+        digits = []
+        for _ in range(8 // fallback_bits):
+            digits.append(c & (2**fallback_bits - 1))
+            c >>= fallback_bits
+        tokenset.add_sequence(s, [tokenset.tokens[d] for d in reversed(digits)])
+
+    tokenizer = Tokenizer(tokenset)
     out = tokenizer.tokenize(string)
-    result = [t.string or t.value for t in out]
+    result = [tokenset.tokens[t].value or tokenset.tokens[t].string or 0 for t in out]
     return result
 
 

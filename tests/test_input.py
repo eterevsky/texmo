@@ -15,7 +15,7 @@ set_tokens_dir(os.path.join(os.path.dirname(__file__), "../tokens"))
 
 class InputTest(TestCase):
     def test_parse1(self):
-        input = Input.from_spec("tokens.256-pos.16-emb.128")
+        input = Input.from_spec("tokens.256.cw.bh-pos.16-emb.128")
         self.assertEqual(input.ntokens, 256)
         self.assertFalse(input._emb_norm)
         self.assertEqual(input._emb_size, 128)
@@ -24,7 +24,7 @@ class InputTest(TestCase):
         self.assertEqual(input.output_size, 128)
 
     def test_parse2(self):
-        input = Input.from_spec("tokens.256-emb.128.norm")
+        input = Input.from_spec("tokens.256.cw.bh-emb.128.norm")
         self.assertEqual(input.ntokens, 256)
         self.assertTrue(input._emb_norm)
         self.assertEqual(input._emb_size, 128)
@@ -33,7 +33,7 @@ class InputTest(TestCase):
         self.assertEqual(input.output_size, 128)
 
     def test_parse3(self):
-        input = Input.from_spec("bytes-onehot")
+        input = Input.from_spec("tokens.256.raw.b8")
         self.assertEqual(input.ntokens, 256)
         self.assertFalse(input._emb_norm)
         self.assertIs(input._emb_size, None)
@@ -42,7 +42,7 @@ class InputTest(TestCase):
         self.assertEqual(input.output_size, 256)
 
     def test_parse4(self):
-        input = Input.from_spec("bytes-pos.16-onehot")
+        input = Input.from_spec("tokens.256.raw.b8-pos.16")
         self.assertEqual(input.ntokens, 256)
         self.assertFalse(input._emb_norm)
         self.assertIs(input._emb_size, None)
@@ -51,7 +51,7 @@ class InputTest(TestCase):
         self.assertEqual(input.output_size, 256 + 16)
 
     def test_onehot_step(self):
-        input = Input.from_spec("tokens.4-onehot")
+        input = Input.from_spec("tokens.4.cw.bh")
         self.assertEqual(input.weights, 0)
         rng = Rng()
         self.assertFalse(input.init_weights(rng))
@@ -60,7 +60,7 @@ class InputTest(TestCase):
         self.assertEqual(list(out), [0, 0, 1, 0])
 
     def test_onehot_forward(self):
-        input = Input.from_spec("tokens.4-onehot")
+        input = Input.from_spec("tokens.4.cw.bh")
 
         out = input.forward_batch(
             weights={}, input=jnp.array([[2, 3], [1, 0]]), padding_len=1
@@ -74,7 +74,7 @@ class InputTest(TestCase):
         )
 
     def test_pos_onehot_step(self):
-        input = Input.from_spec("tokens.4-pos.2-onehot")
+        input = Input.from_spec("tokens.4.cw.bh-pos.2")
         self.assertEqual(input.weights, 0)
         rng = Rng()
         self.assertFalse(input.init_weights(rng))
@@ -86,7 +86,7 @@ class InputTest(TestCase):
         self.assertEqual(new_state["position"], 1)
 
     def test_pos_onehot_forward(self):
-        input = Input.from_spec("tokens.4-pos.2-onehot")
+        input = Input.from_spec("tokens.4.cw.bh-pos.2")
 
         out = input.forward_batch(
             weights={}, input=jnp.array([[2, 3], [1, 0]]), padding_len=1
@@ -108,7 +108,7 @@ class InputTest(TestCase):
         )
 
     def test_emb_step(self):
-        input = Input.from_spec("tokens.4-pos.2-emb.2")
+        input = Input.from_spec("tokens.4.cw.bh-pos.2-emb.2")
         rng = Rng()
         weights = input.init_weights(rng)
         self.assertEqual(weights["tokens"].shape, (5, 2))
@@ -127,7 +127,7 @@ class InputTest(TestCase):
         self.assertEqual(new_state["position"], 1)
 
     def test_emb_forward(self):
-        input = Input.from_spec("tokens.4-pos.2-emb.2")
+        input = Input.from_spec("tokens.4.cw.bh-pos.2-emb.2")
         out = input.forward_batch(
             weights={
                 "tokens": np.array([[1, 0], [2, 0], [3, 0], [4, 0], [5, 0]]),

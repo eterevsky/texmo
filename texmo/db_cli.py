@@ -75,4 +75,4 @@ def updatedb_init_args(parser: argparse.ArgumentParser, config):
         help="path to the database that will be imported",
     )
 
-    parser.set_defaults(func=importdb)
+    parser.set_defaults(func=updatedb)

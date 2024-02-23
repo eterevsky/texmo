@@ -7,7 +7,7 @@ import numpy as np
 from texmo.configuration2 import Configuration2
 from texmo.model3 import build_model
 from texmo.predict import build_loss_trend
-from texmo.resultdb import ResultDBSQLite
+from texmo.resultdb import ResultDB
 from texmo.run import Run
 from texmo.tokens import set_tokens_dir
 
@@ -15,7 +15,7 @@ logging.disable(level=logging.ERROR)
 set_tokens_dir(os.path.join(os.path.dirname(__file__), "../tokens"))
 
 
-def create_conf_run(spec="tokens.256-emb.64|gru.64", batch=256, loss=3.123):
+def create_conf_run(spec="tokens.256.cw.bh-emb.64|gru.64", batch=256, loss=3.123):
     model = build_model(spec)
     conf = Configuration2(
         model=model,
@@ -31,7 +31,7 @@ def create_conf_run(spec="tokens.256-emb.64|gru.64", batch=256, loss=3.123):
 
 class ResultDBTest(TestCase):
     def setUp(self):
-        self.db = ResultDBSQLite()
+        self.db = ResultDB()
 
     def test_create(self):
         cur = self.db._db.execute("SELECT * FROM conf")
@@ -40,8 +40,8 @@ class ResultDBTest(TestCase):
     def test_add_record_same_spec(self):
         conf1, run1 = create_conf_run()
         conf2, run2 = create_conf_run(loss=3.321)
-        self.db.add_run(conf1, run1)
-        self.db.add_run(conf2, run2)
+        self.db.add_run(conf1, run1, init_neighbors=False)
+        self.db.add_run(conf2, run2, init_neighbors=False)
 
         cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
         self.assertEqual(cur.fetchall()[0][0], 1)
@@ -51,9 +51,9 @@ class ResultDBTest(TestCase):
 
     def test_add_record_two_specs(self):
         conf1, run1 = create_conf_run()
-        self.db.add_run(conf1, run1)
-        conf2, run2 = create_conf_run(spec="tokens.256-emb.64|lstm.64", loss=3.321)
-        self.db.add_run(conf2, run2)
+        self.db.add_run(conf1, run1, init_neighbors=False)
+        conf2, run2 = create_conf_run(spec="tokens.256.cw.bh-emb.64|lstm.64", loss=3.321)
+        self.db.add_run(conf2, run2, init_neighbors=False)
 
         cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
         self.assertEqual(cur.fetchall()[0][0], 2)
@@ -66,9 +66,9 @@ class ResultDBTest(TestCase):
         self.db.add_run(conf1, run1)
         conf2, run2 = create_conf_run(loss=2)
         self.db.add_run(conf2, run2)
-        conf3, run3 = create_conf_run(spec="tokens.256-emb.64|lstm.64", loss=3)
+        conf3, run3 = create_conf_run(spec="tokens.256.cw.bh-emb.64|lstm.64", loss=3)
         self.db.add_run(conf3, run3)
-        conf4, run4 = create_conf_run(spec="tokens.256-emb.64|lstm.64", loss=4)
+        conf4, run4 = create_conf_run(spec="tokens.256.cw.bh-emb.64|lstm.64", loss=4)
         self.db.add_run(conf4, run4)
 
         conf_runs = self.db.get_confs_runs()

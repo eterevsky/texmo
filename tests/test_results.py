@@ -6,7 +6,7 @@ import numpy as np
 from texmo.common import INF
 from texmo.configuration2 import Configuration2, Template, conf_neighbors
 from texmo.model3 import build_model
-from texmo.resultdb import ResultDBSQLite
+from texmo.resultdb import ResultDB
 from texmo.results import ResultSet
 from texmo.run import LossTrendBase, Run
 from texmo.tokens import set_tokens_dir
@@ -42,7 +42,7 @@ class ResultSetTest(TestCase):
 
     def test_add_run(self):
         conf = Configuration2(
-            build_model("tokens.2|"), lr=0.125, length=32, batch=1, steps=64
+            build_model("tokens.2.raw.b1|"), lr=0.125, length=32, batch=1, steps=64
         )
         run = Run(
             system="test", loss=1.234, train_time=12.345, loss_trend=FakeLossTrend()
@@ -74,7 +74,7 @@ class ResultSetTest(TestCase):
 
     def test_add_run_other_system(self):
         conf = Configuration2(
-            build_model("tokens.2|"), lr=0.125, length=32, batch=1, steps=64
+            build_model("tokens.2.raw.b1|"), lr=0.125, length=32, batch=1, steps=64
         )
         run = Run(system="test", loss=1, train_time=10, loss_trend=FakeLossTrend())
         self._results.add_run(conf, run)
@@ -90,7 +90,7 @@ class ResultSetTest(TestCase):
         self.assertEqual(conf_results.estimated_time(system="other"), 20)
 
         conf2 = Configuration2(
-            build_model("tokens.2|"), lr=0.25, length=32, batch=1, steps=64
+            build_model("tokens.2.raw.b1|"), lr=0.25, length=32, batch=1, steps=64
         )
         conf_results = self._results.get_conf_results(conf2)
         self.assertEqual(len(conf_results.runs), 0)
@@ -100,14 +100,14 @@ class ResultSetTest(TestCase):
         self.assertEqual(conf_results.median_time(system="test"), 10)
 
         conf3 = Configuration2(
-            build_model("tokens.2|"), lr=0.125, length=32, batch=1, steps=128
+            build_model("tokens.2.raw.b1|"), lr=0.125, length=32, batch=1, steps=128
         )
         conf_results = self._results.get_conf_results(conf3)
         self.assertEqual(conf_results.estimated_time(system="test"), 20)
         self.assertEqual(conf_results.median_time(system="test"), 20)
 
         conf4 = Configuration2(
-            build_model("tokens.4|"), lr=0.125, length=32, batch=1, steps=64
+            build_model("tokens.4.raw.b2|"), lr=0.125, length=32, batch=1, steps=64
         )
         conf_results = self._results.get_conf_results(conf4)
         self.assertEqual(conf_results.estimated_time(system="test"), 10)
@@ -115,8 +115,8 @@ class ResultSetTest(TestCase):
         self._results._check_consistency()
 
     def test_load_results_db(self):
-        db = ResultDBSQLite()
-        model = build_model("tokens.2|")
+        db = ResultDB()
+        model = build_model("tokens.2.raw.b1|")
         conf = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=64)
         conf_mod = Configuration2(model=model, lr=0.125, length=32, batch=2, steps=64)
         loss_trend = FakeLossTrend()
@@ -169,8 +169,8 @@ class ResultSetTest(TestCase):
         self.assertEqual(len(conf_runs), 5)
 
     def test_median_time(self):
-        db = ResultDBSQLite()
-        model = build_model("tokens.2|")
+        db = ResultDB()
+        model = build_model("tokens.2.raw.b1|")
         conf1 = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=64)
         conf2 = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=128)
         conf3 = Configuration2(model=model, lr=0.250, length=32, batch=1, steps=64)
@@ -198,9 +198,6 @@ class ResultSetTest(TestCase):
         results = ResultSet(result_db=db, template=self._template, system="sys2")
         results._check_consistency()
 
-        conf = results.get_untimed_conf()
-        self.assertTrue(conf in (conf1, conf2, conf3))
-
         new_run = Run(
             step_loss=None, loss=4, loss_trend=loss_trend, train_time=40, system="sys2"
         )
@@ -211,18 +208,16 @@ class ResultSetTest(TestCase):
         self.assertEqual(results.get_conf_results(conf2).median_time(system="sys2"), 80)
         self.assertEqual(results.get_conf_results(conf3).median_time(system="sys2"), 40)
 
-        self.assertIsNone(results.get_untimed_conf())
-
     def test_init_neighbors(self):
-        db = ResultDBSQLite()
-        model = build_model("tokens.2|")
+        db = ResultDB()
+        model = build_model("tokens.2.raw.b1|")
         conf1 = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=64)
         run1 = Run(
             step_loss=None, loss=1.5, loss_trend=FakeLossTrend(), train_time=10, system="sys1"
         )
         db.add_run(conf1, run1)
 
-        template = Template('tokens\.2\|', lr=0.125, length=(32, 64), batch=(1, INF), steps=64, max_weights=None)
+        template = Template('tokens\.2\.raw\.b1\|', lr=0.125, length=(32, 64), batch=(1, INF), steps=64, max_weights=None)
 
         results = ResultSet(result_db=db, template=template, system="sys1")
         results._check_consistency()

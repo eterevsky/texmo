@@ -14,7 +14,6 @@ class Token(object):
         self.id: int = id
         self.string: bytes | None = string
         self.value: int | None = value
-        self.suffix = None
 
     def __str__(self):
         if self.string:

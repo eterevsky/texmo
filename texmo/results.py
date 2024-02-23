@@ -34,7 +34,7 @@ class ResultSet(object):
         self._init_db()
 
         if result_db is None:
-            self._result_db = ResultDBSQLite()
+            self._result_db = ResultDB()
         else:
             self._result_db = result_db
             self._import_from_result_db()
@@ -107,7 +107,7 @@ class ResultSet(object):
                 assert id is None or conf_results.id == id
                 return conf_results
             if id is None:
-                id = self._result_db.find_or_add_conf(conf)
+                id = self._result_db.find_or_add_conf(conf, init_neighbors=False)
             conf_results = ConfResults(id, conf)
             self._conf_results_by_id[id] = conf_results
             self._conf_results_by_conf[conf] = conf_results

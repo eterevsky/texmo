@@ -10,8 +10,7 @@ from . import latency
 from .common import INF
 from .configuration2 import Configuration2, Template, conf_neighbors
 from .confresults import ConfResults
-from .record import TrainingRecord
-from .resultdb import ResultDB, ResultDBSQLite
+from .resultdb import ResultDB
 from .run import Run
 
 

@@ -4,7 +4,7 @@ import logging
 import numpy as np
 
 import config
-from texmo import sample_cli, latency, search_cli, train_cli, resultdb, report, server
+from texmo import sample_cli, latency, search_cli, train_cli, db_cli, report, server
 from texmo.tokens import small_tokens
 
 
@@ -71,7 +71,12 @@ def parse_args():
     parser_importdb = subparsers.add_parser(
         "importdb", help="Import configurations and runs from one databased into another"
     )
-    resultdb.importdb_init_args(parser_importdb, config)
+    db_cli.importdb_init_args(parser_importdb, config)
+
+    parser_updatedb = subparsers.add_parser(
+        "updatedb", help="Check databased consistency and update scores and neighbors"
+    )
+    db_cli.updatedb_init_args(parser_updatedb, config)
 
     parser_report = subparsers.add_parser(
         "report", help="Print a report of the results in the database"

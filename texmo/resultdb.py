@@ -1,4 +1,3 @@
-import argparse
 import logging
 import math
 from datetime import datetime
@@ -16,7 +15,6 @@ from .common import INF
 from .configuration2 import Configuration2
 from .model3 import build_model
 from .run import Run
-from .tokens import set_tokens_dir
 
 
 def _pack_ndarray(step_loss):
@@ -344,7 +342,7 @@ class ResultDB(object):
         self, conf: Configuration2, run: Run, timestamp: datetime
     ) -> bool:
         """Check if a run with the same configuration and timestamp exists."""
-        conf_id = self.find_or_add_conf(conf)
+        conf_id = self.find_or_add_conf(conf, init_neighbors=False)
         timestamp = timestamp.isoformat()
         cur = self._db.cursor()
         cur.execute(
@@ -359,54 +357,3 @@ class ResultDB(object):
         )
         return cur.fetchone() is not None
 
-
-def importdb(args: argparse.Namespace):
-    set_tokens_dir(args.tokens_dir)
-    db_from = ResultDB.from_args(args.db_from)
-    db_into = ResultDB.from_args(args.db_into)
-
-    present = {}
-    new = {}
-
-    for _, conf, run, timestamp in db_from.get_confs_runs(with_timestamps=True):
-        # print(run.system, conf, run.loss, timestamp)
-        assert timestamp is not None
-        assert run.system is not None
-        exists = db_into.check_run_exists(conf, run, timestamp)
-        if exists:
-            present[run.system] = present.get(run.system, 0) + 1
-        else:
-            new[run.system] = new.get(run.system, 0) + 1
-            print(run.system, conf, run.loss, timestamp)
-
-            db_into.add_run(conf, run, timestamp=timestamp, commit=False)
-
-    print("Present:", present)
-    print("New:", new)
-
-    db_into.commit()
-
-
-def importdb_init_args(parser: argparse.ArgumentParser, config):
-    parser.add_argument(
-        "--tokens-dir",
-        type=str,
-        default=config.TOKENS_DIR,
-        help="directory with token sets",
-    )
-
-    parser.add_argument(
-        "--db-from",
-        type=str,
-        required=True,
-        help="path to the database that will be imported",
-    )
-
-    parser.add_argument(
-        "--db-into",
-        type=str,
-        default=config.DB,
-        help="databased to which the results will be copied",
-    )
-
-    parser.set_defaults(func=importdb)

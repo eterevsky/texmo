@@ -26,6 +26,7 @@ CREATE TABLE conf (
 );
 
 CREATE INDEX conf_spec ON conf(spec);
+CREATE INDEX conf_median_score ON conf(median_score);
 
 CREATE TABLE neighbor (
     conf1_id INTEGER NOT NULL,

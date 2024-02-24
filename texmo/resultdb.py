@@ -48,12 +48,14 @@ class ConfScore(object):
         median_score: float | None,
         system: str,
         median_time: float | None,
+        num_runs: int,
     ):
         self.conf_id: int = conf_id
         self.conf: Configuration2 = conf
         self.median_score: float | None = median_score
         self.system: str = system
         self.median_time: float | None = median_time
+        self.num_runs: int = num_runs
 
 
 class ResultDB(object):
@@ -283,6 +285,20 @@ class ResultDB(object):
         with latency.timer("ResultDB.add_run"):
             self._add_run(conf, run, conf_id, timestamp, update_neighbors)
 
+    def _conf_score_from_row(self, row: dict, system: str) -> ConfScore:
+        model = build_model(row[1])
+        conf = Configuration2(
+            model, lr=row[2], length=row[3], batch=row[4], steps=row[5]
+        )
+        return ConfScore(
+            row[0],
+            conf,
+            median_score=row[6],
+            system=system,
+            median_time=row[7],
+            num_runs=row[8],
+        )
+
     def top_confs(
         self,
         system: str,
@@ -314,49 +330,62 @@ class ResultDB(object):
 
         cur = self._db.execute(
             f"""
-            SELECT conf.id, spec, lr, length, batch, steps, median_score,
+            SELECT conf.id AS conf_id, spec, lr, length, batch, steps, median_score,
                 (SELECT median_time FROM conf_time
-                 WHERE conf_id = conf.id AND system = :system) AS median_time
+                 WHERE conf_id = conf.id AND system = :system) AS median_time,
+                (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs
             FROM conf {where} {order} {limit}
             """,
             params,
         )
 
         for row in cur:
-            conf_id = row[0]
-            model = build_model(row[1])
+            yield self._conf_score_from_row(row, system)
+
+    def get_neighbors_by_runs(self, conf_id: int, system: str) -> Iterable[ConfScore]:
+        cur = self._db.cursor()
+        cur.execute("BEGIN TRANSACTION")
+        cur.execute(
+            "SELECT has_neighbors FROM conf WHERE id = :conf_id", {"conf_id": conf_id}
+        )
+        has_neighbors = cur.fetchone()[0]
+        if not has_neighbors:
+            cur.execute(
+                "SELECT spec, lr, length, batch, steps FROM conf WHERE id = :conf_id",
+                {"conf_id": conf_id},
+            )
+            row = cur.fetchone()
             conf = Configuration2(
-                model, lr=row[2], length=row[3], batch=row[4], steps=row[5]
+                build_model(row[0]),
+                lr=row[1],
+                length=row[2],
+                batch=row[3],
+                steps=row[4],
             )
-            yield ConfScore(
-                conf_id, conf, median_score=row[6], system=system, median_time=row[7]
-            )
+            self._init_neighbors(cur, conf, conf_id)
+        cur.execute(
+            f"""
+            SELECT conf.id AS conf_id, spec, lr, length, batch, steps, median_score,
+                (SELECT median_time FROM conf_time
+                 WHERE conf_id = conf.id AND system = :system) AS median_time,
+                (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs
+            FROM conf, neighbor
+            WHERE neighbor.conf1_id = :conf_id
+              AND neighbor.conf2_id = conf.id
+            ORDER BY num_runs ASC
+            """,
+            {"conf_id": conf_id, "system": system},
+        )
+        rows = cur.fetchall()
+        cur.execute("COMMIT")
+        for row in rows:
+            yield self._conf_score_from_row(row, system)
 
     def total_runs(self) -> int:
         cur = self._db.execute("SELECT COUNT(*) AS count FROM run")
         total = cur.fetchone()["count"]
         assert isinstance(total, int)
         return total
-
-    def get_top_by_median_all_systems(
-        self, max_weights: int, limit: int
-    ) -> Iterable[tuple[int, Configuration2, float]]:
-        cur = self._db.execute(
-            """
-            SELECT conf.id, spec, lr, length, batch, steps, median_score
-            FROM conf
-            WHERE weights <= :max_weights
-            ORDER BY median_score ASC
-            LIMIT :limit
-            """,
-            {"max_weights": max_weights, "limit": limit},
-        )
-
-        for row in cur:
-            conf_id = row[0]
-            model = build_model(row[1])
-            conf = Configuration2(model, row[2], row[3], row[4], row[5])
-            yield conf_id, conf, row[6]
 
     def get_confs_runs(
         self, with_timestamps: bool = False

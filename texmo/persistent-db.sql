@@ -83,8 +83,10 @@ CREATE INDEX run_conf_id ON run(conf_id);
 
 CREATE TABLE conf_time (
     conf_id INTEGER NOT NULL,
-    sys TEXT NOT NULL,
+    system TEXT NOT NULL,
     median_time REAL NOT NULL,
-    UNIQUE (conf_id, sys),
+    UNIQUE (conf_id, system),
     FOREIGN KEY (conf_id) REFERENCES conf(id)
 );
+
+CREATE INDEX conf_time_conf_id ON conf_time(conf_id);

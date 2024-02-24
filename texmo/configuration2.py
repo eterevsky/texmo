@@ -3,7 +3,7 @@ import re
 from typing import Optional, Iterable
 import math
 
-from .common import INF, itoa3
+from .common import INF, itoa3, itoa3_aligned
 from .model3 import Model3, build_model
 from . import latency
 from .tokens.tokenizer import Tokenizer
@@ -89,6 +89,13 @@ class Configuration2(object):
             + f"  B{itoa3(self.batch)}  LR{self.lr:.4f}{steps}"
         )
 
+    def aligned_str(self) -> str:
+        model = str(self.model)
+        return (
+            f"L{itoa3_aligned(self.length)} B{itoa3_aligned(self.batch)} "
+            + f"LR{self.lr:.4f}   S{itoa3_aligned(self.steps)}  {model} ({self.model.weights})"
+        )
+
     def is_valid(self) -> bool:
         return (
             self.model.is_valid()
@@ -101,7 +108,7 @@ class Configuration2(object):
     @property
     def tokenizer(self) -> Tokenizer:
         return self.model.input.tokenizer
-    
+
     @property
     def tokens_name(self) -> str:
         return self.tokenizer.tokenset.name
@@ -109,17 +116,17 @@ class Configuration2(object):
     def neighbors(self) -> Iterable["Configuration2"]:
         for model in self.model.neighbors():
             yield self.replace(model=model)
-        yield self.replace(lr=self.lr/2)
-        yield self.replace(lr=self.lr*2)
+        yield self.replace(lr=self.lr / 2)
+        yield self.replace(lr=self.lr * 2)
         if self.length > 1:
-            yield self.replace(length=self.length//2)
-        yield self.replace(length=self.length*2)
+            yield self.replace(length=self.length // 2)
+        yield self.replace(length=self.length * 2)
         if self.batch > 1:
-            yield self.replace(batch=self.batch//2)
-        yield self.replace(batch=self.batch*2)
+            yield self.replace(batch=self.batch // 2)
+        yield self.replace(batch=self.batch * 2)
         if self.steps > 2:
-            yield self.replace(steps=self.steps//2)
-        yield self.replace(steps=self.steps*2)
+            yield self.replace(steps=self.steps // 2)
+        yield self.replace(steps=self.steps * 2)
 
 
 class Bounds(object):
@@ -132,7 +139,7 @@ class Bounds(object):
                 self.min, self.max = limits
             except TypeError:
                 self.min = self.max = limits
-    
+
     def __str__(self) -> str:
         return f"({self.min}, {self.max})"
 
@@ -208,9 +215,11 @@ class Template(object):
         )
 
     def __str__(self):
-        return (f"Template({self.regex}, lr={self.lr}, length={self.length}, " +
-               f"batch={self.batch}, steps={self.steps}, max_weights={self.max_weights})")
-    
+        return (
+            f"Template({self.regex}, lr={self.lr}, length={self.length}, "
+            + f"batch={self.batch}, steps={self.steps}, max_weights={self.max_weights})"
+        )
+
     def update_regex(self, regex: Optional[str]):
         self.regex = re.compile(regex) if regex else None
 
@@ -227,7 +236,7 @@ class Template(object):
             and self.batch.match(conf.batch)
             and self.steps.match(conf.steps)
         )
-    
+
     def _conf_neighbors(self, conf: Configuration2) -> Iterable[Configuration2]:
         for model in conf.model.neighbors():
             if self.match_model(model):

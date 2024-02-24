@@ -1,12 +1,12 @@
 import logging
 import math
-from datetime import datetime
 import os
+import sqlite3
 from collections.abc import Iterable
+from datetime import datetime
+from statistics import StatisticsError, median
 from typing import Optional
 from urllib.parse import urlparse
-import sqlite3
-from statistics import median, StatisticsError
 
 import numpy as np
 
@@ -38,6 +38,22 @@ def _build_loss_trend(step_loss, model_version, params):
     from .predict import build_loss_trend
 
     return build_loss_trend(step_loss, model_version, params)
+
+
+class ConfScore(object):
+    def __init__(
+        self,
+        conf_id: int,
+        conf: Configuration2,
+        median_score: float | None,
+        system: str,
+        median_time: float | None,
+    ):
+        self.conf_id: int = conf_id
+        self.conf: Configuration2 = conf
+        self.median_score: float | None = median_score
+        self.system: str = system
+        self.median_time: float | None = median_time
 
 
 class ResultDB(object):
@@ -76,7 +92,7 @@ class ResultDB(object):
                     [
                         {"conf1_id": conf_id, "conf2_id": neighbor_id},
                         {"conf1_id": neighbor_id, "conf2_id": conf_id},
-                    ]
+                    ],
                 )
             cur.execute(
                 """
@@ -180,13 +196,14 @@ class ResultDB(object):
                 median_time = median(row[0] for row in cur)
             except StatisticsError:
                 median_time = None
-            cur.execute(
-                """
-                INSERT OR REPLACE INTO conf_time(conf_id, sys, median_time)
-                VALUES (:conf_id, :sys, :median_time)
-                """,
-                {"median_time": median_time, "conf_id": conf_id, "sys": system},
-            )
+            if median_time is not None:
+                cur.execute(
+                    """
+                    INSERT OR REPLACE INTO conf_time(conf_id, system, median_time)
+                    VALUES (:conf_id, :system, :median_time)
+                    """,
+                    {"median_time": median_time, "conf_id": conf_id, "system": system},
+                )
 
     def _update_scores(self, cur: sqlite3.Cursor, conf_id: int, system: str):
         # cur.execute(
@@ -200,13 +217,28 @@ class ResultDB(object):
         # for neighbor_id in neighbors:
         #     self._update_neighbor_score(cur, neighbor_id)
 
+    def update_all_scores(self):
+        with latency.timer("ResultDB.update_scores"):
+            cur = self._db.cursor()
+
+            cur.execute(
+                "SELECT DISTINCT conf.id, system FROM conf, run WHERE conf.id = run.conf_id"
+            )
+
+            for row in cur.fetchall():
+                conf_id = row[0]
+                system = row[1]
+                logging.info(f"{conf_id} {system}")
+                self._update_scores(cur, conf_id, system)
+            self.commit()
+
     def _add_run(
         self,
         conf: Configuration2,
         run: Run,
         conf_id: Optional[int],
         timestamp: Optional[datetime],
-        init_neighbors: bool,
+        update_neighbors: bool,
     ):
         assert run.checkpoint is None
 
@@ -214,7 +246,7 @@ class ResultDB(object):
         cur.execute("BEGIN TRANSACTION")
 
         if conf_id is None:
-            conf_id = self._find_or_add_conf(cur, conf, init_neighbors)
+            conf_id = self._find_or_add_conf(cur, conf, update_neighbors)
 
         if run.loss_trend is None:
             loss_model_v = None
@@ -246,10 +278,59 @@ class ResultDB(object):
         run: Run,
         conf_id: Optional[int] = None,
         timestamp: Optional[datetime] = None,
-        init_neighbors: bool = True,
+        update_neighbors: bool = True,
     ):
         with latency.timer("ResultDB.add_run"):
-            self._add_run(conf, run, conf_id, timestamp, init_neighbors)
+            self._add_run(conf, run, conf_id, timestamp, update_neighbors)
+
+    def top_confs(
+        self,
+        system: str,
+        max_weights: float | None = None,
+        max_time: float | None = None,
+        limit: int = None,
+        sorted: bool = True,
+    ) -> Iterable[ConfScore]:
+        conditions = ["median_score IS NOT NULL"]
+        params = {"system": system}
+
+        if max_weights is not None:
+            conditions.append("weights <= :max_weight")
+            params["max_weight"] = max_weights
+
+        if max_time is not None:
+            conditions.append("median_time <= :max_time")
+            params["max_time"] = max_time
+
+        where = "WHERE " + " AND ".join(conditions)
+
+        if limit is None:
+            limit = ""
+        else:
+            params["limit"] = limit
+            limit = "LIMIT :limit"
+
+        order = "ORDER BY median_score ASC" if sorted else ""
+
+        cur = self._db.execute(
+            f"""
+            SELECT conf.id, spec, lr, length, batch, steps, median_score,
+                (SELECT median_time FROM conf_time
+                 WHERE conf_id = conf.id AND system = :system) AS median_time
+            FROM conf {where} {order} {limit}
+            """,
+            params,
+        )
+
+        for row in cur:
+            conf_id = row[0]
+            model = build_model(row[1])
+            conf = Configuration2(
+                model, lr=row[2], length=row[3], batch=row[4], steps=row[5]
+            )
+            yield ConfScore(
+                conf_id, conf, median_score=row[6], system=system, median_time=row[7]
+            )
 
     def total_runs(self) -> int:
         cur = self._db.execute("SELECT COUNT(*) AS count FROM run")

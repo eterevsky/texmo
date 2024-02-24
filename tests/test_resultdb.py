@@ -40,8 +40,8 @@ class ResultDBTest(TestCase):
     def test_add_record_same_spec(self):
         conf1, run1 = create_conf_run()
         conf2, run2 = create_conf_run(loss=3.321)
-        self.db.add_run(conf1, run1, init_neighbors=False)
-        self.db.add_run(conf2, run2, init_neighbors=False)
+        self.db.add_run(conf1, run1, update_neighbors=False)
+        self.db.add_run(conf2, run2, update_neighbors=False)
 
         cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
         self.assertEqual(cur.fetchall()[0][0], 1)
@@ -51,9 +51,9 @@ class ResultDBTest(TestCase):
 
     def test_add_record_two_specs(self):
         conf1, run1 = create_conf_run()
-        self.db.add_run(conf1, run1, init_neighbors=False)
+        self.db.add_run(conf1, run1, update_neighbors=False)
         conf2, run2 = create_conf_run(spec="tokens.256.cw.bh-emb.64|lstm.64", loss=3.321)
-        self.db.add_run(conf2, run2, init_neighbors=False)
+        self.db.add_run(conf2, run2, update_neighbors=False)
 
         cur = self.db._db.execute("SELECT COUNT(*) AS count FROM conf")
         self.assertEqual(cur.fetchall()[0][0], 2)

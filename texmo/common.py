@@ -74,6 +74,16 @@ def itoa3(x: int) -> str:
         return f"{x / base:.0f}{suffix}"
 
 
+def itoa3_aligned(x: int) -> str:
+    """Convert float to a string with 3 significant digits, as a string of length 5."""
+    s = itoa3(x)
+    if s[-1].isdigit():
+        s += " "
+    while len(s) < 5:
+        s = " " + s
+    return s
+
+
 def ttoa3(t: float) -> str:
     """Convert time in seconds to a string with 3 significant digits."""
     if t < 1E-6: return f"{t * 1E9:.0f} ns"

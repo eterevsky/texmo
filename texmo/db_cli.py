@@ -59,6 +59,7 @@ def importdb_init_args(parser: argparse.ArgumentParser, config):
 def updatedb(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
     db = ResultDB.from_args(args.db)
+    db.update_all_scores()
 
 
 def updatedb_init_args(parser: argparse.ArgumentParser, config):

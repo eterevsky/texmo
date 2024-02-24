@@ -47,7 +47,7 @@ class Search(object):
         assert isinstance(run, Run)
         assert self._template.match(conf)
 
-        self._db.add_run(conf, run)
+        self._db.add_run(conf, run, update_neighbors=True)
 
     def _select_time(self) -> float:
         tmin, tmax = self._train_time
@@ -58,100 +58,50 @@ class Search(object):
 
     def _select_max_weights(self, t):
         with latency.timer("Search._select_max_weights"):
-            top_conf_results = self._result_set.top_conf(t)
-            if top_conf_results is None:
+            try:
+                top_conf = next(self._db.top_confs(max_time=t, system=self._system, limit=1))
+            except StopIteration:
                 return self._template.max_weights.min
-            maxw = 8 * top_conf_results.conf.model.weights
+            maxw = 8 * top_conf.conf.model.weights
             if self._template.max_weights.min >= maxw:
                 return self._template.max_weights.min
             if self._template.max_weights.max <= maxw:
                 maxw = self._template.max_weights.max
             l = random.uniform(log2(self._template.max_weights.min), log2(maxw))
-            return int(2**l)
-
-    def _select_by_neighbors_score(self, t: float, max_weights: int):
-        with latency.timer("Search._select_by_neighbors_score"):
-            confs = [(None, 0)]
-            for conf_results in self._result_set.top_by_neighbors_score(t, max_weights):
-                i = len(confs)
-                nruns = min(len(conf_results.runs), conf_results.ntimes(self._system))
-                confs.append((conf_results.conf, nruns))
-                expected_runs = 1
-                while i > 0:
-                    if confs[i][1] < expected_runs:
-                        assert self._template.match(confs[i][0])
-                        logging.info(f"Selecting conf top #{i-1} by neighbors score.")
-                        return confs[i][0]
-                    i //= 3
-                    expected_runs += 1
-        return None
-
-    # def _select_by_pred_score(self, t: int, max_weights: int):
-    #     with latency.timer("Search._select_by_pred_score"):
-    #         confs = [(None, 0)]
-    #         for conf_results in self._result_set.top_pred_confs(t, max_weights):
-    #             i = len(confs)
-    #             confs.append((conf_results.conf, len(conf_results.runs)))
-    #             expected_runs = 1
-    #             while i > 0:
-    #                 if confs[i][1] < expected_runs:
-    #                     assert self._template.match_conf(confs[i][0])
-    #                     return i - 1, confs[i][0]
-    #                 i //= 3
-    #                 expected_runs += 1
-    #     return None, None
-
-    def print_top_confs(self, t, max_weights):
-        with latency.timer("Search.print_top_confs"):
-            report = [f"T ≤ {ttoa3(t)}  W ≤ {itoa3(max_weights)}  by neighbors score"]
-
-            for conf_results in self._result_set.top_by_neighbors_score(t, max_weights, limit=20):
-                num_runs = len(conf_results.runs)
-                if conf_results.median_score:
-                    score = f" {conf_results.median_score:.4f} ({num_runs})"
-                    if num_runs < 10:
-                        score += " "
-                elif conf_results.neighbors_score:
-                    score = f"({conf_results.neighbors_score:.4f})    "
-                conf = conf_results.conf
-                report.append(
-                    f"{score}  LEN{conf.length:4}  B{conf.batch:4}  LR{conf.lr:7.4f}  S{conf.steps:4}  {conf.model}"
-                )
-            report.append("")
-            logging.info("\n".join(report))
+            return round(2**l)
 
     def print_top_median(self, t, max_weights):
-        with latency.timer("Search.print_top_median"):
-            report = [f"T ≤ {ttoa3(t)}  W ≤ {itoa3(max_weights)}  by median score"]
+        raise NotImplementedError
+        # with latency.timer("Search.print_top_median"):
+        #     report = [f"T ≤ {ttoa3(t)}  W ≤ {itoa3(max_weights)}  by median score"]
 
-            for conf_results in self._result_set.top_confs(max_time=t, max_weights=max_weights, limit=20):
-                num_runs = len(conf_results.runs)
-                assert conf_results.median_score is not None
-                score = f" {conf_results.median_score:.4f} ({num_runs})"
-                if num_runs < 10:
-                    score += " "
-                conf = conf_results.conf
-                report.append(
-                    f"{score}  LEN{conf.length:4}  B{conf.batch:4}  LR{conf.lr:7.4f}  S{conf.steps:4}  {conf.model}"
-                )
-            report.append("")
-            logging.info("\n".join(report))
+        #     for res in self._db.top_confs_with_time(max_time=t, max_weights=max_weights, system=self._system, limit=20):
+        #         num_runs = res["num_runs"]
+        #         median_score = res["median_score"]
+        #         assert median_score is not None
+        #         score = f" {median_score:.4f} ({num_runs})"
+        #         if num_runs < 10:
+        #             score += " "
+        #         conf = res["conf"]
+        #         report.append(
+        #             f"{score}  LEN{conf.length:4}  B{conf.batch:4}  LR{conf.lr:7.4f}  S{conf.steps:4}  {conf.model}"
+        #         )
+        #     report.append("")
+        #     logging.info("\n".join(report))
 
     def _select_untimed(self, max_weights: int):
-        confs = list(self._result_set.top_confs_any_t(max_weights, 10))
-        if all(c.median_time(self._system) is not None for c in confs):
-            return None
-        print(f"Top confs W ≤ {itoa3(max_weights)}:")
-        for c in confs:
-            t = c.median_time(self._system)
-            if t is not None:
-                t = ttoa3(t)
-            else:
-                t = "?     "
-            print(f"{c.median_score:.4f}  {t}  {c.conf}")
-        for c in confs:
-            if c.median_time(self._system) is None:
-                return c.conf
+        with latency.timer("Search._select_untimed"):
+            confs = list(self._db.top_confs(max_weights=max_weights, system=self._system, limit=10))
+            if all(c.median_time is not None for c in confs):
+                return None
+            report_lines = [f"Top confs W ≤ {itoa3(max_weights)}:"]
+            for c in confs:
+                t = "?       " if c.median_time is None else "{:8}".format(ttoa3(c.median_time))
+                report_lines.append(f"{c.median_score:.4f}  {t}  {c.conf.aligned_str()}")
+            logging.info("\n".join(report_lines))
+            for c in confs:
+                if c.median_time is None:
+                    return c.conf
 
     def _select_median_neighbor(self, t: float, max_weights: int) -> Optional[Configuration2]:
         with latency.timer("Search._select_median_neighbor"):
@@ -185,41 +135,13 @@ class Search(object):
 
             conf = self._select_untimed(max_weights)
             if conf is not None:
-                logging.info(f"Selecting untimed conf")
+                logging.info(f"Selecting untimed conf: {conf}")
                 return conf
 
-            if random.choice([True, False]):
-                self.print_top_median(t, max_weights)
-                conf = self._select_median_neighbor(t, max_weights)
-                if conf is not None:
-                    return conf
-
-            self.print_top_confs(t, max_weights)
-
-            conf = self._select_by_neighbors_score(t, max_weights)
-
-            if conf is not None:
-                return conf
-
-            # ipred, pred_conf = None, None
-            # ipred, pred_conf = self._select_by_pred_score(t, max_weights)
-            # ineighbor, neighbor_conf, parent_conf = self._select_neighbor(
-            #     t, max_weights
-            # )
-
-            # if ipred is not None and (ineighbor is None or ineighbor >= ipred):
-            #     logging.info(f"Selecting conf top #{ipred} by predicted score.")
-            #     return pred_conf, None
-
-            # if ineighbor is not None and (ipred is None or random.randrange(2)):
-            #     c = conf_to_string(parent_conf)
-            #     logging.info(
-            #         f"Selecting a neighbor or conf #{ineighbor} by median score: {c}"
-            #     )
-            #     return neighbor_conf, None
-            # elif ipred is not None:
-            #     logging.info(f"Selecting conf top #{ipred} by predicted score.")
-            #     return pred_conf, None
+            # self.print_top_median(t, max_weights)
+            # conf = self._select_median_neighbor(t, max_weights)
+            # if conf is not None:
+            #     return conf
 
             logging.info("Selecting default configuration")
             return self._init_conf

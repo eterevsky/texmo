@@ -4,25 +4,24 @@ import logging
 from .configuration2 import Configuration2, Template, default_from_template
 from .dataset import DataSet, DataSetWrapper
 from .manager import Manager, release_device_buffers
-from .model2 import build_model
 from .report import (
     draw_weight_loss_graph,
-    draw_loss_by_time,
     generate_max_report,
     generate_report_by_weight,
 )
 from .resultdb import ResultDB
-from .search import Search
+from .search2 import Search
 from .tokens import set_tokens_dir
 from . import latency
 
 
-def generate_report(result_set, template, train_time, system: str, draw_weight_loss: bool):
-    print(generate_report_by_weight(result_set, template, system))
-    print()
-    print(generate_max_report(result_set, template, train_time, system))
-    if draw_weight_loss:
-        draw_weight_loss_graph(result_set, template, train_time)
+def generate_report(result_db: ResultDB, template, train_time, system: str, draw_weight_loss: bool):
+    pass
+    # print(generate_report_by_weight(result_set, template, system))
+    # print()
+    # print(generate_max_report(result_set, template, train_time, system))
+    # if draw_weight_loss:
+    #     draw_weight_loss_graph(result_set, template, train_time)
     # draw_loss_by_time(result_set, template)
 
 
@@ -34,18 +33,10 @@ def search_loop(
     logging.info("Starting search")
     while True:
         conf = search.select_conf()
-        # weights = None
-        # if checkpoint is not None:
-        #     logging.info(f"Checkpoint: {checkpoint}")
-        #     weights = checkpoint.load_weights(checkpoints_path)
-
-        # # TODO: Train from the checkpoint
-        # manager = Manager(conf, weights=weights)
-
         manager = Manager(conf, system, dataset=dataset)
         manager.init(quiet=True)
 
-        run, weights = manager.train_and_eval(
+        run, _weights = manager.train_and_eval(
             steps=conf.steps,
             time_limit=None,
             temp_steps=None,
@@ -55,7 +46,7 @@ def search_loop(
             quiet=True,
         )
 
-        search.add_run(conf, run, weights)
+        search.add_run(conf, run)
         release_device_buffers()
 
 
@@ -84,9 +75,6 @@ def main(args: argparse.Namespace):
         result_db,
         template,
         default,
-        checkpoints_path=None,
-        predictor=None,
-        # predictor=predictor,
         train_time=train_time,
     )
 
@@ -101,7 +89,7 @@ def main(args: argparse.Namespace):
         dataset_wrapper.join()
 
     generate_report(
-        search._result_set,
+        result_db,
         template,
         train_time=train_time,
         system=args.system,

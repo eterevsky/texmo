@@ -31,7 +31,7 @@ def search_loop(
 ):
     logging.info("Starting search")
     while True:
-        conf = search.select_conf()
+        conf = search.select_conf(system)
         manager = Manager(conf, system, dataset=dataset)
         manager.init(quiet=True)
 
@@ -70,7 +70,6 @@ def main(args: argparse.Namespace):
         train_time.append(train_time[0])
 
     search = Search(
-        args.system,
         result_db,
         template,
         default,

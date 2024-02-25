@@ -28,15 +28,11 @@ class Search(object):
 
     def __init__(
         self,
-        system: str,
         db: ResultDB,
         template: Template,
         init_conf: Configuration2,
         train_time: tuple[float, float],
     ):
-        assert isinstance(system, str)
-        self._system = system
-
         assert isinstance(db, ResultDB)
         self._db = db
 
@@ -68,11 +64,11 @@ class Search(object):
         assert 0 < tmin < tmax
         return 2 ** random.uniform(log2(tmin), log2(tmax))
 
-    def _select_max_weights(self, t):
+    def _select_max_weights(self, t, system: str):
         with latency.timer("Search._select_max_weights"):
             try:
                 top_conf = next(
-                    self._db.top_confs(max_time=t, system=self._system, limit=1)
+                    self._db.top_confs(max_time=t, system=system, limit=1)
                 )
             except StopIteration:
                 return self._template.max_weights.min
@@ -84,29 +80,11 @@ class Search(object):
             l = random.uniform(log2(self._template.max_weights.min), log2(maxw))
             return round(2**l)
 
-    # def print_top_median(self, t, max_weights):
-    # with latency.timer("Search.print_top_median"):
-    #     report = [f"T ≤ {ttoa3(t)}  W ≤ {itoa3(max_weights)}  by median score"]
-
-    #     for res in self._db.top_confs_with_time(max_time=t, max_weights=max_weights, system=self._system, limit=20):
-    #         num_runs = res["num_runs"]
-    #         median_score = res["median_score"]
-    #         assert median_score is not None
-    #         score = f" {median_score:.4f} ({num_runs})"
-    #         if num_runs < 10:
-    #             score += " "
-    #         conf = res["conf"]
-    #         report.append(
-    #             f"{score}  LEN{conf.length:4}  B{conf.batch:4}  LR{conf.lr:7.4f}  S{conf.steps:4}  {conf.model}"
-    #         )
-    #     report.append("")
-    #     logging.info("\n".join(report))
-
-    def _select_untimed(self, max_weights: int):
+    def _select_untimed(self, max_weights: int, system: str):
         with latency.timer("Search._select_untimed"):
             confs = list(
                 self._db.top_confs(
-                    max_weights=max_weights, system=self._system, limit=10
+                    max_weights=max_weights, system=system, limit=10
                 )
             )
             if all(c.median_time is not None for c in confs):
@@ -114,17 +92,17 @@ class Search(object):
             logging.info(top_confs_report(confs=confs, max_weights=max_weights, max_time=None))
             for i, c in enumerate(confs):
                 if c.median_time is None:
-                    logging.info(f"Selecting conf #{i}: {c.conf}")
+                    logging.info(f"Selecting conf #{i}")
                     return c.conf
 
-    def _select_neighbor_fewest_runs(self, conf_id: int) -> Optional[ConfScore]:
-        for neighbor_cs in self._db.get_neighbors_by_runs(conf_id, self._system):
+    def _select_neighbor_fewest_runs(self, conf_id: int, system: str) -> Optional[ConfScore]:
+        for neighbor_cs in self._db.get_neighbors_by_runs(conf_id, system):
             if self._template.match(neighbor_cs.conf):
                 return neighbor_cs
         return None
 
     def _select_median_neighbor(
-        self, t: float, max_weights: int
+        self, t: float, max_weights: int, system: str
     ) -> Optional[Configuration2]:
         """
         Expected number of runs based on position (configuration, neighbors):
@@ -139,7 +117,7 @@ class Search(object):
         with latency.timer("Search._select_median_neighbor"):
             confs = list(
                 self._db.top_confs(
-                    max_time=t, max_weights=max_weights, system=self._system, limit=10
+                    max_time=t, max_weights=max_weights, system=system, limit=10
                 )
             )
             logging.info(
@@ -148,12 +126,12 @@ class Search(object):
 
             top_cs = confs[0]
             if top_cs.num_runs < 2:
-                logging.info(f"Selecting conf #0: {top_cs.conf}")
+                logging.info(f"Selecting conf #0")
                 return top_cs.conf
 
-            neighbor_cs = self._select_neighbor_fewest_runs(top_cs.conf_id)
+            neighbor_cs = self._select_neighbor_fewest_runs(top_cs.conf_id, system)
             if neighbor_cs is not None and neighbor_cs.num_runs == 0:
-                logging.info(f"Selecting neighbor of top conf: {neighbor_cs.conf}")
+                logging.info(f"Selecting neighbor of conf #0")
                 return neighbor_cs.conf
 
             for i in range(1, 3):
@@ -164,9 +142,9 @@ class Search(object):
 
             for i in range(1, 3):
                 cs = confs[i]
-                neighbor_cs = self._select_neighbor_fewest_runs(cs.conf_id)
+                neighbor_cs = self._select_neighbor_fewest_runs(cs.conf_id, system)
                 if neighbor_cs is not None and neighbor_cs.num_runs == 0:
-                    logging.info(f"Selecting neighbor of conf #{i}: {neighbor_cs.conf}")
+                    logging.info(f"Selecting neighbor of conf #{i}")
                     return neighbor_cs.conf
 
             top_cs = confs[0]
@@ -174,24 +152,24 @@ class Search(object):
                 logging.info(f"Selecting conf #0: {top_cs.conf}")
                 return top_cs.conf
 
-            neighbor_cs = self._select_neighbor_fewest_runs(top_cs.conf_id)
+            neighbor_cs = self._select_neighbor_fewest_runs(top_cs.conf_id, system)
             if neighbor_cs is not None and neighbor_cs.num_runs < 2:
-                logging.info(f"Selecting neighbor of top conf: {neighbor_cs.conf}")
+                logging.info(f"Selecting neighbor of conf #0")
                 return neighbor_cs.conf
 
             # raise NotImplementedError()
             return None
 
-    def select_conf(self) -> Configuration2:
+    def select_conf(self, system: str) -> Configuration2:
         with latency.timer("Search.select_conf"):
             t = self._select_time()
-            max_weights = self._select_max_weights(t)
+            max_weights = self._select_max_weights(t, system)
 
-            conf = self._select_untimed(max_weights)
+            conf = self._select_untimed(max_weights, system)
             if conf is not None:
                 return conf
 
-            conf = self._select_median_neighbor(t, max_weights)
+            conf = self._select_median_neighbor(t, max_weights, system)
             if conf is not None:
                 return conf
 

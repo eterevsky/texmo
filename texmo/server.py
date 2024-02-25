@@ -1,11 +1,45 @@
 import argparse
 from flask import Flask, render_template, request, redirect
 import logging
+import threading
+from queue import Queue
 
 from .configuration2 import Configuration2, Template, default_from_template
 from .resultdb import ResultDB
-from .search import Search
+from .search2 import Search
 from .tokens import set_tokens_dir
+
+
+class SearchThread(threading.Thread):
+    def __init__(
+        self,
+        db: ResultDB,
+        template: Template,
+        default: Configuration2,
+        requests_queue: Queue,
+        confs_by_system: dict,
+        confs_by_system_lock: threading.Lock,
+    ):
+        super().__init__()
+        self.search = Search(
+            db=db,
+            template=template,
+            init_conf=default,
+            train_time=(1.0, 16.0),
+        )
+        self.requests_queue = requests_queue
+        self.confs_by_system = confs_by_system
+        self.confs_by_system_lock = confs_by_system_lock
+
+    def run(self):
+        logging.info("Started search thread")
+        while True:
+            system = self.requests_queue.get()
+            if system is None:
+                break
+            conf = self.search.select_conf(system)
+            with self.confs_by_system_lock:
+                self.confs_by_system[system].put(conf)
 
 
 class SearchServer(object):
@@ -14,7 +48,23 @@ class SearchServer(object):
         self.template: Template = template
         self.default = default_from_template(template, spec=default_spec)
         logging.info(f"Default configuration: {self.default}")
-        self.searches = {}
+
+        self.requests_queue = Queue()
+        self.confs_by_system: dict[str, Queue] = {}
+        self.confs_by_system_lock = threading.Lock()
+
+        self.search_thread = SearchThread(
+            db,
+            template,
+            self.default,
+            self.requests_queue,
+            self.confs_by_system,
+            self.confs_by_system_lock,
+        )
+        self.search_thread.start()
+    
+    def __del__(self):
+        self.requests_queue.put(None)
 
     def index(self):
         pattern = self.template.regex.pattern if self.template.regex else ""
@@ -26,20 +76,19 @@ class SearchServer(object):
 
     def select(self, args):
         system = args["system"]
+        logging.info(f"Generating conf for system {system}")
+        
+        with self.confs_by_system_lock:
+            if system not in self.confs_by_system:
+                self.confs_by_system[system] = Queue()
+                self.requests_queue.put(system)
+            response_queue = self.confs_by_system[system]
 
-        search = self.searches.get(system)
-        if search is None:
-            search = Search(
-                system,
-                self.db,
-                self.template,
-                self.default,
-                predictor=None,
-                train_time=(1.0, 16.0),
-            )
-            self.searches[system] = search
+        self.requests_queue.put(system)
 
-        result = search.select_conf().to_dict()
+        conf = response_queue.get()
+        logging.info(f"Generated conf for system {system}: {conf}")
+        result = conf.to_dict()
         result["system"] = system
         return result
 

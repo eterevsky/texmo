@@ -460,9 +460,6 @@ class Manager(object):
             eval_loss = INF
 
         self.run.finalize(eval_loss, train_time)
-
-        # step_time = train_time / (len(step_times) - 1)
-
         logging.info(
             f"{self.conf}:  loss {eval_loss:.4f} b/byte  T = {ttoa3(train_time)}"
         )

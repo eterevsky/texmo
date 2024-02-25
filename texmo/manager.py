@@ -128,6 +128,7 @@ class Manager(object):
 
     def save(self, dir):
         model_name = self.name()
+        model_name = model_name.replace("|", "!")
         path = os.path.join(dir, f"{model_name}.json")
 
         weights = self.serialize_weights(self.weights)
@@ -381,32 +382,25 @@ class Manager(object):
         t = "" if time_limit is None else f" {time_limit} s"
         s = "" if steps > 1e10 else f" {steps} steps"
 
-        sample_times = []
-        step_times = []
-
         logging.info(f"Training for{t}{s}")
-        finish_time = INF
-        start = None
+        deadline = INF
+        start_time = None
 
-        step_start = perf_counter()
-
-        while perf_counter() < finish_time and self.step < steps:
+        while perf_counter() < deadline and self.step < steps:
             batch = self._get_batch()
 
             # try:
             loss = self.train_step(batch)
             # except (XlaRuntimeError, ValueError) as e:
-            #     logging.warn("Internal XLA error, probably OOM. Returning +inf loss:\n" + str(e))
-            #     step_times = []
+            #     logging.warn("Internal XLA error, probably OOM:\n" + str(e))
             #     break
 
             step_end = perf_counter()
-            step_time = step_end - step_start
-            step_times.append(step_time)
-            step_start = step_end  # Counting output in the next step time
 
             if math.isnan(loss) or math.isinf(loss):
                 logging.warning(f"Loss is {loss}, stopping training")
+                # Don't register the training time if it diverged.
+                start_time = None
                 break
 
             if not quiet and (
@@ -425,16 +419,12 @@ class Manager(object):
             ):
                 self.save(temp_dir)
 
-            if len(step_times) == 1:
-                logging.info(
-                    f"First training step took {ttoa3(step_times[0])}. "
-                    + "Disregarded for time limit."
-                )
-                start = step_start
-                finish_time = start + time_limit if time_limit else INF
+            if start_time is None:
+                start_time = step_end
+                deadline = start_time + time_limit if time_limit else INF
 
-        total_time = 0 if start is None else perf_counter() - start
-        return total_time, step_times
+        total_time = None if start_time is None else perf_counter() - start_time
+        return total_time
 
     def train_and_eval(
         self,
@@ -447,13 +437,17 @@ class Manager(object):
         quiet=False,
     ) -> tuple[TrainingRecord, Run]:
         try:
-            train_time, step_times = self.train(
+            train_time = self.train(
                 steps,
                 time_limit,
                 temp_steps,
                 temp_dir,
                 quiet=quiet,
             )
+
+            if train_time is None:
+                # Training diverged
+                eval_loss = INF
 
             if output_dir is not None:
                 self.save(output_dir)

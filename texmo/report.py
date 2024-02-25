@@ -207,53 +207,21 @@ def print_top_confs(top_confs, run_count) -> str:
     return out.getvalue()
 
 
-# def generate_report_by_weight(
-#     result_set: ResultSet,
-#     template: Template,
-#     min_max_weights: int,
-#     train_time: tuple[float, float],
-#     system: str,
-# ) -> str:
-#     top_confs, run_count = get_top_confs(
-#         result_set, template, min_max_weights, train_time, system
-#     )
-#     return print_top_confs(top_confs, run_count)
-
-
-def generate_report_by_weight(result_set: ResultSet, template: Template, system: str, max_time: float | None = None) -> str:
-    out = StringIO()
-    best_loss = INF
-    prev_best = None
-    for conf_results in result_set.get_results_by_weights(max_time=max_time):
-        # print(conf_results.conf, file=out)
-        if prev_best is not None and conf_results.conf.model.weights > prev_best.conf.model.weights:
-            t = prev_best.median_time(system)
-            if t is not None:
-                t = ttoa3(t)
-            else:
-                t = "?     "
-            print(f"{prev_best.median_score:.4f}  {t}  {prev_best.conf}", file=out)
-            prev_best = None
-
-        # print(conf_results.median_score, best_loss, template.match(conf_results.conf), file=out)
-        if (conf_results.median_score is None or
-            conf_results.median_score > best_loss or
-            not template.match(conf_results.conf)):
-            # print("continue")
+def generate_report_by_weight(result_db: ResultDB, template: Template, system: str) -> str:
+    lines = [f"Top confs by weight ({template}):"]
+    confs = result_db.top_confs(system, sorted="weights")
+    best_score = INF
+    for c in confs:
+        if c.median_score > best_score:
             continue
-
-        prev_best = conf_results
-        best_loss = conf_results.median_score
-
-    if prev_best is not None:
-        t = prev_best.median_time(system)
-        if t:
-            t = ttoa3(t)
-        else:
-            t = "?"
-        print(f"{prev_best.median_score:.4f}  {t}  {prev_best.conf}", file=out)
-
-    return out.getvalue()
+        if not template.match(c.conf):
+            continue
+        t = "?       " if c.median_time is None else "{:8}".format(ttoa3(c.median_time))
+        lines.append(
+            f"{c.median_score:.4f} ({c.num_runs})  {t}  {c.conf.aligned_str()}"
+        )
+        best_score = c.median_score
+    return "\n".join(lines) + "\n"
 
 
 def generate_max_report(

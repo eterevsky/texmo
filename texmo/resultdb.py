@@ -262,7 +262,7 @@ class ResultDB(object):
         run_dict = {
             "conf_id": conf_id,
             "system": run.system,
-            "train_time": run.train_time,
+            "train_time": run.train_time or 0,
             "timestamp": timestamp,
             "loss": INF if math.isnan(run.loss) or run.loss is None else run.loss,
             "step_loss": _pack_ndarray(run.step_loss),
@@ -282,6 +282,7 @@ class ResultDB(object):
         timestamp: Optional[datetime] = None,
         update_neighbors: bool = True,
     ):
+        assert run.train_time is None or run.train_time > 0.0001
         with latency.timer("ResultDB.add_run"):
             self._add_run(conf, run, conf_id, timestamp, update_neighbors)
 
@@ -305,7 +306,7 @@ class ResultDB(object):
         max_weights: float | None = None,
         max_time: float | None = None,
         limit: int = None,
-        sorted: bool = True,
+        sorted: str = "median_score",
     ) -> Iterable[ConfScore]:
         conditions = ["median_score IS NOT NULL"]
         params = {"system": system}
@@ -326,7 +327,12 @@ class ResultDB(object):
             params["limit"] = limit
             limit = "LIMIT :limit"
 
-        order = "ORDER BY median_score ASC" if sorted else ""
+        if sorted == "median_score":
+            order = "ORDER BY median_score ASC"
+        elif sorted == "weights":
+            order = "ORDER BY weights ASC, median_score ASC"
+        else:
+            order = ""
 
         cur = self._db.execute(
             f"""

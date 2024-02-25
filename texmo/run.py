@@ -57,7 +57,7 @@ class Run(object):
     def steps(self):
         return len(self.step_loss)
 
-    def finalize(self, eval_loss: float, train_time: float):
+    def finalize(self, eval_loss: float, train_time: float | None):
         """Sets the eval loss and fits the loss trend model.
 
         Called after the model has been trained.

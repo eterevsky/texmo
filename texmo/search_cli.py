@@ -16,8 +16,7 @@ from . import latency
 
 
 def generate_report(result_db: ResultDB, template, train_time, system: str, draw_weight_loss: bool):
-    pass
-    # print(generate_report_by_weight(result_set, template, system))
+    logging.info(generate_report_by_weight(result_db, template, system))
     # print()
     # print(generate_max_report(result_set, template, train_time, system))
     # if draw_weight_loss:

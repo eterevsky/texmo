@@ -209,7 +209,7 @@ def print_top_confs(top_confs, run_count) -> str:
 
 def generate_report_by_weight(result_db: ResultDB, template: Template, system: str) -> str:
     lines = [f"Top confs by weight ({template}):"]
-    confs = result_db.top_confs(system, sorted="weights")
+    confs = result_db.top_confs(system, sorted="weights", template=template)
     best_score = INF
     for c in confs:
         if c.median_score > best_score:

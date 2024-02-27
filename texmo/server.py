@@ -1,13 +1,16 @@
 import argparse
-from flask import Flask, render_template, request, redirect
 import logging
 import threading
 from queue import Queue
 
+from flask import Flask, redirect, render_template, request
+
 from .configuration2 import Configuration2, Template, default_from_template
 from .resultdb import ResultDB
+from .run import Run
 from .search2 import Search
 from .tokens import set_tokens_dir
+from .latency import timer
 
 
 class SearchThread(threading.Thread):
@@ -34,12 +37,19 @@ class SearchThread(threading.Thread):
     def run(self):
         logging.info("Started search thread")
         while True:
-            system = self.requests_queue.get()
-            if system is None:
+            command, args = self.requests_queue.get()
+            if command == "stop":
                 break
-            conf = self.search.select_conf(system)
-            with self.confs_by_system_lock:
-                self.confs_by_system[system].put(conf)
+            elif command == "select":
+                system = args
+                conf = self.search.select_conf(system)
+                with self.confs_by_system_lock:
+                    self.confs_by_system[system].put(conf)
+            elif command == "add":
+                conf, run = args
+                self.search.add_run(conf, run)
+            else:
+                assert False, f"Unknown command: {command}"
 
 
 class SearchServer(object):
@@ -62,9 +72,9 @@ class SearchServer(object):
             self.confs_by_system_lock,
         )
         self.search_thread.start()
-    
+
     def __del__(self):
-        self.requests_queue.put(None)
+        self.requests_queue.put(("stop", None))
 
     def index(self):
         pattern = self.template.regex.pattern if self.template.regex else ""
@@ -77,20 +87,25 @@ class SearchServer(object):
     def select(self, args):
         system = args["system"]
         logging.info(f"Generating conf for system {system}")
-        
+
         with self.confs_by_system_lock:
             if system not in self.confs_by_system:
                 self.confs_by_system[system] = Queue()
-                self.requests_queue.put(system)
+                self.requests_queue.put(("select", system))
             response_queue = self.confs_by_system[system]
 
-        self.requests_queue.put(system)
+        self.requests_queue.put(("select", system))
 
         conf = response_queue.get()
         logging.info(f"Generated conf for system {system}: {conf}")
         result = conf.to_dict()
         result["system"] = system
         return result
+
+    def add(self, run_json: dict):
+        conf = Configuration2.from_dict(run_json["conf"])
+        run = Run.from_dict(run_json["run"])
+        self.requests_queue.put(("add", (conf, run)))
 
 
 def main(args: argparse.Namespace):
@@ -109,11 +124,18 @@ def main(args: argparse.Namespace):
 
     @app.route("/update", methods=["POST"])
     def _update():
-        return server.update(request.form)
+        with timer("SearchServer.update"):
+            return server.update(request.form)
 
     @app.route("/select", methods=["GET"])
     def _select():
-        return server.select(request.args)
+        with timer("SearchServer.select"):
+            return server.select(request.args)
+
+    @app.route("/add", methods=["POST"])
+    def _add():
+        with timer("SearchServer.add"):
+            return server.add(request.json)
 
     app.run(debug=True)
 

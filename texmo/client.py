@@ -13,10 +13,11 @@ from .tokens import set_tokens_dir
 def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
     select_url = f"http://{server_host}/select"
     add_url = f"http://{server_host}/add"
+    s = requests.Session()
 
     while True:
         with timer("get(select)"):
-            r = requests.get(select_url, params={"system": system})
+            r = s.get(select_url, params={"system": system})
         d = r.json()
         assert d["system"] == system
         conf = Configuration2.from_dict(d["conf"])
@@ -37,7 +38,7 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
         # search.add_run(conf, run)
 
         with timer("post(add)"):
-            requests.post(
+            s.post(
                 add_url,
                 json={"system": system, "run": run.to_dict(), "conf": conf.to_dict()}
             )

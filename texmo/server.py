@@ -159,7 +159,7 @@ def main(args: argparse.Namespace):
 
     
     try:
-        app.run(debug=True)
+        app.run(host="0.0.0.0", debug=True)
     finally:
         server.join()
 

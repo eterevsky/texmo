@@ -1,22 +1,21 @@
 from jax import numpy as jnp
-from jax.random import KeyArray
 import jax.random
 from random import randrange
 from typing import Optional, Sequence
 
 
 class Rng(object):
-    def __init__(self, key: Optional[KeyArray] = None, seed: Optional[int] = None):
+    def __init__(self, key = None, seed: Optional[int] = None):
         if seed is not None:
             key = jax.random.PRNGKey(seed)
         if key is None:
             key = jax.random.PRNGKey(randrange(2**32))
-        self._key: KeyArray = key
+        self._key = key
 
-    def gen(self) -> KeyArray:
+    def gen(self):
         self._key, out = jax.random.split(self._key)
         return out
-    
+
     def uniform(self, shape: Sequence[int]) -> jax.Array:
         return jax.random.uniform(self.gen(), shape=shape)
 

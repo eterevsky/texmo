@@ -1,16 +1,18 @@
 import argparse
-from flask import Flask, render_template, request, redirect
+from flask import Flask, render_template, request, redirect, make_response
 import logging
 import threading
 from queue import Queue
 
 from .configuration2 import Configuration2, Template, default_from_template
+from .latency import get_report, timer
 from .resultdb import ResultDB
 from .search2 import Search
 from .tokens import set_tokens_dir
+from .run import Run
 
 
-class SearchThread(threading.Thread):
+class SearchThread(threading.Thread):   
     def __init__(
         self,
         db: ResultDB,
@@ -34,12 +36,22 @@ class SearchThread(threading.Thread):
     def run(self):
         logging.info("Started search thread")
         while True:
-            system = self.requests_queue.get()
-            if system is None:
+            command, args = self.requests_queue.get()
+            if command == "select":
+                system = args
+                if system is None:
+                    break
+                conf = self.search.select_conf(system)
+                with self.confs_by_system_lock:
+                    self.confs_by_system[system].put(conf)
+            elif command == "add":
+                conf, run = args
+                self.search.add_run(conf, run)
+            elif command == "stop":
+                logging.info("Stopping search thread")
                 break
-            conf = self.search.select_conf(system)
-            with self.confs_by_system_lock:
-                self.confs_by_system[system].put(conf)
+            else:
+                assert False, f"Unknown command: {command}"
 
 
 class SearchServer(object):
@@ -81,16 +93,29 @@ class SearchServer(object):
         with self.confs_by_system_lock:
             if system not in self.confs_by_system:
                 self.confs_by_system[system] = Queue()
-                self.requests_queue.put(system)
+                self.requests_queue.put(("select", system))
             response_queue = self.confs_by_system[system]
 
-        self.requests_queue.put(system)
+        self.requests_queue.put(("select", system))
 
         conf = response_queue.get()
         logging.info(f"Generated conf for system {system}: {conf}")
-        result = conf.to_dict()
-        result["system"] = system
+        result = {
+            "system": system,
+            "conf": conf.to_dict()
+        }
         return result
+
+    def add_run(self, params):
+        run = Run.from_dict(params["run"])
+        conf = Configuration2.from_dict(params["conf"])
+        logging.info(f"Adding run: {conf} - {run}")
+        self.requests_queue.put(("add", (conf, run)))
+    
+    def join(self):
+        self.requests_queue.put(("stop", None))
+        self.search_thread.join()
+        logging.info("Search thread joined")
 
 
 def main(args: argparse.Namespace):
@@ -113,9 +138,26 @@ def main(args: argparse.Namespace):
 
     @app.route("/select", methods=["GET"])
     def _select():
-        return server.select(request.args)
+        with timer("SearchServer.select"):
+            return server.select(request.args)
+    
+    @app.route("/add", methods=["POST"])
+    def _add():
+        with timer("SearchServer.add_run"):
+            server.add_run(request.json)
+            return "", 200
+    
+    @app.route("/report", methods=["GET"])
+    def _report():
+        response = make_response(get_report(), 200)
+        response.mimetype = "text/plain"
+        return response
 
-    app.run(debug=True)
+    
+    try:
+        app.run(debug=True)
+    finally:
+        server.join()
 
 
 def init_args(parser: argparse.ArgumentParser, config):

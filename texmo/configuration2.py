@@ -30,7 +30,7 @@ class Configuration2(object):
         raise AttributeError("Configuration is immutable")
 
     @staticmethod
-    def from_dict(d: dict) -> Self:
+    def from_dict(d: dict) -> "Confiuration2":
         model = build_model(d["spec"])
         return Configuration2(
             model=model,

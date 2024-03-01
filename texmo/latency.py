@@ -41,7 +41,7 @@ def timer(name):
     return Timer(name)
 
 
-def report():
+def get_report() -> str:
     total_time = perf_counter_ns() - _start
     report = "Latency report:\n"
     for name, measures in sorted(_measures.items()):
@@ -57,5 +57,7 @@ def report():
             total = len(measures)
             percent = (sum(measures) / total_time) * 100
             report += f"{name}({itoa3(total)})  {ttoa3(p50th)}  {ttoa3(p90th)}  {ttoa3(p99th)}  AVG {ttoa3(avg)}  {percent:.1f}%\n"
-    
-    logging.info(report)
+    return report
+
+def report():
+    logging.info(get_report())

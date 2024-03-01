@@ -4,19 +4,9 @@ from typing import Optional
 
 import numpy as np
 
-from .common import INF
+from .common import INF, ttoa3
 from .tokens import TokenSet
-
-
-class LossTrendBase(object):
-    def fit(self, step_byte_loss: list[float]):
-        raise NotImplementedError
-
-    def predict(self, step: int) -> float:
-        raise NotImplementedError
-
-    def params(self) -> np.ndarray:
-        raise NotImplementedError
+from .predict.loss_trend import LossTrendBase
 
 
 class Run(object):
@@ -50,6 +40,23 @@ class Run(object):
 
         self.checkpoint: Optional[str] = checkpoint
 
+    @staticmethod
+    def from_dict(d: dict):
+        loss_trend = (
+            LossTrendBase.from_dict(d["loss_trend"]) if d.get("loss_trend") else None
+        )
+        return Run(
+            system=d["system"],
+            id=d.get("id"),
+            step_loss=d["step_loss"],
+            loss=d["loss"],
+            loss_trend=loss_trend,
+            train_time=d["train_time"],
+        )
+    
+    def __str__(self):
+        return f"{self.system} {self.loss:.4f} {ttoa3(self.train_time)}"
+
     def add_step(self, token_loss: float):
         self.step_loss.append(token_loss)
 
@@ -76,10 +83,13 @@ class Run(object):
 
     def to_dict(self):
         loss_trend = self.loss_trend.to_dict() if self.loss_trend else self.loss_trend
+        step_loss = self.step_loss.tolist()
         d = {
-            "step_loss": self.step_loss,
+            "step_loss": step_loss,
             "loss": self.loss,
-            "loss_trend": loss_trend
+            "loss_trend": loss_trend,
+            "system": self.system,
+            "train_time": self.train_time,
         }
         if self.id is not None:
             d["id"] = self.id

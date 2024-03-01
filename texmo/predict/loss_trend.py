@@ -3,12 +3,27 @@ from scipy.optimize import minimize
 
 from .. import latency
 from ..common import INF
-from ..run import LossTrendBase
 from .predict_common import prediction_score
 
 
 def _pred_log(c1, c2, eps, step):
     return c1 + c2 * step**eps
+
+
+class LossTrendBase(object):
+    @staticmethod
+    def from_dict(d: dict):
+        assert d["version"] == 1
+        return LossTrend(d["c1"], d["c2"], d["eps"])
+
+    def fit(self, step_byte_loss: list[float]):
+        raise NotImplementedError
+
+    def predict(self, step: int) -> float:
+        raise NotImplementedError
+
+    def params(self) -> np.ndarray:
+        raise NotImplementedError
 
 
 class LossTrend(LossTrendBase):

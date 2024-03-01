@@ -183,7 +183,7 @@ def init_args(parser: argparse.ArgumentParser, config):
     parser.add_argument(
         "--extra-db",
         type=str,
-        default=config.EXTRA_DB,
+        default=None,
         help="path to additional result DBs from other machines",
     )
     parser.add_argument(

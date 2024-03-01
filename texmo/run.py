@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+from math import isnan
 import numpy as np
 
 from .common import INF, ttoa3
@@ -84,7 +85,11 @@ class Run(object):
     def to_dict(self):
         loss_trend = self.loss_trend.to_dict() if self.loss_trend else self.loss_trend
         step_loss = np.minimum(self.step_loss, 1E10).tolist()
+        if any(isnan(l) for l in step_loss):
+            step_loss = None
         loss = 1E10 if self.loss > 1E10 else self.loss
+        if isnan(loss):
+            loss = 1E10
         d = {
             "step_loss": step_loss,
             "loss": loss,

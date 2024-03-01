@@ -85,8 +85,11 @@ class Run(object):
     def to_dict(self):
         loss_trend = self.loss_trend.to_dict() if self.loss_trend else self.loss_trend
         step_loss = np.minimum(self.step_loss, 1E10).tolist()
+        train_time = self.train_time
         if any(isnan(l) for l in step_loss):
             step_loss = None
+            loss_trend = None
+            train_time = None
         loss = 1E10 if self.loss > 1E10 else self.loss
         if isnan(loss):
             loss = 1E10
@@ -95,7 +98,7 @@ class Run(object):
             "loss": loss,
             "loss_trend": loss_trend,
             "system": self.system,
-            "train_time": self.train_time,
+            "train_time": train_time,
         }
         if self.id is not None:
             d["id"] = self.id

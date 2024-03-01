@@ -83,7 +83,7 @@ class Run(object):
 
     def to_dict(self):
         loss_trend = self.loss_trend.to_dict() if self.loss_trend else self.loss_trend
-        step_loss = self.step_loss.tolist()
+        step_loss = np.minimum(self.step_loss, 1E10).tolist()
         loss = 1E10 if self.loss > 1E10 else self.loss
         d = {
             "step_loss": step_loss,

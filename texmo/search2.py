@@ -68,7 +68,7 @@ class Search(object):
         with latency.timer("Search._select_max_weights"):
             try:
                 top_conf = next(
-                    self._db.top_confs(max_time=t, system=system, limit=1)
+                    self._db.top_confs(max_time=t, system=system, limit=1, template=self._template)
                 )
             except StopIteration:
                 return self._template.max_weights.min
@@ -84,7 +84,7 @@ class Search(object):
         with latency.timer("Search._select_untimed"):
             confs = list(
                 self._db.top_confs(
-                    max_weights=max_weights, system=system, limit=10
+                    max_weights=max_weights, system=system, limit=10, template=self._template
                 )
             )
             if all(c.median_time is not None for c in confs):
@@ -117,7 +117,7 @@ class Search(object):
         with latency.timer("Search._select_median_neighbor"):
             confs = list(
                 self._db.top_confs(
-                    max_time=t, max_weights=max_weights, system=system, limit=10
+                    max_time=t, max_weights=max_weights, system=system, limit=10, template=self._template
                 )
             )
             logging.info(

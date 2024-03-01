@@ -4,9 +4,12 @@ import logging
 import threading
 from queue import Queue
 
+from flask import Flask, redirect, render_template, request
+
 from .configuration2 import Configuration2, Template, default_from_template
 from .latency import get_report, timer
 from .resultdb import ResultDB
+from .run import Run
 from .search2 import Search
 from .tokens import set_tokens_dir
 from .run import Run
@@ -74,9 +77,9 @@ class SearchServer(object):
             self.confs_by_system_lock,
         )
         self.search_thread.start()
-    
+
     def __del__(self):
-        self.requests_queue.put(None)
+        self.requests_queue.put(("stop", None))
 
     def index(self):
         pattern = self.template.regex.pattern if self.template.regex else ""
@@ -89,7 +92,7 @@ class SearchServer(object):
     def select(self, args):
         system = args["system"]
         logging.info(f"Generating conf for system {system}")
-        
+
         with self.confs_by_system_lock:
             if system not in self.confs_by_system:
                 self.confs_by_system[system] = Queue()
@@ -134,7 +137,8 @@ def main(args: argparse.Namespace):
 
     @app.route("/update", methods=["POST"])
     def _update():
-        return server.update(request.form)
+        with timer("SearchServer.update"):
+            return server.update(request.form)
 
     @app.route("/select", methods=["GET"])
     def _select():

@@ -86,7 +86,8 @@ def itoa3_aligned(x: int) -> str:
 
 def ttoa3(t: float) -> str:
     """Convert time in seconds to a string with 3 significant digits."""
-    if t < 1E-6: return f"{t * 1E9:.0f} ns"
+    if t is None: return "null"
+    elif t < 1E-6: return f"{t * 1E9:.0f} ns"
     elif t < 1E-5: return f"{t * 1E6:.2f} μs"
     elif t < 1E-4: return f"{t * 1E6:.1f} μs"
     elif t < 0.001: return f"{t * 1E6:.0f} μs"

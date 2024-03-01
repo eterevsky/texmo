@@ -1,6 +1,7 @@
 import logging
 import math
 import os
+import re
 import sqlite3
 from collections.abc import Iterable
 from datetime import datetime
@@ -12,7 +13,7 @@ import numpy as np
 
 from . import latency
 from .common import INF
-from .configuration2 import Configuration2
+from .configuration2 import Configuration2, Template
 from .model3 import build_model
 from .run import Run
 
@@ -58,6 +59,12 @@ class ConfScore(object):
         self.num_runs: int = num_runs
 
 
+def _regexp(pattern, input_string):
+    if input_string is None or pattern is None:
+        return False
+    return re.fullmatch(pattern, input_string) is not None
+
+
 class ResultDB(object):
     @staticmethod
     def from_args(db: Optional[str]) -> "ResultDB":
@@ -70,6 +77,7 @@ class ResultDB(object):
         if path != ":memory:":
             logging.info(f"Connecting to results DB {path}")
         self._db = sqlite3.connect(path, check_same_thread=False)
+        self._db.create_function("REGEXP", 2, _regexp)
 
         if not exists:
             schema_path = os.path.join(os.path.dirname(__file__), "persistent-db.sql")
@@ -303,6 +311,7 @@ class ResultDB(object):
     def top_confs(
         self,
         system: str,
+        template: Template | None = None,
         max_weights: float | None = None,
         max_time: float | None = None,
         limit: int = None,
@@ -318,6 +327,38 @@ class ResultDB(object):
         if max_time is not None:
             conditions.append("median_time <= :max_time")
             params["max_time"] = max_time
+
+        if template is not None:
+            if template.regex is not None:
+                conditions.append("spec REGEXP :regex")
+                params["regex"] = template.regex.pattern
+            if template.lr.min > 0:
+                conditions.append("lr >= :lr_min")
+                params["lr_min"] = template.lr.min
+            if template.lr.max < INF:
+                conditions.append("lr <= :lr_max")
+                params["lr_max"] = template.lr.min
+            if template.length.min > 1:
+                conditions.append("length >= :length_min")
+                params["length_min"] = template.length.min
+            if template.length.max < INF:
+                conditions.append("length <= :length_max")
+                params["length_max"] = template.length.max
+            if template.batch.min > 1:
+                conditions.append("batch >= :batch_min")
+                params["batch_min"] = template.batch.min
+            if template.batch.max < INF:
+                conditions.append("batch <= :batch_max")
+                params["batch_max"] = template.batch.max
+            if template.steps.min > 2:
+                conditions.append("steps >= :steps_min")
+                params["steps_min"] = template.steps.min
+            if template.steps.max < INF:
+                conditions.append("steps <= :steps_max")
+                params["steps_max"] = template.steps.max
+            if template.max_weights.max < INF:
+                conditions.append("weights <= :weights_max")
+                params["weights_max"] = template.max_weights.max
 
         where = "WHERE " + " AND ".join(conditions)
 

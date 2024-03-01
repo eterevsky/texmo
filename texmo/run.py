@@ -84,9 +84,10 @@ class Run(object):
     def to_dict(self):
         loss_trend = self.loss_trend.to_dict() if self.loss_trend else self.loss_trend
         step_loss = self.step_loss.tolist()
+        loss = 1E10 if self.loss > 1E10 else self.loss
         d = {
             "step_loss": step_loss,
-            "loss": self.loss,
+            "loss": loss,
             "loss_trend": loss_trend,
             "system": self.system,
             "train_time": self.train_time,
@@ -94,3 +95,17 @@ class Run(object):
         if self.id is not None:
             d["id"] = self.id
         return d
+
+    @staticmethod
+    def from_dict(d: dict):
+        loss_trend = d["loss_trend"]
+        if loss_trend:
+            loss_trend = LossTrendBase.from_dict(loss_trend)
+        return Run(
+            system=d["system"],
+            id=d.get("id"),
+            step_loss=d["step_loss"],
+            loss=d["loss"],
+            loss_trend=loss_trend,
+            train_time=d["train_time"],
+        )

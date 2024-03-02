@@ -4,6 +4,7 @@ import logging
 import math
 import requests
 import time
+import numpy as np
 
 from .common import ttoa3
 from .configuration2 import Configuration2
@@ -26,14 +27,11 @@ def retry(callable, min_delay=1, exp=1.5, max_delay=120):
 
 
 def sanitize_float(f: float) -> float | None:
-    if f == float("inf"):
-        return 1E12
-    elif f == float("-inf"):
-        return -1E12
-    elif math.isnan(f):
+    if math.isnan(f):
         return None
-    else:
-        return f
+    elif math.isinf(f):
+        return 1E12
+    return f
 
 
 def sanitize_json_list(l: list):
@@ -42,8 +40,13 @@ def sanitize_json_list(l: list):
             sanitize_json_dict(v)
         elif isinstance(v, list):
             sanitize_json_list(v)
-        elif isinstance(v, float):
-            l[i] = sanitize_float(v)
+        elif (
+            isinstance(v, np.float16)
+            or isinstance(v, np.float32)
+            or isinstance(v, np.float64)
+            or isinstance(v, float)
+        ):
+            l[i] = sanitize_float(float(v))
 
 
 def sanitize_json_dict(d: dict):
@@ -52,8 +55,13 @@ def sanitize_json_dict(d: dict):
             sanitize_json_dict(v)
         elif isinstance(v, list):
             sanitize_json_list(v)
-        elif isinstance(v, float):
-            d[k] = sanitize_float(v)
+        elif (
+            isinstance(v, np.float16)
+            or isinstance(v, np.float32)
+            or isinstance(v, np.float64)
+            or isinstance(v, float)
+        ):
+            d[k] = sanitize_float(float(v))
 
 
 def sanitize_json(d: dict):
@@ -87,10 +95,10 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
 
         with timer("post(add)"):
             result = {
-                        "system": system,
-                        "run": run.to_dict(),
-                        "conf": conf.to_dict(),
-                    }
+                "system": system,
+                "run": run.to_dict(),
+                "conf": conf.to_dict(),
+            }
             sanitize_json(result)
             try:
                 retry(

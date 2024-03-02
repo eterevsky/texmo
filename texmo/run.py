@@ -83,17 +83,10 @@ class Run(object):
         return f"{step}  {byte_loss:.4f} b/B"
 
     def to_dict(self):
-        loss_trend = self.loss_trend.to_dict() if self.loss_trend else self.loss_trend
-        if any(isnan(v) for v in loss_trend.values()):
-            loss_trend = None
-        step_loss = np.minimum(self.step_loss, 1E10).tolist()
-        if any(isnan(l) for l in step_loss):
-            step_loss = None
-            loss_trend = None
         d = {
-            "step_loss": step_loss,
+            "step_loss": self.step_loss.tolist(),
             "loss": self.loss,
-            "loss_trend": loss_trend,
+            "loss_trend": self.loss_trend.to_dict() if self.loss_trend else None,
             "system": self.system,
             "train_time": self.train_time,
         }

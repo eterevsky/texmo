@@ -84,12 +84,12 @@ class Run(object):
 
     def to_dict(self):
         loss_trend = self.loss_trend.to_dict() if self.loss_trend else self.loss_trend
+        if any(isnan(v) for v in loss_trend.values()):
+            loss_trend = None
         step_loss = np.minimum(self.step_loss, 1E10).tolist()
         if any(isnan(l) for l in step_loss):
             step_loss = None
             loss_trend = None
-        if isnan(loss):
-            loss = 1E10
         d = {
             "step_loss": step_loss,
             "loss": self.loss,

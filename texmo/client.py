@@ -2,12 +2,26 @@ import argparse
 import json
 import logging
 import requests
+import time
 
+from .common import ttoa3
 from .configuration2 import Configuration2
 from .dataset import DataSet, DataSetWrapper
 from .latency import timer, report
 from .manager import Manager, release_device_buffers
 from .tokens import set_tokens_dir
+
+
+def retry(callable, min_delay=1, exp=1.5, max_delay=120):
+    delay = min_delay
+    while True:
+        try:
+            return callable()
+        except requests.exceptions.RequestException as e:
+            logging.warning(f"Request failed: {e}")
+            logging.warning(f"Retrying in {ttoa3(delay)}")
+            time.sleep(delay)
+            delay = min(delay * exp, max_delay)
 
 
 def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
@@ -17,7 +31,7 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
 
     while True:
         with timer("get(select)"):
-            r = s.get(select_url, params={"system": system})
+            r = retry(lambda: s.get(select_url, params={"system": system}))
         d = r.json()
         assert d["system"] == system
         conf = Configuration2.from_dict(d["conf"])
@@ -35,12 +49,16 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
             quiet=True,
         )
 
-        # search.add_run(conf, run)
-
         with timer("post(add)"):
-            s.post(
-                add_url,
-                json={"system": system, "run": run.to_dict(), "conf": conf.to_dict()}
+            retry(
+                lambda: s.post(
+                    add_url,
+                    json={
+                        "system": system,
+                        "run": run.to_dict(),
+                        "conf": conf.to_dict(),
+                    },
+                )
             )
         release_device_buffers()
 

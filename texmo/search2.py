@@ -124,6 +124,9 @@ class Search(object):
                 top_confs_report(confs=confs, max_weights=max_weights, max_time=t)
             )
 
+            if not confs:
+                return None
+
             top_cs = confs[0]
             if top_cs.num_runs < 2:
                 logging.info(f"Selecting conf #0")

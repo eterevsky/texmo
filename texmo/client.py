@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import math
 import requests
 import time
 
@@ -22,6 +23,41 @@ def retry(callable, min_delay=1, exp=1.5, max_delay=120):
             logging.warning(f"Retrying in {ttoa3(delay)}")
             time.sleep(delay)
             delay = min(delay * exp, max_delay)
+
+
+def sanitize_float(f: float) -> float | None:
+    if f == float("inf"):
+        return 1E12
+    elif f == float("-inf"):
+        return -1E12
+    elif math.isnan(f):
+        return None
+    else:
+        return f
+
+
+def sanitize_json_list(l: list):
+    for i, v in enumerate(l):
+        if isinstance(v, dict):
+            sanitize_json_dict(v)
+        elif isinstance(v, list):
+            sanitize_json_list(v)
+        elif isinstance(v, float):
+            l[i] = sanitize_float(v)
+
+
+def sanitize_json_dict(d: dict):
+    for k, v in d.items():
+        if isinstance(v, dict):
+            sanitize_json_dict(v)
+        elif isinstance(v, list):
+            sanitize_json_list(v)
+        elif isinstance(v, float):
+            d[k] = sanitize_float(v)
+
+
+def sanitize_json(d: dict):
+    sanitize_json_dict(d)
 
 
 def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
@@ -50,14 +86,16 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
         )
 
         with timer("post(add)"):
-            retry(
-                lambda: s.post(
-                    add_url,
-                    json={
+            result = {
                         "system": system,
                         "run": run.to_dict(),
                         "conf": conf.to_dict(),
-                    },
+                    }
+            sanitize_json(result)
+            retry(
+                lambda: s.post(
+                    add_url,
+                    json=result,
                 )
             )
         release_device_buffers()

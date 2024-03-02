@@ -92,12 +92,17 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
                         "conf": conf.to_dict(),
                     }
             sanitize_json(result)
-            retry(
-                lambda: s.post(
-                    add_url,
-                    json=result,
+            try:
+                retry(
+                    lambda: s.post(
+                        add_url,
+                        json=result,
+                    )
                 )
-            )
+            except TypeError as e:
+                logging.error(f"Failed to post result: {e}")
+                logging.error(f"Result: {result}")
+                raise
         release_device_buffers()
 
 

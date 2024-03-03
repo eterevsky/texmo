@@ -113,6 +113,7 @@ class Search(object):
         (2, 1) (2, 1) (2, 1)
         (3, 1) (2, 1) (2, 1)
         (3, 2) (2, 1) (2, 1)
+        (3, 2) (2, 1) (2, 1) (2, 1) ... (2, 1)
         """
         with latency.timer("Search._select_median_neighbor"):
             confs = list(
@@ -160,7 +161,20 @@ class Search(object):
                 logging.info(f"Selecting neighbor of conf #0")
                 return neighbor_cs.conf
 
-            # raise NotImplementedError()
+            for i in range(3, 9):
+                cs = confs[i]
+                if cs.num_runs < 2:
+                    logging.info(f"Selecting conf #{i}: {cs.conf}")
+                    return cs.conf
+
+            for i in range(3, 9):
+                cs = confs[i]
+                neighbor_cs = self._select_neighbor_fewest_runs(cs.conf_id, system)
+                if neighbor_cs is not None and neighbor_cs.num_runs == 0:
+                    logging.info(f"Selecting neighbor of conf #{i}")
+                    return neighbor_cs.conf
+
+            logging.warning("No configuration selected by median time")
             return None
 
     def select_conf(self, system: str) -> Configuration2:

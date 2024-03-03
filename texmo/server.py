@@ -25,8 +25,11 @@ class SearchThread(threading.Thread):
         requests_queue: Queue,
         confs_by_system: dict,
         confs_by_system_lock: threading.Lock,
+        report_queue: Queue,
     ):
         super().__init__()
+        self.db = db
+        self.template = template
         self.search = Search(
             db=db,
             template=template,
@@ -36,6 +39,7 @@ class SearchThread(threading.Thread):
         self.requests_queue = requests_queue
         self.confs_by_system = confs_by_system
         self.confs_by_system_lock = confs_by_system_lock
+        self.report_queue = report_queue
 
     def run(self):
         logging.info("Started search thread")
@@ -51,35 +55,16 @@ class SearchThread(threading.Thread):
             elif command == "add":
                 conf, run = args
                 self.search.add_run(conf, run)
+            elif command == "report":
+                system = args
+                report = generate_report_by_weight(self.db, self.template, system)
+                self.report_queue.put((system, report))
             elif command == "stop":
                 logging.info("Stopping search thread")
                 break
             else:
                 assert False, f"Unknown command: {command}"
 
-
-
-class ReportThread(threading.Thread):
-    def __init__(self, db: ResultDB, template: Template, requests_queue: Queue, report_queue: Queue):
-        super().__init__()
-        self.db = db
-        self.template = template
-        self.requests_queue = requests_queue
-        self.report_queue = report_queue
-
-    def run(self):
-        logging.info("Started report thread")
-        while True:
-            command, args = self.requests_queue.get()
-            if command == "stop":
-                logging.info("Stopping report thread")
-                break
-            elif command == "report":
-                system = args
-                report = generate_report_by_weight(self.db, self.template, system)
-                self.report_queue.put((system, report))
-            else:
-                assert False, f"Unknown command: {command}"
 
 
 class SearchServer(object):
@@ -92,6 +77,7 @@ class SearchServer(object):
         self.requests_queue = Queue()
         self.confs_by_system: dict[str, Queue] = {}
         self.confs_by_system_lock = threading.Lock()
+        self.report_queue = Queue()
 
         self.search_thread = SearchThread(
             db,
@@ -100,18 +86,9 @@ class SearchServer(object):
             self.requests_queue,
             self.confs_by_system,
             self.confs_by_system_lock,
-        )
-        self.search_thread.start()
-
-        self.report_request_queue = Queue()
-        self.report_queue = Queue()
-        self.report_thread = ReportThread(
-            db,
-            template,
-            self.report_request_queue,
             self.report_queue,
         )
-        self.report_thread.start()
+        self.search_thread.start()
 
     def __del__(self):
         self.requests_queue.put(("stop", None))
@@ -154,7 +131,7 @@ class SearchServer(object):
         system = args["system"]
         logging.info(f"Generating report for system {system}")
 
-        self.report_request_queue.put(("report", system))
+        self.requests_queue.put(("report", system))
         sys, report = self.report_queue.get()
         assert sys == system
 
@@ -162,11 +139,8 @@ class SearchServer(object):
     
     def join(self):
         self.requests_queue.put(("stop", None))
-        self.report_request_queue.put(("stop", None))
         self.search_thread.join()
         logging.info("Search thread joined")
-        self.report_thread.join()
-        logging.info("Report thread joined")
 
 
 def main(args: argparse.Namespace):

@@ -206,7 +206,7 @@ class ResultDB(object):
                 median_time = median(row[0] for row in cur)
             except StatisticsError:
                 median_time = None
-            if median_time is not None:
+            if median_time is not None and median_time > 0.0001:
                 cur.execute(
                     """
                     INSERT OR REPLACE INTO conf_time(conf_id, system, median_time)

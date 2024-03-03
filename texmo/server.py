@@ -13,6 +13,7 @@ from .run import Run
 from .search2 import Search
 from .tokens import set_tokens_dir
 from .run import Run
+from .report import generate_report_by_weight
 
 
 class SearchThread(threading.Thread):   
@@ -57,6 +58,30 @@ class SearchThread(threading.Thread):
                 assert False, f"Unknown command: {command}"
 
 
+
+class ReportThread(threading.Thread):
+    def __init__(self, db: ResultDB, template: Template, requests_queue: Queue, report_queue: Queue):
+        super().__init__()
+        self.db = db
+        self.template = template
+        self.requests_queue = requests_queue
+        self.report_queue = report_queue
+
+    def run(self):
+        logging.info("Started report thread")
+        while True:
+            command, args = self.requests_queue.get()
+            if command == "stop":
+                logging.info("Stopping report thread")
+                break
+            elif command == "report":
+                system = args
+                report = generate_report_by_weight(self.db, self.template, system)
+                self.report_queue.put((system, report))
+            else:
+                assert False, f"Unknown command: {command}"
+
+
 class SearchServer(object):
     def __init__(self, db: ResultDB, template: Template, default_spec: str):
         self.db: ResultDB = db
@@ -77,6 +102,16 @@ class SearchServer(object):
             self.confs_by_system_lock,
         )
         self.search_thread.start()
+
+        self.report_request_queue = Queue()
+        self.report_queue = Queue()
+        self.report_thread = ReportThread(
+            db,
+            template,
+            self.report_request_queue,
+            self.report_queue,
+        )
+        self.report_thread.start()
 
     def __del__(self):
         self.requests_queue.put(("stop", None))
@@ -115,10 +150,23 @@ class SearchServer(object):
         logging.info(f"Adding run: {conf} - {run}")
         self.requests_queue.put(("add", (conf, run)))
     
+    def report(self, args):
+        system = args["system"]
+        logging.info(f"Generating report for system {system}")
+
+        self.report_request_queue.put(("report", system))
+        sys, report = self.report_queue.get()
+        assert sys == system
+
+        return report
+    
     def join(self):
         self.requests_queue.put(("stop", None))
+        self.report_request_queue.put(("stop", None))
         self.search_thread.join()
         logging.info("Search thread joined")
+        self.report_thread.join()
+        logging.info("Report thread joined")
 
 
 def main(args: argparse.Namespace):
@@ -151,12 +199,18 @@ def main(args: argparse.Namespace):
             server.add_run(request.json)
             return "", 200
     
-    @app.route("/report", methods=["GET"])
-    def _report():
+    @app.route("/latency", methods=["GET"])
+    def _latency():
         response = make_response(get_report(), 200)
         response.mimetype = "text/plain"
         return response
-
+    
+    @app.route("/report", methods=["GET"])
+    def _report():
+        with timer("SearchServer.report"):
+            response = make_response(server.report(request.args), 200)
+            response.mimetype = "text/plain"
+            return response
     
     try:
         app.run(host="0.0.0.0", debug=True)

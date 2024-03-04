@@ -102,6 +102,5 @@ def ttoa3(t: float) -> str:
         return f"{m} m {s} s"
     else:
         h = round(t // 3600)
-        m = (t % 3600) // 60
-        s = round(t % 60)
-        return f"{h} h {m} m {s} s"
+        m = round((t % 3600) / 60)
+        return f"{h} h {m} m"

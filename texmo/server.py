@@ -21,6 +21,7 @@ class SearchThread(threading.Thread):
         self,
         db: ResultDB,
         template: Template,
+        train_time: tuple[float, float],
         default: Configuration2,
         requests_queue: Queue,
         confs_by_system: dict,
@@ -34,7 +35,7 @@ class SearchThread(threading.Thread):
             db=db,
             template=template,
             init_conf=default,
-            train_time=(1.0, 16.0),
+            train_time=train_time,
         )
         self.requests_queue = requests_queue
         self.confs_by_system = confs_by_system
@@ -68,7 +69,7 @@ class SearchThread(threading.Thread):
 
 
 class SearchServer(object):
-    def __init__(self, db: ResultDB, template: Template, default_spec: str):
+    def __init__(self, db: ResultDB, template: Template, train_time: tuple[float, float], default_spec: str):
         self.db: ResultDB = db
         self.template: Template = template
         self.default = default_from_template(template, spec=default_spec)
@@ -82,11 +83,12 @@ class SearchServer(object):
         self.search_thread = SearchThread(
             db,
             template,
-            self.default,
-            self.requests_queue,
-            self.confs_by_system,
-            self.confs_by_system_lock,
-            self.report_queue,
+            train_time=train_time,
+            default=self.default,
+            requests_queue=self.requests_queue,
+            confs_by_system=self.confs_by_system,
+            confs_by_system_lock=self.confs_by_system_lock,
+            report_queue=self.report_queue,
         )
         self.search_thread.start()
 
@@ -149,7 +151,9 @@ def main(args: argparse.Namespace):
     logging.info(f"Template: {template}")
 
     db = ResultDB.from_args(args.db)
-    server = SearchServer(db, template, args.default_spec)
+    train_time = tuple(map(float, args.train_time.split("-")))
+    logging.info(f"T ∈ {train_time} s")
+    server = SearchServer(db, template, train_time, args.default_spec)
 
     app = Flask("texmo")
 

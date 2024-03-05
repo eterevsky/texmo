@@ -11,10 +11,11 @@ from .run import Run
 
 
 def top_confs_report(
-    confs: list[ConfScore], max_weights: int, max_time: float | None
+    confs: list[ConfScore], max_weights: int, max_time: float | None, system: str | None
 ) -> str:
+    sys = "" if system is None else f" ({system})"
     t = "" if max_time is None else f" T ≤ {ttoa3(max_time)}"
-    lines = [f"Top confs W ≤ {itoa3(max_weights)}{t}:"]
+    lines = [f"Top confs W ≤ {itoa3(max_weights)}{t}{sys}:"]
     for c in confs:
         t = "?       " if c.median_time is None else "{:8}".format(ttoa3(c.median_time))
         lines.append(
@@ -89,7 +90,7 @@ class Search(object):
             )
             if all(c.median_time is not None for c in confs):
                 return None
-            logging.info(top_confs_report(confs=confs, max_weights=max_weights, max_time=None))
+            logging.info(top_confs_report(confs=confs, max_weights=max_weights, max_time=None, system=system))
             for i, c in enumerate(confs):
                 if c.median_time is None:
                     logging.info(f"Selecting conf #{i}")
@@ -122,7 +123,7 @@ class Search(object):
                 )
             )
             logging.info(
-                top_confs_report(confs=confs, max_weights=max_weights, max_time=t)
+                top_confs_report(confs=confs, max_weights=max_weights, max_time=t, system=system)
             )
 
             if not confs:

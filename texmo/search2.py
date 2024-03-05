@@ -135,7 +135,7 @@ class Search(object):
                 return top_cs.conf
 
             neighbor_cs = self._select_neighbor_fewest_runs(top_cs.conf_id, system)
-            if neighbor_cs is not None and neighbor_cs.num_runs == 0:
+            if neighbor_cs is not None and (neighbor_cs.num_runs == 0 or neighbor_cs.median_time is None):
                 logging.info(f"Selecting neighbor of conf #0")
                 return neighbor_cs.conf
 
@@ -148,7 +148,7 @@ class Search(object):
             for i in range(1, 3):
                 cs = confs[i]
                 neighbor_cs = self._select_neighbor_fewest_runs(cs.conf_id, system)
-                if neighbor_cs is not None and neighbor_cs.num_runs == 0:
+                if neighbor_cs is not None and (neighbor_cs.num_runs == 0 or neighbor_cs.median_time is None):
                     logging.info(f"Selecting neighbor of conf #{i}")
                     return neighbor_cs.conf
 
@@ -171,7 +171,7 @@ class Search(object):
             for i in range(3, 9):
                 cs = confs[i]
                 neighbor_cs = self._select_neighbor_fewest_runs(cs.conf_id, system)
-                if neighbor_cs is not None and neighbor_cs.num_runs == 0:
+                if neighbor_cs is not None and (neighbor_cs.num_runs == 0 or neighbor_cs.median_time is None):
                     logging.info(f"Selecting neighbor of conf #{i}")
                     return neighbor_cs.conf
 
@@ -183,9 +183,9 @@ class Search(object):
             t = self._select_time()
             max_weights = self._select_max_weights(t, system)
 
-            conf = self._select_untimed(max_weights, system)
-            if conf is not None:
-                return conf
+            # conf = self._select_untimed(max_weights, system)
+            # if conf is not None:
+            #     return conf
 
             conf = self._select_median_neighbor(t, max_weights, system)
             if conf is not None:

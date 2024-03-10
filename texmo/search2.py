@@ -11,10 +11,11 @@ from .run import Run
 
 
 def top_confs_report(
-    confs: list[ConfScore], max_weights: int, max_time: float | None
+    confs: list[ConfScore], max_weights: int, max_time: float | None, system: str | None
 ) -> str:
+    sys = "" if system is None else f" ({system})"
     t = "" if max_time is None else f" T ≤ {ttoa3(max_time)}"
-    lines = [f"Top confs W ≤ {itoa3(max_weights)}{t}:"]
+    lines = [f"Top confs W ≤ {itoa3(max_weights)}{t}{sys}:"]
     for c in confs:
         t = "?       " if c.median_time is None else "{:8}".format(ttoa3(c.median_time))
         lines.append(
@@ -89,7 +90,7 @@ class Search(object):
             )
             if all(c.median_time is not None for c in confs):
                 return None
-            logging.info(top_confs_report(confs=confs, max_weights=max_weights, max_time=None))
+            logging.info(top_confs_report(confs=confs, max_weights=max_weights, max_time=None, system=system))
             for i, c in enumerate(confs):
                 if c.median_time is None:
                     logging.info(f"Selecting conf #{i}")
@@ -113,6 +114,7 @@ class Search(object):
         (2, 1) (2, 1) (2, 1)
         (3, 1) (2, 1) (2, 1)
         (3, 2) (2, 1) (2, 1)
+        (3, 2) (2, 1) (2, 1) (2, 1) ... (2, 1)
         """
         with latency.timer("Search._select_median_neighbor"):
             confs = list(
@@ -121,7 +123,7 @@ class Search(object):
                 )
             )
             logging.info(
-                top_confs_report(confs=confs, max_weights=max_weights, max_time=t)
+                top_confs_report(confs=confs, max_weights=max_weights, max_time=t, system=system)
             )
 
             if not confs:
@@ -133,7 +135,7 @@ class Search(object):
                 return top_cs.conf
 
             neighbor_cs = self._select_neighbor_fewest_runs(top_cs.conf_id, system)
-            if neighbor_cs is not None and neighbor_cs.num_runs == 0:
+            if neighbor_cs is not None and (neighbor_cs.num_runs == 0 or neighbor_cs.median_time is None):
                 logging.info(f"Selecting neighbor of conf #0")
                 return neighbor_cs.conf
 
@@ -146,7 +148,7 @@ class Search(object):
             for i in range(1, 3):
                 cs = confs[i]
                 neighbor_cs = self._select_neighbor_fewest_runs(cs.conf_id, system)
-                if neighbor_cs is not None and neighbor_cs.num_runs == 0:
+                if neighbor_cs is not None and (neighbor_cs.num_runs == 0 or neighbor_cs.median_time is None):
                     logging.info(f"Selecting neighbor of conf #{i}")
                     return neighbor_cs.conf
 
@@ -160,7 +162,20 @@ class Search(object):
                 logging.info(f"Selecting neighbor of conf #0")
                 return neighbor_cs.conf
 
-            # raise NotImplementedError()
+            for i in range(3, 9):
+                cs = confs[i]
+                if cs.num_runs < 2:
+                    logging.info(f"Selecting conf #{i}: {cs.conf}")
+                    return cs.conf
+
+            for i in range(3, 9):
+                cs = confs[i]
+                neighbor_cs = self._select_neighbor_fewest_runs(cs.conf_id, system)
+                if neighbor_cs is not None and (neighbor_cs.num_runs == 0 or neighbor_cs.median_time is None):
+                    logging.info(f"Selecting neighbor of conf #{i}")
+                    return neighbor_cs.conf
+
+            logging.warning("No configuration selected by median time")
             return None
 
     def select_conf(self, system: str) -> Configuration2:
@@ -168,9 +183,9 @@ class Search(object):
             t = self._select_time()
             max_weights = self._select_max_weights(t, system)
 
-            conf = self._select_untimed(max_weights, system)
-            if conf is not None:
-                return conf
+            # conf = self._select_untimed(max_weights, system)
+            # if conf is not None:
+            #     return conf
 
             conf = self._select_median_neighbor(t, max_weights, system)
             if conf is not None:

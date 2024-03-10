@@ -13,6 +13,7 @@ from .run import Run
 from .search2 import Search
 from .tokens import set_tokens_dir
 from .run import Run
+from .report import generate_report_by_weight
 
 
 class SearchThread(threading.Thread):   
@@ -20,21 +21,26 @@ class SearchThread(threading.Thread):
         self,
         db: ResultDB,
         template: Template,
+        train_time: tuple[float, float],
         default: Configuration2,
         requests_queue: Queue,
         confs_by_system: dict,
         confs_by_system_lock: threading.Lock,
+        report_queue: Queue,
     ):
         super().__init__()
+        self.db = db
+        self.template = template
         self.search = Search(
             db=db,
             template=template,
             init_conf=default,
-            train_time=(1.0, 16.0),
+            train_time=train_time,
         )
         self.requests_queue = requests_queue
         self.confs_by_system = confs_by_system
         self.confs_by_system_lock = confs_by_system_lock
+        self.report_queue = report_queue
 
     def run(self):
         logging.info("Started search thread")
@@ -50,6 +56,10 @@ class SearchThread(threading.Thread):
             elif command == "add":
                 conf, run = args
                 self.search.add_run(conf, run)
+            elif command == "report":
+                system = args
+                report = generate_report_by_weight(self.db, self.template, system)
+                self.report_queue.put((system, report))
             elif command == "stop":
                 logging.info("Stopping search thread")
                 break
@@ -57,8 +67,9 @@ class SearchThread(threading.Thread):
                 assert False, f"Unknown command: {command}"
 
 
+
 class SearchServer(object):
-    def __init__(self, db: ResultDB, template: Template, default_spec: str):
+    def __init__(self, db: ResultDB, template: Template, train_time: tuple[float, float], default_spec: str):
         self.db: ResultDB = db
         self.template: Template = template
         self.default = default_from_template(template, spec=default_spec)
@@ -67,14 +78,17 @@ class SearchServer(object):
         self.requests_queue = Queue()
         self.confs_by_system: dict[str, Queue] = {}
         self.confs_by_system_lock = threading.Lock()
+        self.report_queue = Queue()
 
         self.search_thread = SearchThread(
             db,
             template,
-            self.default,
-            self.requests_queue,
-            self.confs_by_system,
-            self.confs_by_system_lock,
+            train_time=train_time,
+            default=self.default,
+            requests_queue=self.requests_queue,
+            confs_by_system=self.confs_by_system,
+            confs_by_system_lock=self.confs_by_system_lock,
+            report_queue=self.report_queue,
         )
         self.search_thread.start()
 
@@ -115,6 +129,16 @@ class SearchServer(object):
         logging.info(f"Adding run: {conf} - {run}")
         self.requests_queue.put(("add", (conf, run)))
     
+    def report(self, args):
+        system = args["system"]
+        logging.info(f"Generating report for system {system}")
+
+        self.requests_queue.put(("report", system))
+        sys, report = self.report_queue.get()
+        assert sys == system
+
+        return report
+    
     def join(self):
         self.requests_queue.put(("stop", None))
         self.search_thread.join()
@@ -127,7 +151,9 @@ def main(args: argparse.Namespace):
     logging.info(f"Template: {template}")
 
     db = ResultDB.from_args(args.db)
-    server = SearchServer(db, template, args.default_spec)
+    train_time = tuple(map(float, args.train_time.split("-")))
+    logging.info(f"T ∈ {train_time} s")
+    server = SearchServer(db, template, train_time, args.default_spec)
 
     app = Flask("texmo")
 
@@ -151,12 +177,18 @@ def main(args: argparse.Namespace):
             server.add_run(request.json)
             return "", 200
     
-    @app.route("/report", methods=["GET"])
-    def _report():
+    @app.route("/latency", methods=["GET"])
+    def _latency():
         response = make_response(get_report(), 200)
         response.mimetype = "text/plain"
         return response
-
+    
+    @app.route("/report", methods=["GET"])
+    def _report():
+        with timer("SearchServer.report"):
+            response = make_response(server.report(request.args), 200)
+            response.mimetype = "text/plain"
+            return response
     
     try:
         app.run(host="0.0.0.0", debug=True)

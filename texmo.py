@@ -4,8 +4,18 @@ import logging
 import numpy as np
 
 import config
-from texmo import sample_cli, latency, search_cli, train_cli, db_cli, report, server, client
+from texmo import (
+    sample_cli,
+    latency,
+    search_cli,
+    train_cli,
+    db_cli,
+    report,
+    server,
+    client,
+)
 from texmo.tokens import small_tokens
+from texmo.predict import time_cli
 
 
 def help(parser):
@@ -21,9 +31,7 @@ def parse_args():
         help="show runtime timers",
     )
 
-    subparsers = parser.add_subparsers(
-        dest="command", help="command to be executed"
-    )
+    subparsers = parser.add_subparsers(dest="command", help="command to be executed")
 
     parser_sample = subparsers.add_parser(
         "sample", help="generate a typical sample of training data"
@@ -49,7 +57,8 @@ def parse_args():
     sample_cli.benchmark_init_args(parser_benchmark_dataset, config)
 
     parser_importdb = subparsers.add_parser(
-        "importdb", help="Import configurations and runs from one databased into another"
+        "importdb",
+        help="Import configurations and runs from one databased into another",
     )
     db_cli.importdb_init_args(parser_importdb, config)
 
@@ -63,15 +72,19 @@ def parse_args():
     )
     report.init_args(parser_report, config)
 
-    parser_server = subparsers.add_parser(
-        "server", help="Start the search server"
-    )
+    parser_server = subparsers.add_parser("server", help="Start the search server")
     server.init_args(parser_server, config)
 
     parser_client = subparsers.add_parser(
-        "client", help="Start a client that will run configurations provided by the server"
+        "client",
+        help="Start a client that will run configurations provided by the server",
     )
     client.init_args(parser_client, config)
+
+    parser_predict_time = subparsers.add_parser(
+        "time", help="Predict the time that it will take to train a configuration"
+    )
+    time_cli.init_args(parser_predict_time, config)
 
     parser_help = subparsers.add_parser("help")
     parser_help.set_defaults(func=lambda _: help(parser), parser=parser)
@@ -85,11 +98,11 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(format="%(levelname)s [%(filename)s:%(lineno)d] %(message)s", level=logging.INFO)
+    logging.basicConfig(
+        format="%(levelname)s [%(filename)s:%(lineno)d] %(message)s", level=logging.INFO
+    )
     logging.getLogger().setLevel(logging.INFO)
     np.set_printoptions(linewidth=100, edgeitems=6, precision=3)
-    # For timing model
-    # jax.config.update("jax_enable_x64", True)
     args = parse_args()
     args.func(args)
 

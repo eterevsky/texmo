@@ -169,13 +169,13 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="batch size (default: 32)",
     )
     parser.add_argument(
-        "-l",
         "--lr",
         type=str,
         default="0.0625",
         help="learning rate, could be written as a float or as 2^-10 (default: 0.0625)",
     )
     parser.add_argument(
+        "-l",
         "--length",
         type=int,
         default=128,

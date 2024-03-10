@@ -113,20 +113,20 @@ class Configuration2(object):
     def tokens_name(self) -> str:
         return self.tokenizer.tokenset.name
 
-    # def neighbors(self) -> Iterable["Configuration2"]:
-    #     if self.steps > 2:
-    #         yield self.replace(steps=self.steps // 2)
-    #     yield self.replace(steps=self.steps * 2)
-    #     yield self.replace(lr=self.lr / 2)
-    #     yield self.replace(lr=self.lr * 2)
-    #     if self.batch > 1:
-    #         yield self.replace(batch=self.batch // 2)
-    #     yield self.replace(batch=self.batch * 2)
-    #     if self.length > 1:
-    #         yield self.replace(length=self.length // 2)
-    #     yield self.replace(length=self.length * 2)
-    #     for model in self.model.neighbors():
-    #         yield self.replace(model=model)
+    def neighbors(self) -> Iterable["Configuration2"]:
+        if self.steps > 2:
+            yield self.replace(steps=self.steps // 2)
+        yield self.replace(steps=self.steps * 2)
+        yield self.replace(lr=self.lr / 2)
+        yield self.replace(lr=self.lr * 2)
+        if self.batch > 1:
+            yield self.replace(batch=self.batch // 2)
+        yield self.replace(batch=self.batch * 2)
+        if self.length > 1:
+            yield self.replace(length=self.length // 2)
+        yield self.replace(length=self.length * 2)
+        for model in self.model.neighbors():
+            yield self.replace(model=model)
 
 
 class Bounds(object):

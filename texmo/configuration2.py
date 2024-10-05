@@ -114,19 +114,19 @@ class Configuration2(object):
         return self.tokenizer.tokenset.name
 
     def neighbors(self) -> Iterable["Configuration2"]:
-        for model in self.model.neighbors():
-            yield self.replace(model=model)
-        yield self.replace(lr=self.lr / 2)
-        yield self.replace(lr=self.lr * 2)
-        if self.length > 1:
-            yield self.replace(length=self.length // 2)
-        yield self.replace(length=self.length * 2)
-        if self.batch > 1:
-            yield self.replace(batch=self.batch // 2)
-        yield self.replace(batch=self.batch * 2)
         if self.steps > 2:
             yield self.replace(steps=self.steps // 2)
         yield self.replace(steps=self.steps * 2)
+        yield self.replace(lr=self.lr / 2)
+        yield self.replace(lr=self.lr * 2)
+        if self.batch > 1:
+            yield self.replace(batch=self.batch // 2)
+        yield self.replace(batch=self.batch * 2)
+        if self.length > 1:
+            yield self.replace(length=self.length // 2)
+        yield self.replace(length=self.length * 2)
+        for model in self.model.neighbors():
+            yield self.replace(model=model)
 
 
 class Bounds(object):
@@ -238,17 +238,17 @@ class Template(object):
         )
 
     def _conf_neighbors(self, conf: Configuration2) -> Iterable[Configuration2]:
+        for steps in self.steps.neighbors(conf.steps):
+            yield conf.replace(steps=steps)
+        for lr in self.lr.neighbors(conf.lr):
+            yield conf.replace(lr=lr)
+        for batch in self.batch.neighbors(conf.batch):
+            yield conf.replace(batch=batch)
+        for length in self.length.neighbors(conf.length):
+            yield conf.replace(length=length)
         for model in conf.model.neighbors():
             if self.match_model(model):
                 yield conf.replace(model=model)
-        for lr in self.lr.neighbors(conf.lr):
-            yield conf.replace(lr=lr)
-        for length in self.length.neighbors(conf.length):
-            yield conf.replace(length=length)
-        for batch in self.batch.neighbors(conf.batch):
-            yield conf.replace(batch=batch)
-        for steps in self.steps.neighbors(conf.steps):
-            yield conf.replace(steps=steps)
 
 
 def conf_neighbors(

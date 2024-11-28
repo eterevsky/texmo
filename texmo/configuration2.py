@@ -281,7 +281,7 @@ def default_from_template(template: Template, spec: Optional[str]) -> Configurat
             steps=steps,
         )
 
-    for tokens in ("tokens.2.raw.b1", "tokens.4.raw.bh"):
+    for tokens in ("tokens.2.raw.b1", "tokens.4.raw.bh", "tokens.256.raw.b8"):
         for pos in ("", "-pos.16", "-pos.256"):
             for emb in ("", "-emb.64", "-emb.256"):
                 input_spec = tokens + pos + emb

@@ -101,7 +101,7 @@ class Model3(object):
                     )
                 )
 
-        for layer_type in ("gru", "mgru", "lstm"):
+        for layer_type in ("gru", "mgru", "mingru", "lstm"):
             yield input_spec + "|" + "-".join(
                 chain(layers_str, (f"{layer_type}.{new_layer_size}",))
             )

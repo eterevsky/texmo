@@ -112,3 +112,49 @@ class Mgru(Layer):
 
         state = (1 - f) * state + f * hc
         return state, state
+
+
+@layer_cls
+class MinGru(Layer):
+    """From https://arxiv.org/abs/2305.17473"""
+    name = "mingru"
+
+    def __init__(self, size, input_shape=None, skip=False):
+        super().__init__(input_shape=input_shape)
+        self.size = size
+        self.output_shape = (size,)
+        # self._no_activation = not tanh and not relu
+        if skip:
+            assert total_size(input_shape) == total_size(self.output_shape)
+        self._skip = skip
+
+    def __str__(self) -> str:
+        return f"mingru.{self.size}"
+
+    def is_valid(self) -> bool:
+        return is_power2_int(self.size)
+
+    @property
+    def weights(self) -> int:
+        return 2 * self.size * (self.input_size + 1)
+
+    def init_weights(self, rng: Rng, init_scale: float) -> LayerWeights:
+        weights = {
+            "w": rng.he((2 * self.size, self.input_size), input_size=self.input_size) * init_scale,
+            "b": rng.normal((2 * self.size,)) * init_scale,
+        }
+        return weights
+
+    def init_state(self, _weights) -> LayerState:
+        return jnp.zeros((self.size,))
+
+    def step(
+        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray
+    ) -> tuple[LayerState, jax.Array]:
+        input = input.flatten()
+        zh = jnp.dot(weights["w"], input) + weights["b"]
+        z = jax.nn.sigmoid(zh[:self.size])
+        h = zh[self.size:]
+
+        state = (1 - z) * state + z * h
+        return state, state

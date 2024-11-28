@@ -60,7 +60,7 @@ class Layer(object):
             for activation in ("tanh", "relu", "gelu"):
                 yield f"{name}.{size}.{activation}"
 
-        for name in ("gru", "mgru", "lstm"):
+        for name in ("gru", "mingru", "mgru", "lstm"):
             yield f"{name}.{size}"
 
         for neighbor_size in power2_neighbors(size):

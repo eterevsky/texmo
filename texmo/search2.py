@@ -99,14 +99,15 @@ class Search(object):
                 # b) there are no similar with fewer steps that took longer
                 # than `t` on this system.
                 if (c.median_time is None and
-                    all(steps > c.steps or median_time < t
+                    all(steps > c.conf.steps or median_time < t
                         for steps, median_time
-                        in self._db.get_conf_runs_diff_steps(c, system))):
+                        in self._db.get_conf_runs_diff_steps(c.conf, system))):
                     selected = i
                     break
             if selected is not None:
                 logging.info(top_confs_report(confs=confs, max_weights=max_weights, max_time=None, system=system))
                 logging.info(f"Selecting conf #{i}")
+                return confs[selected].conf
 
     def _select_neighbor_fewest_runs(self, conf_id: int, system: str) -> Optional[ConfScore]:
         for neighbor_cs in self._db.get_neighbors_by_runs(conf_id, system):

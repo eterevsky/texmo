@@ -389,6 +389,28 @@ class ResultDB(object):
         for row in cur:
             yield self._conf_score_from_row(row, system)
 
+    def get_conf_runs_diff_steps(self, conf: Configuration2, system: str) -> Iterable[tuple[int, float]]:
+        """Find all runs on a given system of configurations which differ from `conf` only in the number of steps."""
+        cur = self._db.execute(
+            f"""
+            SELECT conf.steps, conf_time.median_time
+            FROM conf, conf_time
+            WHERE conf.id = conf_time.conf_id
+              AND conf.spec = :spec
+              AND conf.lr = :lr
+              AND conf.length = :length
+              AND conf.batch = :batch
+              AND conf_time.system = :system
+            """,
+            {"spec": str(conf.model),
+             "lr": conf.lr,
+             "length": conf.length,
+             "batch": conf.batch,
+             "system": system})
+
+        return cur
+
+
     def get_neighbors_by_runs(self, conf_id: int, system: str) -> Iterable[ConfScore]:
         cur = self._db.cursor()
         cur.execute("BEGIN TRANSACTION")

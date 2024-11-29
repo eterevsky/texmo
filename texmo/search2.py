@@ -81,20 +81,32 @@ class Search(object):
             l = random.uniform(log2(self._template.max_weights.min), log2(maxw))
             return round(2**l)
 
-    def _select_untimed(self, max_weights: int, system: str):
+    def _select_untimed(self, t: float, max_weights: int, system: str):
         with latency.timer("Search._select_untimed"):
             confs = list(
                 self._db.top_confs(
-                    max_weights=max_weights, system=system, limit=10, template=self._template
+                    max_weights=max_weights,
+                    system=system,
+                    limit=10,
+                    template=self._template
                 )
             )
             if all(c.median_time is not None for c in confs):
                 return None
-            logging.info(top_confs_report(confs=confs, max_weights=max_weights, max_time=None, system=system))
+            selected = None
             for i, c in enumerate(confs):
-                if c.median_time is None:
-                    logging.info(f"Selecting conf #{i}")
-                    return c.conf
+                # Select a conf if it's a) hasn't been run on the given system,
+                # b) there are no similar with fewer steps that took longer
+                # than `t` on this system.
+                if (c.median_time is None and
+                    all(steps > c.steps or median_time < t
+                        for steps, median_time
+                        in self._db.get_conf_runs_diff_steps(c, system))):
+                    selected = i
+                    break
+            if selected is not None:
+                logging.info(top_confs_report(confs=confs, max_weights=max_weights, max_time=None, system=system))
+                logging.info(f"Selecting conf #{i}")
 
     def _select_neighbor_fewest_runs(self, conf_id: int, system: str) -> Optional[ConfScore]:
         for neighbor_cs in self._db.get_neighbors_by_runs(conf_id, system):
@@ -178,18 +190,23 @@ class Search(object):
             logging.warning("No configuration selected by median time")
             return None
 
-    def select_conf(self, system: str) -> Configuration2:
+    def select_conf(self, system: str) -> tuple[Configuration2, float]:
+        """Select a configuration to run.
+
+            Returns:
+                (configuration to run, soft time limit in seconds)
+        """
         with latency.timer("Search.select_conf"):
             t = self._select_time()
             max_weights = self._select_max_weights(t, system)
 
-            # conf = self._select_untimed(max_weights, system)
-            # if conf is not None:
-            #     return conf
+            conf = self._select_untimed(t, max_weights, system)
+            if conf is not None:
+                return conf, t
 
             conf = self._select_median_neighbor(t, max_weights, system)
             if conf is not None:
-                return conf
+                return conf, t
 
             logging.info("Selecting default configuration")
-            return self._init_conf
+            return self._init_conf, t

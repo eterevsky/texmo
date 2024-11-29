@@ -79,11 +79,12 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
         d = r.json()
         assert d["system"] == system
         conf = Configuration2.from_dict(d["conf"])
+        soft_tl = d.get("soft_tl")  # soft time limit
 
         manager = Manager(conf, system, dataset=dataset)
         manager.init(quiet=True)
 
-        run, _weights = manager.train_and_eval(
+        run, _weights, out_conf = manager.train_and_eval(
             steps=conf.steps,
             time_limit=None,
             temp_steps=None,
@@ -91,13 +92,14 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
             output_dir=None,
             log=None,
             quiet=True,
+            soft_tl=soft_tl,
         )
 
         with timer("post(add)"):
             result = {
                 "system": system,
                 "run": run.to_dict(),
-                "conf": conf.to_dict(),
+                "conf": out_conf.to_dict(),
             }
             sanitize_json(result)
             try:

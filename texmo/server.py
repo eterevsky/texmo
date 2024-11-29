@@ -50,9 +50,9 @@ class SearchThread(threading.Thread):
                 system = args
                 if system is None:
                     break
-                conf = self.search.select_conf(system)
+                conf, soft_tl = self.search.select_conf(system)
                 with self.confs_by_system_lock:
-                    self.confs_by_system[system].put(conf)
+                    self.confs_by_system[system].put((conf, soft_tl))
             elif command == "add":
                 conf, run = args
                 self.search.add_run(conf, run)
@@ -115,11 +115,12 @@ class SearchServer(object):
 
         self.requests_queue.put(("select", system))
 
-        conf = response_queue.get()
+        conf, soft_tl = response_queue.get()
         logging.info(f"Generated conf for system {system}: {conf}")
         result = {
             "system": system,
-            "conf": conf.to_dict()
+            "conf": conf.to_dict(),
+            "soft_tl": soft_tl
         }
         return result
 

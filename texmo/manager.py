@@ -488,7 +488,7 @@ class Manager(object):
             f"{self.conf}:  loss {eval_loss:.4f} b/byte  T = {ttoa3(train_time)}"
         )
 
-        return (self.run, self.weights)
+        return (self.run, self.weights, final_conf)
 
     def continue_prefix(
         self, prefix: str, length: int, temperature: float

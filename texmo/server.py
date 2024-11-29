@@ -41,6 +41,7 @@ class SearchThread(threading.Thread):
         self.confs_by_system = confs_by_system
         self.confs_by_system_lock = confs_by_system_lock
         self.report_queue = report_queue
+        _, self.max_time = train_time
 
     def run(self):
         logging.info("Started search thread")
@@ -58,7 +59,7 @@ class SearchThread(threading.Thread):
                 self.search.add_run(conf, run)
             elif command == "report":
                 system = args
-                report = generate_report_by_weight(self.db, self.template, system)
+                report = generate_report_by_weight(self.db, self.template, system, max_time=self.max_time)
                 self.report_queue.put((system, report))
             elif command == "stop":
                 logging.info("Stopping search thread")

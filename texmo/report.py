@@ -207,7 +207,7 @@ def print_top_confs(top_confs, run_count) -> str:
     return out.getvalue()
 
 
-def generate_report_by_weight(result_db: ResultDB, template: Template, system: str) -> str:
+def generate_report_by_weight(result_db: ResultDB, template: Template, system: str, max_time: float) -> str:
     lines = [f"Top confs by weight ({template}):"]
     confs = result_db.top_confs(system, sorted="weights", template=template)
     best_score = INF
@@ -216,7 +216,9 @@ def generate_report_by_weight(result_db: ResultDB, template: Template, system: s
             continue
         if not template.match(c.conf):
             continue
-        t = "?       " if c.median_time is None else "{:8}".format(ttoa3(c.median_time))
+        if c.median_time is None or c.median_time > max_time:
+            continue
+        t = "{:8}".format(ttoa3(c.median_time))
         lines.append(
             f"{c.median_score:.4f} ({c.num_runs})  {t}  {c.conf.aligned_str()}"
         )

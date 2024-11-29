@@ -158,3 +158,34 @@ class MinGru(Layer):
 
         state = (1 - z) * state + z * h
         return state, state
+
+    def forward_batch(
+            self, weights: LayerWeights, inputs: jax.Array
+    ) -> jax.Array:
+        batch, length = inputs.shape[0:2]
+        inputs = jnp.reshape(inputs, (batch, length, -1))
+
+        # (batch, position, ...) -> (position, batch, ...)
+        inputs = jnp.swapaxes(inputs, 0, 1)
+
+        b = jnp.reshape(weights["b"], (1, 1, -1))
+        zhs = jnp.einsum("oi,bni->bno", weights["w"], inputs) + b
+        zs = jax.nn.sigmoid(zhs[:,:,:self.size])
+        hs = zhs[:,:,self.size:]
+
+        def step_batch(state, v):
+            # Both should have dimentions (batch, size)
+            z, h = v
+            state = (1.0 - z) * state + z * h
+            return state, state
+
+        init_state = jnp.zeros((batch, self.size))
+
+        _, out = jax.lax.scan(
+            step_batch,
+            init_state,
+            (zs, hs)
+        )
+        return jnp.swapaxes(out, 0, 1)
+
+

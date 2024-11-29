@@ -42,3 +42,26 @@ class GruTest(TestCase):
         out_fs = layer._forward_batch_from_step(weights, input)
 
         self.assertTrue(jnp.linalg.norm(out_ff - out_fs) < 1e-6)
+
+
+class MinGruTest(TestCase):
+
+    def test_forward_batch(self):
+        layer = Gru(2, input_shape=(4,))
+        input = jnp.array(
+            [
+                [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]],
+                [[13, 14, 15, 16], [17, 18, 19, 20], [21, 22, 23, 24]],
+            ],
+            dtype=jnp.float32
+        )
+
+        rng = Rng()
+        weights = layer.init_weights(rng, 1.0)
+
+        out_ff = layer._forward_batch_from_forward(weights, input)
+        out_fs = layer._forward_batch_from_step(weights, input)
+        out_fb = layer.forward_batch(weights, input)
+
+        self.assertTrue(jnp.linalg.norm(out_ff - out_fs) < 1e-6)
+        self.assertTrue(jnp.linalg.norm(out_fb - out_fs) < 1e-6)

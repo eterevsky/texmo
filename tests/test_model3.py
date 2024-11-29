@@ -26,7 +26,7 @@ class Model3Test(TestCase):
             outs.append(out)
 
         step_outs = jnp.stack(outs)
-        
+
         batch = jnp.array(input).reshape(1, -1)
         batch_outs = model._forward_batch(weights, batch)
 
@@ -88,6 +88,10 @@ class Model3Test(TestCase):
                 "tokens.128.cw.bh-pos.8-emb.64.norm|gru.64-dense.64.relu",
                 "tokens.256.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu",
                 "tokens.64.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu",
+                "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-mingru.64",
+                "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-mingru.64",
+                "tokens.128.cw.bh-pos.16-emb.64.norm|mingru.64-dense.64.relu",
+
             },
         )
 

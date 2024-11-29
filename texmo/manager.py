@@ -432,7 +432,7 @@ class Manager(object):
                 soft_deadline = start_time + soft_tl if soft_tl else INF
 
         if self.step < steps:
-            if perf_counter() < deadline:
+            if perf_counter() > deadline:
                 logging.info(f"Stopped at step {self.step}/{steps} due to hard time limit")
             else:
                 logging.info(f"Stopped at step {self.step}/{steps} due to soft time limit {soft_tl}")

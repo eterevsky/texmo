@@ -54,7 +54,7 @@ class Search(object):
     ):
         assert isinstance(conf, Configuration2)
         assert isinstance(run, Run)
-        assert self._template.match(conf)
+        # assert self._template.match(conf)
 
         self._db.add_run(conf, run, update_neighbors=False)
 

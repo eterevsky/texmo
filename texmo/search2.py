@@ -203,11 +203,11 @@ class Search(object):
 
             conf = self._select_untimed(t, max_weights, system)
             if conf is not None:
-                return conf, t
+                return conf, 2*t
 
             conf = self._select_median_neighbor(t, max_weights, system)
             if conf is not None:
-                return conf, t
+                return conf, 2*t
 
             logging.info("Selecting default configuration")
-            return self._init_conf, t
+            return self._init_conf, 2*t

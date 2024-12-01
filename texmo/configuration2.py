@@ -1,6 +1,6 @@
 import argparse
 import re
-from typing import Optional, Iterable
+from typing import Optional, Iterable, Self
 import math
 
 from .common import INF, itoa3, itoa3_aligned
@@ -17,27 +17,29 @@ def is_valid_int(x: int) -> bool:
 
 
 class Configuration2(object):
-    __slots__ = ("model", "lr", "length", "batch", "steps")
+    __slots__ = ('model', 'lr', 'length', 'batch', 'steps')
 
-    def __init__(self, model: Model3, lr: float, length: int, batch: int, steps: int):
-        object.__setattr__(self, "model", model)
-        object.__setattr__(self, "lr", lr)
-        object.__setattr__(self, "length", length)
-        object.__setattr__(self, "batch", batch)
-        object.__setattr__(self, "steps", steps)
+    def __init__(
+        self, model: Model3, lr: float, length: int, batch: int, steps: int
+    ):
+        object.__setattr__(self, 'model', model)
+        object.__setattr__(self, 'lr', lr)
+        object.__setattr__(self, 'length', length)
+        object.__setattr__(self, 'batch', batch)
+        object.__setattr__(self, 'steps', steps)
 
     def __setattr__(self, _key, _value):
-        raise AttributeError("Configuration is immutable")
+        raise AttributeError('Configuration is immutable')
 
     @staticmethod
-    def from_dict(d: dict) -> "Confiuration2":
-        model = build_model(d["spec"])
+    def from_dict(d: dict) -> Self:
+        model = build_model(d['spec'])
         return Configuration2(
             model=model,
-            lr=d["lr"],
-            length=d["length"],
-            batch=d["batch"],
-            steps=d["steps"],
+            lr=d['lr'],
+            length=d['length'],
+            batch=d['batch'],
+            steps=d['steps'],
         )
 
     def __eq__(self, other: Self) -> bool:
@@ -50,7 +52,9 @@ class Configuration2(object):
         )
 
     def __hash__(self) -> int:
-        return hash((str(self.model), self.lr, self.length, self.batch, self.steps))
+        return hash(
+            (str(self.model), self.lr, self.length, self.batch, self.steps)
+        )
 
     def replace(
         self,
@@ -71,11 +75,11 @@ class Configuration2(object):
 
     def to_dict(self) -> dict:
         return {
-            "spec": str(self.model),
-            "lr": self.lr,
-            "length": self.length,
-            "batch": self.batch,
-            "steps": self.steps,
+            'spec': str(self.model),
+            'lr': self.lr,
+            'length': self.length,
+            'batch': self.batch,
+            'steps': self.steps,
         }
 
     def __repr__(self) -> str:
@@ -83,17 +87,17 @@ class Configuration2(object):
 
     def __str__(self) -> str:
         model = str(self.model)
-        steps = f"  S{itoa3(self.steps)}" if self.steps else ""
+        steps = f'  S{itoa3(self.steps)}' if self.steps else ''
         return (
-            f"{model} ({itoa3(self.model.weights)})  LEN{itoa3(self.length)}"
-            + f"  B{itoa3(self.batch)}  LR{self.lr:.4f}{steps}"
+            f'{model} ({itoa3(self.model.weights)})  LEN{itoa3(self.length)}'
+            + f'  B{itoa3(self.batch)}  LR{self.lr:.4f}{steps}'
         )
 
     def aligned_str(self) -> str:
         model = str(self.model)
         return (
-            f"L{itoa3_aligned(self.length)} B{itoa3_aligned(self.batch)} "
-            + f"LR{self.lr:.4f}   S{itoa3_aligned(self.steps)}  {model} ({self.model.weights})"
+            f'L{itoa3_aligned(self.length)} B{itoa3_aligned(self.batch)} '
+            + f'LR{self.lr:.4f}   S{itoa3_aligned(self.steps)}  {model} ({self.model.weights})'
         )
 
     def is_valid(self) -> bool:
@@ -113,7 +117,7 @@ class Configuration2(object):
     def tokens_name(self) -> str:
         return self.tokenizer.tokenset.name
 
-    def neighbors(self) -> Iterable["Configuration2"]:
+    def neighbors(self) -> Iterable['Configuration2']:
         if self.steps > 2:
             yield self.replace(steps=self.steps // 2)
         yield self.replace(steps=self.steps * 2)
@@ -130,7 +134,9 @@ class Configuration2(object):
 
 
 class Bounds(object):
-    def __init__(self, limits: Optional[float | tuple[float, float]], min_value: float):
+    def __init__(
+        self, limits: Optional[float | tuple[float, float]], min_value: float
+    ):
         if limits is None:
             self.min = min_value
             self.max = INF
@@ -141,7 +147,7 @@ class Bounds(object):
                 self.min = self.max = limits
 
     def __str__(self) -> str:
-        return f"({self.min}, {self.max})"
+        return f'({self.min}, {self.max})'
 
     def match(self, value: float) -> bool:
         return self.min <= value <= self.max
@@ -176,7 +182,7 @@ Limits = Optional[float | tuple[float, float]]
 def _parse_interval(arg: str, num_type: type) -> tuple:
     if arg is None:
         return None
-    comps = arg.split("-")
+    comps = arg.split('-')
     assert len(comps) in (1, 2)
     if len(comps) == 1:
         v = num_type(comps[0])
@@ -216,8 +222,8 @@ class Template(object):
 
     def __str__(self):
         return (
-            f"Template({self.regex}, lr={self.lr}, length={self.length}, "
-            + f"batch={self.batch}, steps={self.steps}, max_weights={self.max_weights})"
+            f'Template({self.regex}, lr={self.lr}, length={self.length}, '
+            + f'batch={self.batch}, steps={self.steps}, max_weights={self.max_weights})'
         )
 
     def update_regex(self, regex: Optional[str]):
@@ -237,7 +243,9 @@ class Template(object):
             and self.steps.match(conf.steps)
         )
 
-    def _conf_neighbors(self, conf: Configuration2) -> Iterable[Configuration2]:
+    def _conf_neighbors(
+        self, conf: Configuration2
+    ) -> Iterable[Configuration2]:
         for steps in self.steps.neighbors(conf.steps):
             yield conf.replace(steps=steps)
         for lr in self.lr.neighbors(conf.lr):
@@ -254,7 +262,7 @@ class Template(object):
 def conf_neighbors(
     conf: Configuration2, template: Template
 ) -> Iterable[Configuration2]:
-    with latency.timer("conf_neighbors"):
+    with latency.timer('conf_neighbors'):
         neighbors = template._conf_neighbors_cache.get(conf)
 
         if neighbors is not None:
@@ -266,7 +274,9 @@ def conf_neighbors(
         return neighbors
 
 
-def default_from_template(template: Template, spec: Optional[str]) -> Configuration2:
+def default_from_template(
+    template: Template, spec: Optional[str]
+) -> Configuration2:
     lr = template.lr.pick_default(1 / 32)
     length = template.length.pick_default(8)
     batch = template.batch.pick_default(1)
@@ -281,18 +291,18 @@ def default_from_template(template: Template, spec: Optional[str]) -> Configurat
             steps=steps,
         )
 
-    for tokens in ("tokens.2.raw.b1", "tokens.4.raw.bh", "tokens.256.raw.b8"):
-        for pos in ("", "-pos.16", "-pos.256"):
-            for emb in ("", "-emb.64", "-emb.256"):
+    for tokens in ('tokens.2.raw.b1', 'tokens.4.raw.bh', 'tokens.256.raw.b8'):
+        for pos in ('', '-pos.16', '-pos.256'):
+            for emb in ('', '-emb.64', '-emb.256'):
                 input_spec = tokens + pos + emb
                 for layers in (
-                    "",
-                    "dense.1.gelu",
-                    "rec.1.gelu",
-                    "gru.1",
-                    "lstm.1",
+                    '',
+                    'dense.1.gelu',
+                    'rec.1.gelu',
+                    'gru.1',
+                    'lstm.1',
                 ):
-                    spec = input_spec + "|" + layers
+                    spec = input_spec + '|' + layers
                     model = build_model(spec)
                     if template.match_model(model):
                         return Configuration2(
@@ -302,4 +312,6 @@ def default_from_template(template: Template, spec: Optional[str]) -> Configurat
                             batch=batch,
                             steps=steps,
                         )
-    raise RuntimeError("Can't pick up a default model that would fit the template")
+    raise RuntimeError(
+        "Can't pick up a default model that would fit the template"
+    )

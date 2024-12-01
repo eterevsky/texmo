@@ -52,7 +52,7 @@ class DataSet(object):
     def __del__(self):
         if hasattr(self, "data_file"):
             self.data_file.close()
-        if hasattr(self, "processed_file"):
+        if hasattr(self, "processed_file") and self.processed_file is not None:
             self.processed_file.close()
 
     def _select_chunk_start(

@@ -223,7 +223,7 @@ def generate_report_by_weight(
     lines = [
         f'Top confs by weights for {system}',
         f'Max time: {max_time}',
-        f'Spec: {template.pattern}',
+        f'Spec: {template.regex.pattern}',
         f'LR: {template.lr}',
         f'Length: {template.length}',
         f'Batch: {template.batch}',

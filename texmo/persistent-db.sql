@@ -14,6 +14,8 @@ CREATE TABLE conf (
     length INTEGER NOT NULL,
     batch INTEGER NOT NULL,
     steps INTEGER NOT NULL,
+    -- One of 'fp32', 'fp16', 'bf16'
+    precision TEXT NOT NULL DEFAULT 'fp32',
 
     -- Scores based on the runs.
     median_score REAL,

@@ -13,7 +13,7 @@ import numpy as np
 
 from . import latency
 from .common import INF
-from .configuration2 import Configuration2, Template
+from .configuration2 import Configuration2, Template, Precision
 from .model3 import build_model
 from .run import Run
 
@@ -130,6 +130,7 @@ class ResultDB(object):
               AND length = :length
               AND batch = :batch
               AND steps = :steps
+              AND precision = :precision
             """,
             conf_dict,
         )
@@ -144,8 +145,8 @@ class ResultDB(object):
             cur = self._db.cursor()
             cur.execute(
                 """
-                INSERT INTO conf (spec, weights, lr, length, batch, steps, has_neighbors)
-                VALUES (:spec, :weights, :lr, :length, :batch, :steps, 0)
+                INSERT INTO conf (spec, weights, lr, length, batch, steps, has_neighbors, precision)
+                VALUES (:spec, :weights, :lr, :length, :batch, :steps, 0, precision)
                 """,
                 conf_dict,
             )
@@ -374,6 +375,10 @@ class ResultDB(object):
             if template.max_weights.max < INF:
                 conditions.append('weights <= :weights_max')
                 params['weights_max'] = template.max_weights.max
+            if len(template.precision) != len(Precision):
+                # We can do this because there's only a limited set of precisions.
+                precisions_list = ', '.join(f'"{p}"' for p in template.precision)
+                conditions.append(f'precision IN ({precisions_list})')
 
         if with_runs:
             conditions.append(
@@ -397,7 +402,7 @@ class ResultDB(object):
 
         cur = self._db.execute(
             f"""
-            SELECT conf.id AS conf_id, spec, lr, length, batch, steps, median_score,
+            SELECT conf.id AS conf_id, spec, precision, lr, length, batch, steps, median_score,
                 (SELECT median_time FROM conf_time
                  WHERE conf_id = conf.id AND system = :system) AS median_time,
                 (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs
@@ -419,6 +424,7 @@ class ResultDB(object):
             FROM conf, conf_time
             WHERE conf.id = conf_time.conf_id
               AND conf.spec = :spec
+              AND conf.precision = :precision
               AND conf.lr = :lr
               AND conf.length = :length
               AND conf.batch = :batch
@@ -426,6 +432,7 @@ class ResultDB(object):
             """,
             {
                 'spec': str(conf.model),
+                'precision': str(conf.precision),
                 'lr': conf.lr,
                 'length': conf.length,
                 'batch': conf.batch,
@@ -447,24 +454,26 @@ class ResultDB(object):
         has_neighbors = cur.fetchone()[0]
         if not has_neighbors:
             cur.execute(
-                'SELECT spec, lr, length, batch, steps FROM conf WHERE id = :conf_id',
+                'SELECT spec, precision, lr, length, batch, steps FROM conf WHERE id = :conf_id',
                 {'conf_id': conf_id},
             )
             row = cur.fetchone()
             conf = Configuration2(
                 build_model(row[0]),
-                lr=row[1],
-                length=row[2],
-                batch=row[3],
-                steps=row[4],
+                precision=row[1],
+                lr=row[2],
+                length=row[3],
+                batch=row[4],
+                steps=row[5],
             )
             self._init_neighbors(cur, conf, conf_id)
         cur.execute(
             f"""
-            SELECT conf.id AS conf_id, spec, lr, length, batch, steps, median_score,
-                (SELECT median_time FROM conf_time
-                 WHERE conf_id = conf.id AND system = :system) AS median_time,
-                (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs
+            SELECT conf.id AS conf_id, spec, precision, lr, length, batch,
+                   steps, median_score,
+                   (SELECT median_time FROM conf_time
+                    WHERE conf_id = conf.id AND system = :system) AS median_time,
+                   (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs
             FROM conf, neighbor
             WHERE neighbor.conf1_id = :conf_id
               AND neighbor.conf2_id = conf.id
@@ -491,6 +500,7 @@ class ResultDB(object):
             """
             SELECT conf.id AS conf_id,
                    spec,
+                   precision,
                    lr,
                    length,
                    batch,
@@ -514,30 +524,30 @@ class ResultDB(object):
                 conf_id = row[0]
 
                 model = build_model(row[1])
-                conf = Configuration2(model, row[2], row[3], row[4], row[5])
+                conf = Configuration2(model, row[2], row[3], row[4], row[5], row[6])
 
-                step_loss = _unpack_ndarray(row[11])
+                step_loss = _unpack_ndarray(row[12])
                 loss_trend = _build_loss_trend(
                     step_loss,
-                    row[12],
-                    _unpack_ndarray(row[13]),
+                    row[13],
+                    _unpack_ndarray(row[14]),
                 )
 
                 run = Run(
-                    id=row[6],
+                    id=row[7],
                     step_loss=step_loss,
-                    loss=row[10],
+                    loss=row[11],
                     loss_trend=loss_trend,
-                    train_time=row[8],
-                    checkpoint=row[14],
-                    system=row[7],
+                    train_time=row[9],
+                    checkpoint=row[15],
+                    system=row[8],
                 )
 
                 if with_timestamps:
-                    if row[9] is None:
+                    if row[10] is None:
                         timestamp = None
                     else:
-                        timestamp = datetime.fromisoformat(row[9])
+                        timestamp = datetime.fromisoformat(row[10])
                     yield conf_id, conf, run, timestamp
                 else:
                     yield conf_id, conf, run

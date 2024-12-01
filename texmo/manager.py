@@ -392,12 +392,12 @@ class Manager(object):
         # steps is a power of 2.
 
         while self.step < steps:
-            if perf_counter() < deadline:
+            if perf_counter() > deadline:
                 logging.info(
                     f"Stopped at step {self.step} due to hard time limit {ttoa3(time_limit)}"
                 )
                 break
-            if self.step & (self.step - 1) != 0 and perf_counter() < soft_deadline:
+            if self.step & (self.step - 1) != 0 and perf_counter() > soft_deadline:
                 logging.info(
                     f"Stopped at step {self.step} / {steps} due to soft time limit {ttoa3(soft_tl)}"
                 )

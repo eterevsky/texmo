@@ -67,20 +67,22 @@ def _regexp(pattern, input_string):
 
 class ResultDB(object):
     @staticmethod
-    def from_args(db: Optional[str]) -> "ResultDB":
+    def from_args(db: Optional[str]) -> 'ResultDB':
         return ResultDB(db)
 
     def __init__(self, path: Optional[str] = None):
         if path is None:
-            path = ":memory:"
-        exists = path != ":memory:" and os.path.exists(path)
-        if path != ":memory:":
-            logging.info(f"Connecting to results DB {path}")
+            path = ':memory:'
+        exists = path != ':memory:' and os.path.exists(path)
+        if path != ':memory:':
+            logging.info(f'Connecting to results DB {path}')
         self._db = sqlite3.connect(path, check_same_thread=False)
-        self._db.create_function("REGEXP", 2, _regexp)
+        self._db.create_function('REGEXP', 2, _regexp)
 
         if not exists:
-            schema_path = os.path.join(os.path.dirname(__file__), "persistent-db.sql")
+            schema_path = os.path.join(
+                os.path.dirname(__file__), 'persistent-db.sql'
+            )
             with open(schema_path) as schema:
                 self._db.executescript(schema.read())
                 self._db.commit()
@@ -88,8 +90,10 @@ class ResultDB(object):
     def commit(self):
         self._db.commit()
 
-    def _init_neighbors(self, cur: sqlite3.Cursor, conf: Configuration2, conf_id: int):
-        with latency.timer("ResultDB._init_neighbors"):
+    def _init_neighbors(
+        self, cur: sqlite3.Cursor, conf: Configuration2, conf_id: int
+    ):
+        with latency.timer('ResultDB._init_neighbors'):
             for neighbor in conf.neighbors():
                 neighbor_id = self._find_or_add_conf(
                     cur, neighbor, init_neighbors=False
@@ -100,8 +104,8 @@ class ResultDB(object):
                     VALUES (:conf1_id, :conf2_id)
                     """,
                     [
-                        {"conf1_id": conf_id, "conf2_id": neighbor_id},
-                        {"conf1_id": neighbor_id, "conf2_id": conf_id},
+                        {'conf1_id': conf_id, 'conf2_id': neighbor_id},
+                        {'conf1_id': neighbor_id, 'conf2_id': conf_id},
                     ],
                 )
             cur.execute(
@@ -110,14 +114,14 @@ class ResultDB(object):
                 SET has_neighbors = 1
                 WHERE id = :conf_id
                 """,
-                {"conf_id": conf_id},
+                {'conf_id': conf_id},
             )
 
     def _find_or_add_conf(
         self, cur: sqlite3.Cursor, conf: Configuration2, init_neighbors: bool
     ) -> int:
         conf_dict = conf.to_dict()
-        conf_dict["weights"] = conf.model.weights
+        conf_dict['weights'] = conf.model.weights
         cur.execute(
             """
             SELECT id, has_neighbors FROM conf
@@ -150,17 +154,19 @@ class ResultDB(object):
                 self._init_neighbors(cur, conf, conf_id)
             return conf_id
 
-    def find_or_add_conf(self, conf: Configuration2, init_neighbors: bool) -> int:
+    def find_or_add_conf(
+        self, conf: Configuration2, init_neighbors: bool
+    ) -> int:
         """Finds the conf in the db and returns the configuration id."""
-        with latency.timer("ResultDB.find_or_add_conf"):
+        with latency.timer('ResultDB.find_or_add_conf'):
             cur = self._db.cursor()
-            cur.execute("BEGIN TRANSACTION")
+            cur.execute('BEGIN TRANSACTION')
             conf_id = self._find_or_add_conf(cur, conf, init_neighbors)
-            cur.execute("COMMIT")
+            cur.execute('COMMIT')
             return conf_id
 
     def _add_run_execute(self, cur: sqlite3.Cursor, run_dict: dict):
-        with latency.timer("ResultDB._add_run_execute"):
+        with latency.timer('ResultDB._add_run_execute'):
             cur.execute(
                 """
                 INSERT INTO run(conf_id, system, train_time, timestamp, loss, step_loss,
@@ -172,12 +178,12 @@ class ResultDB(object):
             )
 
     def _update_median_score(self, cur: sqlite3.Cursor, conf_id: int):
-        with latency.timer("ResultDB._update_median_score"):
+        with latency.timer('ResultDB._update_median_score'):
             cur.execute(
                 """
                 SELECT loss FROM run WHERE conf_id = :conf_id
                 """,
-                {"conf_id": conf_id},
+                {'conf_id': conf_id},
             )
             try:
                 median_score = median(row[0] for row in cur)
@@ -189,18 +195,20 @@ class ResultDB(object):
                 SET median_score = :median_score
                 WHERE id = :conf_id
                 """,
-                {"median_score": median_score, "conf_id": conf_id},
+                {'median_score': median_score, 'conf_id': conf_id},
             )
 
-    def _update_median_time(self, cur: sqlite3.Cursor, conf_id: int, system: str):
-        with latency.timer("ResultDB._update_median_time"):
+    def _update_median_time(
+        self, cur: sqlite3.Cursor, conf_id: int, system: str
+    ):
+        with latency.timer('ResultDB._update_median_time'):
             cur.execute(
                 """
                 SELECT train_time
                 FROM run
                 WHERE conf_id = :conf_id AND system = :system
                 """,
-                {"conf_id": conf_id, "system": system},
+                {'conf_id': conf_id, 'system': system},
             )
             try:
                 median_time = median(row[0] for row in cur if row[0] > 0.0001)
@@ -212,7 +220,11 @@ class ResultDB(object):
                     INSERT OR REPLACE INTO conf_time(conf_id, system, median_time)
                     VALUES (:conf_id, :system, :median_time)
                     """,
-                    {"median_time": median_time, "conf_id": conf_id, "system": system},
+                    {
+                        'median_time': median_time,
+                        'conf_id': conf_id,
+                        'system': system,
+                    },
                 )
 
     def _update_scores(self, cur: sqlite3.Cursor, conf_id: int, system: str):
@@ -228,17 +240,17 @@ class ResultDB(object):
         #     self._update_neighbor_score(cur, neighbor_id)
 
     def update_all_scores(self):
-        with latency.timer("ResultDB.update_scores"):
+        with latency.timer('ResultDB.update_scores'):
             cur = self._db.cursor()
 
             cur.execute(
-                "SELECT DISTINCT conf.id, system FROM conf, run WHERE conf.id = run.conf_id"
+                'SELECT DISTINCT conf.id, system FROM conf, run WHERE conf.id = run.conf_id'
             )
 
             for row in cur.fetchall():
                 conf_id = row[0]
                 system = row[1]
-                logging.info(f"{conf_id} {system}")
+                logging.info(f'{conf_id} {system}')
                 self._update_scores(cur, conf_id, system)
             self.commit()
 
@@ -253,7 +265,7 @@ class ResultDB(object):
         assert run.checkpoint is None
 
         cur = self._db.cursor()
-        cur.execute("BEGIN TRANSACTION")
+        cur.execute('BEGIN TRANSACTION')
 
         if conf_id is None:
             conf_id = self._find_or_add_conf(cur, conf, update_neighbors)
@@ -268,19 +280,21 @@ class ResultDB(object):
         timestamp = timestamp.isoformat() if timestamp else None
 
         run_dict = {
-            "conf_id": conf_id,
-            "system": run.system,
-            "train_time": run.train_time or 0,
-            "timestamp": timestamp,
-            "loss": INF if math.isnan(run.loss) or run.loss is None else run.loss,
-            "step_loss": _pack_ndarray(run.step_loss),
-            "loss_model_v": loss_model_v,
-            "loss_model": loss_model,
+            'conf_id': conf_id,
+            'system': run.system,
+            'train_time': run.train_time or 0,
+            'timestamp': timestamp,
+            'loss': INF
+            if math.isnan(run.loss) or run.loss is None
+            else run.loss,
+            'step_loss': _pack_ndarray(run.step_loss),
+            'loss_model_v': loss_model_v,
+            'loss_model': loss_model,
         }
 
         self._add_run_execute(cur, run_dict)
         self._update_scores(cur, conf_id, run.system)
-        cur.execute("COMMIT")
+        cur.execute('COMMIT')
 
     def add_run(
         self,
@@ -291,7 +305,7 @@ class ResultDB(object):
         update_neighbors: bool = True,
     ):
         assert run.train_time is None or run.train_time > 0.0001
-        with latency.timer("ResultDB.add_run"):
+        with latency.timer('ResultDB.add_run'):
             self._add_run(conf, run, conf_id, timestamp, update_neighbors)
 
     def _conf_score_from_row(self, row: dict, system: str) -> ConfScore:
@@ -315,71 +329,71 @@ class ResultDB(object):
         max_weights: float | None = None,
         max_time: float | None = None,
         limit: int = None,
-        sorted: str = "median_score",
+        sorted: str = 'median_score',
         with_runs: bool = False,
     ) -> Iterable[ConfScore]:
-        conditions = ["median_score IS NOT NULL"]
-        params = {"system": system}
+        conditions = ['median_score IS NOT NULL']
+        params = {'system': system}
 
         if max_weights is not None:
-            conditions.append("weights <= :max_weight")
-            params["max_weight"] = max_weights
+            conditions.append('weights <= :max_weight')
+            params['max_weight'] = max_weights
 
         if max_time is not None:
-            conditions.append("median_time <= :max_time")
-            params["max_time"] = max_time
+            conditions.append('median_time <= :max_time')
+            params['max_time'] = max_time
 
         if template is not None:
             if template.regex is not None:
-                conditions.append("spec REGEXP :regex")
-                params["regex"] = template.regex.pattern
+                conditions.append('spec REGEXP :regex')
+                params['regex'] = template.regex.pattern
             if template.lr.min > 0:
-                conditions.append("lr >= :lr_min")
-                params["lr_min"] = template.lr.min
+                conditions.append('lr >= :lr_min')
+                params['lr_min'] = template.lr.min
             if template.lr.max < INF:
-                conditions.append("lr <= :lr_max")
-                params["lr_max"] = template.lr.min
+                conditions.append('lr <= :lr_max')
+                params['lr_max'] = template.lr.min
             if template.length.min > 1:
-                conditions.append("length >= :length_min")
-                params["length_min"] = template.length.min
+                conditions.append('length >= :length_min')
+                params['length_min'] = template.length.min
             if template.length.max < INF:
-                conditions.append("length <= :length_max")
-                params["length_max"] = template.length.max
+                conditions.append('length <= :length_max')
+                params['length_max'] = template.length.max
             if template.batch.min > 1:
-                conditions.append("batch >= :batch_min")
-                params["batch_min"] = template.batch.min
+                conditions.append('batch >= :batch_min')
+                params['batch_min'] = template.batch.min
             if template.batch.max < INF:
-                conditions.append("batch <= :batch_max")
-                params["batch_max"] = template.batch.max
+                conditions.append('batch <= :batch_max')
+                params['batch_max'] = template.batch.max
             if template.steps.min > 2:
-                conditions.append("steps >= :steps_min")
-                params["steps_min"] = template.steps.min
+                conditions.append('steps >= :steps_min')
+                params['steps_min'] = template.steps.min
             if template.steps.max < INF:
-                conditions.append("steps <= :steps_max")
-                params["steps_max"] = template.steps.max
+                conditions.append('steps <= :steps_max')
+                params['steps_max'] = template.steps.max
             if template.max_weights.max < INF:
-                conditions.append("weights <= :weights_max")
-                params["weights_max"] = template.max_weights.max
+                conditions.append('weights <= :weights_max')
+                params['weights_max'] = template.max_weights.max
 
         if with_runs:
             conditions.append(
-                "EXISTS(SELECT 1 FROM run WHERE run.conf_id = conf.id AND system = :system)"
+                'EXISTS(SELECT 1 FROM run WHERE run.conf_id = conf.id AND system = :system)'
             )
 
-        where = "WHERE " + " AND ".join(conditions)
+        where = 'WHERE ' + ' AND '.join(conditions)
 
         if limit is None:
-            limit = ""
+            limit = ''
         else:
-            params["limit"] = limit
-            limit = "LIMIT :limit"
+            params['limit'] = limit
+            limit = 'LIMIT :limit'
 
-        if sorted == "median_score":
-            order = "ORDER BY median_score ASC"
-        elif sorted == "weights":
-            order = "ORDER BY weights ASC, median_score ASC"
+        if sorted == 'median_score':
+            order = 'ORDER BY median_score ASC'
+        elif sorted == 'weights':
+            order = 'ORDER BY weights ASC, median_score ASC'
         else:
-            order = ""
+            order = ''
 
         cur = self._db.execute(
             f"""
@@ -395,7 +409,9 @@ class ResultDB(object):
         for row in cur:
             yield self._conf_score_from_row(row, system)
 
-    def get_conf_runs_diff_steps(self, conf: Configuration2, system: str) -> Iterable[tuple[int, float]]:
+    def get_conf_runs_diff_steps(
+        self, conf: Configuration2, system: str
+    ) -> Iterable[tuple[int, float]]:
         """Find all runs on a given system of configurations which differ from `conf` only in the number of steps."""
         cur = self._db.execute(
             f"""
@@ -408,26 +424,31 @@ class ResultDB(object):
               AND conf.batch = :batch
               AND conf_time.system = :system
             """,
-            {"spec": str(conf.model),
-             "lr": conf.lr,
-             "length": conf.length,
-             "batch": conf.batch,
-             "system": system})
+            {
+                'spec': str(conf.model),
+                'lr': conf.lr,
+                'length': conf.length,
+                'batch': conf.batch,
+                'system': system,
+            },
+        )
 
         return cur
 
-
-    def get_neighbors_by_runs(self, conf_id: int, system: str) -> Iterable[ConfScore]:
+    def get_neighbors_by_runs(
+        self, conf_id: int, system: str
+    ) -> Iterable[ConfScore]:
         cur = self._db.cursor()
-        cur.execute("BEGIN TRANSACTION")
+        cur.execute('BEGIN TRANSACTION')
         cur.execute(
-            "SELECT has_neighbors FROM conf WHERE id = :conf_id", {"conf_id": conf_id}
+            'SELECT has_neighbors FROM conf WHERE id = :conf_id',
+            {'conf_id': conf_id},
         )
         has_neighbors = cur.fetchone()[0]
         if not has_neighbors:
             cur.execute(
-                "SELECT spec, lr, length, batch, steps FROM conf WHERE id = :conf_id",
-                {"conf_id": conf_id},
+                'SELECT spec, lr, length, batch, steps FROM conf WHERE id = :conf_id',
+                {'conf_id': conf_id},
             )
             row = cur.fetchone()
             conf = Configuration2(
@@ -449,16 +470,16 @@ class ResultDB(object):
               AND neighbor.conf2_id = conf.id
             ORDER BY num_runs ASC
             """,
-            {"conf_id": conf_id, "system": system},
+            {'conf_id': conf_id, 'system': system},
         )
         rows = cur.fetchall()
-        cur.execute("COMMIT")
+        cur.execute('COMMIT')
         for row in rows:
             yield self._conf_score_from_row(row, system)
 
     def total_runs(self) -> int:
-        cur = self._db.execute("SELECT COUNT(*) AS count FROM run")
-        total = cur.fetchone()["count"]
+        cur = self._db.execute('SELECT COUNT(*) AS count FROM run')
+        total = cur.fetchone()['count']
         assert isinstance(total, int)
         return total
 
@@ -489,7 +510,7 @@ class ResultDB(object):
         )
 
         for row in cur:
-            with latency.timer("ResultDB.get_confs_runs-row"):
+            with latency.timer('ResultDB.get_confs_runs-row'):
                 conf_id = row[0]
 
                 model = build_model(row[1])
@@ -536,6 +557,6 @@ class ResultDB(object):
             AND timestamp = :timestamp
             AND system = :system
             """,
-            {"conf_id": conf_id, "timestamp": timestamp, "system": run.system},
+            {'conf_id': conf_id, 'timestamp': timestamp, 'system': run.system},
         )
         return cur.fetchone() is not None

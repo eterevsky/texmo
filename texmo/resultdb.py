@@ -309,18 +309,18 @@ class ResultDB(object):
         with latency.timer('ResultDB.add_run'):
             self._add_run(conf, run, conf_id, timestamp, update_neighbors)
 
-    def _conf_score_from_row(self, row: dict, system: str) -> ConfScore:
+    def _conf_score_from_row(self, row: list, system: str) -> ConfScore:
         model = build_model(row[1])
         conf = Configuration2(
-            model, lr=row[2], length=row[3], batch=row[4], steps=row[5]
+            model, precision=row[2], lr=row[3], length=row[4], batch=row[5], steps=row[6]
         )
         return ConfScore(
             row[0],
             conf,
-            median_score=row[6],
+            median_score=row[7],
             system=system,
-            median_time=row[7],
-            num_runs=row[8],
+            median_time=row[8],
+            num_runs=row[9],
         )
 
     def top_confs(

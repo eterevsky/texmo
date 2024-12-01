@@ -52,15 +52,17 @@ def draw_weight_loss_graph(
     result_set: ResultSet, template: Template, train_time: tuple[float, float]
 ):
     fig, ax = plt.subplots()
-    ax.set_ylabel("cross-entropy (bits per byte)")
-    ax.set_xlabel("weights")
-    ax.set_xscale("log")
-    ax.set_yscale("log")
+    ax.set_ylabel('cross-entropy (bits per byte)')
+    ax.set_xlabel('weights')
+    ax.set_xscale('log')
+    ax.set_yscale('log')
     ax.grid(visible=True)
     ax.set_yticks([1, 2, 3, 4])
     ax.yaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
     ax.yaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
-    yticks = [x / 10 for x in range(1, 30)] + [x / 10 for x in range(30, 50, 2)]
+    yticks = [x / 10 for x in range(1, 30)] + [
+        x / 10 for x in range(30, 50, 2)
+    ]
     ax.set_yticks(yticks, minor=True)
 
     t = 1
@@ -70,23 +72,25 @@ def draw_weight_loss_graph(
 
     while t <= train_time[1]:
         if t >= train_time[0]:
-            x, y = max_points(result_set, t, top_conf_results.conf.model.weights * 4)
+            x, y = max_points(
+                result_set, t, top_conf_results.conf.model.weights * 4
+            )
             ax.plot(x, y)
             legends.append(t)
         t *= 2
 
     ax.legend(legends)
 
-    plt.savefig("results/graph.png")
+    plt.savefig('results/graph.png')
     plt.show()
 
 
 def draw_loss_by_time(result_set: ResultSet, template: Template):
     _, ax = plt.subplots()
-    ax.set_xlabel("time (s)")
-    ax.set_ylabel("cross-entropy (bits per byte)")
-    ax.set_xscale("log")
-    ax.set_yscale("log")
+    ax.set_xlabel('time (s)')
+    ax.set_ylabel('cross-entropy (bits per byte)')
+    ax.set_xscale('log')
+    ax.set_yscale('log')
     ax.grid(visible=True)
     ax.xaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
     ax.xaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
@@ -104,11 +108,15 @@ def draw_loss_by_time(result_set: ResultSet, template: Template):
 
     for t in times:
         best.append(result_set.top_conf(t).median_score)
-        bytes_top_conf = result_set.top_conf_for_tokenset(t, "tokens256_raw_all")
-        best_for_bytes.append(bytes_top_conf.median_score if bytes_top_conf else 4)
+        bytes_top_conf = result_set.top_conf_for_tokenset(
+            t, 'tokens256_raw_all'
+        )
+        best_for_bytes.append(
+            bytes_top_conf.median_score if bytes_top_conf else 4
+        )
 
-    ax.plot(times, best, label="best")
-    ax.plot(times, best_for_bytes, label="best for bytes")
+    ax.plot(times, best, label='best')
+    ax.plot(times, best_for_bytes, label='best for bytes')
 
     plt.show()
 
@@ -132,7 +140,9 @@ def get_top_confs(
             continue
         conf = conf_results.conf
         weights = conf.model.weights
-        weights_bucket = max(2 ** math.ceil(math.log2(weights)), min_max_weights)
+        weights_bucket = max(
+            2 ** math.ceil(math.log2(weights)), min_max_weights
+        )
         try:
             count[(weights_bucket, t)] += len(conf_results.runs)
         except KeyError:
@@ -181,54 +191,70 @@ def print_top_confs(top_confs, run_count) -> str:
                 continue
             if first_weight_line:
                 print(
-                    "| ------- | ---- | ---- |",
-                    "-" * spec_len,
-                    "| ------ | --------- |",
+                    '| ------- | ---- | ---- |',
+                    '-' * spec_len,
+                    '| ------ | --------- |',
                     file=out,
                 )
-                print(f"| {weights:>7} | ", file=out, end="")
+                print(f'| {weights:>7} | ', file=out, end='')
                 first_weight_line = False
             else:
-                print("|         | ", file=out, end="")
-            print(f"{t:>4} | {count:>4} | ", file=out, end="")
+                print('|         | ', file=out, end='')
+            print(f'{t:>4} | {count:>4} | ', file=out, end='')
             model_str = str(conf.model)
             print(
                 model_str,
-                " " * (spec_len - len(model_str)),
+                ' ' * (spec_len - len(model_str)),
                 file=out,
-                end="",
+                end='',
             )
-            print(f"| {score:.4f} | ", file=out, end="")
-            print(f"B{conf.batch} LR{conf.lr:.4f}", file=out, end="")
-            print(f" LEN{conf.length}", file=out, end="")
+            print(f'| {score:.4f} | ', file=out, end='')
+            print(f'B{conf.batch} LR{conf.lr:.4f}', file=out, end='')
+            print(f' LEN{conf.length}', file=out, end='')
 
-            print(" |", file=out)
+            print(' |', file=out)
 
     return out.getvalue()
 
 
-def generate_report_by_weight(result_db: ResultDB, template: Template, system: str, max_time: float) -> str:
-    lines = [f"Top confs by weight ({template}):"]
-    confs = result_db.top_confs(system, sorted="weights", template=template)
+def generate_report_by_weight(
+    result_db: ResultDB, template: Template, system: str, max_time: float
+) -> str:
+    lines = [
+        f'Top confs by weights for {system}',
+        f'Max time: {max_time}',
+        f'Spec: {template.pattern}',
+        f'LR: {template.lr}',
+        f'Length: {template.length}',
+        f'Batch: {template.batch}',
+        f'Steps: {template.steps}',
+        f'Weights: {template.max_weights}',
+    ]
+    confs = result_db.top_confs(
+        system, sorted='weights', template=template, with_runs=True
+    )
     best_score = INF
     for c in confs:
         if c.median_score > best_score:
             continue
         if not template.match(c.conf):
             continue
-        if c.median_time is None or c.median_time > max_time:
+        assert c.median_time is not None
+        if c.median_time > max_time:
             continue
-        t = "{:8}".format(ttoa3(c.median_time))
+        t = '{:8}'.format(ttoa3(c.median_time))
         lines.append(
-            f"{c.median_score:.4f} ({c.num_runs})  {t}  {c.conf.aligned_str()}"
+            f'{c.median_score:.4f} ({c.num_runs})  {t}  {c.conf.aligned_str()}'
         )
         best_score = c.median_score
-    return "\n".join(lines) + "\n"
+    return '\n'.join(lines) + '\n'
 
 
 def generate_max_report(
-    result_set: ResultSet, template: Template, train_time: tuple[float, float],
-    system: str
+    result_set: ResultSet,
+    template: Template,
+    train_time: tuple[float, float],
+    system: str,
 ) -> str:
     out = StringIO()
     lo, hi = train_time
@@ -238,8 +264,13 @@ def generate_max_report(
     # runs_count = result_set.runs_count_per_t()
     t = lo
     while t <= hi:
-        print(f"\nT ≤ {t}", file=out)
-        print(generate_report_by_weight(result_set, template, system, max_time=t), file=out)
+        print(f'\nT ≤ {t}', file=out)
+        print(
+            generate_report_by_weight(
+                result_set, template, system, max_time=t
+            ),
+            file=out,
+        )
 
         t *= 2
 
@@ -249,87 +280,94 @@ def generate_max_report(
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
     template = Template.from_args(args)
-    logging.info(f"Template: {template}")
+    logging.info(f'Template: {template}')
 
-    train_time = tuple(map(float, args.train_time.split("-")))
+    train_time = tuple(map(float, args.train_time.split('-')))
     assert len(train_time) in (1, 2)
     if len(train_time) == 1:
         train_time.append(train_time[0])
 
     result_db = ResultDB.from_args(args.db)
-    result_set = ResultSet(system=args.system, result_db=result_db, template=template, generate_neighbors=False)
+    result_set = ResultSet(
+        system=args.system,
+        result_db=result_db,
+        template=template,
+        generate_neighbors=False,
+    )
 
     # print()
-    logging.info(generate_max_report(result_set, template, train_time, args.system))
+    logging.info(
+        generate_max_report(result_set, template, train_time, args.system)
+    )
     logging.info(generate_report_by_weight(result_set, template, args.system))
+
 
 def init_args(parser: argparse.ArgumentParser, config):
     parser.add_argument(
-        "--tokens-dir",
+        '--tokens-dir',
         type=str,
         default=config.TOKENS_DIR,
-        help="directory with tokensets",
+        help='directory with tokensets',
     )
 
     # Template args
     parser.add_argument(
-        "-s",
-        "--spec-regex",
+        '-s',
+        '--spec-regex',
         type=str,
         default=None,
-        help="regex covering the acceptable specs",
+        help='regex covering the acceptable specs',
     )
     parser.add_argument(
-        "-b",
-        "--batch",
+        '-b',
+        '--batch',
         type=str,
         default=None,
         help='range of acceptable batch sizes, for example "1-256"',
     )
     parser.add_argument(
-        "-l",
-        "--lr",
+        '-l',
+        '--lr',
         type=str,
         default=None,
-        help="range of acceptable learning rates",
+        help='range of acceptable learning rates',
     )
     parser.add_argument(
-        "--length",
+        '--length',
         type=str,
         default=None,
-        help="range of acceptable training sample lengths",
+        help='range of acceptable training sample lengths',
     )
     parser.add_argument(
-        "--steps",
+        '--steps',
         type=str,
         default=None,
-        help="range for the number of training steps; lower bound >= 2",
+        help='range for the number of training steps; lower bound >= 2',
     )
     parser.add_argument(
-        "-w",
-        "--weights",
+        '-w',
+        '--weights',
         type=str,
-        default="32-4294967296",
-        help="range for the _maximal_ number of weights in the model",
+        default='32-4294967296',
+        help='range for the _maximal_ number of weights in the model',
     )
     parser.add_argument(
-        "-t",
-        "--train-time",
-        default="1-16",
-        help="range for the training time in seconds",
+        '-t',
+        '--train-time',
+        default='1-16',
+        help='range for the training time in seconds',
     )
     parser.add_argument(
-        "--db",
+        '--db',
         type=str,
         default=config.DB,
-        help="path to the SQLite database with the results, or a URL for a PostgreSQL database",
+        help='path to the SQLite database with the results, or a URL for a PostgreSQL database',
     )
     parser.add_argument(
-        "--system",
+        '--system',
         type=str,
         default=config.SYSTEM_NAME,
-        help="the name of the system that will be used to identify runs in the DB",
+        help='the name of the system that will be used to identify runs in the DB',
     )
 
     parser.set_defaults(func=main)
- 

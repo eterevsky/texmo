@@ -316,6 +316,7 @@ class ResultDB(object):
         max_time: float | None = None,
         limit: int = None,
         sorted: str = "median_score",
+        with_runs: bool = False,
     ) -> Iterable[ConfScore]:
         conditions = ["median_score IS NOT NULL"]
         params = {"system": system}
@@ -359,6 +360,11 @@ class ResultDB(object):
             if template.max_weights.max < INF:
                 conditions.append("weights <= :weights_max")
                 params["weights_max"] = template.max_weights.max
+
+        if with_runs:
+            conditions.append(
+                "EXIST(SELECT 1 FROM run WHERE run.conf_is = conf.id AND system = :system)"
+            )
 
         where = "WHERE " + " AND ".join(conditions)
 

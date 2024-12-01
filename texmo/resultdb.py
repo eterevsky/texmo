@@ -146,7 +146,7 @@ class ResultDB(object):
             cur.execute(
                 """
                 INSERT INTO conf (spec, weights, lr, length, batch, steps, has_neighbors, precision)
-                VALUES (:spec, :weights, :lr, :length, :batch, :steps, 0, precision)
+                VALUES (:spec, :weights, :lr, :length, :batch, :steps, 0, :precision)
                 """,
                 conf_dict,
             )

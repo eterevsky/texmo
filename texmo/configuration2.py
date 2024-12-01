@@ -1,7 +1,11 @@
 import argparse
+import enum
 import re
 from typing import Optional, Iterable, Self
 import math
+
+import jax
+import jax.numpy as jnp
 
 from .common import INF, itoa3, itoa3_aligned
 from .model3 import Model3, build_model
@@ -16,13 +20,36 @@ def is_valid_int(x: int) -> bool:
     return isinstance(x, int) and x >= 1
 
 
+class Precision(enum.StrEnum):
+    FP32 = enum.auto()
+    FP16 = enum.auto()
+    BF16 = enum.auto()
+
+    @property
+    def dtype(self):
+        match self:
+            case Precision.FP32:
+                return jnp.float32
+            case Precision.FP16:
+                return jnp.float16
+            case Precision.BF16:
+                return jax.dtypes.bfloat16
+
+
 class Configuration2(object):
-    __slots__ = ('model', 'lr', 'length', 'batch', 'steps')
+    __slots__ = ('model', 'precision', 'lr', 'length', 'batch', 'steps')
 
     def __init__(
-        self, model: Model3, lr: float, length: int, batch: int, steps: int
+        self,
+        model: Model3,
+        precision: str,
+        lr: float,
+        length: int,
+        batch: int,
+        steps: int,
     ):
         object.__setattr__(self, 'model', model)
+        object.__setattr__(self, 'precision', Precision(precision))
         object.__setattr__(self, 'lr', lr)
         object.__setattr__(self, 'length', length)
         object.__setattr__(self, 'batch', batch)
@@ -36,6 +63,7 @@ class Configuration2(object):
         model = build_model(d['spec'])
         return Configuration2(
             model=model,
+            precision=d['precision'],
             lr=d['lr'],
             length=d['length'],
             batch=d['batch'],
@@ -45,6 +73,7 @@ class Configuration2(object):
     def __eq__(self, other: Self) -> bool:
         return (
             self.lr == other.lr
+            and self.precision == other.precision
             and self.length == other.length
             and self.batch == other.batch
             and self.steps == other.steps
@@ -59,6 +88,7 @@ class Configuration2(object):
     def replace(
         self,
         model: Optional[Model3] = None,
+        precision: Optional[str] = None,
         lr: Optional[float] = None,
         length: Optional[int] = None,
         batch: Optional[int] = None,
@@ -69,13 +99,15 @@ class Configuration2(object):
         length = length or self.length
         batch = batch or self.batch
         steps = steps or self.steps
+        precision = precision or self.precision
         return Configuration2(
-            model=model, lr=lr, length=length, batch=batch, steps=steps
+            model=model, precision=precision, lr=lr, length=length, batch=batch, steps=steps
         )
 
     def to_dict(self) -> dict:
         return {
             'spec': str(self.model),
+            'precision': str(self.precision),
             'lr': self.lr,
             'length': self.length,
             'batch': self.batch,
@@ -83,21 +115,24 @@ class Configuration2(object):
         }
 
     def __repr__(self) -> str:
-        return f"Configuration2('{self.model}', {self.lr}, {self.length}, {self.batch}, {self.steps})"
+        return f"Configuration2('{self.model}', '{self.precision}', {self.lr}, {self.length}, {self.batch}, {self.steps})"
 
     def __str__(self) -> str:
         model = str(self.model)
         steps = f'  S{itoa3(self.steps)}' if self.steps else ''
         return (
-            f'{model} ({itoa3(self.model.weights)})  LEN{itoa3(self.length)}'
-            + f'  B{itoa3(self.batch)}  LR{self.lr:.4f}{steps}'
+            f'{model} ({itoa3(self.model.weights)})  {self.precision}   '
+            + f'LEN{itoa3(self.length)}  '
+            + f'B{itoa3(self.batch)}  '
+            + f'LR{self.lr:.4f}{steps}'
         )
 
     def aligned_str(self) -> str:
         model = str(self.model)
         return (
             f'L{itoa3_aligned(self.length)} B{itoa3_aligned(self.batch)} '
-            + f'LR{self.lr:.4f}   S{itoa3_aligned(self.steps)}  {model} ({self.model.weights})'
+            + f'LR{self.lr:.4f}   S{itoa3_aligned(self.steps)}  '
+            + f'{self.precision}  {model} ({self.model.weights})'
         )
 
     def is_valid(self) -> bool:
@@ -120,6 +155,9 @@ class Configuration2(object):
     def neighbors(self) -> Iterable['Configuration2']:
         if self.steps > 2:
             yield self.replace(steps=self.steps // 2)
+        for precision in Precision:
+            if precision != self.precision:
+                yield self.replace(precision=precision)
         yield self.replace(steps=self.steps * 2)
         yield self.replace(lr=self.lr / 2)
         yield self.replace(lr=self.lr * 2)
@@ -200,6 +238,7 @@ class Template(object):
         batch: Limits,
         steps: Limits,
         max_weights: Limits,
+        precision: list[Precision],
     ):
         self.regex = re.compile(spec_regex) if spec_regex else None
         self.lr = Bounds(lr, 0)
@@ -207,10 +246,15 @@ class Template(object):
         self.batch = Bounds(batch, 1)
         self.steps = Bounds(steps, 2)
         self.max_weights = Bounds(max_weights, 16)
+        self.precision = precision
         self._conf_neighbors_cache = {}
 
     @staticmethod
     def from_args(args: argparse.Namespace):
+        if not args.precision:
+            precision = list(Precision)
+        else:
+            precision = list(map(Precision, args.precision.split(',')))
         return Template(
             spec_regex=args.spec_regex,
             lr=_parse_interval(args.lr, float),
@@ -218,12 +262,17 @@ class Template(object):
             batch=_parse_interval(args.batch, int),
             steps=_parse_interval(args.steps, int),
             max_weights=_parse_interval(args.weights, int),
+            precision=precision,
         )
 
     def __str__(self):
         return (
-            f'Template({self.regex}, lr={self.lr}, length={self.length}, '
-            + f'batch={self.batch}, steps={self.steps}, max_weights={self.max_weights})'
+            f'Template({self.regex}, '
+            + f'precision={self.precision}, '
+            + f'lr={self.lr}, length={self.length}, '
+            + f'batch={self.batch}, '
+            + f'steps={self.steps}, '
+            + f'max_weights={self.max_weights})'
         )
 
     def update_regex(self, regex: Optional[str]):
@@ -237,6 +286,7 @@ class Template(object):
     def match(self, conf: Configuration2) -> bool:
         return (
             self.match_model(conf.model)
+            and conf.precision in self.precision
             and self.lr.match(conf.lr)
             and self.length.match(conf.length)
             and self.batch.match(conf.batch)
@@ -257,6 +307,10 @@ class Template(object):
         for model in conf.model.neighbors():
             if self.match_model(model):
                 yield conf.replace(model=model)
+        for precision in self.precision:
+            if precision != conf.precision:
+                yield conf.replace(precision=precision)
+            
 
 
 def conf_neighbors(
@@ -307,6 +361,7 @@ def default_from_template(
                     if template.match_model(model):
                         return Configuration2(
                             model=model,
+                            precision=template.precision[0],
                             lr=lr,
                             length=length,
                             batch=batch,

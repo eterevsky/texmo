@@ -221,6 +221,13 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="regex covering the acceptable specs",
     )
     parser.add_argument(
+        "-p",
+        "--precision",
+        type=str,
+        default="bf16,fp16,fp32",
+        help="precision"
+    )
+    parser.add_argument(
         "-b",
         "--batch",
         type=str,

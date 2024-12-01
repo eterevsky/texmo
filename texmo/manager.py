@@ -25,17 +25,17 @@ from .tokens import Tokenizer
 LOG2 = 1 / math.log(2)
 
 
-def deserialize_weights(saved_weights):
+def deserialize_weights(saved_weights, dtype):
     if isinstance(saved_weights, list):
         weights = []
         for value in saved_weights:
             if isinstance(value, dict):
-                value = deserialize_weights(value)
+                value = deserialize_weights(value, dtype)
             elif isinstance(value, list):
                 if len(value) > 0 and isinstance(value[0], float):
-                    value = jnp.array(value)
+                    value = jnp.array(value, dtype=dtype)
                 else:
-                    value = deserialize_weights(value)
+                    value = deserialize_weights(value, dtype)
             elif value is None:
                 pass
             else:
@@ -45,9 +45,9 @@ def deserialize_weights(saved_weights):
         weights = {}
         for key, value in saved_weights.items():
             if type(value) is dict:
-                weights[key] = deserialize_weights(value)
+                weights[key] = deserialize_weights(value, dtype)
             else:
-                weights[key] = jnp.array(value)
+                weights[key] = jnp.array(value, dtype=dtype)
     return weights
 
 
@@ -81,6 +81,7 @@ class Manager(object):
         self._system: str = system
         assert isinstance(conf, Configuration2)
         self.conf: Configuration2 = conf
+        self.dtype = conf.precision.dtype
 
         assert isinstance(dataset, DataSet) or isinstance(
             dataset, DataSetWrapper
@@ -88,7 +89,7 @@ class Manager(object):
         self.dataset: DataSet = dataset
 
         if weights is None:
-            weights = self.model.init_weights(self._rng, 1.0)
+            weights = self.model.init_weights(self._rng, 1.0, dtype=conf.precision.dtype)
         self.weights: Weights = weights
         # Only layers starting from this one will be trained
         self.train_from: int = 0
@@ -160,7 +161,7 @@ class Manager(object):
             spec = json.load(f)
 
         conf = Configuration2.from_dict(spec['conf'])
-        weights = deserialize_weights(spec['weights'])
+        weights = deserialize_weights(spec['weights'], dtype=conf.precision.dtype)
 
         manager = Manager(
             conf,
@@ -193,7 +194,7 @@ class Manager(object):
         self.conf = self.conf.replace(model=model)
 
         self.train_from = len(self.weights) - 1
-        weights = self.model.init_weights(self._rng, 1.0)
+        weights = self.model.init_weights(self._rng, 1.0, dtype=self.dtype)
         weights[: self.train_from] = self.weights[:-1]
         self.weights = weights
 
@@ -219,10 +220,10 @@ class Manager(object):
         logging.info(f'Conf: {self.conf}')
 
         if self.train_from == 0:
-            self._loss_avg = self.model.loss_batch
+            self._loss_avg = lambda w, batch: self.model.loss_batch(w, batch, self.dtype)
         else:
             self._loss_avg = lambda w, batch: self.model.loss_batch(
-                self.weights[: self.train_from] + w, batch
+                self.weights[: self.train_from] + w, batch, self.dtype
             )
 
         if training:
@@ -267,9 +268,10 @@ class Manager(object):
                 shard = xs[start:end]
                 shard_len = lengths[start:end]
                 try:
-                    # shard = jax.nn.one_hot(shard, self.ntokens)
+                    # TODO: convert everything to FP32 to make sure that the
+                    # eval part always works the same way
                     loss += self.model.loss_batch_masked(
-                        self.weights, shard, shard_len
+                        self.weights, shard, shard_len, dtype=self.dtype
                     ).item()
                 except (XlaRuntimeError, ValueError):
                     evaluation_failed = True
@@ -308,7 +310,7 @@ class Manager(object):
         # prefix = jax.nn.one_hot(prefix, self.ntokens)
         c = prefix[-1]
 
-        state = self.model.init_state(self.weights)
+        state = self.model.init_state(self.weights, self.dtype)
         state, _ = jax.lax.scan(
             lambda s, c: self.model.step(self.weights, s, c),
             state,
@@ -326,15 +328,15 @@ class Manager(object):
     def sample(self, prefix, l, temperature=0.05):
         """Sample from the distribution to continue the given prefix."""
         self._rng = Rng()
-        state = self.model.init_state(self.weights)
+        state = self.model.init_state(self.weights, dtype=self.dtype)
         for c in prefix[:-1]:
-            state, _ = self.model.step(self.weights, state, c)
+            state, _ = self.model.step(self.weights, state, c, dtype=self.dtype)
 
         c = prefix[-1]
         out = []
         while len(out) < l:
             state, c = self.model.step_sample(
-                self.weights, state, c, self._rng, temperature
+                self.weights, state, c, self._rng, temperature, dtype=self.dtype
             )
             out.append(c)
         return out
@@ -496,7 +498,7 @@ class Manager(object):
 
         self.run.finalize(eval_loss, train_time)
         logging.info(
-            f'{self.conf}:  loss {eval_loss:.4f} b/byte  T = {ttoa3(train_time)}'
+            f'{final_conf}:  loss {eval_loss:.4f} b/byte  T = {ttoa3(train_time)}'
         )
 
         return (self.run, self.weights, final_conf)

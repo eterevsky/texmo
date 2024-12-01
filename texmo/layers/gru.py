@@ -31,18 +31,18 @@ class Gru(Layer):
     def weights(self) -> int:
         return 3 * self.size * (self.input_size + self.size + 1)
 
-    def init_weights(self, rng: Rng, init_scale: float) -> LayerWeights:
+    def init_weights(self, rng: Rng, init_scale: float, dtype) -> LayerWeights:
         total_size = self.input_size + self.size
         weights = {
-            "w": rng.he((2 * self.size, total_size), input_size=total_size) * init_scale,
-            "b": rng.normal((2 * self.size,)) * init_scale,
-            "wh": rng.he((self.size, total_size), input_size=total_size) * init_scale,
-            "bh": rng.normal((self.size,)) * init_scale,
+            "w": rng.he((2 * self.size, total_size), input_size=total_size, dtype=dtype) * init_scale,
+            "b": rng.normal((2 * self.size,), dtype=dtype) * init_scale,
+            "wh": rng.he((self.size, total_size), input_size=total_size, dtype=dtype) * init_scale,
+            "bh": rng.normal((self.size,), dtype=dtype) * init_scale,
         }
         return weights
 
-    def init_state(self, _weights) -> LayerState:
-        return jnp.zeros((self.size,))
+    def init_state(self, _weights, dtype) -> LayerState:
+        return jnp.zeros((self.size,), dtype=dtype)
 
     def step(
         self, weights: LayerWeights, state: LayerState, input: jnp.ndarray
@@ -85,21 +85,21 @@ class Mgru(Layer):
     def weights(self) -> int:
         return 2 * self.size * (self.input_size + self.size + 1)
 
-    def init_weights(self, rng: Rng, init_scale: float) -> LayerWeights:
+    def init_weights(self, rng: Rng, init_scale: float, dtype) -> LayerWeights:
         total_size = self.input_size + self.size
         weights = {
-            "wf": rng.he((self.size, total_size), input_size=total_size) * init_scale,
-            "bf": rng.normal((self.size,)) * init_scale,
-            "wh": rng.he((self.size, total_size), input_size=total_size) * init_scale,
-            "bh": rng.normal((self.size,)) * init_scale,
+            "wf": rng.he((self.size, total_size), input_size=total_size, dtype=dtype) * init_scale,
+            "bf": rng.normal((self.size,), dtype=dtype) * init_scale,
+            "wh": rng.he((self.size, total_size), input_size=total_size, dtype=dtype) * init_scale,
+            "bh": rng.normal((self.size,), dtype=dtype) * init_scale,
         }
         return weights
 
-    def init_state(self, _weights) -> LayerState:
-        return jnp.zeros((self.size,))
+    def init_state(self, _weights, dtype) -> LayerState:
+        return jnp.zeros((self.size,), dtype=dtype)
 
     def step(
-        self, weights: LayerWeights, state: LayerState, input: jax.Array
+        self, weights: LayerWeights, state: LayerState, input: jax.Array, dtype
     ) -> tuple[LayerState, jax.Array]:
         input = input.flatten()
         input_state = jnp.concatenate((input, state))
@@ -138,18 +138,18 @@ class MinGru(Layer):
     def weights(self) -> int:
         return 2 * self.size * (self.input_size + 1)
 
-    def init_weights(self, rng: Rng, init_scale: float) -> LayerWeights:
+    def init_weights(self, rng: Rng, init_scale: float, dtype) -> LayerWeights:
         weights = {
-            "w": rng.he((2 * self.size, self.input_size), input_size=self.input_size) * init_scale,
-            "b": rng.normal((2 * self.size,)) * init_scale,
+            "w": rng.he((2 * self.size, self.input_size), input_size=self.input_size, dtype=dtype) * init_scale,
+            "b": rng.normal((2 * self.size,), dtype=dtype) * init_scale,
         }
         return weights
 
     def init_state(self, _weights) -> LayerState:
-        return jnp.zeros((self.size,))
+        return jnp.zeros((self.size,), dtype=dtype)
 
     def step(
-        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray
+        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray, _dtype
     ) -> tuple[LayerState, jax.Array]:
         input = input.flatten()
         zh = jnp.dot(weights["w"], input) + weights["b"]
@@ -160,7 +160,7 @@ class MinGru(Layer):
         return state, state
 
     def forward_batch(
-            self, weights: LayerWeights, inputs: jax.Array
+            self, weights: LayerWeights, inputs: jax.Array, dtype
     ) -> jax.Array:
         batch, length = inputs.shape[0:2]
         inputs = jnp.reshape(inputs, (batch, length, -1))
@@ -179,7 +179,7 @@ class MinGru(Layer):
             state = (1.0 - z) * state + z * h
             return state, state
 
-        init_state = jnp.zeros((batch, self.size))
+        init_state = jnp.zeros((batch, self.size), dtype=dtype)
 
         _, out = jax.lax.scan(
             step_batch,
@@ -187,5 +187,3 @@ class MinGru(Layer):
             (zs, hs)
         )
         return jnp.swapaxes(out, 0, 1)
-
-

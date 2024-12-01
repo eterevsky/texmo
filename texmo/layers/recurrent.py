@@ -39,19 +39,19 @@ class Rec(Layer):
     def weights(self) -> int:
         return self.size * self.input_size + self.size * self.size + self.size
 
-    def init_weights(self, rng: Rng, init_scale: float) -> LayerWeights:
+    def init_weights(self, rng: Rng, init_scale: float, dtype) -> LayerWeights:
         total_size = self.input_size + self.size
         weights = {
-            "w": rng.he((self.size, total_size), input_size=total_size) * init_scale,
-            "b": rng.normal((self.size,)) * init_scale,
+            "w": rng.he((self.size, total_size), input_size=total_size, dtype=dtype) * init_scale,
+            "b": rng.normal((self.size,), dtype=dtype) * init_scale,
         }
         return weights
 
-    def init_state(self, _weights) -> LayerState:
-        return jnp.zeros((self.size,))
+    def init_state(self, _weights, dtype) -> LayerState:
+        return jnp.zeros((self.size,), dtype=dtype)
 
     def step(
-        self, weights: LayerWeights, state: LayerState, input: jax.Array
+        self, weights: LayerWeights, state: LayerState, input: jax.Array, dtype
     ) -> tuple[LayerState, jax.Array]:
         input = input.flatten()
         input_state = jnp.concatenate((input, state))

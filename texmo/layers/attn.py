@@ -69,22 +69,22 @@ class Attn(Layer):
             + self.heads * self._comp_size
         )
 
-    def init_weights(self, rng, init_scale) -> None:
+    def init_weights(self, rng, init_scale, dtype) -> None:
         return {
-            "w": rng.he((self.heads, 3 * self._comp_size, self.input_size))
+            "w": rng.he((self.heads, 3 * self._comp_size, self.input_size), dtype=dtype)
             * init_scale,
-            "bkey": rng.normal((self.heads, self.length, self._comp_size))
+            "bkey": rng.normal((self.heads, self.length, self._comp_size), dtype=dtype)
             * init_scale
             * 0.1,
-            "bquery": rng.normal((self.heads, self._comp_size))
+            "bquery": rng.normal((self.heads, self._comp_size), dtype=dtype)
             * init_scale
             * 0.1,
         }
 
-    def init_state(self, _weights) -> LayerState:
+    def init_state(self, _weights, dtype) -> LayerState:
         return {
-            "keys": jnp.zeros((self.heads, self.length - 1, self._comp_size)),
-            "values": jnp.zeros((self.heads, self.length - 1, self._comp_size)),
+            "keys": jnp.zeros((self.heads, self.length - 1, self._comp_size), dtype=dtype),
+            "values": jnp.zeros((self.heads, self.length - 1, self._comp_size), dtype=dtype),
         }
 
     def step(
@@ -222,24 +222,24 @@ class AttnMQ(Layer):
             + self.heads * self._comp_size
         )
 
-    def init_weights(self, rng, init_scale) -> None:
+    def init_weights(self, rng, init_scale, dtype) -> None:
         return {
-            "wk": rng.he((self._comp_size, self.input_size)) * init_scale,
-            "wv": rng.he((self._comp_size, self.input_size)) * init_scale,
-            "wq": rng.he((self.heads, self._comp_size, self.input_size))
+            "wk": rng.he((self._comp_size, self.input_size), dtype=dtype) * init_scale,
+            "wv": rng.he((self._comp_size, self.input_size), dtype=dtype) * init_scale,
+            "wq": rng.he((self.heads, self._comp_size, self.input_size), dtype=dtype)
             * init_scale,
-            "bkey": rng.normal((self.length, self._comp_size))
+            "bkey": rng.normal((self.length, self._comp_size), dtype=dtype)
             * init_scale
             * 0.1,
-            "bquery": rng.normal((self.heads, self._comp_size))
+            "bquery": rng.normal((self.heads, self._comp_size), dtype=dtype)
             * init_scale
             * 0.1,
         }
 
-    def init_state(self, _weights) -> LayerState:
+    def init_state(self, _weights, dtype) -> LayerState:
         return {
-            "keys": jnp.zeros((self.length - 1, self._comp_size)),
-            "values": jnp.zeros((self.length - 1, self._comp_size)),
+            "keys": jnp.zeros((self.length - 1, self._comp_size), dtype=dtype),
+            "values": jnp.zeros((self.length - 1, self._comp_size), dtype=dtype),
         }
 
     def step(

@@ -16,13 +16,13 @@ class Rng(object):
         self._key, out = jax.random.split(self._key)
         return out
 
-    def uniform(self, shape: Sequence[int]) -> jax.Array:
-        return jax.random.uniform(self.gen(), shape=shape)
+    def uniform(self, shape: Sequence[int], dtype) -> jax.Array:
+        return jax.random.uniform(self.gen(), shape=shape, dtype=dtype)
 
-    def normal(self, shape: Sequence[int], scale=0.1) -> jax.Array:
-        return scale * jax.random.normal(self.gen(), shape=shape)
+    def normal(self, shape: Sequence[int], scale=1.0, dtype=jnp.float32) -> jax.Array:
+        return scale * jax.random.normal(self.gen(), shape=shape, dtype=dtype)
 
-    def he(self, shape: Sequence[int], input_size: int = 0) -> jax.Array:
+    def he(self, shape: Sequence[int], input_size: int = 0, dtype = jnp.float32) -> jax.Array:
         """Generate random weights with He initialization.
 
         The weights follow normal distribution scaled by sqrt(2 / input_size),
@@ -32,4 +32,4 @@ class Rng(object):
         if input_size == 0:
             input_size = shape[-1]
         scale = jnp.sqrt(2 / input_size)
-        return self.normal(shape, scale)
+        return self.normal(shape, scale, dtype)

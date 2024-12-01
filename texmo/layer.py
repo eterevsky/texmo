@@ -69,14 +69,14 @@ class Layer(object):
             else:
                 yield f"{self.name}.{neighbor_size}"
 
-    def init_weights(self, rng: Rng, init_scale: float = 1.0) -> LayerWeights:
+    def init_weights(self, rng: Rng, init_scale: float, dtype) -> LayerWeights:
         return None
 
-    def init_state(self, weights: LayerWeights) -> LayerState:
+    def init_state(self, weights: LayerWeights, dtype) -> LayerState:
         return None
 
     def step(
-        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray
+        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray, dtype
     ) -> tuple[LayerState, jnp.ndarray]:
         """Make a single forward step on the input and return the new state and the output.
 
@@ -89,14 +89,14 @@ class Layer(object):
         raise NotImplementedError
 
     def _step_batch_from_step(
-        self, weights: LayerWeights, states: LayerState, inputs: jnp.ndarray
+        self, weights: LayerWeights, states: LayerState, inputs: jnp.ndarray, dtype
     ) -> tuple[LayerState, jnp.ndarray]:
         if self._step_batch_impl is None:
             self._step_batch_impl = jax.vmap(
                 self.step, in_axes=(None, 0, 0), out_axes=0
             )
 
-        return self._step_batch_impl(weights, states, inputs)
+        return self._step_batch_impl(weights, states, inputs, dtype=dtype)
 
     def step_batch(
         self, weights: LayerWeights, states: LayerState, inputs: jnp.ndarray
@@ -117,11 +117,11 @@ class Layer(object):
         return self._step_batch_from_step(weights, states, inputs)
 
     def _forward_from_step(
-        self, weights: LayerWeights, input: jnp.ndarray
+        self, weights: LayerWeights, input: jnp.ndarray, dtype
     ) -> jnp.ndarray:
         _, out = jax.lax.scan(
-            lambda state, v: self.step(weights, state, v),
-            self.init_state(weights),
+            lambda state, v: self.step(weights, state, v, dtype),
+            self.init_state(weights, dtype=dtype),
             input,
         )
 
@@ -129,7 +129,7 @@ class Layer(object):
 
         return out
 
-    def forward(self, weights: LayerWeights, input: jnp.ndarray) -> jnp.ndarray:
+    def forward(self, weights: LayerWeights, input: jnp.ndarray, dtype) -> jnp.ndarray:
         """Make a forward pass on a single full sample.
 
         This method can be reimplemented in the layer class.
@@ -140,23 +140,24 @@ class Layer(object):
         Returns:
             The output array.
         """
-        return self._forward_from_step(weights, input)
+        return self._forward_from_step(weights, input, dtype=dtype)
 
     def _forward_batch_from_forward(
-        self, weights: LayerWeights, inputs: jnp.ndarray
+        self, weights: LayerWeights, inputs: jnp.ndarray, dtype
     ) -> jnp.ndarray:
         if self._forward_batch_impl is None:
+            _forward = lambda w, i: self.forward(w, i, dtype)
             self._forward_batch_impl = jax.vmap(
-                self.forward, in_axes=(None, 0), out_axes=0
+                _forward, in_axes=(None, 0), out_axes=0
             )
         return self._forward_batch_impl(weights, inputs)
 
     def _forward_batch_from_step(
-        self, weights: LayerWeights, inputs: jnp.ndarray
+        self, weights: LayerWeights, inputs: jnp.ndarray, dtype
     ) -> jnp.ndarray:
         batch_size = inputs.shape[0]
 
-        init_state = self.init_state(weights)
+        init_state = self.init_state(weights, dtype=dtype)
         init_state = jax.tree_util.tree_map(
             lambda x: jnp.tile(x, (batch_size,) + (1,) * len(x.shape)),
             init_state,
@@ -179,7 +180,7 @@ class Layer(object):
     use_step_batch = False
 
     def forward_batch(
-        self, weights: LayerWeights, inputs: jax.Array
+        self, weights: LayerWeights, inputs: jax.Array, dtype
     ) -> jax.Array:
         """Make a forward pass on a batch of inputs.
 
@@ -190,11 +191,11 @@ class Layer(object):
         Returns:
             Output array with the shape (batch_size, sample_len, output_shape)
         """
-        assert inputs.dtype == jnp.float32
+        assert inputs.dtype == dtype
         if self.use_step_batch:
-            return self._forward_batch_from_step(weights, inputs)
+            return self._forward_batch_from_step(weights, inputs, dtype=dtype)
         else:
-            return self._forward_batch_from_forward(weights, inputs)
+            return self._forward_batch_from_forward(weights, inputs, dtype=dtype)
 
     def _forward_batch_from_step_manual(self, weights: LayerWeights, inputs: jax.Array) -> jax.Array:
         outputs = []

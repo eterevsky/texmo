@@ -150,6 +150,9 @@ class Input(object):
         self._emb_size = emb_dim
         self._emb_norm = emb_norm
 
+        # Initialized in initial_step()
+        self.dtype = None
+
     @property
     def output_size(self) -> int:
         if self._emb_size is not None:
@@ -343,30 +346,30 @@ class Input(object):
                 emb_norm=not self._emb_norm,
             )
 
-    def init_weights(self, rng: Rng) -> LayerWeights:
+    def init_weights(self, rng: Rng, dtype) -> LayerWeights:
         if self._emb_size is None:
             return {}
         weights = {}
 
-        token_emb = rng.uniform(shape=(self.ntokens + 1, self._emb_size))
+        token_emb = rng.uniform(shape=(self.ntokens + 1, self._emb_size), dtype=dtype)
         token_emb = token_emb / token_emb.sum(axis=1).reshape(-1, 1)
 
         weights["tokens"] = token_emb
 
         if self._positions is not None:
-            pos_emb = rng.uniform(shape=(self._positions, self._emb_size))
+            pos_emb = rng.uniform(shape=(self._positions, self._emb_size), dtype=dtype)
             pos_emb = pos_emb / pos_emb.sum(axis=1).reshape(-1, 1)
             weights["positions"] = pos_emb
 
         return weights
 
-    def init_state(self, weights: LayerWeights) -> LayerState:
+    def init_state(self, weights: LayerWeights, dtype) -> LayerState:
         if self._positions:
             return {"position": 0}
         else:
             return {}
 
-    def initial_step(self, weights: LayerWeights) -> tuple[LayerState, jax.Array]:
+    def initial_step(self, weights: LayerWeights, dtype) -> tuple[LayerState, jax.Array]:
         """Return initial state and output for position 0.
 
         Args:
@@ -375,21 +378,22 @@ class Input(object):
         Returns:
             (initial state, output vector)
         """
+        self.dtype = dtype
         if self._emb_size:
             if self._positions:
                 return {"position": 0}, weights["positions"][0]
             else:
-                return {}, jnp.zeros(self._emb_size)
+                return {}, jnp.zeros(self._emb_size, dtype=dtype)
         else:
             if self._positions:
                 return {"position": 0}, jax.nn.one_hot(
-                    self.ntokens, self._positions + self.ntokens
+                    self.ntokens, self._positions + self.ntokens, dtype=dtype
                 )
             else:
-                return {}, jnp.zeros(self.ntokens)
+                return {}, jnp.zeros(self.ntokens, dtype=dtype)
 
     def step(
-        self, weights: LayerWeights, state: LayerState, input: int
+        self, weights: LayerWeights, state: LayerState, input: int, dtype
     ) -> tuple[LayerState, jax.Array]:
         """Consume one token from the input and return new state and output.
 
@@ -417,14 +421,14 @@ class Input(object):
 
             return new_state, emb
         else:
-            oh = jax.nn.one_hot(input, self.ntokens)
+            oh = jax.nn.one_hot(input, self.ntokens, dtype=dtype)
             if self._positions:
-                pos_oh = jax.nn.one_hot(pos, self._positions)
+                pos_oh = jax.nn.one_hot(pos, self._positions, dtype=dtype)
                 oh = jnp.concatenate([oh, pos_oh])
             return new_state, oh
 
     def forward_batch(
-        self, weights: LayerWeights, input: jax.Array, padding_len: int
+        self, weights: LayerWeights, input: jax.Array, padding_len: int, dtype
     ) -> jax.Array:
         """Generate output for a batch of full inputs.
 
@@ -457,14 +461,15 @@ class Input(object):
                 emb = emb / emb.sum(axis=2).reshape(batch, sample_len + padding_len, 1)
             return emb
 
-        input_oh = jax.nn.one_hot(input, self.ntokens)
-        padding = jnp.zeros((batch, padding_len, self.ntokens))
+        input_oh = jax.nn.one_hot(input, self.ntokens, dtype=dtype)
+        padding = jnp.zeros((batch, padding_len, self.ntokens), dtype=dtype)
         tokens_oh = jnp.concatenate([padding, input_oh], axis=1)
         if self._positions:
-            pos = jnp.arange(-padding_len, sample_len) % self._positions
+            pos = jnp.arange(-padding_len, sample_len, dtype=dtype) % self._positions
             pos_oh = jax.nn.one_hot(
                 pos,
                 self._positions,
+                dtype=dtype,
             ).reshape(1, -1, self._positions)
             pos_oh = jnp.tile(pos_oh, (batch, 1, 1))
             tokens_oh = jnp.concatenate([tokens_oh, pos_oh], axis=2)

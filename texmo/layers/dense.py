@@ -48,14 +48,14 @@ class Dense(Layer):
     def weights(self) -> int:
         return self.size * self.input_size + self.size
 
-    def init_weights(self, rng: Rng, init_scale: float) -> LayerWeights:
+    def init_weights(self, rng: Rng, init_scale: float, dtype) -> LayerWeights:
         return {
-            "w": rng.he((self.size, self.input_size)) * init_scale,
-            "b": rng.normal((self.size,)) * init_scale,
+            "w": rng.he((self.size, self.input_size), dtype=dtype) * init_scale,
+            "b": rng.normal((self.size,), dtype=dtype) * init_scale,
         }
 
     def step(
-        self, weights: LayerWeights, _state: None, input: jax.Array
+        self, weights: LayerWeights, _state: None, input: jax.Array, dtype
     ) -> tuple[None, jax.Array]:
         input = input.flatten()
         out = jnp.dot(weights["w"], input) + weights["b"]
@@ -87,7 +87,7 @@ class Dense(Layer):
         return out
 
     def forward_batch(
-        self, weights: LayerWeights, input: jax.Array
+        self, weights: LayerWeights, input: jax.Array, dtype
     ) -> jax.Array:
         batch_size, sample_len = input.shape[0:2]
         input = jnp.reshape(input, (batch_size, sample_len, -1))

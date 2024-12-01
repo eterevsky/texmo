@@ -86,20 +86,20 @@ class Attention(Layer):
                 + self._comp_size * self.input_size
             )
 
-    def init_weights(self, rng, init_scale) -> None:
+    def init_weights(self, rng, init_scale, dtype) -> None:
         weights = {
-            "wvalue": rng.he((self.heads, self._comp_size, self.input_size))
+            "wvalue": rng.he((self.heads, self._comp_size, self.input_size), dtype=dtype)
             * init_scale,
-            "wquery": rng.he((self.heads, self._comp_size, self.input_size))
+            "wquery": rng.he((self.heads, self._comp_size, self.input_size), dtype=dtype)
             * init_scale,
         }
 
         if self.multi_key:
             weights["wkey"] = (
-                rng.he((self.heads, self._comp_size, self.input_size)) * init_scale
+                rng.he((self.heads, self._comp_size, self.input_size), dtype=dtype) * init_scale
             )
         else:
-            weights["wkey"] = rng.he((self._comp_size, self.input_size)) * init_scale
+            weights["wkey"] = rng.he((self._comp_size, self.input_size), dtype=dtype) * init_scale
 
         return weights
 

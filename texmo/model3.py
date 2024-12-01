@@ -143,25 +143,25 @@ class Model3(object):
             if model.is_valid() and model != self:
                 yield model
 
-    def init_weights(self, rng: Rng, init_scale: float = 1.0):
+    def init_weights(self, rng: Rng, init_scale: float = 1.0, dtype = jnp.float32):
         return (
-            [self.input.init_weights(rng)]
-            + [l.init_weights(rng, init_scale) for l in self.layers]
-            + [self.output.init_weights(rng, init_scale)]
+            [self.input.init_weights(rng, dtype)]
+            + [l.init_weights(rng, init_scale, dtype) for l in self.layers]
+            + [self.output.init_weights(rng, init_scale, dtype)]
         )
 
-    def init_state(self, weights: Weights) -> State:
-        return [self.input.init_state(weights[0])] + [
-            l.init_state(w) for l, w in zip(self.layers, weights[1:-1])
+    def init_state(self, weights: Weights, dtype = jnp.float32) -> State:
+        return [self.input.init_state(weights[0], dtype)] + [
+            l.init_state(w, dtype) for l, w in zip(self.layers, weights[1:-1])
         ]
 
-    def initial_step(self, weights: Weights) -> tuple[State, jax.Array]:
+    def initial_step(self, weights: Weights, dtype) -> tuple[State, jax.Array]:
         """Predict the first token."""
-        input_state, v = self.input.initial_step(weights[0])
+        input_state, v = self.input.initial_step(weights[0], dtype=dtype)
         new_state = [input_state]
 
         for layer, layer_weights in zip(self.layers, weights[1:-1]):
-            init_state = layer.init_state(layer_weights)
+            init_state = layer.init_state(layer_weights, dtype=dtype)
             layer_state, v = layer.step(layer_weights, init_state, v)
             new_state.append(layer_state)
 
@@ -169,7 +169,7 @@ class Model3(object):
         return new_state, out
 
     def step(
-        self, weights: Weights, state: State, input_char: int
+        self, weights: Weights, state: State, input_char: int, dtype
     ) -> tuple[State, jax.Array]:
         """Run inference for one input character.
 
@@ -182,16 +182,16 @@ class Model3(object):
         """
         new_state = []
 
-        input_state, v = self.input.step(weights[0], state[0], input_char)
+        input_state, v = self.input.step(weights[0], state[0], input_char, dtype=dtype)
         new_state.append(input_state)
 
         for layer, layer_weights, layer_state in zip(
             self.layers, weights[1:-1], state[1:]
         ):
-            layer_state, v = layer.step(layer_weights, layer_state, v)
+            layer_state, v = layer.step(layer_weights, layer_state, v, dtype=dtype)
             new_state.append(layer_state)
 
-        _, out = self.output.step(weights[-1], None, v)
+        _, out = self.output.step(weights[-1], None, v, dtype=dtype)
         return new_state, out
 
     def step_prob(
@@ -199,9 +199,10 @@ class Model3(object):
         weights: Weights,
         state: State,
         input_char: int,
-        temperature=1.0,
+        temperature: float,
+        dtype,
     ):
-        state, out = self.step(weights, state, input_char)
+        state, out = self.step(weights, state, input_char, dtype=dtype)
         return state, jax.nn.softmax(out / temperature)
 
     def step_sample(
@@ -210,7 +211,8 @@ class Model3(object):
         state: State,
         input_char: int,
         rng: Rng,
-        temperature=1.0,
+        temperature: float,
+        dtype,
     ):
         """Runs a single step and samples from the output distribution.
 
@@ -224,24 +226,27 @@ class Model3(object):
         Returns:
             (new state, index of the sampled token)
         """
-        state, out_softmax = self.step_prob(weights, state, input_char, temperature)
+        state, out_softmax = self.step_prob(weights, state, input_char, temperature, dtype)
         c_selected = jax.random.choice(rng.gen(), self.input.ntokens, p=out_softmax)
         return state, int(c_selected)
 
-    def _forward_batch(self, weights: Weights, batch: jax.Array) -> jax.Array:
-        v = self.input.forward_batch(weights[0], batch[:, :-1], padding_len=1)
+    def _forward_batch(self, weights: Weights, batch: jax.Array, dtype) -> jax.Array:
+        v = self.input.forward_batch(weights[0], batch[:, :-1], padding_len=1, dtype=dtype)
 
         for layer, layer_weights in zip(self.layers, weights[1:-1]):
-            v = layer.forward_batch(layer_weights, v)
+            v = layer.forward_batch(layer_weights, v, dtype=dtype)
+            assert v.dtype == dtype
 
-        out = self.output.forward_batch(weights[-1], v)
+        out = self.output.forward_batch(weights[-1], v, dtype=dtype)
         assert out.shape == batch.shape + (self.input.ntokens,), f"batch_shape={batch.shape}, out_shape={out.shape}"
+        assert out.dtype == dtype
         return out
 
     def _loss_batch_unpacked(
         self,
         weights: Weights,
         batch: jax.Array,
+        dtype,
     ) -> jax.Array:
         """Run model on a batch of inputs and return entropy of each character.
 
@@ -253,10 +258,10 @@ class Model3(object):
             an array of shape (batch_size, sample_len) with cross-entropy
             of each character
         """
-        out = self._forward_batch(weights, batch)
+        out = self._forward_batch(weights, batch, dtype=dtype)
         return optax.softmax_cross_entropy_with_integer_labels(out, batch)
 
-    def loss_batch(self, weights: Weights, batch: jax.Array) -> jax.Array:
+    def loss_batch(self, weights: Weights, batch: jax.Array, dtype) -> jax.Array:
         """Run model on a batch of inputs and return the average entropy.
 
         Args:
@@ -266,11 +271,11 @@ class Model3(object):
         Returns:
             average cross-entropy in bits per token
         """
-        entropy = self._loss_batch_unpacked(weights, batch)
+        entropy = self._loss_batch_unpacked(weights, batch, dtype)
         return _1_BY_LOG2 * jnp.mean(entropy)
 
     def loss_batch_masked(
-        self, weights: Weights, batch: jax.Array, lengths: jax.Array
+        self, weights: Weights, batch: jax.Array, lengths: jax.Array, dtype
     ) -> jax.Array:
         """Run model on a batch of inputs and return "masked" entropy.
 
@@ -288,7 +293,7 @@ class Model3(object):
         Returns:
             total cross-entropy in bits
         """
-        entropy = self._loss_batch_unpacked(weights, batch)
+        entropy = self._loss_batch_unpacked(weights, batch, dtype)
         mask = jnp.arange(entropy.shape[1]) < lengths[:, jnp.newaxis]
         return _1_BY_LOG2 * jnp.sum(entropy * mask)
 

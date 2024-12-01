@@ -5,7 +5,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .configuration2 import Configuration2
+from .configuration2 import Configuration2, Precision
 from .dataset import DataSet
 from .manager import Manager
 from .model3 import build_model
@@ -56,13 +56,14 @@ def train(args: argparse.Namespace):
             test_sample_len=args.test_sample_len,
             system=args.system,
         )
-        manager.update_conf(lr, args.sample_len, args.batch, args.time)
+        manager.update_conf(lr, args.sample_len, args.batch, args.time, precision=Precision(args.precision))
         if args.add_layers:
             manager.add_layers(args.add_layers)
         manager.init()
     else:
         conf = Configuration2(
             build_model(args.spec),
+            precision=args.precision,
             lr=lr,
             length=args.length,
             batch=args.batch,
@@ -161,6 +162,15 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="path to the token set definition",
     )
     parser.add_argument(
+        "-p",
+        "--precision",
+        type=str,
+        choices=["fp32", "fp16", "bf16"],
+        metavar="P",
+        default="fp32",
+        help="training precision",
+    )
+    parser.add_argument(
         "-b",
         "--batch",
         type=int,
@@ -215,7 +225,6 @@ def init_args(parser: argparse.ArgumentParser, config):
 
     # Evaluation
     parser.add_argument(
-        "-p",
         "--prefix",
         type=str,
         default="Roses are red\nViolets are",

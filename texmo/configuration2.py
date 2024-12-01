@@ -339,6 +339,7 @@ def default_from_template(
     if spec is not None:
         return Configuration2(
             model=build_model(spec),
+            precision=template.precision[0],
             lr=lr,
             length=length,
             batch=batch,

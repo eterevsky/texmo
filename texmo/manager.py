@@ -370,7 +370,7 @@ class Manager(object):
         temp_steps=None,
         temp_dir=None,
         quiet=False,
-        soft_tl:Optional[float]=None,
+        soft_tl: Optional[float] = None,
     ) -> tuple[float, Configuration2]:
         last_report = 0  # Timestamp of the last printed report
 
@@ -390,10 +390,19 @@ class Manager(object):
 
         # Checking deadline, step limit and soft deadline when the number of
         # steps is a power of 2.
-        while (perf_counter() < deadline and
-               self.step < steps and
-               (perf_counter() < soft_deadline or
-                (self.step & (self.step - 1)) != 0)):
+
+        while self.step < steps:
+            if perf_counter() < deadline:
+                logging.info(
+                    f"Stopped at step {self.step} due to hard time limit {ttoa3(time_limit)}"
+                )
+                break
+            if self.step & (self.step - 1) != 0 and perf_counter() < soft_deadline:
+                logging.info(
+                    f"Stopped at step {self.step} / {steps} due to soft time limit {ttoa3(soft_tl)}"
+                )
+                break
+
             batch = self._get_batch()
 
             # try:
@@ -431,12 +440,6 @@ class Manager(object):
                 deadline = start_time + time_limit if time_limit else INF
                 soft_deadline = start_time + soft_tl if soft_tl else INF
 
-        if self.step < steps:
-            if perf_counter() > deadline:
-                logging.info(f"Stopped at step {self.step}/{steps} due to hard time limit")
-            else:
-                logging.info(f"Stopped at step {self.step}/{steps} due to soft time limit {soft_tl}")
-
         total_time = None if start_time is None else perf_counter() - start_time
 
         return total_time, self.conf.replace(steps=self.step)
@@ -449,8 +452,8 @@ class Manager(object):
         temp_dir,
         output_dir,
         log,
-        quiet: bool=False,
-        soft_tl: Optional[float]=None,
+        quiet: bool = False,
+        soft_tl: Optional[float] = None,
     ) -> tuple[Run, Weights, Configuration2]:
         """Train a model and evaluate it.
 

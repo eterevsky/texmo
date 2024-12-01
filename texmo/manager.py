@@ -397,7 +397,7 @@ class Manager(object):
                     f"Stopped at step {self.step} due to hard time limit {ttoa3(time_limit)}"
                 )
                 break
-            if self.step & (self.step - 1) != 0 and perf_counter() > soft_deadline:
+            if self.step & (self.step - 1) == 0 and perf_counter() > soft_deadline:
                 logging.info(
                     f"Stopped at step {self.step} / {steps} due to soft time limit {ttoa3(soft_tl)}"
                 )

@@ -14,7 +14,7 @@ from jaxlib.xla_extension import XlaRuntimeError
 
 from . import latency
 from .common import INF, ttoa3
-from .configuration2 import Configuration2
+from .configuration2 import Configuration2, Precision
 from .dataset import DataSet, DataSetWrapper
 from .model3 import Model3, Weights
 from .predict import LossTrend
@@ -235,9 +235,10 @@ class Manager(object):
             mask_bias = lambda tree: jax.tree_util.tree_map(
                 lambda g: len(g.shape) > 1, tree
             )
+            eps = 1E-4 if self.conf.precision == Precision.FP16 else 1E-8
             self.optimizer = optax.chain(
                 optax.clip_by_global_norm(1.0),
-                optax.adamw(self.conf.lr, mask=mask_bias, weight_decay=0.01),
+                optax.adamw(self.conf.lr, mask=mask_bias, weight_decay=0.01, eps=eps),
             )
 
             self.opt_state = self.optimizer.init(

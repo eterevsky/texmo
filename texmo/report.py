@@ -221,14 +221,14 @@ def generate_report_by_weight(
     result_db: ResultDB, template: Template, system: str, max_time: float
 ) -> str:
     lines = [
-        f'Top confs by weights for {system}',
-        f'Max time: {max_time}',
+        f'Top confs by weights for {system}\n',
+        f'Max time: {ttoa3(max_time)}',
         f'Spec: {template.regex.pattern}',
         f'LR: {template.lr}',
         f'Length: {template.length}',
         f'Batch: {template.batch}',
         f'Steps: {template.steps}',
-        f'Weights: {template.max_weights}',
+        f'Weights: {template.max_weights}\n',
     ]
     confs = result_db.top_confs(
         system, sorted='weights', template=template, with_runs=True

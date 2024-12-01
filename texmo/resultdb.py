@@ -363,7 +363,7 @@ class ResultDB(object):
 
         if with_runs:
             conditions.append(
-                "EXIST(SELECT 1 FROM run WHERE run.conf_is = conf.id AND system = :system)"
+                "EXISTS(SELECT 1 FROM run WHERE run.conf_id = conf.id AND system = :system)"
             )
 
         where = "WHERE " + " AND ".join(conditions)

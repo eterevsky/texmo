@@ -256,6 +256,8 @@ class Manager(object):
 
         assert self.tokenizer is not None
 
+        weights32 = jax.tree.map(lambda x: x.astype(jnp.float32), self.weights)                                 
+
         shards = 4
         while shards <= xs.shape[0]:
             logging.info(f'Evaluating with {shards} batches')
@@ -269,10 +271,8 @@ class Manager(object):
                 shard = xs[start:end]
                 shard_len = lengths[start:end]
                 try:
-                    # TODO: convert everything to FP32 to make sure that the
-                    # eval part always works the same way
                     loss += self.model.loss_batch_masked(
-                        self.weights, shard, shard_len, dtype=self.dtype
+                        weights32, shard, shard_len, dtype=jnp.float32
                     ).item()
                 except (XlaRuntimeError, ValueError):
                     evaluation_failed = True

@@ -235,7 +235,7 @@ class Manager(object):
             mask_bias = lambda tree: jax.tree_util.tree_map(
                 lambda g: len(g.shape) > 1, tree
             )
-            eps = 1E-4 if self.conf.precision in (Precision.FP16, Precision.BF16) else 1E-8
+            eps = 1E-4 if self.conf.precision == Precision.FP16 else 1E-8
             self.optimizer = optax.chain(
                 optax.clip_by_global_norm(1.0),
                 optax.adamw(self.conf.lr, mask=mask_bias, weight_decay=0.01, eps=eps),

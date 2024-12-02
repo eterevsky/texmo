@@ -18,9 +18,9 @@ class Layer(object):
         # here.
         self._step_batch = None
         self._forward_batch = None
-        self._forward_batch_impl: Optional[
+        self._forward_batch_impl: dict[str,
             Callable[[LayerWeights, jnp.ndarray], jnp.ndarray]
-        ] = None
+        ] = {}
         self._step_batch_impl: Optional[
             Callable[
                 [LayerWeights, LayerState, jnp.ndarray],
@@ -145,12 +145,12 @@ class Layer(object):
     def _forward_batch_from_forward(
         self, weights: LayerWeights, inputs: jnp.ndarray, dtype
     ) -> jnp.ndarray:
-        if self._forward_batch_impl is None:
+        if str(dtype) not in self._forward_batch_impl:
             _forward = lambda w, i: self.forward(w, i, dtype)
-            self._forward_batch_impl = jax.vmap(
+            self._forward_batch_impl[str(dtype)] = jax.vmap(
                 _forward, in_axes=(None, 0), out_axes=0
             )
-        return self._forward_batch_impl(weights, inputs)
+        return self._forward_batch_impl[str(dtype)](weights, inputs)
 
     def _forward_batch_from_step(
         self, weights: LayerWeights, inputs: jnp.ndarray, dtype

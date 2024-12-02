@@ -297,6 +297,7 @@ class Template(object):
         self, conf: Configuration2
     ) -> Iterable[Configuration2]:
         for steps in self.steps.neighbors(conf.steps):
+            assert steps >= 2
             yield conf.replace(steps=steps)
         for lr in self.lr.neighbors(conf.lr):
             yield conf.replace(lr=lr)

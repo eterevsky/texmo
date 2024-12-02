@@ -366,7 +366,7 @@ class ResultDB(object):
             if template.batch.max < INF:
                 conditions.append('batch <= :batch_max')
                 params['batch_max'] = template.batch.max
-            if template.steps.min > 2:
+            if template.steps.min >= 2:
                 conditions.append('steps >= :steps_min')
                 params['steps_min'] = template.steps.min
             if template.steps.max < INF:

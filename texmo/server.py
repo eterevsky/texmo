@@ -1,19 +1,19 @@
 import argparse
-from flask import Flask, render_template, request, redirect, make_response
 import logging
+import os
 import threading
 from queue import Queue
 
-from flask import Flask, redirect, render_template, request
+from flask import (Flask, make_response, redirect, render_template, request,
+                   send_from_directory)
 
 from .configuration2 import Configuration2, Template, default_from_template
 from .latency import get_report, timer
+from .report import generate_report_by_weight
 from .resultdb import ResultDB
 from .run import Run
 from .search2 import Search
 from .tokens import set_tokens_dir
-from .run import Run
-from .report import generate_report_by_weight
 
 
 class SearchThread(threading.Thread):   
@@ -192,6 +192,14 @@ def main(args: argparse.Namespace):
             response.mimetype = "text/plain"
             return response
     
+    @app.route('/favicon.ico')
+    def _favicon():
+        return send_from_directory(
+            os.path.join(app.root_path, 'static'),
+            'favicon.ico',
+            mimetype='image/vnd.microsoft.icon'
+        )
+
     try:
         app.run(host="0.0.0.0", debug=True)
     finally:

@@ -21,6 +21,7 @@ def is_valid_int(x: int) -> bool:
 
 
 class Precision(enum.StrEnum):
+    FP64 = enum.auto()
     FP32 = enum.auto()
     FP16 = enum.auto()
     BF16 = enum.auto()
@@ -28,12 +29,26 @@ class Precision(enum.StrEnum):
     @property
     def dtype(self):
         match self:
+            case Precision.FP64:
+                return jnp.float64
             case Precision.FP32:
                 return jnp.float32
             case Precision.FP16:
                 return jnp.float16
             case Precision.BF16:
                 return jax.dtypes.bfloat16
+    
+    @property
+    def neighbors(self):
+        match self:
+            case Precision.FP64:
+                return (Precision.FP32,)
+            case Precision.FP32:
+                return (Precision.FP64, Precision.FP16, Precision.BF16)
+            case Precision.FP16:
+                return (Precision.FP16, Precision.BF16)
+            case Precision.BF16:
+                return (Precision.FP16, Precision.BF16)
 
 
 class Configuration2(object):
@@ -155,9 +170,8 @@ class Configuration2(object):
     def neighbors(self) -> Iterable['Configuration2']:
         if self.steps > 2:
             yield self.replace(steps=self.steps // 2)
-        for precision in Precision:
-            if precision != self.precision:
-                yield self.replace(precision=precision)
+        for precision in self.precision.neighbors:
+            yield self.replace(precision=precision)
         yield self.replace(steps=self.steps * 2)
         yield self.replace(lr=self.lr / 2)
         yield self.replace(lr=self.lr * 2)
@@ -308,8 +322,8 @@ class Template(object):
         for model in conf.model.neighbors():
             if self.match_model(model):
                 yield conf.replace(model=model)
-        for precision in self.precision:
-            if precision != conf.precision:
+        for precision in conf.precision.neighbors:
+            if precision in self.precision:
                 yield conf.replace(precision=precision)
             
 

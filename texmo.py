@@ -2,6 +2,7 @@ import argparse
 import logging
 
 import numpy as np
+import jax
 
 import config
 from texmo import (
@@ -17,6 +18,9 @@ from texmo import (
 from texmo.tokens import small_tokens
 from texmo.predict import time_cli
 
+
+# Need to do this before any JAX code is executed.
+jax.config.update("jax_enable_x64", True)
 
 def help(parser):
     parser.print_help()

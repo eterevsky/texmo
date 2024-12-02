@@ -45,7 +45,7 @@ class Gru(Layer):
         return jnp.zeros((self.size,), dtype=dtype)
 
     def step(
-        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray
+        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray, dtype
     ) -> tuple[LayerState, jax.Array]:
         input = input.flatten()
         input_state = jnp.concatenate((input, state))

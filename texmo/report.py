@@ -239,7 +239,8 @@ def generate_report_by_weight(
             continue
         if not template.match(c.conf):
             continue
-        assert c.median_time is not None
+        if c.median_time is None:
+            continue
         if c.median_time > max_time:
             continue
         t = '{:8}'.format(ttoa3(c.median_time))

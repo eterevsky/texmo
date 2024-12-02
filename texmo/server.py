@@ -265,7 +265,7 @@ def init_args(parser: argparse.ArgumentParser, config):
         "-w",
         "--weights",
         type=str,
-        default="32-4294967296",
+        default="1024-4294967296",
         help="range for the _maximal_ number of weights in the model",
     )
     parser.add_argument(

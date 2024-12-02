@@ -88,7 +88,7 @@ class Attn(Layer):
         }
 
     def step(
-        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray
+        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray, dtype
     ) -> tuple[LayerState, jax.Array]:
         input = input.flatten()
 
@@ -119,7 +119,7 @@ class Attn(Layer):
         next_values = values[:, 1:, :]
         return {"keys": next_keys, "values": next_values}, attn_value
 
-    def forward(self, weights: LayerWeights, input: jax.Array) -> jax.Array:
+    def forward(self, weights: LayerWeights, input: jax.Array, dtype) -> jax.Array:
         input_len = input.shape[0]
         input = input.reshape((input_len, -1))
         input = jnp.concatenate(
@@ -243,7 +243,7 @@ class AttnMQ(Layer):
         }
 
     def step(
-        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray
+        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray, step
     ) -> tuple[LayerState, jax.Array]:
         input = input.flatten()
 
@@ -274,7 +274,7 @@ class AttnMQ(Layer):
         next_values = values[1:, :]
         return {"keys": next_keys, "values": next_values}, attn_value
 
-    def forward(self, weights: LayerWeights, input: jax.Array) -> jax.Array:
+    def forward(self, weights: LayerWeights, input: jax.Array, dtype) -> jax.Array:
         input_len = input.shape[0]
         input = input.reshape((input_len, -1))
         input = jnp.concatenate(

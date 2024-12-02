@@ -217,7 +217,7 @@ class Manager(object):
         #     )
 
     def init(self, quiet=False, training=True):
-        logging.info(f'Conf: {self.conf}')
+        logging.info(str(self.conf))
 
         if self.train_from == 0:
             self._loss_avg = lambda w, batch: self.model.loss_batch(w, batch, self.dtype)
@@ -235,7 +235,7 @@ class Manager(object):
             mask_bias = lambda tree: jax.tree_util.tree_map(
                 lambda g: len(g.shape) > 1, tree
             )
-            eps = 1E-4 if self.conf.precision == Precision.FP16 else 1E-8
+            eps = 1E-4 if self.conf.precision in (Precision.FP16, Precision.BF16) else 1E-8
             self.optimizer = optax.chain(
                 optax.clip_by_global_norm(1.0),
                 optax.adamw(self.conf.lr, mask=mask_bias, weight_decay=0.01, eps=eps),
@@ -256,7 +256,7 @@ class Manager(object):
 
         assert self.tokenizer is not None
 
-        weights32 = jax.tree.map(lambda x: x.astype(jnp.float32), self.weights)                                 
+        weights32 = jax.tree.map(lambda x: x.astype(jnp.float32), self.weights)
 
         shards = 4
         while shards <= xs.shape[0]:
@@ -498,8 +498,12 @@ class Manager(object):
             eval_loss = INF
 
         self.run.finalize(eval_loss, train_time)
+        if final_conf != self.conf:
+            steps_log = f'  after {final_conf.steps} steps'
+        else:
+            steps_log = ''
         logging.info(
-            f'{final_conf}:  loss {eval_loss:.4f} b/byte  T = {ttoa3(train_time)}'
+            f'loss {eval_loss:.4f} b/byte  T = {ttoa3(train_time)}{steps_log}'
         )
 
         return (self.run, self.weights, final_conf)

@@ -74,8 +74,9 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
     s = requests.Session()
 
     while True:
-        with timer("get(select)"):
+        with timer("get(select)") as t:
             r = retry(lambda: s.get(select_url, params={"system": system}))
+        logging.info(f"===== Got configuration in {ttoa3(t.value())}")
         d = r.json()
         assert d["system"] == system
         conf = Configuration2.from_dict(d["conf"])

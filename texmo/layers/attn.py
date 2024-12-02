@@ -123,7 +123,7 @@ class Attn(Layer):
         input_len = input.shape[0]
         input = input.reshape((input_len, -1))
         input = jnp.concatenate(
-            [jnp.zeros((self.length - 1, self.input_size)), input]
+            [jnp.zeros((self.length - 1, self.input_size), dtype=dtype), input]
         )
         input_len = input.shape[0]
 
@@ -278,7 +278,7 @@ class AttnMQ(Layer):
         input_len = input.shape[0]
         input = input.reshape((input_len, -1))
         input = jnp.concatenate(
-            [jnp.zeros((self.length - 1, self.input_size)), input]
+            [jnp.zeros((self.length - 1, self.input_size), dtype=dtype), input]
         )
         input_len = input.shape[0]
 

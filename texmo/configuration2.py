@@ -310,6 +310,9 @@ class Template(object):
     def _conf_neighbors(
         self, conf: Configuration2
     ) -> Iterable[Configuration2]:
+        for precision in conf.precision.neighbors:
+            if precision in self.precision:
+                yield conf.replace(precision=precision)
         for steps in self.steps.neighbors(conf.steps):
             assert steps >= 2
             yield conf.replace(steps=steps)
@@ -322,9 +325,6 @@ class Template(object):
         for model in conf.model.neighbors():
             if self.match_model(model):
                 yield conf.replace(model=model)
-        for precision in conf.precision.neighbors:
-            if precision in self.precision:
-                yield conf.replace(precision=precision)
             
 
 

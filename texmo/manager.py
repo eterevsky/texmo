@@ -274,7 +274,10 @@ class Manager(object):
                     loss += self.model.loss_batch_masked(
                         weights32, shard, shard_len, dtype=jnp.float32
                     ).item()
-                except (XlaRuntimeError, ValueError):
+                except (XlaRuntimeError, ValueError, RuntimeError):
+                    self.weights = jax.device_get(self.weights)
+                    weights32 = jax.device_get(weights32)
+                    release_device_buffers()
                     evaluation_failed = True
                     break
 

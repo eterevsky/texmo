@@ -47,9 +47,9 @@ def power2_neighbors(x: int) -> Iterable[int]:
 _BASES = (
     (1, ""),
     (1000, "k"),
-    (1E6, "M"),
-    (1E9, "G"),
-    (1E12, "T"),
+    (10**6, "M"),
+    (10**9, "G"),
+    (10**12, "T"),
 )
 
 def itoa3(x: int) -> str:

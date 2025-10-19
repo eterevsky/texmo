@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from jaxlib.xla_extension import XlaRuntimeError
+from jax.errors import JaxRuntimeError
 
 from . import latency
 from .common import INF, ttoa3
@@ -274,7 +274,7 @@ class Manager(object):
                     loss += self.model.loss_batch_masked(
                         weights32, shard, shard_len, dtype=jnp.float32
                     ).item()
-                except (XlaRuntimeError, ValueError, RuntimeError):
+                except (JaxRuntimeError, ValueError, RuntimeError):
                     self.weights = jax.device_get(self.weights)
                     weights32 = jax.device_get(weights32)
                     release_device_buffers()

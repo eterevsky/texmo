@@ -1,0 +1,16 @@
+[project]
+name = "texmo"
+version = "0.1.0"
+description = "Experimenting with small language models"
+readme = "README.md"
+#requires-python = ">=3.13,<3.14"
+requires-python = ">=3.14"
+dependencies = [
+    "flask>=3.1.2",
+    "jax>=0.8",
+    "matplotlib>=3.10.7",
+    "numpy>=2.3.4",
+    "optax>=0.2.6",
+    "regex>=2025.9.18",
+    "requests>=2.32.5",
+]

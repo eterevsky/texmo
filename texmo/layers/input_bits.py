@@ -91,10 +91,12 @@ class InputBits:
                 (not self.pos or self.nbits < 8))
 
     def _neighbors(self):
-        return [InputBits(self.nbits // 2, self.one_hot, self.pos),
-                InputBits(self.nbits * 2, self.one_hot, self.pos),
-                InputBits(self.nbits, not self.one_hot, self.pos),
-                InputBits(self.nbits, self.one_hot, not self.pos)]
+        if self.nbits > 1:
+            yield InputBits(self.nbits // 2, self.one_hot, self.pos)
+        if self.nbits < 8:
+                InputBits(self.nbits * 2, self.one_hot, self.pos)
+        yield InputBits(self.nbits, not self.one_hot, self.pos)
+        yield InputBits(self.nbits, self.one_hot, not self.pos)
 
     def neighbors(self):
         for neighbor in self._neighbors():

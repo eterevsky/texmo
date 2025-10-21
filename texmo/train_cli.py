@@ -33,7 +33,8 @@ def show_loss_graph(manager: Manager, output_dir: str):
     )
     plt.plot(xs, ys)
     if output_dir is not None:
-        plt.savefig(os.path.join(output_dir, manager.name() + ".png"))
+        name = manager.name().replace('|', '!')
+        plt.savefig(os.path.join(output_dir, name + ".png"))
     plt.show()
 
 

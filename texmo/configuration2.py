@@ -37,7 +37,7 @@ class Precision(enum.StrEnum):
                 return jnp.float16
             case Precision.BF16:
                 return jax.dtypes.bfloat16
-    
+
     @property
     def neighbors(self):
         match self:
@@ -46,9 +46,9 @@ class Precision(enum.StrEnum):
             case Precision.FP32:
                 return (Precision.FP64, Precision.FP16, Precision.BF16)
             case Precision.FP16:
-                return (Precision.FP16, Precision.BF16)
+                return (Precision.FP32, Precision.BF16)
             case Precision.BF16:
-                return (Precision.FP16, Precision.BF16)
+                return (Precision.FP32, Precision.BF16)
 
 
 class Configuration2(object):
@@ -165,7 +165,7 @@ class Configuration2(object):
 
     @property
     def tokens_name(self) -> str:
-        return self.tokenizer.tokenset.name
+        return self.model.input.tokens_name
 
     def neighbors(self) -> Iterable['Configuration2']:
         if self.steps > 2:
@@ -325,7 +325,7 @@ class Template(object):
         for model in conf.model.neighbors():
             if self.match_model(model):
                 yield conf.replace(model=model)
-            
+
 
 
 def conf_neighbors(

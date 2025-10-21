@@ -121,8 +121,22 @@ python3 eval.py -d data -m models/some-model.json --prefix="..."
 
 (Either `-d` or `--prefix` is enough.)
 
-## Searching the configurations and metaparameters
+## Client-server search
+
+In this mode a single system maintains a database of all the results and performs a search over the space of possible models and metaparameters. The client systems can send a request over HTTP to get a configuration that they are going to run and then submit the results back to the server.
+
+The server is run by
 
 ```
-python3 search.py -d data -c dense.128 -t 8 --vary=struc,batch,lr
+uv run texmo.py search -s <spec regex> -p <precisions> -b <batch sizes> ...
 ```
+
+specifying the space of considered configurations.
+
+The client system is run with
+
+```
+uv run texmo.py client
+```
+
+(specifying the name of the system and the address of the server in `config.py`)

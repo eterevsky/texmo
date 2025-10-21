@@ -20,43 +20,21 @@ def _build_literal_bytes() -> TokenSet:
     return token_set
 
 
-class LiteralBytesTokenizer(object):
-    def __init__(self):
-        self.token_set = _build_literal_bytes()
+class BytesTokenSet:
+    name = 'bytes'
+    processing = 'raw'
+    avg_proc_bytes_per_token = 1
+    avg_bytes_per_token = 1
 
-    def tokenize(
-        self,
-        string: bytes | mmap.mmap,
-        start=0,
-        max_tokens=None,
-        max_bytes=None,
-    ) -> list[Token]:
-        if max_tokens is not None:
-            l = max_tokens
-        elif max_bytes is not None:
-            l = max_bytes
-        else:
-            l = len(string) - start
 
-        return [self.token_set.tokens[b] for b in string[start : start + l]]
+class LiteralBytesTokenizer:
+    tokenset = BytesTokenSet()
 
-    def tokenize_ids(
-        self,
-        string: bytes | mmap.mmap,
-        start=0,
-        max_tokens=None,
-        max_bytes=None,
-    ) -> np.ndarray:
-        if max_tokens is not None:
-            l = max_tokens
-        elif max_bytes is not None:
-            l = max_bytes
-        else:
-            l = len(string) - start
+    def tokenize(self, chunk: bytes) -> list[int]:
+        return list(chunk)
 
-        return np.frombuffer(string[start : start + l], dtype=np.uint8), 0
-
-        # return list(string[start : start + l])
+    def tokenize_processed(self, chunk: bytes) -> list[int]:
+        return self.tokenize(chunk)
 
     def untokenize(self, tokens: list[int]) -> bytes:
         return bytes(tokens)
@@ -64,7 +42,8 @@ class LiteralBytesTokenizer(object):
 
 class LiteralBitsTokenizer(object):
     def __init__(self):
-        self.token_set = TokenSet.build("fallback_bits", 1, "raw", [], {"literal_cost": 8, "literal_dist_entropy": 0}, bytes_per_token=0.125)
+        pass
+        # self.token_set = TokenSet.build("fallback_bits", 1, "raw", [], {"literal_cost": 8, "literal_dist_entropy": 0}, bytes_per_token=0.125)
 
     def tokenize(
         self,
@@ -109,7 +88,7 @@ class LiteralBitsTokenizer(object):
 
 _TOKENIZERS = {
     # "tokens2_raw_bits1": LiteralBitsTokenizer(),
-    # "tokens256_raw_all": LiteralBytesTokenizer()
+    "bytes": LiteralBytesTokenizer()
 }
 _TOKENS_DIR = None
 

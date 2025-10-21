@@ -16,7 +16,7 @@ from .search2 import Search
 from .tokens import set_tokens_dir
 
 
-class SearchThread(threading.Thread):   
+class SearchThread(threading.Thread):
     def __init__(
         self,
         db: ResultDB,
@@ -66,7 +66,6 @@ class SearchThread(threading.Thread):
                 break
             else:
                 assert False, f"Unknown command: {command}"
-
 
 
 class SearchServer(object):
@@ -130,7 +129,7 @@ class SearchServer(object):
         conf = Configuration2.from_dict(params["conf"])
         logging.info(f"Adding run: {conf} - {run}")
         self.requests_queue.put(("add", (conf, run)))
-    
+
     def report(self, args):
         system = args["system"]
         logging.info(f"Generating report for system {system}")
@@ -140,7 +139,7 @@ class SearchServer(object):
         assert sys == system
 
         return report
-    
+
     def join(self):
         self.requests_queue.put(("stop", None))
         self.search_thread.join()
@@ -172,26 +171,26 @@ def main(args: argparse.Namespace):
     def _select():
         with timer("SearchServer.select"):
             return server.select(request.args)
-    
+
     @app.route("/add", methods=["POST"])
     def _add():
         with timer("SearchServer.add_run"):
             server.add_run(request.json)
             return "", 200
-    
+
     @app.route("/latency", methods=["GET"])
     def _latency():
         response = make_response(get_report(), 200)
         response.mimetype = "text/plain"
         return response
-    
+
     @app.route("/report", methods=["GET"])
     def _report():
         with timer("SearchServer.report"):
             response = make_response(server.report(request.args), 200)
             response.mimetype = "text/plain"
             return response
-    
+
     @app.route('/favicon.ico')
     def _favicon():
         return send_from_directory(

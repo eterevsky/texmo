@@ -54,7 +54,7 @@ class Run(object):
             loss_trend=loss_trend,
             train_time=d["train_time"],
         )
-    
+
     def __str__(self):
         return f"{self.system} {self.loss:.4f} {ttoa3(self.train_time)}"
 
@@ -84,7 +84,7 @@ class Run(object):
 
     def to_dict(self):
         d = {
-            "step_loss": self.step_loss.tolist(),
+            "step_loss": self.step_loss if type(self.step_loss) is list else self.step_loss.tolist(),
             "loss": self.loss,
             "loss_trend": self.loss_trend.to_dict() if self.loss_trend else None,
             "system": self.system,

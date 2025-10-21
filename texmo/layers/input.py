@@ -83,7 +83,7 @@ class Input(object):
     """
 
     @staticmethod
-    def from_spec(spec: str) -> "Input":
+    def from_spec(spec: str) -> Input:
         # Defaults
         ntokens = None
         nbits = None
@@ -95,6 +95,10 @@ class Input(object):
         for comp_spec in spec.split("-"):
             parts = comp_spec.split(".")
             match parts[0]:
+                case "bytes":
+                    ntokens = 256
+                    processing = "raw"
+                    token_type = "b8"
                 case "tokens":
                     ntokens = int(parts[1])
                     processing = parts[2]
@@ -138,14 +142,17 @@ class Input(object):
         positions: int | None,
         emb_dim: int | None,
         emb_norm: bool,
+        tokenset_name: str = None,
     ):
         assert isinstance(token_type, str)
         self.ntokens = ntokens
         self._processing = processing
         self._token_type = token_type
 
-        tokenset_name = f"tokens{ntokens}_{_PROCESSING_NAMES[processing]}_{_TOKEN_TYPE_NAMES[token_type]}"
+        if tokenset_name is None:
+            tokenset_name = f"tokens{ntokens}_{_PROCESSING_NAMES[processing]}_{_TOKEN_TYPE_NAMES[token_type]}"
         self.tokenizer = get_tokenizer(tokenset_name)
+        self.tokens_name = self.tokenizer.tokenset.name
         self._positions = positions
         self._emb_size = emb_dim
         self._emb_norm = emb_norm
@@ -201,7 +208,7 @@ class Input(object):
                 emb_dim=self._emb_size,
                 emb_norm=self._emb_norm,
             )
-        
+
         if (self.ntokens, self._token_type) == (2, "b1"):
             yield Input(
                 ntokens=4,
@@ -265,7 +272,7 @@ class Input(object):
                     emb_dim=self._emb_size,
                     emb_norm=self._emb_norm,
                 )
-        
+
         for token_type in _TOKEN_TYPE_NEIGHBORS[self._token_type]:
             yield Input(
                 ntokens=self.ntokens,
@@ -284,7 +291,7 @@ class Input(object):
                 positions=2,
                 emb_dim=self._emb_size,
                 emb_norm=self._emb_norm,
-            )            
+            )
         else:
             if self._positions == 2:
                 yield Input(

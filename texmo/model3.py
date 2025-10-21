@@ -9,6 +9,7 @@ from .layer import Layer, LayerState, LayerWeights
 from .layers import build_layer
 from .layers.dense import Dense
 from .layers.input import Input
+from .layers.input_raw import InputRaw
 from .prng import Rng
 
 Self = ()
@@ -33,7 +34,10 @@ class Model3(object):
         else:
             raise AssertionError("Model spec can't contain more than one |")
 
-        self.input = Input.from_spec(input_spec)
+        if input_spec.startswith('bytes'):
+            self.input = InputRaw.from_spec(input_spec)
+        else:
+            self.input = Input.from_spec(input_spec)
 
         self.layers = []
         shape = self.input.output_shape

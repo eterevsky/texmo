@@ -38,7 +38,7 @@ class Model3(object):
         if input_spec.startswith('bytes'):
             self.input = InputBytes.from_spec(input_spec)
         elif input_spec.startswith('bits'):
-            self.intput = InputBits.from_spec(input_spec)
+            self.input = InputBits.from_spec(input_spec)
         else:
             self.input = Input.from_spec(input_spec)
 

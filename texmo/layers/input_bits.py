@@ -118,7 +118,15 @@ class InputBits:
         Returns:
             (new state, output vector)
         """
-        out = self.encodings[input]
+        if self.one_hot:
+            out = jax.nn.one_hot(input, 2**self.nbits)
+        else:
+            i = input
+            out = []
+            for j in range(self.nbits):
+                out.append(i % 2)
+                i //= 2
+            out = jnp.array(out)
         pos = state['pos']
 
         if self.pos:
@@ -144,7 +152,14 @@ class InputBits:
             one-hot encoding of the token + optionally position.
         """
         batch, sample_len = input.shape
-        out = self.encodings[input]  # (batch, sample_len, enc_size)
+        if self.one_hot:
+            out = jax.nn.one_hot(input, 2**self.nbits)
+        else:
+            digits = []
+            for i in range(self.nbits):
+                d = input // 2**i % 2
+                digits.append(d)
+            out = jnp.stack(digits, axis=-1)
         if self.pos:
             pos = jnp.arange(sample_len) % self.positions
             pos = pos[None,:,:]

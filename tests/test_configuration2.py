@@ -4,6 +4,7 @@ from unittest import TestCase
 
 from texmo.configuration2 import (
     Configuration2,
+    Precision,
     Template,
     conf_neighbors,
 )
@@ -25,6 +26,7 @@ class Configuration2Test(TestCase):
             batch=(128, 256),
             steps=(256, 256),
             max_weights=(32, INF),
+            precision=(Precision.FP32,)
         )
 
         conf = Configuration2(
@@ -33,6 +35,7 @@ class Configuration2Test(TestCase):
             length=128,
             batch=256,
             steps=256,
+            precision='fp32'
         )
         self.assertEqual(
             set(conf_neighbors(conf, template)),
@@ -55,6 +58,7 @@ class Configuration2Test(TestCase):
             batch=(128, 128),
             steps=(256, 256),
             max_weights=(32, INF),
+            precision=(Precision.FP32,)
         )
 
         conf = Configuration2(
@@ -63,6 +67,7 @@ class Configuration2Test(TestCase):
             length=128,
             batch=128,
             steps=256,
+            precision='fp32'
         )
 
         self.assertEqual(
@@ -82,6 +87,7 @@ class Configuration2Test(TestCase):
             batch=(128, 256),
             steps=(256, 256),
             max_weights=(32, INF),
+            precision=(Precision.FP32,)
         )
 
         conf = Configuration2(
@@ -90,6 +96,7 @@ class Configuration2Test(TestCase):
             length=128,
             batch=256,
             steps=256,
+            precision='fp32'
         )
         self.assertEqual(
             set(conf_neighbors(conf, template)),
@@ -109,5 +116,6 @@ class Configuration2Test(TestCase):
             length=128,
             batch=256,
             steps=128,
+            precision='fp32'
         )
         self.assertTrue(conf.is_valid())

@@ -2,7 +2,7 @@ import logging
 from unittest import TestCase
 
 from texmo.common import INF
-from texmo.configuration2 import Configuration2, Template
+from texmo.configuration2 import Configuration2, Template, Precision
 from texmo.model3 import build_model
 from texmo.resultdb import ResultDB
 from texmo.search import Search
@@ -19,10 +19,12 @@ class SearchTest(TestCase):
             length=None,
             batch=None,
             steps=None,
+            precision=None,
             max_weights=(32, INF),
         )
         self._init_conf = Configuration2(
-            build_model("tokens.2.raw.b1|"), lr=0.125, length=32, batch=1, steps=64
+            build_model("tokens.2.raw.b1|"), lr=0.125,
+                        length=32, batch=1, steps=64, precision=Precision.FP32
         )
 
     def test_init(self):

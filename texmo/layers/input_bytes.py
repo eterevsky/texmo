@@ -4,15 +4,15 @@ import jax.numpy as jnp
 from ..layer import LayerState, LayerWeights
 from ..tokens import get_tokenizer
 
-"""Input layer without tokenization, just with bytes or bits."""
 
 
-class InputRaw(object):
+class InputBytes(object):
+    """Input layer without tokenization, just with bytes."""
 
     @staticmethod
-    def from_spec(spec: str) -> InputRaw:
+    def from_spec(spec: str) -> InputBytes:
         assert spec == 'bytes'
-        return InputRaw()
+        return InputBytes()
 
     def __init__(self):
         self.ntokens = 256
@@ -34,8 +34,8 @@ class InputRaw(object):
     def init_weights(self, _rng, _dtype) -> LayerWeights:
         return None
 
-    def init_state(self, weights: LayerWeights, dtype) -> tuple[LayerState, jax.Array]:
-        return {}, jnp.zeros(self.output_shape, dtype=dtype)
+    def init_state(self, weights: LayerWeights, dtype) -> LayerState:
+        return {}
 
     def step(self, _weights: LayerWeights, _state: LayerState, input: int, dtype) -> tuple[LayerState, jax.Array]:
         """Consume one token from the input and return new state and output.

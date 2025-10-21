@@ -152,7 +152,7 @@ class Input(object):
         if tokenset_name is None:
             tokenset_name = f"tokens{ntokens}_{_PROCESSING_NAMES[processing]}_{_TOKEN_TYPE_NAMES[token_type]}"
         self.tokenizer = get_tokenizer(tokenset_name)
-        self.tokens_name = self.tokenizer.tokenset.name
+        self.tokens_name = self.tokenizer.tokenset.name if self.tokenizer else None
         self._positions = positions
         self._emb_size = emb_dim
         self._emb_norm = emb_norm
@@ -198,7 +198,7 @@ class Input(object):
             parts.append(f"emb.{self._emb_size}{norm}")
         return "-".join(parts)
 
-    def neighbors(self):
+    def _neighbors(self):
         for ntokens in (self.ntokens // 2, self.ntokens * 2):
             yield Input(
                 ntokens=ntokens,
@@ -353,6 +353,11 @@ class Input(object):
                 emb_norm=not self._emb_norm,
             )
 
+    def neighbors(self):
+        for neighbor in self._neighbors():
+            if neighbor.is_valid():
+                yield neighbor
+
     def init_weights(self, rng: Rng, dtype) -> LayerWeights:
         if self._emb_size is None:
             return {}
@@ -472,7 +477,7 @@ class Input(object):
         padding = jnp.zeros((batch, padding_len, self.ntokens), dtype=dtype)
         tokens_oh = jnp.concatenate([padding, input_oh], axis=1)
         if self._positions:
-            pos = jnp.arange(-padding_len, sample_len, dtype=dtype) % self._positions
+            pos = jnp.arange(-padding_len, sample_len) % self._positions
             pos_oh = jax.nn.one_hot(
                 pos,
                 self._positions,

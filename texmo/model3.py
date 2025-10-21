@@ -9,7 +9,8 @@ from .layer import Layer, LayerState, LayerWeights
 from .layers import build_layer
 from .layers.dense import Dense
 from .layers.input import Input
-from .layers.input_raw import InputRaw
+from .layers.input_bytes import InputBytes
+from .layers.input_bits import InputBits
 from .prng import Rng
 
 Self = ()
@@ -35,7 +36,9 @@ class Model3(object):
             raise AssertionError("Model spec can't contain more than one |")
 
         if input_spec.startswith('bytes'):
-            self.input = InputRaw.from_spec(input_spec)
+            self.input = InputBytes.from_spec(input_spec)
+        elif input_spec.startswith('bits'):
+            self.intput = InputBits.from_spec(input_spec)
         else:
             self.input = Input.from_spec(input_spec)
 
@@ -169,7 +172,7 @@ class Model3(object):
             layer_state, v = layer.step(layer_weights, init_state, v)
             new_state.append(layer_state)
 
-        _, out = self.output.step(weights[-1], None, v)
+        _, out = self.output.step(weights[-1], None, v, dtype=dtype)
         return new_state, out
 
     def step(

@@ -1,6 +1,7 @@
 import logging
 from unittest import TestCase
 
+import jax.numpy as jnp
 import numpy as np
 
 from texmo.layers.dense import Dense
@@ -18,7 +19,7 @@ class DenseTest(TestCase):
             "b": np.array([10, 20]),
         }
 
-        state, out = layer.step(weights, None, input)
+        state, out = layer.step(weights, None, input, dtype=jnp.float32)
         self.assertIsNone(state)
         self.assertTrue(all(out == np.array([15, 30])))
 
@@ -31,9 +32,9 @@ class DenseTest(TestCase):
             "b": np.array([10, 20]),
         }
 
-        out = layer.forward(weights, input)
-        _, out1 = layer.step(weights, None, input[0])
-        out_fs = layer._forward_from_step(weights, input)
+        out = layer.forward(weights, input, dtype=jnp.float32)
+        _, out1 = layer.step(weights, None, input[0], dtype=jnp.float32)
+        out_fs = layer._forward_from_step(weights, input, dtype=jnp.float32)
 
         self.assertTrue((out[0] == out1).all())
         self.assertTrue((out == out_fs).all())
@@ -47,10 +48,10 @@ class DenseTest(TestCase):
             "b": np.array([10, 20]),
         }
 
-        out = layer.forward(weights, input)
-        _, out0 = layer.step(weights, None, input[0])
-        _, out1 = layer.step(weights, None, input[1])
-        out_fs = layer._forward_from_step(weights, input)
+        out = layer.forward(weights, input, dtype=jnp.float32)
+        _, out0 = layer.step(weights, None, input[0], dtype=jnp.float32)
+        _, out1 = layer.step(weights, None, input[1], dtype=jnp.float32)
+        out_fs = layer._forward_from_step(weights, input, dtype=jnp.float32)
 
         self.assertTrue((out == np.stack((out0, out1))).all())
         self.assertTrue((out == out_fs).all())
@@ -64,9 +65,9 @@ class DenseTest(TestCase):
             "b": np.array([10, 20]),
         }
 
-        out = layer.forward(weights, input[0])
-        out_fb = layer.forward_batch(weights, input)
-        out_fb_ff = layer._forward_batch_from_forward(weights, input)
+        out = layer.forward(weights, input[0], dtype=jnp.float32)
+        out_fb = layer.forward_batch(weights, input, dtype=jnp.float32)
+        out_fb_ff = layer._forward_batch_from_forward(weights, input, dtype=jnp.float32)
 
         self.assertTrue((out == out_fb[0]).all())
         self.assertTrue((out == out_fb_ff[0]).all())
@@ -82,12 +83,12 @@ class DenseTest(TestCase):
             "b": np.array([10, 20]),
         }
 
-        out0 = layer.forward(weights, input[0])
-        out1 = layer.forward(weights, input[1])
+        out0 = layer.forward(weights, input[0], dtype=jnp.float32)
+        out1 = layer.forward(weights, input[1], dtype=jnp.float32)
         out = np.stack((out0, out1))
-        out_fb = layer.forward_batch(weights, input)
-        out_fb_ff = layer._forward_batch_from_forward(weights, input)
-        out_fb_fs = layer._forward_batch_from_step(weights, input)
+        out_fb = layer.forward_batch(weights, input, dtype=jnp.float32)
+        out_fb_ff = layer._forward_batch_from_forward(weights, input, dtype=jnp.float32)
+        out_fb_fs = layer._forward_batch_from_step(weights, input, dtype=jnp.float32)
 
         self.assertTrue((out == out_fb).all())
         self.assertTrue((out == out_fb_ff).all())

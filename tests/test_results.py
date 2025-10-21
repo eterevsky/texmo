@@ -4,7 +4,7 @@ from unittest import TestCase, main
 import numpy as np
 
 from texmo.common import INF
-from texmo.configuration2 import Configuration2, Template, conf_neighbors
+from texmo.configuration2 import Configuration2, Template, conf_neighbors, Precision
 from texmo.model3 import build_model
 from texmo.resultdb import ResultDB
 from texmo.results import ResultSet
@@ -30,6 +30,7 @@ class ResultSetTest(TestCase):
             batch=None,
             steps=None,
             max_weights=None,
+            precision=(Precision.FP32,),
         )
         self._results = ResultSet(
             result_db=None, template=self._template, system="test"
@@ -42,7 +43,7 @@ class ResultSetTest(TestCase):
 
     def test_add_run(self):
         conf = Configuration2(
-            build_model("tokens.2.raw.b1|"), lr=0.125, length=32, batch=1, steps=64
+            build_model("tokens.2.raw.b1|"), lr=0.125, length=32, batch=1, steps=64, precision='fp32'
         )
         run = Run(
             system="test", loss=1.234, train_time=12.345, loss_trend=FakeLossTrend()
@@ -74,7 +75,7 @@ class ResultSetTest(TestCase):
 
     def test_add_run_other_system(self):
         conf = Configuration2(
-            build_model("tokens.2.raw.b1|"), lr=0.125, length=32, batch=1, steps=64
+            build_model("tokens.2.raw.b1|"), lr=0.125, length=32, batch=1, steps=64, precision='fp32'
         )
         run = Run(system="test", loss=1, train_time=10, loss_trend=FakeLossTrend())
         self._results.add_run(conf, run)
@@ -90,7 +91,7 @@ class ResultSetTest(TestCase):
         self.assertEqual(conf_results.estimated_time(system="other"), 20)
 
         conf2 = Configuration2(
-            build_model("tokens.2.raw.b1|"), lr=0.25, length=32, batch=1, steps=64
+            build_model("tokens.2.raw.b1|"), lr=0.25, length=32, batch=1, steps=64, precision='fp32'
         )
         conf_results = self._results.get_conf_results(conf2)
         self.assertEqual(len(conf_results.runs), 0)
@@ -100,14 +101,14 @@ class ResultSetTest(TestCase):
         self.assertEqual(conf_results.median_time(system="test"), 10)
 
         conf3 = Configuration2(
-            build_model("tokens.2.raw.b1|"), lr=0.125, length=32, batch=1, steps=128
+            build_model("tokens.2.raw.b1|"), lr=0.125, length=32, batch=1, steps=128, precision='fp32'
         )
         conf_results = self._results.get_conf_results(conf3)
         self.assertEqual(conf_results.estimated_time(system="test"), 20)
         self.assertEqual(conf_results.median_time(system="test"), 20)
 
         conf4 = Configuration2(
-            build_model("tokens.4.raw.b2|"), lr=0.125, length=32, batch=1, steps=64
+            build_model("tokens.4.raw.b2|"), lr=0.125, length=32, batch=1, steps=64, precision='fp32'
         )
         conf_results = self._results.get_conf_results(conf4)
         self.assertEqual(conf_results.estimated_time(system="test"), 10)
@@ -117,8 +118,8 @@ class ResultSetTest(TestCase):
     def test_load_results_db(self):
         db = ResultDB()
         model = build_model("tokens.2.raw.b1|")
-        conf = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=64)
-        conf_mod = Configuration2(model=model, lr=0.125, length=32, batch=2, steps=64)
+        conf = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=64, precision='fp32')
+        conf_mod = Configuration2(model=model, lr=0.125, length=32, batch=2, steps=64, precision='fp32')
         loss_trend = FakeLossTrend()
 
         run1 = Run(
@@ -171,9 +172,9 @@ class ResultSetTest(TestCase):
     def test_median_time(self):
         db = ResultDB()
         model = build_model("tokens.2.raw.b1|")
-        conf1 = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=64)
-        conf2 = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=128)
-        conf3 = Configuration2(model=model, lr=0.250, length=32, batch=1, steps=64)
+        conf1 = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=64, precision=Precision.FP32)
+        conf2 = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=128, precision=Precision.FP32)
+        conf3 = Configuration2(model=model, lr=0.250, length=32, batch=1, steps=64, precision=Precision.FP32)
         loss_trend = FakeLossTrend()
 
         self.assertTrue(conf2 in conf_neighbors(conf1, self._template))
@@ -211,13 +212,14 @@ class ResultSetTest(TestCase):
     def test_init_neighbors(self):
         db = ResultDB()
         model = build_model("tokens.2.raw.b1|")
-        conf1 = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=64)
+        conf1 = Configuration2(model=model, lr=0.125, length=32, batch=1, steps=64, precision='fp32')
         run1 = Run(
             step_loss=None, loss=1.5, loss_trend=FakeLossTrend(), train_time=10, system="sys1"
         )
         db.add_run(conf1, run1)
 
-        template = Template('tokens\.2\.raw\.b1\|', lr=0.125, length=(32, 64), batch=(1, INF), steps=64, max_weights=None)
+        template = Template('tokens\.2\.raw\.b1\|', lr=0.125, length=(32, 64), batch=(1, INF),
+                            steps=64, max_weights=None, precision=(Precision.FP32,))
 
         results = ResultSet(result_db=db, template=template, system="sys1")
         results._check_consistency()
@@ -225,8 +227,8 @@ class ResultSetTest(TestCase):
         confs = set(cr.conf for cr in results.top_by_neighbors_score(max_time=16))
         self.assertEqual(confs, {
             conf1,
-            Configuration2(model=model, lr=0.125, length=32, batch=2, steps=64),
-            Configuration2(model=model, lr=0.125, length=64, batch=1, steps=64),
+            Configuration2(model=model, lr=0.125, length=32, batch=2, steps=64, precision='fp32'),
+            Configuration2(model=model, lr=0.125, length=64, batch=1, steps=64, precision='fp32'),
         })
 
 

@@ -7,6 +7,7 @@ from time import perf_counter
 from typing import Optional
 
 import jax
+import jax.extend
 import jax.numpy as jnp
 import numpy as np
 import optax
@@ -52,7 +53,7 @@ def deserialize_weights(saved_weights, dtype):
 
 
 def release_device_buffers():
-    backend = jax.lib.xla_bridge.get_backend()
+    backend = jax.extend.backend.get_backend()
     for buf in backend.live_buffers():
         buf.delete()
 

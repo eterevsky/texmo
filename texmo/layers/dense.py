@@ -64,7 +64,7 @@ class Dense(Layer):
         return None, out
 
     def step_batch(
-        self, weights: LayerWeights, _state: None, input: jax.Array
+        self, weights: LayerWeights, _state: None, input: jax.Array, dtype
     ) -> tuple[None, jax.Array]:
         batch_size = input.shape[0]
         input = jnp.reshape(input, (batch_size, -1))
@@ -76,7 +76,7 @@ class Dense(Layer):
             out = self.activation(out)
         return None, out
 
-    def forward(self, weights: LayerWeights, input: jax.Array) -> jax.Array:
+    def forward(self, weights: LayerWeights, input: jax.Array, dtype) -> jax.Array:
         sample_len = input.shape[0]
         input = jnp.reshape(input, (sample_len, -1))
         out = jnp.einsum("oi,ni->no", weights["w"], input) + jnp.expand_dims(

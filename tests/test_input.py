@@ -54,16 +54,16 @@ class InputTest(TestCase):
         input = Input.from_spec("tokens.4.cw.bh")
         self.assertEqual(input.weights, 0)
         rng = Rng()
-        self.assertFalse(input.init_weights(rng))
+        self.assertFalse(input.init_weights(rng, dtype=jnp.float32))
 
-        _new_state, out = input.step({}, {}, 2)
+        _new_state, out = input.step({}, {}, 2, dtype=jnp.float32)
         self.assertEqual(list(out), [0, 0, 1, 0])
 
     def test_onehot_forward(self):
         input = Input.from_spec("tokens.4.cw.bh")
 
         out = input.forward_batch(
-            weights={}, input=jnp.array([[2, 3], [1, 0]]), padding_len=1
+            weights={}, input=jnp.array([[2, 3], [1, 0]]), padding_len=1, dtype=jnp.float32
         )
         np.testing.assert_array_equal(
             out,
@@ -77,11 +77,11 @@ class InputTest(TestCase):
         input = Input.from_spec("tokens.4.cw.bh-pos.2")
         self.assertEqual(input.weights, 0)
         rng = Rng()
-        self.assertFalse(input.init_weights(rng))
-        state = input.init_state(rng)
+        self.assertFalse(input.init_weights(rng, dtype=jnp.float32))
+        state = input.init_state(rng, dtype=jnp.float32)
         self.assertEqual(state["position"], 0)
 
-        new_state, out = input.step({}, state, 2)
+        new_state, out = input.step({}, state, 2, dtype=jnp.float32)
         self.assertEqual(list(out), [0, 0, 1, 0, 0, 1])
         self.assertEqual(new_state["position"], 1)
 
@@ -89,7 +89,7 @@ class InputTest(TestCase):
         input = Input.from_spec("tokens.4.cw.bh-pos.2")
 
         out = input.forward_batch(
-            weights={}, input=jnp.array([[2, 3], [1, 0]]), padding_len=1
+            weights={}, input=jnp.array([[2, 3], [1, 0]]), padding_len=1, dtype=jnp.float32
         )
         np.testing.assert_array_equal(
             out,
@@ -110,10 +110,10 @@ class InputTest(TestCase):
     def test_emb_step(self):
         input = Input.from_spec("tokens.4.cw.bh-pos.2-emb.2")
         rng = Rng()
-        weights = input.init_weights(rng)
+        weights = input.init_weights(rng, dtype=jnp.float32)
         self.assertEqual(weights["tokens"].shape, (5, 2))
         self.assertEqual(weights["positions"].shape, (2, 2))
-        state = input.init_state(rng)
+        state = input.init_state(rng, dtype=jnp.float32)
 
         new_state, out = input.step(
             {
@@ -122,6 +122,7 @@ class InputTest(TestCase):
             },
             state,
             2,
+            dtype=jnp.float32
         )
         self.assertEqual(list(out), [3, 2])
         self.assertEqual(new_state["position"], 1)
@@ -135,6 +136,7 @@ class InputTest(TestCase):
             },
             input=jnp.array([[2, 3], [1, 0]]),
             padding_len=1,
+            dtype=jnp.float32
         )
         np.testing.assert_array_equal(
             out,

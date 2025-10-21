@@ -18,17 +18,17 @@ class Model3Test(TestCase):
     def _step_and_forward(self, model: Model3, input: list[int]):
         rng = Rng(seed=0)
         weights = model.init_weights(rng)
-        state, out = model.initial_step(weights)
+        state, out = model.initial_step(weights, dtype=jnp.float32)
         outs = [out]
 
         for token in input[:-1]:
-            state, out = model.step(weights, state, token)
+            state, out = model.step(weights, state, token, dtype=jnp.float32)
             outs.append(out)
 
         step_outs = jnp.stack(outs)
 
         batch = jnp.array(input).reshape(1, -1)
-        batch_outs = model._forward_batch(weights, batch)
+        batch_outs = model._forward_batch(weights, batch, dtype=jnp.float32)
 
         np.testing.assert_array_equal(
             step_outs, batch_outs.reshape(step_outs.shape)

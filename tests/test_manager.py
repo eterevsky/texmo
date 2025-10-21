@@ -1,7 +1,7 @@
 import logging
 from unittest import TestCase
 
-from texmo.configuration2 import Configuration2
+from texmo.configuration2 import Configuration2, Precision
 from texmo.dataset import DataSet
 from texmo.manager import Manager
 from texmo.model3 import build_model
@@ -26,6 +26,7 @@ class ManagerTest(TestCase):
             length=32,
             batch=8,
             steps=128,
+            precision=Precision.FP32
         )
         manager = Manager(conf, system="test", dataset=dataset)
         manager.init()

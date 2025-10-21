@@ -93,13 +93,14 @@ class Layer(object):
     ) -> tuple[LayerState, jnp.ndarray]:
         if self._step_batch_impl is None:
             self._step_batch_impl = jax.vmap(
-                self.step, in_axes=(None, 0, 0), out_axes=0
+                lambda weights, states, inputs: self.step(weights, states, inputs, dtype=dtype),
+                in_axes=(None, 0, 0), out_axes=0
             )
 
-        return self._step_batch_impl(weights, states, inputs, dtype=dtype)
+        return self._step_batch_impl(weights, states, inputs)
 
     def step_batch(
-        self, weights: LayerWeights, states: LayerState, inputs: jnp.ndarray
+        self, weights: LayerWeights, states: LayerState, inputs: jnp.ndarray, dtype
     ) -> tuple[LayerState, jnp.ndarray]:
         """One character step on a batch of inputs.
 
@@ -114,7 +115,7 @@ class Layer(object):
             A pair of state in the same format as input and batch output with
             the shape (batch_size,) + output_shape
         """
-        return self._step_batch_from_step(weights, states, inputs)
+        return self._step_batch_from_step(weights, states, inputs, dtype=dtype)
 
     def _forward_from_step(
         self, weights: LayerWeights, input: jnp.ndarray, dtype
@@ -167,7 +168,7 @@ class Layer(object):
         inputs_swapped = jnp.swapaxes(inputs, 0, 1)
 
         _, out_swapped = jax.lax.scan(
-            lambda state, v: self.step_batch(weights, state, v),
+            lambda state, v: self.step_batch(weights, state, v, dtype=dtype),
             init_state,
             inputs_swapped,
         )

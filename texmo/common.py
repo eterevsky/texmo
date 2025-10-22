@@ -1,6 +1,10 @@
 from collections.abc import Iterable
 import logging
 import math
+from rich.console import Console
+
+
+console = Console()
 
 
 logging.basicConfig(

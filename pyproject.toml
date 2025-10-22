@@ -13,6 +13,7 @@ dependencies = [
     "optax>=0.2.6",
     "regex>=2025.9.18",
     "requests>=2.32.5",
+    "rich",
 ]
 
 [dependency-groups]

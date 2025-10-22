@@ -6,7 +6,7 @@ import requests
 import time
 import numpy as np
 
-from .common import ttoa3
+from .common import ttoa3, console
 from .configuration2 import Configuration2
 from .dataset import DataSet, DataSetWrapper
 from .latency import timer, report
@@ -76,7 +76,7 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
     while True:
         with timer("get(select)") as t:
             r = retry(lambda: s.get(select_url, params={"system": system}))
-        logging.info(f"===== Got configuration in {ttoa3(t.value())}")
+        console.log(f'Got configuration in {ttoa3(t.value())}')
         d = r.json()
         assert d["system"] == system
         conf = Configuration2.from_dict(d["conf"])

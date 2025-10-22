@@ -1,3 +1,4 @@
+from datetime import timedelta
 import json
 import logging
 import math
@@ -14,7 +15,7 @@ import optax
 from jax.errors import JaxRuntimeError
 
 from . import latency
-from .common import INF, ttoa3
+from .common import INF, ttoa3, console
 from .configuration2 import Configuration2, Precision
 from .dataset import DataSet, DataSetWrapper
 from .model3 import Model3, Weights
@@ -218,7 +219,8 @@ class Manager(object):
         #     )
 
     def init(self, quiet=False, training=True):
-        logging.info(str(self.conf))
+        # logging.info(str(self.conf))
+        console.log(self.conf, highlight=False)
 
         if self.train_from == 0:
             self._loss_avg = lambda w, batch: self.model.loss_batch(w, batch, self.dtype)
@@ -261,7 +263,8 @@ class Manager(object):
 
         shards = 4
         while shards <= xs.shape[0]:
-            logging.info(f'Evaluating with {shards} batches')
+            # logging.info(f'Evaluating with {shards} batches')
+            console.log('Evaluating with', shards, 'batches')
             shard_size = xs.shape[0] // shards
 
             loss = 0
@@ -394,7 +397,8 @@ class Manager(object):
         t = '' if time_limit is None else f' {time_limit} s'
         s = '' if steps > 1e10 else f' {steps} steps'
 
-        logging.info(f'Training for{t}{s}')
+        # logging.info(f'Training for{t}{s}')
+        console.log(f'Training for{t}{s}')
         deadline = INF
         soft_deadline = INF
         start_time = None
@@ -506,9 +510,7 @@ class Manager(object):
             steps_log = f'  after {final_conf.steps} steps'
         else:
             steps_log = ''
-        logging.info(
-            f'loss {eval_loss:.4f} b/byte  T = {ttoa3(train_time)}{steps_log}'
-        )
+        console.log(f'loss {eval_loss:.4f} b/byte  T = {ttoa3(train_time)}{steps_log}')
 
         return (self.run, self.weights, final_conf)
 

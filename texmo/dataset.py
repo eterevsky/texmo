@@ -7,7 +7,7 @@ import itertools
 from queue import Queue
 from threading import Thread, Lock
 
-from .common import itoa3
+from .common import itoa3, console
 from .tokens import get_tokenizer
 from .tokens.processing import process
 from .latency import timer
@@ -45,7 +45,7 @@ class DataSet(object):
             else:
                 self.processed_file = None
                 self.processed_data = None
-        
+
         self.data_size = len(self.data)
         self.processed_data_size = len(self.processed_data) if self.processed_data else None
 
@@ -69,7 +69,7 @@ class DataSet(object):
         else:
             data = self.data
             size = self.data_size
-        
+
         start = random.randint(0, size)
         return data, size, start, processing
 
@@ -176,24 +176,24 @@ class DataSetWrapper(object):
         self.results_queues_lock = Lock()
         self.thread = Thread(target=self._thread)
         self.thread.start()
-    
+
     def join(self):
         self.jobs_queue.put(None)
-    
+
     def sample_tokens(
         self, ntokens: int, batch: int, tokenset_name: str
     ) -> np.ndarray:
         with timer("DataSet.sample_tokens"):
             key = (ntokens, batch, tokenset_name)
-            
+
             with self.results_queues_lock:
                 if key not in self.results_queues:
-                    logging.info(f"Initializating data queue for {key}")
+                    console.log('Initializing the data queue for', key)
                     self.results_queues[key] = Queue()
                     self.jobs_queue.put(key)
                     self.jobs_queue.put(key)
                 results_queue = self.results_queues[key]
-            
+
             self.jobs_queue.put(key)
             return results_queue.get()
 

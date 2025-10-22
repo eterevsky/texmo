@@ -44,8 +44,9 @@ def top_confs_report_rich(
 
     for c in confs:
         t = '?' if c.median_time is None else ttoa3(c.median_time)
-        table.add_row(f'{c.median_score:.4f} ({c.num_runs})', t, c.conf.length,
-                      c.conf.batch, c.conf.lr, c.conf.steps, c.conf.precision,
+        table.add_row(f'{c.median_score:.4f} ({c.num_runs})', t, str(c.conf.length),
+                      str(c.conf.batch), f'{c.conf.lr:.4f}',
+                      str(c.conf.steps), str(c.conf.precision),
                       c.conf.model)
 
     return table

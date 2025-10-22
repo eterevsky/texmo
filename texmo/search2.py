@@ -47,7 +47,7 @@ def top_confs_report_rich(
         table.add_row(f'{c.median_score:.4f} ({c.num_runs})', t, str(c.conf.length),
                       str(c.conf.batch), f'{c.conf.lr:.4f}',
                       str(c.conf.steps), str(c.conf.precision),
-                      c.conf.model)
+                      str(c.conf.model))
 
     return table
 

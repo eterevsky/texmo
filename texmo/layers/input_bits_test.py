@@ -34,6 +34,12 @@ def test_bits1_batch():
         jnp.array([[[0], [0], [1], [0], [1]], [[0], [0], [1], [1], [0]]]))
 
 
+def test_bits1_neighbors():
+    layer = InputBits.from_spec('bits.1')
+    neighbors = {str(n) for n in layer.neighbors()}
+    assert neighbors == {'bits.2', 'bits.1+pos'}
+
+
 def test_bits1_pos():
     layer = InputBits.from_spec('bits.1+pos')
 

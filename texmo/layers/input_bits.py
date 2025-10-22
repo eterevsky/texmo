@@ -94,7 +94,7 @@ class InputBits:
         if self.nbits > 1:
             yield InputBits(self.nbits // 2, self.one_hot, self.pos)
         if self.nbits < 8:
-                InputBits(self.nbits * 2, self.one_hot, self.pos)
+            yield InputBits(self.nbits * 2, self.one_hot, self.pos)
         yield InputBits(self.nbits, not self.one_hot, self.pos)
         yield InputBits(self.nbits, self.one_hot, not self.pos)
 

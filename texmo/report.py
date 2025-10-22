@@ -252,7 +252,7 @@ def generate_report_by_weight(
 
 
 def generate_max_report(
-    result_set: ResultSet,
+    result_db: ResultDB,
     template: Template,
     train_time: tuple[float, float],
     system: str,
@@ -268,7 +268,7 @@ def generate_max_report(
         print(f'\nT ≤ {t}', file=out)
         print(
             generate_report_by_weight(
-                result_set, template, system, max_time=t
+                result_db, template, system, max_time=t
             ),
             file=out,
         )
@@ -289,18 +289,10 @@ def main(args: argparse.Namespace):
         train_time.append(train_time[0])
 
     result_db = ResultDB.from_args(args.db)
-    result_set = ResultSet(
-        system=args.system,
-        result_db=result_db,
-        template=template,
-        generate_neighbors=False,
-    )
-
-    # print()
     logging.info(
-        generate_max_report(result_set, template, train_time, args.system)
+        generate_max_report(result_db, template, train_time, args.system)
     )
-    logging.info(generate_report_by_weight(result_set, template, args.system))
+    logging.info(generate_report_by_weight(result_db, template, args.system))
 
 
 def init_args(parser: argparse.ArgumentParser, config):

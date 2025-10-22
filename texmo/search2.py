@@ -30,7 +30,7 @@ def top_confs_report_rich(
 ) -> str:
     sys = "" if system is None else f" ({system})"
     t = "" if max_time is None else f" T ≤ {ttoa3(max_time)}"
-    table = Table(title=f"Top confs W ≤ {itoa3(max_weights)}{t}{sys}", expand=True)
+    table = Table(title=f"Top confs W ≤ {itoa3(max_weights)}{t}{sys}")
 
     table.add_column('Loss')
     table.add_column('Time')
@@ -47,7 +47,7 @@ def top_confs_report_rich(
         table.add_row(f'{c.median_score:.4f} ({c.num_runs})', t, str(c.conf.length),
                       str(c.conf.batch), f'{c.conf.lr:.4f}',
                       str(c.conf.steps), str(c.conf.precision),
-                      str(c.conf.model))
+                      f'{c.conf.model} ({c.confmodel.weights})')
 
     return table
 

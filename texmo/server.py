@@ -7,6 +7,7 @@ from queue import Queue
 from flask import (Flask, make_response, redirect, render_template, request,
                    send_from_directory)
 
+from .common import console
 from .configuration2 import Configuration2, Template, default_from_template
 from .latency import get_report, timer
 from .report import generate_report_by_weight
@@ -105,7 +106,7 @@ class SearchServer(object):
 
     def select(self, args):
         system = args["system"]
-        logging.info(f"Generating conf for system {system}")
+        console.log('Generating conf for system', system)
 
         with self.confs_by_system_lock:
             if system not in self.confs_by_system:
@@ -116,7 +117,7 @@ class SearchServer(object):
         self.requests_queue.put(("select", system))
 
         conf, soft_tl = response_queue.get()
-        logging.info(f"Generated conf for system {system}: {conf}")
+        console.log(f"Generated conf for system {system}: {conf}")
         result = {
             "system": system,
             "conf": conf.to_dict(),
@@ -127,7 +128,7 @@ class SearchServer(object):
     def add_run(self, params):
         run = Run.from_dict(params["run"])
         conf = Configuration2.from_dict(params["conf"])
-        logging.info(f"Adding run: {conf} - {run}")
+        console.log(f"Adding run: {conf} - {run}")
         self.requests_queue.put(("add", (conf, run)))
 
     def report(self, args):

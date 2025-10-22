@@ -164,11 +164,8 @@ class InputBits:
             out = jnp.stack(digits, axis=-1)
         if self.pos:
             pos = jnp.arange(sample_len) % self.positions
-            print(pos.shape)
             pos = jax.nn.one_hot(pos, self.positions)
-            print(pos.shape)
             pos = jnp.broadcast_to(pos, (batch, sample_len, self.positions))
-            print(pos.shape)
             out = jnp.concatenate([out, pos], axis=2)
         padding = jnp.zeros((batch, padding_len, self.output_size), dtype=dtype)
-        return jnp.concatenate([padding, out], axis=1)
+        return jnp.concatenate([padding, out], axis=1, dtype=dtype)

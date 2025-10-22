@@ -30,7 +30,7 @@ def top_confs_report_rich(
 ) -> str:
     sys = "" if system is None else f" ({system})"
     t = "" if max_time is None else f" T ≤ {ttoa3(max_time)}"
-    table = Table(title=f"Top confs W ≤ {itoa3(max_weights)}{t}{sys}")
+    table = Table(title=f"Top confs W ≤ {itoa3(max_weights)}{t}{sys}", expand=True)
 
     table.add_column('Loss')
     table.add_column('Time')

@@ -1,10 +1,11 @@
 import logging
 import random
 from math import log2, sqrt
+from rich.table import Table
 from typing import Optional
 
 from . import latency
-from .common import INF, itoa3, ttoa3
+from .common import INF, itoa3, ttoa3, console
 from .configuration2 import Configuration2, Template, conf_neighbors
 from .resultdb import ResultDB, ConfScore
 from .run import Run
@@ -22,6 +23,32 @@ def top_confs_report(
             f"{c.median_score:.4f} ({c.num_runs})  {t}  {c.conf.aligned_str()}"
         )
     return "\n".join(lines)
+
+
+def top_confs_report_rich(
+    confs: list[ConfScore], max_weights: int, max_time: float | None, system: str | None
+) -> str:
+    sys = "" if system is None else f" ({system})"
+    t = "" if max_time is None else f" T ≤ {ttoa3(max_time)}"
+    table = Table(title=f"Top confs W ≤ {itoa3(max_weights)}{t}{sys}")
+
+    table.add_column('Loss')
+    table.add_column('Time')
+    table.add_column('Length', justify='right')
+    table.add_column('Batch', justify='right')
+    table.add_column('LR')
+    table.add_column('Steps', justify='right')
+    table.add_column('P')
+    table.add_column('Model')
+
+
+    for c in confs:
+        t = '?' if c.median_time is None else ttoa3(c.median_time)
+        table.add_row(f'{c.median_score:.4f} ({c.num_runs})', t, c.conf.length,
+                      c.conf.batch, c.conf.lr, c.conf.steps, c.conf.precision,
+                      c.conf.model)
+
+    return table
 
 
 class Search(object):
@@ -135,9 +162,10 @@ class Search(object):
                     max_time=t, max_weights=max_weights, system=system, limit=10, template=self._template
                 )
             )
-            logging.info(
-                top_confs_report(confs=confs, max_weights=max_weights, max_time=t, system=system)
-            )
+            # logging.info(
+            #     top_confs_report(confs=confs, max_weights=max_weights, max_time=t, system=system)
+            # )
+            console.log(top_confs_report_rich(confs=confs, max_weights=max_weights, max_time=t, system=system))
 
             if not confs:
                 return None

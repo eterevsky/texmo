@@ -27,8 +27,8 @@ class InputBits:
 
     @staticmethod
     def from_spec(spec: str) -> InputBits:
-        if spec == bytes:
-            spec = 'bits.8-oh'
+        if spec == 'bytes':
+            spec = 'bits.8.oh'
 
         parts = spec.split('+')
         if len(parts) > 1:
@@ -83,6 +83,8 @@ class InputBits:
         self.positions = 8 // self.nbits
 
     def __str__(self):
+        if self.nbits == 8 and self.one_hot:
+            return 'bytes'
         return f'bits.{self.nbits}' + ('.oh' if self.one_hot else '') + ('+pos' if self.pos else '')
 
     def is_valid(self):

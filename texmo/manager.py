@@ -429,7 +429,8 @@ class Manager(object):
             step_end = perf_counter()
 
             if math.isnan(loss) or math.isinf(loss):
-                logging.warning(f'Loss is {loss}, stopping training')
+                # logging.warning(f'Loss is {loss}, stopping training')
+                console.log('Stopping training, loss:', loss)
                 # Don't register the training time if it diverged.
                 start_time = None
                 break

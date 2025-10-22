@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 import numpy as np
+from rich import print as pprint
 
 from .input_bits import InputBits
 
@@ -171,3 +172,148 @@ def test_bits2_pos_batch():
                     [1, 0, 0, 0, 0, 1]]]))
 
 
+def test_bits2_oh_neighbors():
+    layer = InputBits.from_spec('bits.2.oh')
+    neighbors = {str(n) for n in layer.neighbors()}
+    assert neighbors == {'bits.2', 'bits.2.oh+pos', 'bits.4.oh'}
+
+
+def test_bits2_oh():
+    layer = InputBits.from_spec('bits.2.oh')
+
+    assert layer.ntokens == 4
+    assert layer.output_size == 4
+    assert layer.tokens_name == 'bits.2'
+    assert str(layer) == 'bits.2.oh'
+    assert layer.is_valid()
+    state = layer.init_state(None, jnp.float32)
+
+    state, encoding = layer.step(None, state, 2, jnp.float32)
+    np.testing.assert_array_equal(
+        encoding, jnp.array([0, 0, 1, 0]))
+
+    state, encoding = layer.step(None, state, 3, jnp.float32)
+    np.testing.assert_array_equal(
+        encoding, jnp.array([0, 0, 0, 1]))
+
+def test_bits2_oh_batch():
+    layer = InputBits.from_spec('bits.2.oh')
+
+    input = jnp.array([[0, 1, 2, 3], [2, 3, 0, 1]])
+
+    output = layer.forward_batch(None, input, 1, dtype=jnp.float32)
+
+    np.testing.assert_array_equal(
+        output,
+        jnp.array([[[0, 0, 0, 0],
+                    [1, 0, 0, 0],
+                    [0, 1, 0, 0],
+                    [0, 0, 1, 0],
+                    [0, 0, 0, 1]],
+                   [[0, 0, 0, 0],
+                    [0, 0, 1, 0],
+                    [0, 0, 0, 1],
+                    [1, 0, 0, 0],
+                    [0, 1, 0, 0]]]))
+
+
+def test_bits2_oh_pos_neighbors():
+    layer = InputBits.from_spec('bits.2.oh+pos')
+    neighbors = {str(n) for n in layer.neighbors()}
+    assert neighbors == {'bits.2.oh', 'bits.2+pos', 'bits.4.oh+pos'}
+
+
+def test_bits2_oh_pos():
+    layer = InputBits.from_spec('bits.2.oh+pos')
+
+    assert layer.ntokens == 4
+    assert layer.output_size == 8
+    assert layer.tokens_name == 'bits.2'
+    assert str(layer) == 'bits.2.oh+pos'
+    assert layer.is_valid()
+    state = layer.init_state(None, jnp.float32)
+
+    state, encoding = layer.step(None, state, 2, jnp.float32)
+    np.testing.assert_array_equal(
+        encoding, jnp.array([0, 0, 1, 0, 1, 0, 0, 0]))
+
+    state, encoding = layer.step(None, state, 3, jnp.float32)
+    np.testing.assert_array_equal(
+        encoding, jnp.array([0, 0, 0, 1, 0, 1, 0, 0]))
+
+def test_bits2_oh_pos_batch():
+    layer = InputBits.from_spec('bits.2.oh+pos')
+
+    input = jnp.array([[0, 1, 2, 3], [2, 3, 0, 1]])
+
+    output = layer.forward_batch(None, input, 1, dtype=jnp.float32)
+
+    np.testing.assert_array_equal(
+        output,
+        jnp.array([[[0, 0, 0, 0, 0, 0, 0, 0],
+                    [1, 0, 0, 0, 1, 0, 0, 0],
+                    [0, 1, 0, 0, 0, 1, 0, 0],
+                    [0, 0, 1, 0, 0, 0, 1, 0],
+                    [0, 0, 0, 1, 0, 0, 0, 1]],
+                   [[0, 0, 0, 0, 0, 0, 0, 0],
+                    [0, 0, 1, 0, 1, 0, 0, 0],
+                    [0, 0, 0, 1, 0, 1, 0, 0],
+                    [1, 0, 0, 0, 0, 0, 1, 0],
+                    [0, 1, 0, 0, 0, 0, 0, 1]]]))
+
+
+def test_bits4_neighbors():
+    layer = InputBits.from_spec('bits.4')
+    neighbors = {str(n) for n in layer.neighbors()}
+    assert neighbors == {'bits.2', 'bits.8', 'bits.4+pos', 'bits.4.oh'}
+
+
+def test_bits4():
+    layer = InputBits.from_spec('bits.4')
+
+    assert layer.ntokens == 16
+    assert layer.output_size == 4
+    assert layer.tokens_name == 'bits.4'
+    assert str(layer) == 'bits.4'
+    assert layer.is_valid()
+    state = layer.init_state(None, jnp.float32)
+
+    state, encoding = layer.step(None, state, 2, jnp.float32)
+    np.testing.assert_array_equal(
+        encoding, jnp.array([0, 1, 0, 0]))
+
+    state, encoding = layer.step(None, state, 3, jnp.float32)
+    np.testing.assert_array_equal(
+        encoding, jnp.array([1, 1, 0, 0]))
+
+
+def test_bits8_neighbors():
+    layer = InputBits.from_spec('bits.8')
+    neighbors = {str(n) for n in layer.neighbors()}
+    assert neighbors == {'bits.4', 'bytes'}
+
+
+def test_bits8():
+    layer = InputBits.from_spec('bits.8')
+
+    assert layer.ntokens == 256
+    assert layer.output_size == 8
+    assert layer.tokens_name == 'bits.8'
+    assert str(layer) == 'bits.8'
+    assert layer.is_valid()
+
+
+def test_bytes_neighbors():
+    layer = InputBits.from_spec('bytes')
+    neighbors = {str(n) for n in layer.neighbors()}
+    assert neighbors == {'bits.8', 'bits.4.oh'}
+
+
+def test_bytes():
+    layer = InputBits.from_spec('bytes')
+
+    assert layer.ntokens == 256
+    assert layer.output_size == 256
+    assert layer.tokens_name == 'bits.8'
+    assert str(layer) == 'bytes'
+    assert layer.is_valid()

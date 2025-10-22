@@ -220,6 +220,7 @@ class Search(object):
                     start = end // 3
 
                     if end > have_confs:
+                        console.log('Getting top confs up to ', end)
                         top_confs = list(
                             self._db.top_confs(
                                 max_time=t, max_weights=max_weights, system=system,
@@ -229,6 +230,8 @@ class Search(object):
 
                     for j in range(start, end):
                         if top_confs[j].num_runs < min_self:
+                            console.log('Getting conf', j, 'because it has',
+                                        top_confs[j].num_runs, 'runs <', min_self)
                             return top_confs[j].conf
 
                     if min_neighbor == 0:
@@ -244,7 +247,10 @@ class Search(object):
 
                         neighbor = min_runs_neighbor[j]
                         if neighbor.num_runs < min_neighbor:
+                            console.log('Getting neighbor of conf', j, 'because it has',
+                                        neighbor.num_runs, 'runs <', min_self)
                             return neighbor.conf
+
 
     def _select_median_neighbor(
         self, t: float, max_weights: int, system: str
@@ -343,6 +349,7 @@ class Search(object):
 
             conf = self._select_top_neighbor(t, max_weights, system)
             if conf is not None:
+                console.log('Selected conf', conf, 'with soft time limit', ttoa3(2*t))
                 return conf, 2*t
 
             console.log('Selecting default configuration')

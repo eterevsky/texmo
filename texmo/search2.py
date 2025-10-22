@@ -52,6 +52,61 @@ def top_confs_report_rich(
     return table
 
 
+def _generate_limits():
+    """Generate a sequence of expected numbers of completed runs per position
+    in the top confs.
+
+    Pairs [x0, x1] mean at least x0 runs for the configuration
+    itself, at least x1 runs for the direct neighbors./
+
+    Sequence:
+
+    =0 [1, 0]
+    =0 [2, 0]
+    =0 [2, 1]
+    =0 [2, 1]  <3 [1, 0]
+    =0 [3, 1]  <3 [1, 0]
+    =0 [3, 2]  <3 [1, 0]
+    =0 [3, 2]  <3 [2, 0]
+    =0 [3, 2]  <3 [2, 1]  <9 [1, 0]
+    =0 [4, 2]  <3 [2, 1]  <9 [1, 0]
+    =0 [4, 3]  <3 [2, 1]  <9 [1, 0]
+    =0 [4, 3]  <3 [3, 1]  <9 [1, 0]
+    =0 [4, 3]  <3 [3, 2]  <9 [1, 0]
+    =0 [4, 3]  <3 [3, 2]  <9 [2, 0]
+    =0 [4, 3]  <3 [3, 2]  <9 [2, 1]
+    =0 [4, 3]  <3 [3, 2]  <9 [2, 1]  <27 [1, 0]
+    """
+    seq = [[1, 0]]
+    while True:
+        yield seq
+
+        incremented = False
+        for row in seq:
+            if row[0] > row[1] + 1:
+                row[1] += 1
+                incremented = True
+                break
+
+        if incremented:
+            continue
+
+        for i in range(len(seq) - 1):
+            if seq[i][0] > seq[i+1][0] + 1:
+                seq[i+1][0] += 1
+                incremented = True
+                break
+
+        if incremented:
+            continue
+
+        if seq[-1][0] > 1:
+            seq.append([1, 0])
+            continue
+
+        seq[0][0] += 1
+
+
 class Search(object):
     """Keep track of the configurations and selects what to try next."""
 
@@ -143,6 +198,54 @@ class Search(object):
                 return neighbor_cs
         return None
 
+    def _select_top_neighbor(
+            self, t: float, max_weights: int, system: str
+    ) -> Optional[Configuration2]:
+        with latency.timer("Search._select_top_neighbor"):
+            top_confs = list(
+                self._db.top_confs(
+                    max_time=t, max_weights=max_weights, system=system, limit=10, template=self._template
+                )
+            )
+            if not top_confs:
+                return None
+            console.log(top_confs_report_rich(confs=top_confs, max_weights=max_weights, max_time=t, system=system))
+
+            have_confs = 10
+            min_runs_neighbor = []
+
+            for seq in _generate_limits():
+                for i, (min_self, min_neighbor) in enumerate(seq):
+                    end = 3**i
+                    start = end // 3
+
+                    if end > have_confs:
+                        top_confs = list(
+                            self._db.top_confs(
+                                max_time=t, max_weights=max_weights, system=system,
+                                limit=end, template=self._template
+                            )
+                        )
+
+                    for j in range(start, end):
+                        if top_confs[j].num_runs < min_self:
+                            return top_confs[j].conf
+
+                    if min_neighbor == 0:
+                        continue
+
+                    for j in range(start, end):
+                        if len(min_runs_neighbor) < j + 1:
+                            top = top_confs[j]
+                            neighbor = self._select_neighbor_fewest_runs(
+                                top.conf_id, system)
+                            min_runs_neighbor.append(None)
+                            min_runs_neighbor[j] = neighbor
+
+                        neighbor = min_runs_neighbor[j]
+                        if neighbor.num_runs < min_neighbor:
+                            return neighbor.conf
+
     def _select_median_neighbor(
         self, t: float, max_weights: int, system: str
     ) -> Optional[Configuration2]:
@@ -173,7 +276,7 @@ class Search(object):
 
             top_cs = confs[0]
             if top_cs.num_runs < 2:
-                logging.info(f"Selecting conf #0")
+                # logging.info(f"Selecting conf #0")
                 console.log('Selecting conf #0:', top_cs.conf)
                 return top_cs.conf
 
@@ -221,7 +324,7 @@ class Search(object):
                     logging.info(f"Selecting neighbor of conf #{i}: {neighbor_cs.conf}")
                     return neighbor_cs.conf
 
-            logging.warning("No configuration selected by median time")
+            console.log("No configuration selected by median time")
             return None
 
     def select_conf(self, system: str) -> tuple[Configuration2, float]:
@@ -238,9 +341,9 @@ class Search(object):
             if conf is not None:
                 return conf, 2*t
 
-            conf = self._select_median_neighbor(t, max_weights, system)
+            conf = self._select_top_neighbor(t, max_weights, system)
             if conf is not None:
                 return conf, 2*t
 
-            logging.info("Selecting default configuration")
+            console.log('Selecting default configuration')
             return self._init_conf, 2*t

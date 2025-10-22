@@ -248,7 +248,7 @@ class Search(object):
                         neighbor = min_runs_neighbor[j]
                         if neighbor.num_runs < min_neighbor:
                             console.log('Getting neighbor of conf', j, 'because it has',
-                                        neighbor.num_runs, 'runs <', min_self)
+                                        neighbor.num_runs, 'runs <', min_neighbor)
                             return neighbor.conf
 
 

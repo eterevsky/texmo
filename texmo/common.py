@@ -15,6 +15,7 @@ console = Console()
 logging.basicConfig(
         level=logging.INFO,
         format="%(message)s",
+        datefmt="[%X]",
         handlers=[RichHandler(console=console, show_level=False)]
     )
 

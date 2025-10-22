@@ -174,24 +174,28 @@ class Search(object):
             top_cs = confs[0]
             if top_cs.num_runs < 2:
                 logging.info(f"Selecting conf #0")
+                console.log('Selecting conf #0:', top_cs.conf)
                 return top_cs.conf
 
             neighbor_cs = self._select_neighbor_fewest_runs(top_cs.conf_id, system)
             if neighbor_cs is not None and (neighbor_cs.num_runs == 0 or neighbor_cs.median_time is None):
-                logging.info(f"Selecting neighbor of conf #0: {neighbor_cs.conf}")
+                console.log('Selecting neighbor of conf #0:', neighbor_cs.conf)
+                # logging.info(f"Selecting neighbor of conf #0: {neighbor_cs.conf}")
                 return neighbor_cs.conf
 
             for i in range(1, 3):
                 cs = confs[i]
                 if cs.num_runs < 2:
-                    logging.info(f"Selecting conf #{i}")
+                    console.log(f'Selecting conf #{i}')
+                    # logging.info(f"Selecting conf #{i}")
                     return cs.conf
 
             for i in range(1, 3):
                 cs = confs[i]
                 neighbor_cs = self._select_neighbor_fewest_runs(cs.conf_id, system)
                 if neighbor_cs is not None and (neighbor_cs.num_runs == 0 or neighbor_cs.median_time is None):
-                    logging.info(f"Selecting neighbor of conf #{i}: {neighbor_cs.conf}")
+                    console.log(f'Selecting neighbor of conf #{i}:', neighbor_cs.conf)
+                    # logging.info(f"Selecting neighbor of conf #{i}: {neighbor_cs.conf}")
                     return neighbor_cs.conf
 
             top_cs = confs[0]

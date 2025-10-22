@@ -118,7 +118,6 @@ class InputBits:
 
     def neighbors(self):
         for neighbor in self._neighbors():
-            print(neighbor, neighbor.is_valid())
             if neighbor.is_valid():
                 yield neighbor
 

@@ -405,17 +405,19 @@ class Manager(object):
 
         while self.step < steps:
             if perf_counter() > deadline:
-                logging.info(
-                    f'Stopped at step {self.step} due to hard time limit {ttoa3(time_limit)}'
-                )
+                console.log('Stopped at step', self.step, 'due to hard time limit', ttoa3(time_limit))
+                # logging.info(
+                #     f'Stopped at step {self.step} due to hard time limit {ttoa3(time_limit)}'
+                # )
                 break
             if (
                 self.step & (self.step - 1) == 0
                 and perf_counter() > soft_deadline
             ):
-                logging.info(
-                    f'Stopped at step {self.step} / {steps} due to soft time limit {ttoa3(soft_tl)}'
-                )
+                console.log('Stopped at step', self.step, '/', steps, 'due to soft time limit', ttoa3(soft_tl))
+                # logging.info(
+                #     f'Stopped at step {self.step} / {steps} due to soft time limit {ttoa3(soft_tl)}'
+                # )
                 break
 
             batch = self._get_batch()

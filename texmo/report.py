@@ -370,5 +370,13 @@ def init_args(parser: argparse.ArgumentParser, config):
         default=config.SYSTEM_NAME,
         help='the name of the system that will be used to identify runs in the DB',
     )
+    parser.add_argument(
+        "-p",
+        "--precision",
+        type=str,
+        default="bf16,fp16,fp32",
+        help="precision"
+    )
+
 
     parser.set_defaults(func=main)

@@ -35,9 +35,7 @@ class Model3(object):
         else:
             raise AssertionError("Model spec can't contain more than one |")
 
-        if input_spec.startswith('bytes'):
-            self.input = InputBytes.from_spec(input_spec)
-        elif input_spec.startswith('bits'):
+        if input_spec.startswith('bits') or input_spec.startswith('bytes'):
             self.input = InputBits.from_spec(input_spec)
         else:
             self.input = Input.from_spec(input_spec)

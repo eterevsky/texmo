@@ -363,8 +363,8 @@ def default_from_template(
 
     for tokens in ('bits.1', 'bits.2', 'bits.4', 'bits.8'):
         for oh in ('', '.oh'):
-            for pos in ('', 'bp', 'pos')
-                input_spec = tokens + pos + emb
+            for pos in ('', 'bp', 'pos'):
+                input_spec = tokens + oh + pos
                 for layers in (
                     '',
                     'dense.1.gelu',

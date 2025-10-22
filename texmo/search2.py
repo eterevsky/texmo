@@ -39,7 +39,7 @@ def top_confs_report_rich(
     table.add_column('LR')
     table.add_column('Steps', justify='right')
     table.add_column('P')
-    table.add_column('Model')
+    table.add_column('Model', overflow='fold')
 
 
     for c in confs:

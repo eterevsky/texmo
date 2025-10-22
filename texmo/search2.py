@@ -188,8 +188,8 @@ class Search(object):
                     selected = i
                     break
             if selected is not None:
-                logging.info(top_confs_report(confs=confs, max_weights=max_weights, max_time=None, system=system))
-                logging.info(f"Selecting conf #{i}")
+                console.log(top_confs_report_rich(confs=confs, max_weights=max_weights, max_time=t, system=system))
+                console.log('Selecting conf', i)
                 return confs[selected].conf
 
     def _select_neighbor_fewest_runs(self, conf_id: int, system: str) -> Optional[ConfScore]:
@@ -251,88 +251,6 @@ class Search(object):
                             console.log('Getting neighbor of conf', j, 'because it has',
                                         neighbor.num_runs, 'runs <', min_neighbor)
                             return neighbor.conf
-
-
-    def _select_median_neighbor(
-        self, t: float, max_weights: int, system: str
-    ) -> Optional[Configuration2]:
-        """
-        Expected number of runs based on position (configuration, neighbors):
-
-        (2, 0)
-        (2, 1)
-        (2, 1) (2, 0) (2, 0)
-        (2, 1) (2, 1) (2, 1)
-        (3, 1) (2, 1) (2, 1)
-        (3, 2) (2, 1) (2, 1)
-        (3, 2) (2, 1) (2, 1) (2, 1) ... (2, 1)
-        """
-        with latency.timer("Search._select_median_neighbor"):
-            confs = list(
-                self._db.top_confs(
-                    max_time=t, max_weights=max_weights, system=system, limit=10, template=self._template
-                )
-            )
-            # logging.info(
-            #     top_confs_report(confs=confs, max_weights=max_weights, max_time=t, system=system)
-            # )
-            console.log(top_confs_report_rich(confs=confs, max_weights=max_weights, max_time=t, system=system))
-
-            if not confs:
-                return None
-
-            top_cs = confs[0]
-            if top_cs.num_runs < 2:
-                # logging.info(f"Selecting conf #0")
-                console.log('Selecting conf #0:', top_cs.conf)
-                return top_cs.conf
-
-            neighbor_cs = self._select_neighbor_fewest_runs(top_cs.conf_id, system)
-            if neighbor_cs is not None and (neighbor_cs.num_runs == 0 or neighbor_cs.median_time is None):
-                console.log('Selecting neighbor of conf #0:', neighbor_cs.conf)
-                # logging.info(f"Selecting neighbor of conf #0: {neighbor_cs.conf}")
-                return neighbor_cs.conf
-
-            for i in range(1, 3):
-                cs = confs[i]
-                if cs.num_runs < 2:
-                    console.log(f'Selecting conf #{i}')
-                    # logging.info(f"Selecting conf #{i}")
-                    return cs.conf
-
-            for i in range(1, 3):
-                cs = confs[i]
-                neighbor_cs = self._select_neighbor_fewest_runs(cs.conf_id, system)
-                if neighbor_cs is not None and (neighbor_cs.num_runs == 0 or neighbor_cs.median_time is None):
-                    console.log(f'Selecting neighbor of conf #{i}:', neighbor_cs.conf)
-                    # logging.info(f"Selecting neighbor of conf #{i}: {neighbor_cs.conf}")
-                    return neighbor_cs.conf
-
-            top_cs = confs[0]
-            if top_cs.num_runs < 3:
-                logging.info(f"Selecting conf #0: {top_cs.conf}")
-                return top_cs.conf
-
-            neighbor_cs = self._select_neighbor_fewest_runs(top_cs.conf_id, system)
-            if neighbor_cs is not None and neighbor_cs.num_runs < 2:
-                logging.info(f"Selecting neighbor of conf #0: {neighbor_cs.conf}")
-                return neighbor_cs.conf
-
-            for i in range(3, 9):
-                cs = confs[i]
-                if cs.num_runs < 2:
-                    logging.info(f"Selecting conf #{i}")
-                    return cs.conf
-
-            for i in range(3, 9):
-                cs = confs[i]
-                neighbor_cs = self._select_neighbor_fewest_runs(cs.conf_id, system)
-                if neighbor_cs is not None and (neighbor_cs.num_runs == 0 or neighbor_cs.median_time is None):
-                    logging.info(f"Selecting neighbor of conf #{i}: {neighbor_cs.conf}")
-                    return neighbor_cs.conf
-
-            console.log("No configuration selected by median time")
-            return None
 
     def select_conf(self, system: str) -> tuple[Configuration2, float]:
         """Select a configuration to run.

@@ -2,15 +2,21 @@ from collections.abc import Iterable
 import logging
 import math
 from rich.console import Console
+from rich.logging import RichHandler
 
 
 console = Console()
 
 
+# logging.basicConfig(
+#         format='%(levelname)s [%(asctime)s.%(msecs)03d %(filename)s:%(lineno)d] %(message)s',
+#         level=logging.INFO,
+#         datefmt='%H:%M:%S')
 logging.basicConfig(
-        format='%(levelname)s [%(asctime)s.%(msecs)03d %(filename)s:%(lineno)d] %(message)s',
         level=logging.INFO,
-        datefmt='%H:%M:%S')
+        format="%(message)s",
+        handlers=[RichHandler(console=console, show_level=False)]
+    )
 
 
 INF = float("inf")

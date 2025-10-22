@@ -1,7 +1,8 @@
 import argparse
-import logging
+# import logging
 
 import numpy as np
+from rich.logging import RichHandler
 import jax
 
 import config
@@ -15,6 +16,7 @@ from texmo import (
     server,
     client,
 )
+from texmo.common import console
 from texmo.tokens import small_tokens
 from texmo.predict import time_cli
 
@@ -102,10 +104,12 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        format="%(levelname)s [%(filename)s:%(lineno)d] %(message)s", level=logging.INFO
-    )
-    logging.getLogger().setLevel(logging.INFO)
+    # logging.basicConfig(
+    #     level=logging.INFO,
+    #     format="%(message)s",
+    #     handlers=[RichHandler(console=console, show_level=False)]
+    # )
+
     np.set_printoptions(linewidth=100, edgeitems=6, precision=3)
     args = parse_args()
     args.func(args)

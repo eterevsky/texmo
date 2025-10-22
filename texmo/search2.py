@@ -350,7 +350,7 @@ class Search(object):
 
             conf = self._select_top_neighbor(t, max_weights, system)
             if conf is not None:
-                console.log('Selected conf', conf, 'with soft time limit', ttoa3(2*t))
+                console.log('Selected conf', conf)
                 return conf, 2*t
 
             console.log('Selecting default configuration')

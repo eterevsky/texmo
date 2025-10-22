@@ -5,6 +5,8 @@ from ..layer import LayerState, LayerWeights
 from ..tokens import get_tokenizer
 
 
+_BP = {1: 3, 2: 2, 4: 1}
+
 
 class InputBits:
     """Input layer encoding groups of bits either as one-hot or with one bit per bit.
@@ -12,14 +14,19 @@ class InputBits:
     Possible specs:
 
         bits.1
+        bits.1+bp
         bits.1+pos
         bits.2
         bits.2.oh
+        bits.2+bp
         bits.2+pos
+        bits.2.oh+bp
         bits.2.oh+pos
         bits.4
         bits.4.oh
+        bits.4+bp
         bits.4+pos
+        bits.4.oh+bp
         bits.4.oh+pos
         bits.8
         bits.8-oh (== bytes)
@@ -33,10 +40,10 @@ class InputBits:
         parts = spec.split('+')
         if len(parts) > 1:
             assert len(parts) == 2
-            assert parts[1] == 'pos'
-            pos = True
+            assert parts[1] in ('bp', 'pos')
+            pos = parts[1]
         else:
-            pos = False
+            pos = ''
 
         spec = parts[0]
         parts = spec.split('.')
@@ -54,7 +61,7 @@ class InputBits:
 
         return InputBits(n, oh, pos)
 
-    def __init__(self, nbits: int, one_hot: bool, pos: bool):
+    def __init__(self, nbits: int, one_hot: bool, pos: str):
         self.nbits = nbits
         self.one_hot = one_hot
         self.pos = pos
@@ -63,8 +70,10 @@ class InputBits:
             self.output_size = 2**nbits
         else:
             self.output_size = nbits
-        if pos:
+        if pos == 'pos':
             self.output_size += 8 // nbits
+        elif pos == 'bp':
+            self.output_size += _BP[nbits]
         self.tokens_name = f'bits.{nbits}'
         self.output_shape = (self.output_size,)
         self.weights = 0
@@ -85,7 +94,7 @@ class InputBits:
     def __str__(self):
         if self.nbits == 8 and self.one_hot:
             return 'bytes'
-        return f'bits.{self.nbits}' + ('.oh' if self.one_hot else '') + ('+pos' if self.pos else '')
+        return f'bits.{self.nbits}' + ('.oh' if self.one_hot else '') + (f'+{self.pos}' if self.pos else '')
 
     def is_valid(self):
         return (self.nbits in (1, 2, 4, 8) and
@@ -97,11 +106,19 @@ class InputBits:
             yield InputBits(self.nbits // 2, self.one_hot, self.pos)
         if self.nbits < 8:
             yield InputBits(self.nbits * 2, self.one_hot, self.pos)
+
         yield InputBits(self.nbits, not self.one_hot, self.pos)
-        yield InputBits(self.nbits, self.one_hot, not self.pos)
+
+        if self.pos != '':
+            yield InputBits(self.nbits, self.one_hot, '')
+        if self.pos != 'pos' and self.nbits < 8:
+            yield InputBits(self.nbits, self.one_hot, 'pos')
+        if self.pos != 'bp' and self.nbits < 8:
+            yield InputBits(self.nbits, self.one_hot, 'bp')
 
     def neighbors(self):
         for neighbor in self._neighbors():
+            print(neighbor, neighbor.is_valid())
             if neighbor.is_valid():
                 yield neighbor
 
@@ -133,8 +150,16 @@ class InputBits:
             out = jnp.array(out)
         pos = state['pos']
 
-        if self.pos:
+        if self.pos == 'pos':
             out = jnp.concatenate([out, jax.nn.one_hot(state['pos'], self.positions)], dtype=dtype)
+        elif self.pos == 'bp':
+            bits = []
+            p = state['pos']
+            for i in range(_BP[self.nbits]):
+                bits.append(p % 2)
+                p //= 2
+            print(bits)
+            out = jnp.concatenate([out, jnp.array(bits)], dtype=dtype)
 
         return {'pos': (pos + 1) % self.positions}, out
 
@@ -164,10 +189,25 @@ class InputBits:
                 d = input // 2**i % 2
                 digits.append(d)
             out = jnp.stack(digits, axis=-1)
-        if self.pos:
+        if self.pos == 'pos':
+            print(self.positions)
             pos = jnp.arange(sample_len) % self.positions
             pos = jax.nn.one_hot(pos, self.positions)
             pos = jnp.broadcast_to(pos, (batch, sample_len, self.positions))
             out = jnp.concatenate([out, pos], axis=2)
+        elif self.pos == 'bp':
+            pos = jnp.arange(sample_len)
+            if self.nbits == 1:
+                pos = jnp.stack([pos % 2, pos // 2 % 2, pos // 4 % 2], axis=-1)
+                dim = 3
+            elif self.nbits == 2:
+                pos = jnp.stack([pos % 2, pos // 2 % 2], axis=-1)
+                dim = 2
+            elif self.nbits == 4:
+                pos = jnp.stack([pos % 2], axis=-1)
+                dim = 1
+            pos = jnp.broadcast_to(pos, (batch, sample_len, dim))
+            out = jnp.concatenate([out, pos], axis=2)
+
         padding = jnp.zeros((batch, padding_len, self.output_size), dtype=dtype)
         return jnp.concatenate([padding, out], axis=1, dtype=dtype)

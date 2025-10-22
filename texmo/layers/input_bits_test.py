@@ -38,7 +38,7 @@ def test_bits1_batch():
 def test_bits1_neighbors():
     layer = InputBits.from_spec('bits.1')
     neighbors = {str(n) for n in layer.neighbors()}
-    assert neighbors == {'bits.2', 'bits.1+pos'}
+    assert neighbors == {'bits.2', 'bits.1+pos', 'bits.1+bp'}
 
 
 def test_bits1_pos():
@@ -81,6 +81,45 @@ def test_bits1_pos_batch():
                     [1, 0, 0, 1, 0, 0, 0, 0, 0],
                     [0, 0, 0, 0, 1, 0, 0, 0, 0]]]))
 
+def test_bits1_bp():
+    layer = InputBits.from_spec('bits.1+bp')
+
+    assert layer.ntokens == 2
+    assert layer.output_size == 4
+    assert layer.tokens_name == 'bits.1'
+    assert str(layer) == 'bits.1+bp'
+    assert layer.is_valid()
+    state = layer.init_state(None, jnp.float32)
+
+    state, encoding = layer.step(None, state, 0, jnp.float32)
+    np.testing.assert_array_equal(
+        encoding, jnp.array([0, 0, 0, 0]))
+
+    state, encoding = layer.step(None, state, 1, jnp.float32)
+    np.testing.assert_array_equal(
+        encoding, jnp.array([1, 1, 0, 0]))
+
+
+def test_bits1_bp_batch():
+    layer = InputBits.from_spec('bits.1+bp')
+
+    input = jnp.array([[0, 1, 0, 1], [0, 1, 1, 0]])
+
+    output = layer.forward_batch(None, input, 1, dtype=jnp.float32)
+
+    np.testing.assert_array_equal(
+        output,
+        jnp.array([[[0, 0, 0, 0],
+                    [0, 0, 0, 0],
+                    [1, 1, 0, 0],
+                    [0, 0, 1, 0],
+                    [1, 1, 1, 0]],
+                   [[0, 0, 0, 0],
+                    [0, 0, 0, 0],
+                    [1, 1, 0, 0],
+                    [1, 0, 1, 0],
+                    [0, 1, 1, 0]]]))
+
 
 def test_bits2():
     layer = InputBits.from_spec('bits.2')
@@ -102,7 +141,7 @@ def test_bits2():
 def test_bits2_neighbors():
     layer = InputBits.from_spec('bits.2')
     neighbors = {str(n) for n in layer.neighbors()}
-    assert neighbors == {'bits.1', 'bits.4', 'bits.2+pos', 'bits.2.oh'}
+    assert neighbors == {'bits.1', 'bits.4', 'bits.2+pos', 'bits.2+bp', 'bits.2.oh'}
 
 
 def test_bits2_batch():
@@ -148,7 +187,7 @@ def test_bits2_pos():
 def test_bits2_pos_neighbors():
     layer = InputBits.from_spec('bits.2+pos')
     neighbors = {str(n) for n in layer.neighbors()}
-    assert neighbors == {'bits.2', 'bits.2.oh+pos', 'bits.1+pos', 'bits.4+pos'}
+    assert neighbors == {'bits.2', 'bits.2.oh+pos', 'bits.1+pos', 'bits.4+pos', 'bits.2+bp'}
 
 def test_bits2_pos_batch():
     layer = InputBits.from_spec('bits.2+pos')
@@ -172,10 +211,55 @@ def test_bits2_pos_batch():
                     [1, 0, 0, 0, 0, 1]]]))
 
 
+def test_bits2_bp():
+    layer = InputBits.from_spec('bits.2+bp')
+
+    assert layer.ntokens == 4
+    assert layer.output_size == 4
+    assert layer.tokens_name == 'bits.2'
+    assert str(layer) == 'bits.2+bp'
+    assert layer.is_valid()
+    state = layer.init_state(None, jnp.float32)
+
+    state, encoding = layer.step(None, state, 2, jnp.float32)
+    np.testing.assert_array_equal(
+        encoding, jnp.array([0, 1, 0, 0]))
+
+    state, encoding = layer.step(None, state, 3, jnp.float32)
+    np.testing.assert_array_equal(
+        encoding, jnp.array([1, 1, 1, 0]))
+
+def test_bits2_bp_neighbors():
+    layer = InputBits.from_spec('bits.2+bp')
+    neighbors = {str(n) for n in layer.neighbors()}
+    assert neighbors == {'bits.2', 'bits.2.oh+bp', 'bits.1+bp', 'bits.4+bp', 'bits.2+pos'}
+
+def test_bits2_bp_batch():
+    layer = InputBits.from_spec('bits.2+bp')
+
+    # batch: 2 len: 4
+    input = jnp.array([[0, 1, 2, 3], [2, 3, 0, 1]])
+
+    output = layer.forward_batch(None, input, 1, dtype=jnp.float32)
+
+    np.testing.assert_array_equal(
+        output,
+        jnp.array([[[0, 0, 0, 0],
+                    [0, 0, 0, 0],
+                    [1, 0, 1, 0],
+                    [0, 1, 0, 1],
+                    [1, 1, 1, 1]],
+                   [[0, 0, 0, 0],
+                    [0, 1, 0, 0],
+                    [1, 1, 1, 0],
+                    [0, 0, 0, 1],
+                    [1, 0, 1, 1]]]))
+
+
 def test_bits2_oh_neighbors():
     layer = InputBits.from_spec('bits.2.oh')
     neighbors = {str(n) for n in layer.neighbors()}
-    assert neighbors == {'bits.2', 'bits.2.oh+pos', 'bits.4.oh'}
+    assert neighbors == {'bits.2', 'bits.2.oh+pos', 'bits.2.oh+bp', 'bits.4.oh'}
 
 
 def test_bits2_oh():
@@ -220,7 +304,7 @@ def test_bits2_oh_batch():
 def test_bits2_oh_pos_neighbors():
     layer = InputBits.from_spec('bits.2.oh+pos')
     neighbors = {str(n) for n in layer.neighbors()}
-    assert neighbors == {'bits.2.oh', 'bits.2+pos', 'bits.4.oh+pos'}
+    assert neighbors == {'bits.2.oh', 'bits.2.oh+bp', 'bits.2+pos', 'bits.4.oh+pos'}
 
 
 def test_bits2_oh_pos():
@@ -265,7 +349,7 @@ def test_bits2_oh_pos_batch():
 def test_bits4_neighbors():
     layer = InputBits.from_spec('bits.4')
     neighbors = {str(n) for n in layer.neighbors()}
-    assert neighbors == {'bits.2', 'bits.8', 'bits.4+pos', 'bits.4.oh'}
+    assert neighbors == {'bits.2', 'bits.8', 'bits.4+pos', 'bits.4+bp', 'bits.4.oh'}
 
 
 def test_bits4():

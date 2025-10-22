@@ -227,8 +227,9 @@ class Search(object):
                                 limit=end, template=self._template
                             )
                         )
+                        have_confs = end
 
-                    for j in range(start, end):
+                    for j in range(start, min(end, len(top_confs))):
                         if top_confs[j].num_runs < min_self:
                             console.log('Getting conf', j, 'because it has',
                                         top_confs[j].num_runs, 'runs <', min_self)
@@ -237,7 +238,7 @@ class Search(object):
                     if min_neighbor == 0:
                         continue
 
-                    for j in range(start, end):
+                    for j in range(start, min(end, len(top_confs))):
                         if len(min_runs_neighbor) < j + 1:
                             top = top_confs[j]
                             neighbor = self._select_neighbor_fewest_runs(

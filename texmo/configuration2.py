@@ -74,7 +74,7 @@ class Configuration2(object):
         raise AttributeError('Configuration is immutable')
 
     @staticmethod
-    def from_dict(d: dict) -> Self:
+    def from_dict(d: dict) -> Configuration2:
         model = build_model(d['spec'])
         return Configuration2(
             model=model,
@@ -361,19 +361,22 @@ def default_from_template(
             steps=steps,
         )
 
-    for tokens in ('tokens.2.raw.b1', 'tokens.4.raw.bh', 'tokens.256.raw.b8'):
-        for pos in ('', '-pos.16', '-pos.256'):
-            for emb in ('', '-emb.64', '-emb.256'):
+    for tokens in ('bits.1', 'bits.2', 'bits.4', 'bits.8'):
+        for oh in ('', '.oh'):
+            for pos in ('', 'bp', 'pos')
                 input_spec = tokens + pos + emb
                 for layers in (
                     '',
                     'dense.1.gelu',
-                    'rec.1.gelu',
+                    'rec.1.tanh',
+                    'mgru.1',
                     'gru.1',
                     'lstm.1',
                 ):
                     spec = input_spec + '|' + layers
                     model = build_model(spec)
+                    if not model.is_valid():
+                        continue
                     if template.match_model(model):
                         return Configuration2(
                             model=model,

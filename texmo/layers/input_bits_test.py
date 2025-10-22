@@ -32,3 +32,44 @@ def test_bits1_batch():
     np.testing.assert_array_equal(
         output,
         jnp.array([[[0], [0], [1], [0], [1]], [[0], [0], [1], [1], [0]]]))
+
+
+def test_bits1_pos():
+    layer = InputBits.from_spec('bits.1+pos')
+
+    assert layer.ntokens == 2
+    assert layer.output_size == 9
+    assert layer.tokens_name == 'bits.1'
+    assert str(layer) == 'bits.1+pos'
+    assert layer.is_valid()
+    state = layer.init_state(None, jnp.float32)
+
+    state, encoding = layer.step(None, state, 0, jnp.float32)
+    np.testing.assert_array_equal(
+        encoding, jnp.array([0, 1, 0, 0, 0, 0, 0, 0, 0]))
+
+    state, encoding = layer.step(None, state, 1, jnp.float32)
+    np.testing.assert_array_equal(
+        encoding, jnp.array([1, 0, 1, 0, 0, 0, 0, 0, 0]))
+
+
+def test_bits1_pos_batch():
+    layer = InputBits.from_spec('bits.1+pos')
+
+    # batch: 2 len: 4
+    input = jnp.array([[0, 1, 0, 1], [0, 1, 1, 0]])
+
+    output = layer.forward_batch(None, input, 1, dtype=jnp.float32)
+
+    np.testing.assert_array_equal(
+        output,
+        jnp.array([[[0, 0, 0, 0, 0, 0, 0, 0, 0],
+                    [0, 1, 0, 0, 0, 0, 0, 0, 0],
+                    [1, 0, 1, 0, 0, 0, 0, 0, 0],
+                    [0, 0, 0, 1, 0, 0, 0, 0, 0],
+                    [1, 0, 0, 0, 1, 0, 0, 0, 0]],
+                   [[0, 0, 0, 0, 0, 0, 0, 0, 0],
+                    [0, 1, 0, 0, 0, 0, 0, 0, 0],
+                    [1, 0, 1, 0, 0, 0, 0, 0, 0],
+                    [1, 0, 0, 1, 0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 1, 0, 0, 0, 0]]]))

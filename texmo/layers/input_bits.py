@@ -157,7 +157,6 @@ class InputBits:
             for i in range(_BP[self.nbits]):
                 bits.append(p % 2)
                 p //= 2
-            print(bits)
             out = jnp.concatenate([out, jnp.array(bits)], dtype=dtype)
 
         return {'pos': (pos + 1) % self.positions}, out
@@ -189,7 +188,6 @@ class InputBits:
                 digits.append(d)
             out = jnp.stack(digits, axis=-1)
         if self.pos == 'pos':
-            print(self.positions)
             pos = jnp.arange(sample_len) % self.positions
             pos = jax.nn.one_hot(pos, self.positions)
             pos = jnp.broadcast_to(pos, (batch, sample_len, self.positions))

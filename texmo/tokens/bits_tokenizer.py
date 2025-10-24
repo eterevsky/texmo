@@ -27,7 +27,7 @@ class BitsTokenizer1:
         return self.tokenize(chunk)
 
     def untokenize(self, tokens: list[int]) -> bytes:
-        return bytes(np.packbits(tokens), bitorder='little')
+        return bytes(np.packbits(tokens, bitorder='little'))
 
 
 class BitsTokenizer2:

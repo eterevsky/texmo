@@ -275,16 +275,16 @@ class Manager(object):
                 end = (i + 1) * shard_size
                 shard = xs[start:end]
                 shard_len = lengths[start:end]
-                try:
-                    loss += self.model.loss_batch_masked(
-                        weights32, shard, shard_len, dtype=jnp.float32
-                    ).item()
-                except (JaxRuntimeError, ValueError, RuntimeError):
-                    self.weights = jax.device_get(self.weights)
-                    weights32 = jax.device_get(weights32)
-                    release_device_buffers()
-                    evaluation_failed = True
-                    break
+                # try:
+                loss += self.model.loss_batch_masked(
+                    weights32, shard, shard_len, dtype=jnp.float32
+                ).item()
+                # except (JaxRuntimeError, ValueError, RuntimeError):
+                #     self.weights = jax.device_get(self.weights)
+                #     weights32 = jax.device_get(weights32)
+                #     release_device_buffers()
+                #     evaluation_failed = True
+                #     break
 
             if not evaluation_failed:
                 return loss / (self.test_sample_len * self.test_batch)

@@ -1,4 +1,5 @@
 import numpy as np
+from rich import print as pprint
 
 
 class BitsTokenSet:
@@ -41,7 +42,7 @@ class BitsTokenizer2:
         chunk1 = chunk % 16 >> 2
         chunk2 = chunk % 64 >> 4
         chunk3 = chunk >> 6
-
+    
         return np.vstack((chunk0, chunk1, chunk2, chunk3)).reshape((-1,), order='F')
 
     def tokenize_processed(self, chunk: bytes) -> np.ndarray:
@@ -53,8 +54,10 @@ class BitsTokenizer2:
         chunk1 = tokens[1::4]
         chunk2 = tokens[2::4]
         chunk3 = tokens[3::4]
+
         chunk = chunk0 + (chunk1 << 2) + (chunk2 << 4) + (chunk3 << 6)
-        return bytes(chunk)
+
+        return bytes(chunk.astype(np.uint8))
 
 
 class BitsTokenizer4:
@@ -77,7 +80,7 @@ class BitsTokenizer4:
         chunk0 = tokens[0::2]
         chunk1 = tokens[1::2]
         chunk = chunk0 + (chunk1 << 4)
-        return bytes(chunk)
+        return bytes(chunk.astype(np.uint8))
 
 
 class BytesTokenizer:

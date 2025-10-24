@@ -11,6 +11,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+from rich import print as pprint
 from jax.errors import JaxRuntimeError
 
 from . import latency

@@ -4,6 +4,7 @@ from typing import Any
 import numpy as np
 import random
 import itertools
+from rich import print as pprint
 from queue import Queue
 from threading import Thread, Lock
 
@@ -121,7 +122,7 @@ class DataSet(object):
                 continue
             samples.append(sample[:ntokens])
 
-        return np.array(samples, dtype=np.int32)
+        return np.array(samples)
 
     def sample_bytes(
         self, nbytes: int, batch: int, tokenset_name: str
@@ -146,11 +147,15 @@ class DataSet(object):
         samples = []
         while len(samples) < batch:
             start = random.randint(0, self.data_size - nbytes)
-            while 128 <= self.data[start] < 192:
+            while start < self.data_size and 128 <= self.data[start] < 192:
                 start += 1
-            end = start + nbytes
+            end = min(start + nbytes, self.data_size)
             while end < self.data_size and 128 <= self.data[end] < 192:
                 end += 1
+
+            if end - start < nbytes:
+                continue
+
             chunk = self.data[start : end]
             if processing:
                 chunk = process(chunk)
@@ -159,12 +164,19 @@ class DataSet(object):
             samples.append(sample)
 
         lengths = list(map(len, samples))
-        max_len = max(lengths)
-        for sample in samples:
-            l = len(sample)
-            sample.extend(itertools.repeat(0, max_len - l))
 
-        samples = np.array(samples, dtype=np.int32)
+        max_len = max(lengths)
+
+        for (i, sample) in enumerate(samples):
+            l = len(sample)
+            if max_len > l:
+                if type(sample) is list:
+                    sample.extend(itertools.repeat(0, max_len - l))
+                else:
+                    samples[i] = np.pad(sample, (0, max_len - l))
+
+        if type(samples) is list:
+            samples = np.array(samples, dtype=np.int32)
         lengths = np.array(lengths)
         return samples, lengths
 

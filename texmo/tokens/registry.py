@@ -5,7 +5,7 @@ import os
 
 from .tokenset import TokenSet, Token
 from .tokenizer import Tokenizer
-from .bits_tokenizer import BitsTokenizer
+from .bits_tokenizer import BitsTokenizer1, BitsTokenizer2, BitsTokenizer4, BytesTokenizer
 
 
 def _build_literal_bytes() -> TokenSet:
@@ -21,42 +21,20 @@ def _build_literal_bytes() -> TokenSet:
     return token_set
 
 
-class BytesTokenSet:
-    name = 'bytes'
-    processing = 'raw'
-    avg_proc_bytes_per_token = 1
-    avg_bytes_per_token = 1
-
-
-class LiteralBytesTokenizer:
-    tokenset = BytesTokenSet()
-
-    def tokenize(self, chunk: bytes) -> list[int]:
-        return list(chunk)
-
-    def tokenize_processed(self, chunk: bytes) -> list[int]:
-        return self.tokenize(chunk)
-
-    def untokenize(self, tokens: list[int]) -> bytes:
-        return bytes(tokens)
-
 
 _TOKENIZERS = {
-    "bytes": LiteralBytesTokenizer()
+    'bits.1': BitsTokenizer1(),
+    'bits.2': BitsTokenizer2(),
+    'bits.4': BitsTokenizer4(),
+    'bits.8': BytesTokenizer(),
 }
+_TOKENIZERS['bytes'] = _TOKENIZERS['bits.8']
 _TOKENS_DIR = None
 
 
 def get_tokenizer(name: str):
     if name in _TOKENIZERS:
         return _TOKENIZERS[name]
-
-    if name.startswith('bits'):
-        _, nbits = name.split('.')
-        nbits = int(nbits)
-        tokenizer = BitsTokenizer(nbits)
-        _TOKENIZERS[name] = tokenizer
-        return tokenizer
 
     if _TOKENS_DIR is None:
         logging.error(f"Tokens directory not set")

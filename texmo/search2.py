@@ -264,14 +264,14 @@ class Search(object):
 
             conf = self._select_untimed(t, max_weights, system)
             if conf is not None:
-                tl = min(4*t, self._train_time[1])
-                console.log(f'Conf for {system}: {conf}, TL: {tl}')
+                console.log(f'Conf for {system}: {conf}, TL: {ttoa3(t)}')
                 return conf, tl
 
             conf = self._select_top_neighbor(t, max_weights, system)
             if conf is not None:
-                console.log(f'Conf for {system}: {conf}, TL: {ttoa3(t)}')
-                return conf, t
+                tl = min(4*t, self._train_time[1])
+                console.log(f'Conf for {system}: {conf}, TL: {ttoa3(tl)}')
+                return conf, tl
 
             console.log(f'Conf for {system}: {self._init_conf} (default), TL: {ttoa3(tmax)}')
             return self._init_conf, tmax

@@ -191,10 +191,8 @@ class InputBits:
             out = input.reshape([batch, sample_len, 1])
 
         if self.pos:
-            if sample_len > self.pos_encodings.shape[0]:
-                pos = jnp.tile(self.pos_encodings,
-                    ((sample_len + self.pos_encodings.shape[0] - 1) // self.pos_encodings.shape[0], 1))
-
+            pos = jnp.tile(self.pos_encodings,
+                ((sample_len + self.pos_encodings.shape[0] - 1) // self.pos_encodings.shape[0], 1))
             pos = pos[0:sample_len,:]
             pos = jnp.broadcast_to(pos, (batch, sample_len, pos.shape[1]))
             out = jnp.concatenate([out, pos], axis=2)

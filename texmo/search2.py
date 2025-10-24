@@ -264,12 +264,13 @@ class Search(object):
 
             conf = self._select_untimed(t, max_weights, system)
             if conf is not None:
-                return conf, 2*t
+                console.log(f'Conf for {system}: {conf}, TL: {t}')
+                return conf, t
 
             conf = self._select_top_neighbor(t, max_weights, system)
             if conf is not None:
-                console.log('Selected conf', conf)
-                return conf, 2*t
+                console.log(f'Conf for {system}: {conf}, TL: {t}')
+                return conf, t
 
-            console.log('Selecting default configuration')
-            return self._init_conf, 2*t
+            console.log(f'Conf for {system}: {self._init_conf} (default), TL: {tmax}')
+            return self._init_conf, tmax

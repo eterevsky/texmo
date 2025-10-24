@@ -185,7 +185,10 @@ class InputBits:
         """
         batch, sample_len = input.shape
 
-        out = self.encodings[input]
+        if self.nbits > 1:
+            out = self.encodings[input]
+        else:
+            out = input.reshape([batch, sample_len, 1])
 
         if self.pos:
             if sample_len > self.pos_encodings.shape[0]:
@@ -195,5 +198,10 @@ class InputBits:
             pos = jnp.broadcast_to(pos, (batch, sample_len, pos.shape[1]))
             out = jnp.concatenate([out, pos], axis=2)
 
-        padding = jnp.zeros((batch, padding_len, self.output_size), dtype=dtype)
-        return jnp.concatenate([padding, out], axis=1, dtype=dtype)
+        if padding_len > 0:
+            out = jnp.pad(out, ((0, 0), (padding_len, 0), (0, 0)))
+    
+        if out.dtype != dtype:
+            out = out.astype(dtype)
+
+        return out

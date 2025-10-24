@@ -8,6 +8,14 @@ from ..tokens import get_tokenizer
 _BP = {1: 3, 2: 2, 4: 1}
 
 
+def _to_bit_array(n: int, nbits: int) -> list[int]:
+    enc = []
+    for i in range(nbits):
+        enc.append(n % 2)
+        n //= 2
+    return enc
+
+
 class InputBits:
     """Input layer encoding groups of bits either as one-hot or with one bit per bit.
 
@@ -78,19 +86,25 @@ class InputBits:
         self.output_shape = (self.output_size,)
         self.weights = 0
         self.tokenizer = get_tokenizer(self.tokens_name)
+        
         encodings = []
         for i in range(2**nbits):
             if self.one_hot:
                 encodings.append(jax.nn.one_hot(i, 2**nbits))
             else:
-                enc = []
-                for j in range(nbits):
-                    enc.append(i % 2)
-                    i //= 2
-                encodings.append(enc)
+                encodings.append(_to_bit_array(i, nbits))
         self.encodings = jnp.array(encodings)
-        self.positions = 8 // self.nbits
 
+        if pos:
+            self.positions = 8 // self.nbits
+            pos_encodings = []
+            for i in range(self.positions):
+                if self.pos == 'pos':
+                    pos_encodings.append(jax.nn.one_hot(i, self.positions))
+                elif self.pos == 'bp':
+                    pos_encodings.append(_to_bit_array(i, _BP[self.nbits]))
+            self.pos_encodings = jnp.array(pos_encodings)
+       
     def __str__(self):
         if self.nbits == 8 and self.one_hot:
             return 'bytes'
@@ -125,7 +139,10 @@ class InputBits:
         return None
 
     def init_state(self, weights: LayerWeights, dtype) -> LayerState:
-        return {'pos': 0}
+        if self.pos:
+            return {'pos': 0}
+        else:
+            return None
 
     def step(self, _weights: LayerWeights, state: LayerState, input: int, dtype) -> tuple[LayerState, jax.Array]:
         """Consume one token from the input and return new state and output.
@@ -138,28 +155,16 @@ class InputBits:
         Returns:
             (new state, output vector)
         """
-        if self.one_hot:
-            out = jax.nn.one_hot(input, 2**self.nbits)
-        else:
-            i = input
-            out = []
-            for j in range(self.nbits):
-                out.append(i % 2)
-                i //= 2
-            out = jnp.array(out)
-        pos = state['pos']
+        out = self.encodings[input]
+        
+        if self.pos:
+            pos = state['pos']
+            pos_encoding = self.pos_encodings[pos]
+            out  = jnp.concatenate([out, pos_encoding], dtype=dtype)
 
-        if self.pos == 'pos':
-            out = jnp.concatenate([out, jax.nn.one_hot(state['pos'], self.positions)], dtype=dtype)
-        elif self.pos == 'bp':
-            bits = []
-            p = state['pos']
-            for i in range(_BP[self.nbits]):
-                bits.append(p % 2)
-                p //= 2
-            out = jnp.concatenate([out, jnp.array(bits)], dtype=dtype)
-
-        return {'pos': (pos + 1) % self.positions}, out
+            state = {'pos': (pos + 1) % self.positions}
+        
+        return state, out
 
     def forward_batch(
         self, _weights: LayerWeights, input: jax.Array, padding_len: int, dtype
@@ -179,31 +184,15 @@ class InputBits:
             one-hot encoding of the token + optionally position.
         """
         batch, sample_len = input.shape
-        if self.one_hot:
-            out = jax.nn.one_hot(input, 2**self.nbits)
-        else:
-            digits = []
-            for i in range(self.nbits):
-                d = input // 2**i % 2
-                digits.append(d)
-            out = jnp.stack(digits, axis=-1)
-        if self.pos == 'pos':
-            pos = jnp.arange(sample_len) % self.positions
-            pos = jax.nn.one_hot(pos, self.positions)
-            pos = jnp.broadcast_to(pos, (batch, sample_len, self.positions))
-            out = jnp.concatenate([out, pos], axis=2)
-        elif self.pos == 'bp':
-            pos = jnp.arange(sample_len)
-            if self.nbits == 1:
-                pos = jnp.stack([pos % 2, pos // 2 % 2, pos // 4 % 2], axis=-1)
-                dim = 3
-            elif self.nbits == 2:
-                pos = jnp.stack([pos % 2, pos // 2 % 2], axis=-1)
-                dim = 2
-            elif self.nbits == 4:
-                pos = jnp.stack([pos % 2], axis=-1)
-                dim = 1
-            pos = jnp.broadcast_to(pos, (batch, sample_len, dim))
+
+        out = self.encodings[input]
+
+        if self.pos:
+            if sample_len > self.pos_encodings.shape[0]:
+                pos = jnp.tile(self.pos_encodings, (sample_len // self.pos_encodings.shape[0], 1))
+            else:
+                pos = self.pos_encodings[0:sample_len,:]
+            pos = jnp.broadcast_to(pos, (batch, sample_len, pos.shape[1]))
             out = jnp.concatenate([out, pos], axis=2)
 
         padding = jnp.zeros((batch, padding_len, self.output_size), dtype=dtype)

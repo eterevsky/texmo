@@ -8,7 +8,6 @@ from time import perf_counter
 from typing import Optional
 
 import jax
-import jax.extend
 import jax.numpy as jnp
 import numpy as np
 import optax
@@ -54,9 +53,11 @@ def deserialize_weights(saved_weights, dtype):
 
 
 def release_device_buffers():
-    backend = jax.extend.backend.get_backend()
-    for buf in backend.live_buffers():
-        buf.delete()
+    # No-op for now, since we want to preserve some constant arrays in the layers.
+    pass
+    # backend = jax.extend.backend.get_backend()
+    # for buf in backend.live_buffers():
+    #     buf.delete()
 
 
 class TrainingDiverged(Exception):

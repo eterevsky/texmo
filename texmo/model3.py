@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from itertools import chain
 from typing import Iterable
+from rich import print as pprint
 import math
 import optax
 
@@ -48,7 +49,8 @@ class Model3(object):
                 self.layers.append(layer)
                 shape = layer.output_shape
 
-        self.output = Dense(self.input.ntokens, input_shape=shape)
+        output_size = self.input.ntokens if self.input.ntokens > 2 else 1
+        self.output = Dense(output_size, input_shape=shape)
 
     def __str__(self) -> str:
         return str(self.input) + "|" + "-".join(map(str, self.layers))
@@ -171,6 +173,8 @@ class Model3(object):
             new_state.append(layer_state)
 
         _, out = self.output.step(weights[-1], None, v, dtype=dtype)
+        if self.output.output_size == 1:
+            out = jnp.pad(out, (0, 1))
         return new_state, out
 
     def step(
@@ -197,6 +201,8 @@ class Model3(object):
             new_state.append(layer_state)
 
         _, out = self.output.step(weights[-1], None, v, dtype=dtype)
+        if self.output.output_size == 1:
+            out = jnp.pad(out, (0, 1))
         return new_state, out
 
     def step_prob(
@@ -243,6 +249,8 @@ class Model3(object):
             assert v.dtype == dtype
 
         out = self.output.forward_batch(weights[-1], v, dtype=dtype)
+        if self.output.output_size == 1:
+            out = jnp.pad(out, ((0, 0), (0, 0), (0, 1)))
         assert out.shape == batch.shape + (self.input.ntokens,), f"batch_shape={batch.shape}, out_shape={out.shape}"
         assert out.dtype == dtype
         return out

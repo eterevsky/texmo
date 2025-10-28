@@ -5,7 +5,7 @@ from ..layer import LayerState, LayerWeights
 from ..tokens import get_tokenizer
 
 
-_BP = {1: 3, 2: 2, 4: 1}
+_BP = {1: 3, 2: 2, 4: 1, 8: 0}
 
 
 def _to_bit_array(n: int, nbits: int) -> list[int]:
@@ -86,7 +86,7 @@ class InputBits:
         self.output_shape = (self.output_size,)
         self.weights = 0
         self.tokenizer = get_tokenizer(self.tokens_name)
-        
+
         encodings = []
         for i in range(2**nbits):
             if self.one_hot:
@@ -104,7 +104,7 @@ class InputBits:
                 elif self.pos == 'bp':
                     pos_encodings.append(_to_bit_array(i, _BP[self.nbits]))
             self.pos_encodings = jnp.array(pos_encodings)
-       
+
     def __str__(self):
         if self.nbits == 8 and self.one_hot:
             return 'bytes'
@@ -156,14 +156,14 @@ class InputBits:
             (new state, output vector)
         """
         out = self.encodings[input]
-        
+
         if self.pos:
             pos = state['pos']
             pos_encoding = self.pos_encodings[pos]
             out  = jnp.concatenate([out, pos_encoding], dtype=dtype)
 
             state = {'pos': (pos + 1) % self.positions}
-        
+
         return state, out
 
     def forward_batch(
@@ -199,7 +199,7 @@ class InputBits:
 
         if padding_len > 0:
             out = jnp.pad(out, ((0, 0), (padding_len, 0), (0, 0)))
-    
+
         if out.dtype != dtype:
             out = out.astype(dtype)
 

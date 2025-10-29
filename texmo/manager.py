@@ -387,7 +387,7 @@ class Manager(object):
         temp_dir=None,
         quiet=False,
         soft_tl: Optional[float] = None,
-    ) -> tuple[float, Configuration2]:
+    ):
         last_report = 0  # Timestamp of the last printed report
 
         if steps is None and time_limit is None:
@@ -399,7 +399,6 @@ class Manager(object):
         t = '' if time_limit is None else f' {time_limit} s'
         s = '' if steps > 1e10 else f' {steps} steps'
 
-        # logging.info(f'Training for{t}{s}')
         console.log(f'Training for{t}{s}')
         deadline = INF
         soft_deadline = INF
@@ -408,27 +407,16 @@ class Manager(object):
         while self.step < steps:
             if perf_counter() > deadline:
                 console.log('Stopped at step', self.step, 'due to hard time limit', ttoa3(time_limit))
-                # logging.info(
-                #     f'Stopped at step {self.step} due to hard time limit {ttoa3(time_limit)}'
-                # )
                 break
             if (
                 self.step & (self.step - 1) == 0
                 and perf_counter() > soft_deadline
             ):
                 console.log('Stopped at step', self.step, '/', steps, 'due to soft time limit', ttoa3(soft_tl))
-                # logging.info(
-                #     f'Stopped at step {self.step} / {steps} due to soft time limit {ttoa3(soft_tl)}'
-                # )
                 break
 
             batch = self._get_batch()
-
-            # try:
             loss = self.train_step(batch)
-            # except (XlaRuntimeError, ValueError) as e:
-            #     logging.warn("Internal XLA error, probably OOM:\n" + str(e))
-            #     break
 
             step_end = perf_counter()
 

@@ -4,6 +4,7 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
+from rich import print as pprint
 
 from .configuration2 import Configuration2, Precision
 from .dataset import DataSet
@@ -15,23 +16,30 @@ from .tokens import TokenSet, get_tokenizer, set_tokens_dir
 def show_loss_graph(manager: Manager, output_dir: str):
     run = manager.run
 
+    scaled_step_loss = np.array(run.step_loss) / manager.tokenizer.tokenset.avg_bytes_per_token
+
+
     steps = run.steps
     xs = np.array(range(steps // 2, steps * 4 + 1))
-    ys = run.loss_trend.predict(xs)
+    ys = run.loss_trend.predict(xs) / manager.tokenizer.tokenset.avg_bytes_per_token
 
     steps2 = steps * 2
-    loss2 = run.loss_trend.predict([steps2])[0]
+    loss2 = run.loss_trend.predict([steps2])[0] / manager.tokenizer.tokenset.avg_bytes_per_token
     # print(loss2)
     logging.info(f"Expected loss at {steps2} steps: {loss2:.4f}")
 
     plt.xscale("log")
     plt.yscale("log")
-    plt.ylim(top=8)
+    plt.ylim(top=10)
     plt.plot(
         range(1, steps + 1),
-        run.step_loss,
+        scaled_step_loss,
     )
+
     plt.plot(xs, ys)
+
+    plt.plot(steps + 1, run.loss, 'go')
+
     if output_dir is not None:
         name = manager.name().replace('|', '!')
         plt.savefig(os.path.join(output_dir, name + ".png"))

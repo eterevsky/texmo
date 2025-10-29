@@ -2,12 +2,24 @@ import numpy as np
 from scipy.optimize import minimize
 
 from .. import latency
-from ..common import INF
+from ..common import INF, console
 from .predict_common import prediction_score
 
 
 def _pred_log(c1, c2, eps, step):
-    return c1 + c2 * step**eps
+    return c1**2 + (c2**2) * step**eps
+
+
+
+def _pred_score(true_losses: np.ndarray, predicted_losses: np.ndarray):
+    n = len(true_losses)
+    assert len(predicted_losses) == n
+
+    all_losses = np.concatenate((true_losses, predicted_losses))
+    all_losses = np.log2(all_losses)
+
+    return np.average(np.abs(all_losses[:n] - all_losses[n:]))
+
 
 
 class LossTrendBase(object):
@@ -45,6 +57,7 @@ class LossTrend(LossTrendBase):
         }
 
     def fit(self, losses):
+        console.log(f'Fitting loss trend for {len(losses)} losses')
         with latency.timer("LossTrend.fit"):
             losses = np.log2(losses)
 
@@ -68,7 +81,7 @@ class LossTrend(LossTrendBase):
             def _score(x):
                 c1, c2, eps = x
                 prediction = _pred_log(c1, c2, eps, steps)
-                return prediction_score(target_losses, prediction)
+                return _pred_score(target_losses, prediction)
 
             init = np.array([1.0, 1.0, -1.0])
             res = minimize(_score, init)

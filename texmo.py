@@ -9,7 +9,6 @@ import config
 from texmo import (
     sample_cli,
     latency,
-    search_cli,
     train_cli,
     db_cli,
     report,
@@ -51,11 +50,6 @@ def parse_args():
 
     parser_train = subparsers.add_parser("train", help="train a model")
     train_cli.init_args(parser_train, config)
-
-    parser_search = subparsers.add_parser(
-        "search", help="optimize model and metaparameters"
-    )
-    search_cli.init_args(parser_search, config)
 
     parser_benchmark_dataset = subparsers.add_parser(
         "benchmark-dataset", help="benchmark sampling the training data"

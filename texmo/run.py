@@ -19,7 +19,6 @@ class Run(object):
         loss: Optional[float] = None,
         loss_trend: LossTrendBase = None,
         train_time: Optional[float] = None,
-        checkpoint: Optional[str] = None,
     ):
         assert isinstance(system, str)
         self.system: str = system
@@ -38,8 +37,11 @@ class Run(object):
         # Final loss, evaluated on the test set.
         self.loss: float = loss
         self.train_time: Optional[float] = train_time
-
-        self.checkpoint: Optional[str] = checkpoint
+        
+        # step -> weights
+        self.checkpoints = {}
+        # step -> loss
+        self.checkpoint_loss = {}
 
     @staticmethod
     def from_dict(d: dict):
@@ -60,6 +62,12 @@ class Run(object):
 
     def add_step(self, token_loss: float):
         self.step_loss.append(token_loss)
+
+    def save_checkpoint(self, step: int, weights: dict):
+        self.checkpoints[step] = weights
+
+    def add_checkpoint_loss(self, step: int, loss: float):
+        self.checkpoint_loss[step] = loss
 
     @property
     def steps(self):

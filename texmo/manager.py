@@ -15,7 +15,7 @@ from rich import print as pprint
 from jax.errors import JaxRuntimeError
 
 from . import latency
-from .common import INF, ttoa3, console
+from .common import INF, ttoa3, console, is_power2_int
 from .configuration2 import Configuration2, Precision
 from .dataset import DataSet, DataSetWrapper
 from .model3 import Model3, Weights
@@ -256,17 +256,19 @@ class Manager(object):
             self.optimizer = None
             self.opt_state = None
 
-    def _eval(self, xs, lengths):
+    def _eval(self, xs, lengths, weights = None):
         lengths = np.array(lengths)
+        
+        if weights is None: weights = self.weights
 
         assert self.tokenizer is not None
 
-        weights32 = jax.tree.map(lambda x: x.astype(jnp.float32), self.weights)
+        weights32 = jax.tree.map(lambda x: x.astype(jnp.float32), weights)
 
         shards = 4
         while shards <= xs.shape[0]:
-            # logging.info(f'Evaluating with {shards} batches')
-            console.log('Evaluating with', shards, 'batches')
+            if shards > 4:
+                console.log('Evaluating with', shards, 'shards')
             shard_size = xs.shape[0] // shards
 
             loss = 0
@@ -291,8 +293,8 @@ class Manager(object):
                 return loss / (self.test_sample_len * self.test_batch)
 
             # Convert weights to numpy arrays and then release all the GPU buffers.
-            self.weights = jax.device_get(self.weights)
-            release_device_buffers()
+            # self.weights = jax.device_get(self.weights)
+            # release_device_buffers()
             shards *= 2
 
         # TODO: When we can't run eval with forward, we could just run it
@@ -306,6 +308,18 @@ class Manager(object):
     def eval(self) -> float:
         """Evaluate a model on a random sample from the training data."""
         with latency.timer('Manager.eval'):
+
+            for step, weights in self.run.checkpoints.items():
+                console.log(f'Evaluating checkpoint at step {step}')
+                batch, lengths = self.dataset.sample_bytes(
+                    nbytes=self.test_sample_len,
+                    batch=self.test_batch,
+                    tokenset_name=self.tokenizer.tokenset.name,
+                )
+                loss = self._eval(batch, lengths, weights=weights)
+                self.run.add_checkpoint_loss(step, loss)
+
+
             batch, lengths = self.dataset.sample_bytes(
                 nbytes=self.test_sample_len,
                 batch=self.test_batch,
@@ -364,7 +378,7 @@ class Manager(object):
         loss = float(loss)
         self.run.add_step(loss)
 
-        return loss / (xs.shape[0] * xs.shape[1])
+        return loss
 
     def _get_batch(self) -> jax.Array:
         with latency.timer('Manager._get_batch'):
@@ -422,7 +436,7 @@ class Manager(object):
 
             if math.isnan(loss) or math.isinf(loss):
                 # logging.warning(f'Loss is {loss}, stopping training')
-                console.log('Stopping training, loss:', loss)
+                console.log('Stopping training, loss:', loss / self.tokenizer.tokenset.avg_bytes_per_token)
                 # Don't register the training time if it diverged.
                 start_time = None
                 break
@@ -450,6 +464,11 @@ class Manager(object):
                 deadline = start_time + time_limit if time_limit else INF
                 soft_deadline = start_time + soft_tl if soft_tl else INF
 
+            t = perf_counter() - start_time
+            if t > 0.5 and 2 <= self.step < steps and is_power2_int(self.step):
+                console.log(f'Saving checkpoint for step {self.step}, train loss:', loss / self.tokenizer.tokenset.avg_bytes_per_token)
+                self.run.save_checkpoint(self.step, jax.device_get(self.weights))
+
         total_time = (
             None if start_time is None else perf_counter() - start_time
         )
@@ -466,6 +485,7 @@ class Manager(object):
         log,
         quiet: bool = False,
         soft_tl: Optional[float] = None,
+        weights = None,
     ) -> tuple[Run, Weights, Configuration2]:
         """Train a model and evaluate it.
 
@@ -474,8 +494,11 @@ class Manager(object):
                 spent time is above soft_tl AND the total number of steps
                 is a power of 2
         """
+        if weights is None:
+            weights = self.weights
+
         try:
-            train_time, final_conf = self.train(
+            train_time, final_conf  = self.train(
                 steps,
                 time_limit,
                 temp_steps,

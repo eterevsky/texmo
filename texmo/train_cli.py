@@ -31,6 +31,7 @@ def show_loss_graph(manager: Manager, output_dir: str):
     plt.xscale("log")
     plt.yscale("log")
     plt.ylim(top=10)
+    plt.yticks([1, 1.5, 2, 3, 4, 5, 6, 8], ['1', '1.5', '2', '3', '4', '5', '6', '8'])
     plt.plot(
         range(1, steps + 1),
         scaled_step_loss,
@@ -38,7 +39,9 @@ def show_loss_graph(manager: Manager, output_dir: str):
 
     plt.plot(xs, ys)
 
-    plt.plot(steps + 1, run.loss, 'go')
+    for step, loss in manager.run.checkpoint_loss.items():
+        plt.plot(step + 1, loss, 'ro')
+    plt.plot(steps + 1, run.loss, 'ro')
 
     if output_dir is not None:
         name = manager.name().replace('|', '!')

@@ -263,8 +263,6 @@ class ResultDB(object):
         timestamp: Optional[datetime],
         update_neighbors: bool,
     ):
-        assert run.checkpoint is None
-
         cur = self._db.cursor()
         cur.execute('BEGIN TRANSACTION')
 
@@ -513,7 +511,6 @@ class ResultDB(object):
                    step_loss,
                    loss_model_v,
                    loss_model,
-                   checkpoint
             FROM conf, run
             WHERE conf.id = run.conf_id
             """
@@ -539,7 +536,6 @@ class ResultDB(object):
                     loss=row[11],
                     loss_trend=loss_trend,
                     train_time=row[9],
-                    checkpoint=row[15],
                     system=row[8],
                 )
 

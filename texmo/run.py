@@ -67,7 +67,7 @@ class Run(object):
         )
 
     def __str__(self):
-        loss = "None" if self.loss is None else "{self.loss:.4f}"
+        loss = "None" if self.loss is None else f"{self.loss:.4f}"
         return f"{self.system} {loss} {ttoa3(self.train_time)}"
 
     def add_step(self, token_loss: float):

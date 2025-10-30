@@ -292,9 +292,7 @@ class Manager(object):
             if not evaluation_failed:
                 return loss / (self.test_sample_len * self.test_batch)
 
-            # Convert weights to numpy arrays and then release all the GPU buffers.
-            # self.weights = jax.device_get(self.weights)
-            # release_device_buffers()
+            # TODO: make sure to release the buffers in betwee
             shards *= 2
 
         # TODO: When we can't run eval with forward, we could just run it
@@ -309,16 +307,17 @@ class Manager(object):
         """Evaluate a model on a random sample from the training data."""
         with latency.timer('Manager.eval'):
 
-            for step, weights in self.run.checkpoints.items():
-                console.log(f'Evaluating checkpoint at step {step}')
+            for checkpoint in self.run.checkpoints.values():
+                if checkpoint.step == self.run.steps:
+                    continue
                 batch, lengths = self.dataset.sample_bytes(
                     nbytes=self.test_sample_len,
                     batch=self.test_batch,
                     tokenset_name=self.tokenizer.tokenset.name,
                 )
-                loss = self._eval(batch, lengths, weights=weights)
-                self.run.add_checkpoint_loss(step, loss)
-
+                loss = self._eval(batch, lengths, weights=checkpoint.weights)
+                checkpoint.loss = loss
+                console.log(f'Evaluating checkpoint at step {checkpoint.step}: loss {loss:.4f}')
 
             batch, lengths = self.dataset.sample_bytes(
                 nbytes=self.test_sample_len,
@@ -331,7 +330,6 @@ class Manager(object):
         """Sample from the distribution to continue the given prefix."""
         self._rng = Rng()
         prefix = jnp.array(list(prefix))
-        # prefix = jax.nn.one_hot(prefix, self.ntokens)
         c = prefix[-1]
 
         state = self.model.init_state(self.weights, self.dtype)
@@ -465,9 +463,10 @@ class Manager(object):
                 soft_deadline = start_time + soft_tl if soft_tl else INF
 
             t = perf_counter() - start_time
-            if t > 0.5 and 2 <= self.step < steps and is_power2_int(self.step):
-                console.log(f'Saving checkpoint for step {self.step}, train loss:', loss / self.tokenizer.tokenset.avg_bytes_per_token)
-                self.run.save_checkpoint(self.step, jax.device_get(self.weights))
+            if t > 1 and 2 <= self.step < steps and is_power2_int(self.step):
+                byte_loss = loss / self.tokenizer.tokenset.avg_bytes_per_token
+                console.log(f'Saving checkpoint for step {self.step}, train loss: {byte_loss:.3f}')
+                self.run.add_checkpoint(self.step, t, jax.device_get(self.weights))
 
         total_time = (
             None if start_time is None else perf_counter() - start_time

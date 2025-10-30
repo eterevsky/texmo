@@ -68,6 +68,26 @@ def sanitize_json(d: dict):
     sanitize_json_dict(d)
 
 
+def post_result(session, add_url: str, system, run, conf):
+    result = {
+        "system": system,
+        "run": run.to_dict(),
+        "conf": conf.replace(steps=run.steps).to_dict(),
+    }
+    sanitize_json(result)
+    try:
+        retry(
+            lambda: session.post(
+                add_url,
+                json=result,
+            )
+        )
+    except TypeError as e:
+        logging.error(f"Failed to post result: {e}")
+        logging.error(f"Result: {result}")
+        raise
+
+
 def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
     select_url = f"http://{server_host}/select"
     add_url = f"http://{server_host}/add"
@@ -97,24 +117,11 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
         )
 
         with timer("post(add)"):
-            result = {
-                "system": system,
-                "run": run.to_dict(),
-                "conf": out_conf.to_dict(),
-            }
-            sanitize_json(result)
-            try:
-                retry(
-                    lambda: s.post(
-                        add_url,
-                        json=result,
-                    )
-                )
-            except TypeError as e:
-                logging.error(f"Failed to post result: {e}")
-                logging.error(f"Result: {result}")
-                raise
-        release_device_buffers()
+            post_result(s, add_url, system, run, out_conf)
+
+        for checkpoint in run.checkpoints.values():
+            with timer("post(add)"):
+                post_result(s, add_url, system, checkpoint.make_run(run), out_conf)
 
 
 def main(args: argparse.Namespace):

@@ -10,6 +10,17 @@ from .tokens import TokenSet
 from .predict.loss_trend import LossTrendBase
 
 
+class Checkpoint:
+    def __init__(self, step: int, time: float, weights: dict):
+        self.step = step
+        self.time = time
+        self.weights = weights
+        self.loss = None
+    
+    def make_run(self, full_run: Run) -> Run:
+        return Run(full_run.system, step_loss=full_run.step_loss[:self.step], loss=self.loss, train_time=self.time)
+    
+
 class Run(object):
     def __init__(
         self,
@@ -31,17 +42,15 @@ class Run(object):
         self.step_loss: list[float] = step_loss
 
         # A model for loss per step
-        assert isinstance(loss_trend, LossTrendBase)
-        self.loss_trend: LossTrendBase = loss_trend
+        assert loss_trend is None or isinstance(loss_trend, LossTrendBase)
+        self.loss_trend: Optional[LossTrendBase] = loss_trend
 
         # Final loss, evaluated on the test set.
         self.loss: float = loss
         self.train_time: Optional[float] = train_time
         
-        # step -> weights
-        self.checkpoints = {}
-        # step -> loss
-        self.checkpoint_loss = {}
+        # step -> Checkpoint
+        self.checkpoints: dict[int, Checkpoint] = {}
 
     @staticmethod
     def from_dict(d: dict):
@@ -63,11 +72,8 @@ class Run(object):
     def add_step(self, token_loss: float):
         self.step_loss.append(token_loss)
 
-    def save_checkpoint(self, step: int, weights: dict):
-        self.checkpoints[step] = weights
-
-    def add_checkpoint_loss(self, step: int, loss: float):
-        self.checkpoint_loss[step] = loss
+    def add_checkpoint(self, step: int, t: float, weights: dict):
+        self.checkpoints[step] = Checkpoint(step, t, weights)
 
     @property
     def steps(self):

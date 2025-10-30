@@ -127,6 +127,9 @@ class SearchServer(object):
 
     def add_run(self, params):
         run = Run.from_dict(params["run"])
+        if run.loss is None:
+            console.log('run.loss is None!')
+            return
         conf = Configuration2.from_dict(params["conf"])
         console.log(f"Adding run: {conf} - {run}")
         self.requests_queue.put(("add", (conf, run)))

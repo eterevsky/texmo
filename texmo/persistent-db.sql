@@ -1,4 +1,5 @@
 -- PRAGMA journal_mode=WAL;
+PRAGMA foreign_keys = ON;
 
 CREATE TABLE conf (
     id INTEGER NOT NULL PRIMARY KEY, -- for SQLite
@@ -36,8 +37,8 @@ CREATE TABLE neighbor (
     conf2_id INTEGER NOT NULL,
 
     UNIQUE (conf1_id, conf2_id),
-    FOREIGN KEY (conf1_id) REFERENCES conf(id),
-    FOREIGN KEY (conf2_id) REFERENCES conf(id)
+    FOREIGN KEY (conf1_id) REFERENCES conf(id) ON DELETE CASCADE,
+    FOREIGN KEY (conf2_id) REFERENCES conf(id) ON DELETE CASCADE
 );
 
 CREATE INDEX neighbor_conf1_id ON neighbor(conf1_id);
@@ -79,7 +80,7 @@ CREATE TABLE run (
     -- If non-empty, this contains the filename of the weights checkpoint.
     checkpoint TEXT,
 
-    FOREIGN KEY (conf_id) REFERENCES conf(id),
+    FOREIGN KEY (conf_id) REFERENCES conf(id) ON DELETE CASCADE,
     UNIQUE (conf_id, system, timestamp)
 );
 
@@ -90,7 +91,7 @@ CREATE TABLE conf_time (
     system TEXT NOT NULL,
     median_time REAL NOT NULL,
     UNIQUE (conf_id, system),
-    FOREIGN KEY (conf_id) REFERENCES conf(id)
+    FOREIGN KEY (conf_id) REFERENCES conf(id) ON DELETE CASCADE
 );
 
 CREATE INDEX conf_time_conf_id ON conf_time(conf_id);

@@ -16,10 +16,10 @@ class Checkpoint:
         self.time = time
         self.weights = weights
         self.loss = None
-    
+
     def make_run(self, full_run: Run) -> Run:
         return Run(full_run.system, step_loss=full_run.step_loss[:self.step], loss=self.loss, train_time=self.time)
-    
+
 
 class Run(object):
     def __init__(
@@ -48,7 +48,7 @@ class Run(object):
         # Final loss, evaluated on the test set.
         self.loss: float = loss
         self.train_time: Optional[float] = train_time
-        
+
         # step -> Checkpoint
         self.checkpoints: dict[int, Checkpoint] = {}
 
@@ -67,7 +67,8 @@ class Run(object):
         )
 
     def __str__(self):
-        return f"{self.system} {self.loss:.4f} {ttoa3(self.train_time)}"
+        loss = "None" if self.loss is None else "{self.loss:.4f}"
+        return f"{self.system} {loss} {ttoa3(self.train_time)}"
 
     def add_step(self, token_loss: float):
         self.step_loss.append(token_loss)

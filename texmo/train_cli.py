@@ -39,8 +39,8 @@ def show_loss_graph(manager: Manager, output_dir: str):
 
     plt.plot(xs, ys)
 
-    for step, loss in manager.run.checkpoint_loss.items():
-        plt.plot(step + 1, loss, 'ro')
+    for checkpoint in manager.run.checkpoints.values():
+        plt.plot(checkpoint.step + 1, checkpoint.loss, 'ro')
     plt.plot(steps + 1, run.loss, 'ro')
 
     if output_dir is not None:

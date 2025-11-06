@@ -220,6 +220,18 @@ class Manager(object):
         #         + f" of training data in {ttoa3(timer.elapsed)}"
         #     )
 
+    def _build_optimizer(self) -> optax.GradientTransformationExtraArgs:
+        mask_bias = lambda tree: jax.tree_util.tree_map(
+            lambda g: len(g.shape) > 1, tree
+        )
+
+        eps = 1E-4 if self.conf.precision == Precision.FP16 else 1E-8
+
+        return optax.chain(
+                optax.clip_by_global_norm(1.0),
+                optax.adamw(self.conf.lr, mask=mask_bias, weight_decay=0.01, eps=eps),
+            )
+
     def init(self, quiet=False, training=True):
         # logging.info(str(self.conf))
         console.log(self.conf, highlight=False)
@@ -237,14 +249,7 @@ class Manager(object):
             self._loss_grad = jax.jit(jax.value_and_grad(self._loss_avg))
             if not quiet:
                 logging.info('Creating optimizer')
-            mask_bias = lambda tree: jax.tree_util.tree_map(
-                lambda g: len(g.shape) > 1, tree
-            )
-            eps = 1E-4 if self.conf.precision == Precision.FP16 else 1E-8
-            self.optimizer = optax.chain(
-                optax.clip_by_global_norm(1.0),
-                optax.adamw(self.conf.lr, mask=mask_bias, weight_decay=0.01, eps=eps),
-            )
+            self.optimizer = self._build_optimizer()
 
             self.opt_state = self.optimizer.init(
                 self.weights[self.train_from :]
@@ -258,7 +263,7 @@ class Manager(object):
 
     def _eval(self, xs, lengths, weights = None):
         lengths = np.array(lengths)
-        
+
         if weights is None: weights = self.weights
 
         assert self.tokenizer is not None

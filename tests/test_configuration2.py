@@ -4,6 +4,7 @@ from unittest import TestCase
 
 from texmo.configuration2 import (
     Configuration2,
+    Optimizer,
     Precision,
     Template,
     conf_neighbors,
@@ -26,7 +27,9 @@ class Configuration2Test(TestCase):
             batch=(128, 256),
             steps=(256, 256),
             max_weights=(32, INF),
-            precision=(Precision.FP32,)
+            precision=(Precision.FP32,),
+            optimizer=(Optimizer.ADAM,),
+            decay=None,
         )
 
         conf = Configuration2(
@@ -35,7 +38,9 @@ class Configuration2Test(TestCase):
             length=128,
             batch=256,
             steps=256,
-            precision='fp32'
+            precision='fp32',
+            optimizer='adam',
+            decay=1/32,
         )
         self.assertEqual(
             set(conf_neighbors(conf, template)),
@@ -45,6 +50,8 @@ class Configuration2Test(TestCase):
                 conf.replace(model=build_model("tokens.32.cw.bh|dense.1.relu-suffix.2")),
                 conf.replace(lr=0.125),
                 conf.replace(lr=0.5),
+                conf.replace(decay=1/16),
+                conf.replace(decay=1/64),
                 conf.replace(batch=128),
                 conf.replace(model=build_model("tokens.64.cw.bh|dense.1.relu")),
             },
@@ -58,7 +65,9 @@ class Configuration2Test(TestCase):
             batch=(128, 128),
             steps=(256, 256),
             max_weights=(32, INF),
-            precision=(Precision.FP32,)
+            precision=(Precision.FP32,),
+            optimizer='adam,fromage',
+            decay=1,
         )
 
         conf = Configuration2(
@@ -67,8 +76,11 @@ class Configuration2Test(TestCase):
             length=128,
             batch=128,
             steps=256,
-            precision='fp32'
+            precision='fp32',
+            optimizer=Optimizer.FROMAGE,
+            decay=1,
         )
+
 
         self.assertEqual(
             set(conf_neighbors(conf, template)),
@@ -87,7 +99,9 @@ class Configuration2Test(TestCase):
             batch=(128, 256),
             steps=(256, 256),
             max_weights=(32, INF),
-            precision=(Precision.FP32,)
+            precision=(Precision.FP32,),
+            optimizer=(Optimizer.ADAM,),
+            decay=(0, 1),
         )
 
         conf = Configuration2(
@@ -96,7 +110,9 @@ class Configuration2Test(TestCase):
             length=128,
             batch=256,
             steps=256,
-            precision='fp32'
+            precision='fp32',
+            optimizer=Optimizer.ADAM,
+            decay=1,
         )
         self.assertEqual(
             set(conf_neighbors(conf, template)),
@@ -106,6 +122,7 @@ class Configuration2Test(TestCase):
                 conf.replace(lr=0.5),
                 conf.replace(batch=128),
                 conf.replace(model=build_model("tokens.64.cw.bh|suffix.2")),
+                conf.replace(decay=1/2),
             },
         )
 
@@ -116,6 +133,8 @@ class Configuration2Test(TestCase):
             length=128,
             batch=256,
             steps=128,
-            precision='fp32'
+            precision='fp32',
+            optimizer='fromage',
+            decay=1/32,
         )
         self.assertTrue(conf.is_valid())

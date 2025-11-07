@@ -200,7 +200,7 @@ class Configuration2(object):
     def tokens_name(self) -> str:
         return self.model.input.tokens_name
 
-    def neighbors(self) -> Iterable['Configuration2']:
+    def neighbors(self) -> Iterable[Configuration2]:
         if self.steps > 2:
             yield self.replace(steps=self.steps // 2)
         for precision in self.precision.neighbors:
@@ -381,8 +381,8 @@ class Template(object):
             yield conf.replace(length=length)
         for decay in self.decay.neighbors(conf.decay):
             yield conf.replace(decay=decay)
-        if str(conf.model) == 'bits.1+bp|':
-            console.log('!!!', conf.model)
+        # if str(conf.model) == 'bits.1+bp|':
+        console.log('!!!', conf.model)
         for model in conf.model.neighbors():
             match = self.match_model(model)
             console.log('->', model, match)

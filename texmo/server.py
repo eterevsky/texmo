@@ -8,7 +8,7 @@ from flask import (Flask, make_response, redirect, render_template, request,
                    send_from_directory)
 
 from .common import console
-from .configuration2 import Configuration2, Template, default_from_template
+from .configuration2 import Bounds, Configuration2, Template, default_from_template
 from .latency import get_report, timer
 from .report import generate_report_by_weight
 from .resultdb import ResultDB
@@ -69,6 +69,13 @@ class SearchThread(threading.Thread):
                 assert False, f"Unknown command: {command}"
 
 
+def _render_bounds(b: Bounds):
+    if b.min == b.max:
+        return str(b.min)
+    else:
+        return f'{b.min}-{b.max}'
+
+
 class SearchServer(object):
     def __init__(self, db: ResultDB, template: Template, train_time: tuple[float, float], default_spec: str):
         self.db: ResultDB = db
@@ -98,7 +105,19 @@ class SearchServer(object):
 
     def index(self):
         pattern = self.template.regex.pattern if self.template.regex else ""
-        return render_template("index.html", spec=pattern)
+        precision = {}
+        for p in self.template.precision:
+            precision[p] = True
+
+        return render_template(
+            "index.html",
+            spec=pattern,
+            weights=_render_bounds(self.template.max_weights),
+            length=_render_bounds(self.template.length),
+            batch=_render_bounds(self.template.batch),
+            precision=precision,
+            steps=_render_bounds(self.template.steps),
+        )
 
     def update(self, params):
         self.template.update_regex(params["spec"])

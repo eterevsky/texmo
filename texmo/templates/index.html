@@ -9,7 +9,14 @@
         <main>
         <h2>Template</h1>
         <form action="/update" method="post">
-            Spec regex: <input type="text" name="spec" value="{{ spec }}"><br>
+            Model spec regex: <input type="text" name="spec" value="{{ spec }}"><br>
+            Weights: <input type="text" name="weights" value="{{ weights }}"><br>
+            Sample length: <input type="text" name="length" value="{{ length }}"><br>
+            Batch size: <input type="text" name="batch" value="{{ batch }}"><br>
+            Precision:
+            <label for="bf16">bf16</label> <input type="checkbox" name="bf16" {% if precision.bf16 %} checked {% endif %}>
+            <br>
+            Steps: <input type="text" name="steps" value="{{ steps }}"><br>
             <input type="submit" value="Update">
         </form>
         </main>

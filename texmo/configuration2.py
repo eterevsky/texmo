@@ -7,7 +7,7 @@ import math
 import jax
 import jax.numpy as jnp
 
-from .common import INF, itoa3, itoa3_aligned
+from .common import INF, console, itoa3, itoa3_aligned
 from .model3 import Model3, build_model
 from . import latency
 from .tokens.tokenizer import Tokenizer
@@ -293,14 +293,19 @@ class Template(object):
         decay: Optional[float | tuple[float, float]]
     ):
         self.regex = re.compile(spec_regex) if spec_regex else None
-        self.lr = Bounds(lr, 0)
+        self.max_weights = Bounds(max_weights, 16)
+
         self.length = Bounds(length, 1)
         self.batch = Bounds(batch, 1)
-        self.steps = Bounds(steps, 2)
-        self.max_weights = Bounds(max_weights, 16)
+
         self.precision = precision
+
         self.optimizer = optimizer
+        self.lr = Bounds(lr, 0)
         self.decay = Bounds(decay, 0)
+
+        self.steps = Bounds(steps, 2)
+
         self._conf_neighbors_cache = {}
 
     @staticmethod
@@ -376,7 +381,11 @@ class Template(object):
             yield conf.replace(length=length)
         for decay in self.decay.neighbors(conf.decay):
             yield conf.replace(decay=decay)
+        if str(conf.model) == 'bits.1+bp|':
+            console.log('!!!', conf.model)
         for model in conf.model.neighbors():
+            match = self.match_model(model)
+            console.log('->', model, match)
             if self.match_model(model):
                 yield conf.replace(model=model)
 

@@ -88,7 +88,7 @@ def post_result(session, add_url: str, system, run, conf):
         raise
 
 
-def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
+def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, once: bool):
     select_url = f"http://{server_host}/select"
     add_url = f"http://{server_host}/add"
     s = requests.Session()
@@ -123,6 +123,8 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper):
             with timer("post(add)"):
                 post_result(s, add_url, system, checkpoint.make_run(run), out_conf)
 
+        if once: break
+
 
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
@@ -132,7 +134,7 @@ def main(args: argparse.Namespace):
     try:
         try:
             worker_loop(
-                server_host=args.server, system=args.system, dataset=dataset_wrapper
+                server_host=args.server, system=args.system, dataset=dataset_wrapper, once=args.once
             )
         except KeyboardInterrupt:
             logging.warning("Interrupted\n")
@@ -172,5 +174,9 @@ def init_args(parser: argparse.ArgumentParser, config):
         type=str,
         default=config.SYSTEM_NAME,
         help="the name of the system that will be used to identify runs in the DB",
+    )
+    parser.add_argument(
+        '--once',
+        action='store_true',
     )
     parser.set_defaults(func=main)

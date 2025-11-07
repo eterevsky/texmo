@@ -106,7 +106,6 @@ class SearchServer(object):
 
     def select(self, args):
         system = args["system"]
-        console.log('Generating conf for system', system)
 
         with self.confs_by_system_lock:
             if system not in self.confs_by_system:
@@ -117,7 +116,7 @@ class SearchServer(object):
         self.requests_queue.put(("select", system))
 
         conf, soft_tl = response_queue.get()
-        console.log(f"Generated conf for system {system}: {conf}")
+        console.log(f"Sending conf for system {system}: {conf}")
         result = {
             "system": system,
             "conf": conf.to_dict(),
@@ -246,11 +245,25 @@ def init_args(parser: argparse.ArgumentParser, config):
         help='range of acceptable batch sizes, for example "1-256"',
     )
     parser.add_argument(
+        "--optimizer",
+        type=str,
+        choices=['adam', 'fromage'],
+        metavar="O",
+        default="adam",
+        help="the optimizer algorithm",
+    )
+    parser.add_argument(
         "-l",
         "--lr",
         type=str,
         default=None,
         help="range of acceptable learning rates",
+    )
+    parser.add_argument(
+        '--decay',
+        type=str,
+        default="0.0-1.0",
+        help="decay of the learning rate over the course of training, i.e. (LR at the last step) / (LR at the first step)  (default: 1)",
     )
     parser.add_argument(
         "--length",

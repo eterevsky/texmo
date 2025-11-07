@@ -36,7 +36,7 @@ def top_confs_report_rich(
     table.add_column('Time')
     table.add_column('Length', justify='right')
     table.add_column('Batch', justify='right')
-    table.add_column('LR')
+    table.add_column('Optimizer')
     table.add_column('Steps', justify='right')
     table.add_column('P')
     table.add_column('Model', overflow='fold')
@@ -44,8 +44,11 @@ def top_confs_report_rich(
 
     for c in confs:
         t = '?' if c.median_time is None else ttoa3(c.median_time)
+        decay = '' if c.conf.decay == 1 else f'*{c.conf.decay:.4f}'
+        optimizer = f'{c.conf.optimizer.letter}{c.conf.lr:.4f}{decay}'
+
         table.add_row(f'{c.median_score:.4f} ({c.num_runs})', t, str(c.conf.length),
-                      str(c.conf.batch), f'{c.conf.lr:.4f}',
+                      str(c.conf.batch), optimizer,
                       str(c.conf.steps), str(c.conf.precision),
                       f'{c.conf.model} ({c.conf.model.weights})')
 

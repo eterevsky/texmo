@@ -80,7 +80,9 @@ class Configuration2(object):
         object.__setattr__(self, 'length', length)
         object.__setattr__(self, 'batch', batch)
         object.__setattr__(self, 'steps', steps)
+        assert optimizer is not None
         object.__setattr__(self, 'optimizer', Optimizer(optimizer))
+        assert decay is not None
         object.__setattr__(self, 'decay', decay)
 
     def __setattr__(self, _key, _value):
@@ -136,6 +138,7 @@ class Configuration2(object):
         steps = steps or self.steps
         precision = precision or self.precision
         optimizer = optimizer or self.optimizer
+        decay = decay or self.decay
         return Configuration2(
             model=model, precision=precision, lr=lr, length=length, batch=batch, steps=steps,
             optimizer=optimizer, decay=decay
@@ -310,7 +313,7 @@ class Template(object):
         if not args.optimizer:
             optimizer = [Optimizer.ADAM]
         else:
-            optimizer = list(map(Optimizer, args.precision.split(',')))
+            optimizer = list(map(Optimizer, args.optimizer.split(',')))
 
         return Template(
             spec_regex=args.spec_regex,
@@ -400,6 +403,8 @@ def default_from_template(
     length = template.length.pick_default(8)
     batch = template.batch.pick_default(1)
     steps = template.steps.pick_default(2)
+    decay = template.decay.pick_default(1.0)
+    optimizer = template.optimizer[0]
 
     if spec is not None:
         return Configuration2(
@@ -409,6 +414,8 @@ def default_from_template(
             length=length,
             batch=batch,
             steps=steps,
+            optimizer=optimizer,
+            decay=decay,
         )
 
     for tokens in ('bits.1', 'bits.2', 'bits.4', 'bits.8'):
@@ -436,6 +443,8 @@ def default_from_template(
                             length=length,
                             batch=batch,
                             steps=steps,
+                            optimizer=optimizer,
+                            decay=decay,
                         )
     raise RuntimeError(
         "Can't pick up a default model that would fit the template"

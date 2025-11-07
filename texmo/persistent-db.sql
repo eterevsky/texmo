@@ -32,7 +32,7 @@ CREATE TABLE conf (
     -- Set to true if all the neighbor configurations are added to the DB.
     has_neighbors BOOLEAN NOT NULL DEFAULT FALSE,
 
-    UNIQUE (spec, precision, lr, length, batch, steps)
+    UNIQUE (spec, precision, lr, optimizer, decay, length, batch, steps)
 );
 
 CREATE INDEX conf_spec ON conf(spec);

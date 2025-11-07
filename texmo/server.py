@@ -266,9 +266,8 @@ def init_args(parser: argparse.ArgumentParser, config):
     parser.add_argument(
         "--optimizer",
         type=str,
-        choices=['adam', 'fromage'],
         metavar="O",
-        default="adam",
+        default="adam,fromage",
         help="the optimizer algorithm",
     )
     parser.add_argument(

@@ -16,6 +16,26 @@ def _to_bit_array(n: int, nbits: int) -> list[int]:
     return enc
 
 
+
+_NEIGHBORS = {
+    'bits.1': ('bits.1+bp', 'bits.1+pos', 'bits.2', 'bits.2.oh'),
+    'bits.1+bp': ('bits.1', 'bits.1+pos', 'bits.2+bp', 'bits.2.oh+bp'),
+    'bits.1+pos': ('bits.1', 'bits.1+bp', 'bits.2+pos', 'bits.2.oh+pos'),
+    'bits.2': ('bits.1', 'bits.2+bp', 'bits.2+pos', 'bits.2.oh', 'bits.4'),
+    'bits.2+bp': ('bits.1+bp', 'bits.2', 'bits.2+pos', 'bits.2.oh+bp', 'bits.4+bp'),
+    'bits.2+pos': ('bits.1+pos', 'bits.2', 'bits.2+bp', 'bits.2.oh+pos', 'bits.4+bp'),
+    'bits.2.oh': ('bits.1', 'bits.2', 'bits.2.oh+bp', 'bits.2.oh+pos', 'bits.4.oh'),
+    'bits.2.oh+bp': ('bits.1+bp', 'bits.2+bp', 'bits.2.oh', 'bits.2.oh+pos', 'bits.4.oh+bp'),
+    'bits.2.oh+pos': ('bits.1+pos', 'bits.2+pos', 'bits.2.oh', 'bits.2.oh+bp', 'bits.4.oh+bp'),
+    'bits.4': ('bits.2', 'bits.4+bp', 'bits.4.oh', 'bits.8'),
+    'bits.4+bp': ('bits.2+bp', 'bits.2+pos', 'bits.4', 'bits.4.oh+bp', 'bits.8'),
+    'bits.4.oh': ('bits.2.oh', 'bits.4', 'bits.4.oh+bp', 'bytes'),
+    'bits.4.oh+bp': ('bits.2.oh+bp', 'bits.4+bp', 'bits.4.oh', 'bytes'),
+    'bits.8': ('bits.4', 'bits.4+bp', 'bytes'),
+    'bytes': ('bits.4.oh', 'bits.4.oh+bp', 'bits.8')
+}
+
+
 class InputBits:
     """Input layer encoding groups of bits either as one-hot or with one bit per bit.
 
@@ -25,17 +45,15 @@ class InputBits:
         bits.1+bp
         bits.1+pos
         bits.2
-        bits.2.oh
         bits.2+bp
         bits.2+pos
+        bits.2.oh
         bits.2.oh+bp
         bits.2.oh+pos
         bits.4
-        bits.4.oh
         bits.4+bp
-        bits.4+pos
+        bits.4.oh
         bits.4.oh+bp
-        bits.4.oh+pos
         bits.8
         bits.8-oh (== bytes)
     """
@@ -111,29 +129,21 @@ class InputBits:
         return f'bits.{self.nbits}' + ('.oh' if self.one_hot else '') + (f'+{self.pos}' if self.pos else '')
 
     def is_valid(self):
-        return (self.nbits in (1, 2, 4, 8) and
-                (not self.one_hot or self.nbits > 1) and
-                (not self.pos or self.nbits < 8))
-
-    def _neighbors(self):
-        if self.nbits > 1:
-            yield InputBits(self.nbits // 2, self.one_hot, self.pos)
-        if self.nbits < 8:
-            yield InputBits(self.nbits * 2, self.one_hot, self.pos)
-
-        yield InputBits(self.nbits, not self.one_hot, self.pos)
-
-        if self.pos != '':
-            yield InputBits(self.nbits, self.one_hot, '')
-        if self.pos != 'pos' and self.nbits < 8:
-            yield InputBits(self.nbits, self.one_hot, 'pos')
-        if self.pos != 'bp' and self.nbits < 8:
-            yield InputBits(self.nbits, self.one_hot, 'bp')
+        if self.nbits not in (1, 2, 4, 8):
+            return False
+        if self.pos == 'pos' and self.nbits >= 4:
+            return False
+        if self.pos == 'bp' and self.nbits >= 8:
+            return False
+        if self.one_hot and self.nbits == 1:
+            return False
+        return True
 
     def neighbors(self):
-        for neighbor in self._neighbors():
-            if neighbor.is_valid():
-                yield neighbor
+        for neighbor_spec in _NEIGHBORS[str(self)]:
+            neighbor = InputBits.from_spec(neighbor_spec)
+            assert neighbor.is_valid()
+            yield neighbor
 
     def init_weights(self, _rng, _dtype) -> LayerWeights:
         return None

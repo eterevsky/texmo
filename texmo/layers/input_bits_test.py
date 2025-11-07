@@ -38,7 +38,7 @@ def test_bits1_batch():
 def test_bits1_neighbors():
     layer = InputBits.from_spec('bits.1')
     neighbors = {str(n) for n in layer.neighbors()}
-    assert neighbors == {'bits.2', 'bits.1+pos', 'bits.1+bp'}
+    assert neighbors == {'bits.2', 'bits.1+pos', 'bits.1+bp', 'bits.2.oh'}
 
 
 def test_bits1_pos():
@@ -187,7 +187,7 @@ def test_bits2_pos():
 def test_bits2_pos_neighbors():
     layer = InputBits.from_spec('bits.2+pos')
     neighbors = {str(n) for n in layer.neighbors()}
-    assert neighbors == {'bits.2', 'bits.2.oh+pos', 'bits.1+pos', 'bits.4+pos', 'bits.2+bp'}
+    assert neighbors == {'bits.2', 'bits.2.oh+pos', 'bits.1+pos', 'bits.4+bp', 'bits.2+bp'}
 
 def test_bits2_pos_batch():
     layer = InputBits.from_spec('bits.2+pos')
@@ -259,7 +259,7 @@ def test_bits2_bp_batch():
 def test_bits2_oh_neighbors():
     layer = InputBits.from_spec('bits.2.oh')
     neighbors = {str(n) for n in layer.neighbors()}
-    assert neighbors == {'bits.2', 'bits.2.oh+pos', 'bits.2.oh+bp', 'bits.4.oh'}
+    assert neighbors == {'bits.1', 'bits.2', 'bits.2.oh+pos', 'bits.2.oh+bp', 'bits.4.oh'}
 
 
 def test_bits2_oh():
@@ -304,7 +304,7 @@ def test_bits2_oh_batch():
 def test_bits2_oh_pos_neighbors():
     layer = InputBits.from_spec('bits.2.oh+pos')
     neighbors = {str(n) for n in layer.neighbors()}
-    assert neighbors == {'bits.2.oh', 'bits.2.oh+bp', 'bits.2+pos', 'bits.4.oh+pos'}
+    assert neighbors == {'bits.1+pos', 'bits.2.oh', 'bits.2.oh+bp', 'bits.2+pos', 'bits.4.oh+bp'}
 
 
 def test_bits2_oh_pos():
@@ -349,7 +349,7 @@ def test_bits2_oh_pos_batch():
 def test_bits4_neighbors():
     layer = InputBits.from_spec('bits.4')
     neighbors = {str(n) for n in layer.neighbors()}
-    assert neighbors == {'bits.2', 'bits.8', 'bits.4+pos', 'bits.4+bp', 'bits.4.oh'}
+    assert neighbors == {'bits.2', 'bits.8', 'bits.4+bp', 'bits.4.oh'}
 
 
 def test_bits4():
@@ -374,7 +374,7 @@ def test_bits4():
 def test_bits8_neighbors():
     layer = InputBits.from_spec('bits.8')
     neighbors = {str(n) for n in layer.neighbors()}
-    assert neighbors == {'bits.4', 'bytes'}
+    assert neighbors == {'bits.4', 'bits.4+bp', 'bytes'}
 
 
 def test_bits8():
@@ -390,7 +390,7 @@ def test_bits8():
 def test_bytes_neighbors():
     layer = InputBits.from_spec('bytes')
     neighbors = {str(n) for n in layer.neighbors()}
-    assert neighbors == {'bits.8', 'bits.4.oh'}
+    assert neighbors == {'bits.8', 'bits.4.oh', 'bits.4.oh+bp'}
 
 
 def test_bytes():

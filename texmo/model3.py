@@ -49,8 +49,8 @@ class Model3(object):
                 self.layers.append(layer)
                 shape = layer.output_shape
 
-        output_size = self.input.ntokens if self.input.ntokens > 2 else 1
-        self.output = Dense(output_size, input_shape=shape)
+        self.output_size = self.input.ntokens if self.input.ntokens > 2 else 1
+        self.output = Dense(self.output_size, input_shape=shape)
 
     def __str__(self) -> str:
         return str(self.input) + "|" + "-".join(map(str, self.layers))
@@ -98,9 +98,10 @@ class Model3(object):
 
         # Add layer to the end
         last_layer_size = self.layers[-1].output_size if self.layers else self.input.output_size
-        new_layer_size = min(last_layer_size, self.input.ntokens)
+        rounded_layer_size = 2**int(round(math.log2(last_layer_size)))
+        new_layer_size = min(rounded_layer_size, self.output_size)
         for layer_type in ("dense", "rec"):
-            for activation in ("gelu", "relu", "tanh"):
+            for activation in ("gelu", "tanh"):
                 yield input_spec + "|" + "-".join(
                     chain(
                         layers_str,
@@ -108,7 +109,7 @@ class Model3(object):
                     )
                 )
 
-        for layer_type in ("gru", "mgru", "mingru", "lstm"):
+        for layer_type in ("gru", "mgru", "lstm"):
             yield input_spec + "|" + "-".join(
                 chain(layers_str, (f"{layer_type}.{new_layer_size}",))
             )

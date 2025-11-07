@@ -60,6 +60,7 @@ def train(args: argparse.Namespace):
 
     train_set = DataSet(path=args.data, path_processed=args.data_processed)
     lr = parse_lr(args.lr)
+    decay = parse_lr(args.decay)
 
     if args.model_path is not None:
         manager = Manager.load(
@@ -80,6 +81,8 @@ def train(args: argparse.Namespace):
             length=args.length,
             batch=args.batch,
             steps=args.steps,
+            optimizer=args.optimizer,
+            decay=decay,
         )
         manager = Manager(
             conf,
@@ -191,10 +194,24 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="batch size (default: 32)",
     )
     parser.add_argument(
+        "--optimizer",
+        type=str,
+        choices=['adam', 'fromage'],
+        metavar="O",
+        default="adam",
+        help="the optimizer algorithm",
+    )
+    parser.add_argument(
         "--lr",
         type=str,
-        default="0.0625",
-        help="learning rate, could be written as a float or as 2^-10 (default: 0.0625)",
+        default="0.0078125",
+        help="learning rate, could be written as a float or as 2^-10 (default: 1/128)",
+    )
+    parser.add_argument(
+        '--decay',
+        type=str,
+        default="1.0",
+        help="decay of the learning rate over the course of training, i.e. (LR at the last step) / (LR at the first step)  (default: 1)",
     )
     parser.add_argument(
         "-l",

@@ -221,19 +221,27 @@ class Manager(object):
         #     )
 
     def _build_optimizer(self) -> optax.GradientTransformationExtraArgs:
-        mask_bias = lambda tree: jax.tree_util.tree_map(
-            lambda g: len(g.shape) > 1, tree
-        )
+        if self.conf.decay == 1:
+            lr = self.conf.lr
+        else:
+            lr = lambda count: self.conf.lr * self.conf.decay ** (count / self.conf.steps)
 
-        eps = 1E-4 if self.conf.precision == Precision.FP16 else 1E-8
+        match self.conf.optimizer:
+            case 'adam':
+                mask_bias = lambda tree: jax.tree_util.tree_map(
+                    lambda g: len(g.shape) > 1, tree
+                )
 
-        return optax.chain(
-                optax.clip_by_global_norm(1.0),
-                optax.adamw(self.conf.lr, mask=mask_bias, weight_decay=0.01, eps=eps),
-            )
+                eps = 1E-4 if self.conf.precision == Precision.FP16 else 1E-8
+                optimizer = optax.adamw(lr, mask=mask_bias, weight_decay=0.01, eps=eps)
+            case 'fromage':
+                optimizer = optax.fromage(lr)
+            case 'default':
+                raise RuntimeError(f'Unknown optimizer: {self.conf.optimizer}')
+                
+        return optax.chain(optax.clip_by_global_norm(1.0), optimizer)
 
     def init(self, quiet=False, training=True):
-        # logging.info(str(self.conf))
         console.log(self.conf, highlight=False)
 
         if self.train_from == 0:

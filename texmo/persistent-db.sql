@@ -15,6 +15,12 @@ CREATE TABLE conf (
 
     -- Learning rate.
     lr REAL NOT NULL,
+
+    -- One of 'adam', 'fromage'
+    optimizer TEXT NOT NULL DEFAULT 'adam',
+
+    decay REAL NOT NULL DEFAULT 1,
+
     length INTEGER NOT NULL,
     batch INTEGER NOT NULL,
     steps INTEGER NOT NULL,

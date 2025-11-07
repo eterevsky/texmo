@@ -510,7 +510,7 @@ class ResultDB(object):
                    loss,
                    step_loss,
                    loss_model_v,
-                   loss_model,
+                   loss_model
             FROM conf, run
             WHERE conf.id = run.conf_id
             """
@@ -521,7 +521,7 @@ class ResultDB(object):
                 conf_id = row[0]
 
                 model = build_model(row[1])
-                conf = Configuration2(model, row[2], row[3], row[4], row[5], row[6])
+                conf = Configuration2(model, row[2], row[3], row[4], row[5], row[6], optimizer='adam', decay=1)
 
                 step_loss = _unpack_ndarray(row[12])
                 loss_trend = _build_loss_trend(

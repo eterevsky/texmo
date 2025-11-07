@@ -23,7 +23,9 @@ def create_conf_run(spec="tokens.256.cw.bh-emb.64|gru.64", batch=256, loss=3.123
         length=128,
         batch=batch,
         steps=256,
-        precision='fp32'
+        precision='fp32',
+        optimizer='adam',
+        decay=1,
     )
     loss_trend = build_loss_trend(None, 1, [1, 2, 3])
     run = Run(step_loss=None, loss=loss, loss_trend=loss_trend, train_time=12.345, system="test")

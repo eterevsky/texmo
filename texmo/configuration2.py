@@ -192,6 +192,20 @@ class Configuration2(object):
             and 0 < self.decay <= 1
         )
 
+
+    @property
+    def learning_str(self) -> str:
+        render_lr = lambda lr: str(int(lr)) if lr >= 1 else f'1/{str(int(1/lr))}'
+        lr = render_lr(self.lr)
+        if self.decay == 1:
+            final = ''
+        else:
+            final = self.lr * self.decay
+            final = '→' + render_lr(final)
+
+        return f'{self.optimizer.letter}{lr}{final}'
+
+
     @property
     def tokenizer(self) -> Tokenizer:
         return self.model.input.tokenizer
@@ -267,16 +281,22 @@ class Bounds(object):
 Limits = Optional[float | tuple[float, float]]
 
 
+def _parse_number(arg: str, num_type: type) -> int|float:
+    if arg == 'inf':
+        return INF
+    return num_type(arg)
+
+
 def _parse_interval(arg: str, num_type: type) -> tuple:
     if arg is None:
         return None
     comps = arg.split('-')
     assert len(comps) in (1, 2)
+    comps = tuple(_parse_number(c, num_type) for c in comps)
     if len(comps) == 1:
-        v = num_type(comps[0])
-        return (v, v)
+        return (comps[0], comps[1])
     else:
-        return num_type(comps[0]), num_type(comps[1])
+        return comps
 
 
 class Template(object):
@@ -333,16 +353,21 @@ class Template(object):
         )
 
     def __str__(self):
+        precision = ','.join(map(str, self.precision))
+        optimizer = ','.join(map(str, self.optimizer))
         return (
             f'Template({self.regex}, '
-            + f'precision={self.precision}, '
+            + f'precision=\'{precision}\', '
             + f'lr={self.lr}, length={self.length}, '
             + f'batch={self.batch}, '
             + f'steps={self.steps}, '
             + f'max_weights={self.max_weights}, '
-            + f'optimizer={self.optimizer}, '
+            + f'optimizer=\'{optimizer}\', '
             + f'decay={self.decay})'
         )
+
+    def update_weights(self, weights: Optional[str]):
+        self.max_weights =  Bounds(_parse_interval(weights, int), 2)
 
     def update_regex(self, regex: Optional[str]):
         self.regex = re.compile(regex) if regex else None

@@ -22,6 +22,7 @@ from texmo.predict import time_cli
 
 # Need to do this before any JAX code is executed.
 jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_platforms", config.JAX_PLATFORMS)
 
 def help(parser):
     parser.print_help()

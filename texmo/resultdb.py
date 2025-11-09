@@ -30,15 +30,58 @@ def _unpack_ndarray(blob):
     return np.frombuffer(blob, dtype=np.float32)
 
 
-def _dict_row_factory(cursor, row):
-    fields = [column[0] for column in cursor.description]
-    return {key: value for key, value in zip(fields, row)}
-
-
 def _build_loss_trend(step_loss, model_version, params):
     from .predict import build_loss_trend
 
     return build_loss_trend(step_loss, model_version, params)
+
+
+def _make_template_conditions(template: Template) -> tuple[list[str], dict]:
+    conditions = []
+    params = {}
+    if template.regex is not None:
+        conditions.append('spec REGEXP :regex')
+        params['regex'] = template.regex.pattern
+    if template.lr.min > 0:
+        conditions.append('lr >= :lr_min')
+        params['lr_min'] = template.lr.min
+    if template.lr.max < INF:
+        conditions.append('lr <= :lr_max')
+        params['lr_max'] = template.lr.min
+    if template.length.min > 1:
+        conditions.append('length >= :length_min')
+        params['length_min'] = template.length.min
+    if template.length.max < INF:
+        conditions.append('length <= :length_max')
+        params['length_max'] = template.length.max
+    if template.batch.min > 1:
+        conditions.append('batch >= :batch_min')
+        params['batch_min'] = template.batch.min
+    if template.batch.max < INF:
+        conditions.append('batch <= :batch_max')
+        params['batch_max'] = template.batch.max
+    if template.steps.min >= 2:
+        conditions.append('steps >= :steps_min')
+        params['steps_min'] = template.steps.min
+    if template.steps.max < INF:
+        conditions.append('steps <= :steps_max')
+        params['steps_max'] = template.steps.max
+    if template.max_weights.max < INF:
+        conditions.append('weights <= :weights_max')
+        params['weights_max'] = template.max_weights.max
+    if len(template.precision) != len(Precision):
+        precisions_list = ', '.join(f'"{p}"' for p in template.precision)
+        conditions.append(f'precision IN ({precisions_list})')
+    if len(template.optimizer) != len(Optimizer):
+        optimizers_list = ', '.join(f'"{o}"' for o in template.optimizer)
+        conditions.append(f'optimizer IN ({optimizers_list})')
+    if template.decay.min > 0:
+        conditions.append('decay >= :decay_min')
+        params['decay_min'] = template.decay.min
+    if template.decay.max < 1:
+        conditions.append('decay <= :decay_max')
+        params['decay_max'] = template.decay.max
+    return conditions, params
 
 
 class ConfScore(object):
@@ -46,17 +89,38 @@ class ConfScore(object):
         self,
         conf_id: int,
         conf: Configuration2,
-        median_score: float | None,
+        median_score: Optional[float],
         system: str,
-        median_time: float | None,
+        median_time: Optional[float],
         num_runs: int,
     ):
         self.conf_id: int = conf_id
         self.conf: Configuration2 = conf
-        self.median_score: float | None = median_score
+        self.median_score: Optional[float] = median_score
         self.system: str = system
-        self.median_time: float | None = median_time
-        self.num_runs: int = num_runs
+        self.median_time: Optional[float] = median_time
+        self.num_runs: int = num_runs  # Number of runs on all systems
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row, system: Optional[str] = None) -> ConfScore:
+        model = build_model(row['spec'])
+
+        if system is None:
+            system = row['system']
+
+        conf = Configuration2(
+            model, precision=row['precision'], lr=row['lr'], length=row['length'],
+            batch=row['batch'], steps=row['steps'], optimizer=row['optimizer'],
+            decay=row['decay']
+        )
+        return ConfScore(
+            row['conf_id'],
+            conf,
+            median_score=row['median_score'],
+            system=system,
+            median_time=row['median_time'],
+            num_runs=row['num_runs'],
+        )
 
 
 def _regexp(pattern, input_string):
@@ -175,7 +239,7 @@ class ResultDB(object):
             path = ':memory:'
         exists = path != ':memory:' and os.path.exists(path)
         if path != ':memory:':
-            logging.info(f'Connecting to results DB {path}')
+            console.log(f'Connecting to results DB {path}')
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.create_function('REGEXP', 2, _regexp)
@@ -342,92 +406,73 @@ class ResultDB(object):
         with latency.timer('ResultDB.add_run'):
             self._add_run(conf, run, conf_id, timestamp, update_neighbors)
 
-    def _conf_score_from_row(self, row: list, system: str) -> ConfScore:
-        model = build_model(row['spec'])
-        conf = Configuration2(
-            model, precision=row['precision'], lr=row['lr'], length=row['length'],
-            batch=row['batch'], steps=row['steps'], optimizer=row['optimizer'],
-            decay=row['decay']
-        )
-        return ConfScore(
-            row['conf_id'],
-            conf,
-            median_score=row['median_score'],
-            system=system,
-            median_time=row['median_time'],
-            num_runs=row['num_runs'],
-        )
+    def top_confs_global(self, template: Template):
+        assert type(template) is Template
 
-    def top_confs(
+        conditions, params = _make_template_conditions(template)
+        conditions.append('median_score IS NOT NULL')
+
+        conf_fields = ', '.join([
+            'spec', 'precision', 'optimizer', 'lr',
+            'decay', 'length', 'batch', 'steps'])
+
+        where = 'WHERE ' + ' AND '.join(conditions)
+
+        query = f"""
+            WITH ranked_conf AS (
+                SELECT id,
+                       {conf_fields},
+                       weights,
+                       median_score,
+                       ROW_NUMBER() OVER (PARTITION BY weights ORDER BY median_score) AS rn
+                FROM conf
+                {where}
+            )
+            SELECT id as conf_id,
+                   {conf_fields},
+                   median_score,
+                   (SELECT system FROM conf_time WHERE conf_id=ranked_conf.id
+                    ORDER BY median_time LIMIT 1) AS system,
+                   (SELECT MIN(median_time) FROM conf_time WHERE conf_id=ranked_conf.id) AS median_time,
+                   (SELECT COUNT(*) FROM run WHERE conf_id = ranked_conf.id) AS num_runs
+            FROM ranked_conf
+            WHERE rn = 1
+        """
+
+        cur = self._db.execute(query, params)
+
+        best_score = INF
+
+        for row in cur:
+            conf_score = ConfScore._from_row(row)
+            if conf_score.median_score < best_score:
+                best_score = conf_score.median_score
+                yield conf_score
+
+
+    def top_confs_for_system(
         self,
         system: str,
-        template: Template | None = None,
-        max_weights: float | None = None,
-        max_time: float | None = None,
-        limit: int = None,
-        sorted: str = 'median_score',
-        with_runs: bool = False,
+        template: Template,
+        max_weights: Optional[float] = None,
+        max_time: Optional[float] = None,
+        limit: Optional[int] = None,
     ) -> Iterable[ConfScore]:
-        conditions = ['median_score IS NOT NULL']
-        params = {'system': system}
+        assert type(system) is str
+        assert type(template) is Template
 
-        if max_weights is not None:
+        conditions, params = _make_template_conditions(template)
+
+        conditions.append('median_score IS NOT NULL')
+        params['system'] = system
+
+        if max_weights:
             conditions.append('weights <= :max_weight')
-            params['max_weight'] = max_weights
+            params['max_weight'] =  max_weights
 
-        if max_time is not None:
+        if max_time:
             conditions.append('median_time <= :max_time')
             params['max_time'] = max_time
-
-        if template is not None:
-            if template.regex is not None:
-                conditions.append('spec REGEXP :regex')
-                params['regex'] = template.regex.pattern
-            if template.lr.min > 0:
-                conditions.append('lr >= :lr_min')
-                params['lr_min'] = template.lr.min
-            if template.lr.max < INF:
-                conditions.append('lr <= :lr_max')
-                params['lr_max'] = template.lr.min
-            if template.length.min > 1:
-                conditions.append('length >= :length_min')
-                params['length_min'] = template.length.min
-            if template.length.max < INF:
-                conditions.append('length <= :length_max')
-                params['length_max'] = template.length.max
-            if template.batch.min > 1:
-                conditions.append('batch >= :batch_min')
-                params['batch_min'] = template.batch.min
-            if template.batch.max < INF:
-                conditions.append('batch <= :batch_max')
-                params['batch_max'] = template.batch.max
-            if template.steps.min >= 2:
-                conditions.append('steps >= :steps_min')
-                params['steps_min'] = template.steps.min
-            if template.steps.max < INF:
-                conditions.append('steps <= :steps_max')
-                params['steps_max'] = template.steps.max
-            if template.max_weights.max < INF:
-                conditions.append('weights <= :weights_max')
-                params['weights_max'] = template.max_weights.max
-            if len(template.precision) != len(Precision):
-                # We can do this because there's only a limited set of precisions.
-                precisions_list = ', '.join(f'"{p}"' for p in template.precision)
-                conditions.append(f'precision IN ({precisions_list})')
-            if len(template.optimizer) != len(Optimizer):
-                optimizers_list = ', '.join(f'"{o}"' for o in template.optimizer)
-                conditions.append(f'optimizer IN ({optimizers_list})')
-            if template.decay.min > 0:
-                conditions.append('decay >= :decay_min')
-                params['decay_min'] = template.decay.min
-            if template.decay.max < 1:
-                conditions.append('decay <= :decay_max')
-                params['decay_max'] = template.decay.max
-
-        if with_runs:
-            conditions.append(
-                'EXISTS(SELECT 1 FROM run WHERE run.conf_id = conf.id AND system = :system)'
-            )
 
         where = 'WHERE ' + ' AND '.join(conditions)
 
@@ -437,26 +482,20 @@ class ResultDB(object):
             params['limit'] = limit
             limit = 'LIMIT :limit'
 
-        if sorted == 'median_score':
-            order = 'ORDER BY median_score ASC'
-        elif sorted == 'weights':
-            order = 'ORDER BY weights ASC, median_score ASC'
-        else:
-            order = ''
-
         query = f"""
             SELECT conf.id AS conf_id, spec, precision, lr, length, batch,
                 optimizer, decay, steps, median_score,
+                (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs,
                 (SELECT median_time FROM conf_time
-                 WHERE conf_id = conf.id AND system = :system) AS median_time,
-                (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs
-            FROM conf {where} {order} {limit}
+                 WHERE conf_id = conf.id AND system = :system
+                 ORDER BY median_time LIMIT 1) AS median_time
+            FROM conf {where} ORDER BY median_score ASC {limit}
             """
 
         cur = self._db.execute(query, params)
 
         for row in cur:
-            yield self._conf_score_from_row(row, system)
+            yield ConfScore._from_row(row, system)
 
     def get_conf_runs_diff_steps(
         self, conf: Configuration2, system: str
@@ -500,7 +539,7 @@ class ResultDB(object):
         rows = cur.fetchall()
         cur.execute('COMMIT')
         for row in rows:
-            yield self._conf_score_from_row(row, system)
+            yield ConfScore._from_row(row, system)
 
     def total_runs(self) -> int:
         cur = self._db.execute('SELECT COUNT(*) AS count FROM run')

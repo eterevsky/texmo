@@ -2,23 +2,93 @@
 <html>
     <head>
         <title>TexMo</title>
-        <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='normalize.css') }}">
-        <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
+        <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='simple.css') }}">
+        <style>
+            input[type="text"] {
+                width: 30rem;
+            }
+        </style>
     </head>
     <body>
         <main>
-        <h2>Template</h1>
         <form action="/update" method="post">
-            Model spec regex: <input type="text" name="spec" value="{{ spec }}"><br>
-            Weights: <input type="text" name="weights" value="{{ weights }}"><br>
-            Sample length: <input type="text" name="length" value="{{ length }}"><br>
-            Batch size: <input type="text" name="batch" value="{{ batch }}"><br>
-            Precision:
-            <label for="bf16">bf16</label> <input type="checkbox" name="bf16" {% if precision.bf16 %} checked {% endif %}>
-            <br>
-            Steps: <input type="text" name="steps" value="{{ steps }}"><br>
-            <input type="submit" value="Update">
+            <table>
+                <caption>Template</caption>
+                <tr>
+                    <td>Model spec regex:</td>
+                    <td><input type="text" name="spec" value="{{ spec }}"></td>
+                </tr>
+                <tr>
+                    <td>Weights:</td>
+                    <td><input type="text" name="weights" value="{{ weights }}"></td>
+                </tr>
+                <tr>
+                    <td>Sample length:</td>
+                    <td><input type="text" name="length" value="{{ length }}"></td>
+                </tr>
+                <tr>
+                    <td>Batch size:</td>
+                    <td><input type="text" name="batch" value="{{ batch }}"></td>
+                </tr>
+                <tr>
+                    <td>Precision:</td>
+                    <td>
+                        <input type="checkbox" name="bf16" {% if precision.bf16 %} checked {% endif %}> <label for="bf16">bf16</label>
+                        <input type="checkbox" name="fp16" {% if precision.fp16 %} checked {% endif %}> <label for="fp16">fp16</label>
+                        <input type="checkbox" name="fp32" {% if precision.fp32 %} checked {% endif %}> <label for="fp32">fp32</label>
+                        <input type="checkbox" name="fp64" {% if precision.fp64 %} checked {% endif %}> <label for="fp64">fp64</label>
+                    </td>
+                </tr>
+                <tr>
+                    <td>Optimizer:</td>
+                    <td>
+                        <input type="checkbox" name="adama" {% if optimizer.adam %} checked {% endif %}> <label for="adam">adam</label>
+                        <input type="checkbox" name="fromage" {% if optimizer.fromage %} checked {% endif %}> <label for="fromage">fromage</label>
+                    </td>
+                </tr>
+                <tr>
+                    <td>Learning rate:</td>
+                    <td><input type="text" name="lr" value="{{ lr }}"></td>
+                </tr>
+                <tr>
+                    <td>Decay:</td>
+                    <td><input type="text" name="decay" value="{{ decay }}"></td>
+                </tr>
+                <tr>
+                    <td>Steps:</td>
+                    <td><input type="text" name="steps" value="{{ steps }}"><br></td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td><input type="submit" value="Update"></td>
+                </tr>
+            </table>
         </form>
+
+        <table>
+            <tr>
+                <th>Model</th>
+                <th>P</th>
+                <th>Length</th>
+                <th>Batch</th>
+                <th>Optimizer</th>
+                <th>Steps</th>
+                <th>Score</th>
+                <th>Time</th>
+            </tr>
+            {% for item in top %}
+            <tr>
+                <td><code>{{ item.spec }}</code> ({{ item.weights }})</td>
+                <td>{{ item.precision }}</td>
+                <td>{{ item.length }}</td>
+                <td>{{ item.batch }}</td>
+                <td>{{ item.learning }}</td>
+                <td>{{ item.steps }}</td>
+                <td>{{ item.score }}</td>
+                <td>{{ item.time }}</td>
+            </tr>
+            {% endfor %}
+        </table>
         </main>
     </body>
 </html>

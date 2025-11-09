@@ -7,8 +7,8 @@ from queue import Queue
 from flask import (Flask, make_response, redirect, render_template, request,
                    send_from_directory)
 
-from .common import console
-from .configuration2 import Bounds, Configuration2, Template, default_from_template
+from .common import console, ttoa3
+from .configuration2 import Bounds, Configuration2, Template, default_from_template, Precision, Optimizer
 from .latency import get_report, timer
 from .report import generate_report_by_weight
 from .resultdb import ResultDB
@@ -80,6 +80,7 @@ class SearchServer(object):
     def __init__(self, db: ResultDB, template: Template, train_time: tuple[float, float], default_spec: str):
         self.db: ResultDB = db
         self.template: Template = template
+        self.train_time: tuple[float, float] = train_time
         self.default = default_from_template(template, spec=default_spec)
         logging.info(f"Default configuration: {self.default}")
 
@@ -103,11 +104,36 @@ class SearchServer(object):
     def __del__(self):
         self.requests_queue.put(("stop", None))
 
+    def _generate_report(self):
+        pass
+
     def index(self):
         pattern = self.template.regex.pattern if self.template.regex else ""
+
         precision = {}
-        for p in self.template.precision:
-            precision[p] = True
+        for p in Precision:
+            precision[p] = p in self.template.precision
+
+        optimizer = {}
+        for o in Optimizer:
+            optimizer[o] = o in self.template.optimizer
+
+        top = []
+        for conf_score in self.db.top_confs_global(self.template):
+            top.append({
+                'spec': str(conf_score.conf.model),
+                'weights': conf_score.conf.model.weights,
+                'precision': str(conf_score.conf.precision),
+                'length': conf_score.conf.length,
+                'batch': conf_score.conf.batch,
+                'learning': conf_score.conf.learning_str,
+                'steps': conf_score.conf.steps,
+                'score': f'{conf_score.median_score:.3f} ({conf_score.num_runs})',
+                'time': f'{ttoa3(conf_score.median_time)} on {conf_score.system}',
+            })
+
+        tmin, tmax = self.train_time
+        train_time = f'{tmin}-{tmax}'
 
         return render_template(
             "index.html",
@@ -116,11 +142,17 @@ class SearchServer(object):
             length=_render_bounds(self.template.length),
             batch=_render_bounds(self.template.batch),
             precision=precision,
+            optimizer=optimizer,
+            lr=_render_bounds(self.template.lr),
+            decay=_render_bounds(self.template.decay),
             steps=_render_bounds(self.template.steps),
+            time=train_time,
+            top=top,
         )
 
     def update(self, params):
         self.template.update_regex(params["spec"])
+        self.template.update_weights(params['weights'])
         return redirect("/")
 
     def select(self, args):

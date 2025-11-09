@@ -5,12 +5,11 @@ from io import StringIO
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import numpy as np
 
-from .resultdb import ResultDB
+from .resultdb import ConfScore, ResultDB
 from .results import ResultSet
 from .configuration2 import Template
-from .common import INF, ttoa3
+from .common import INF, console, ttoa3
 from .tokens import set_tokens_dir
 
 
@@ -224,7 +223,10 @@ def generate_report_by_weight(
         f'Top confs by weights for {system}\n',
         f'Max time: {ttoa3(max_time)}',
         f'Spec: {template.regex.pattern if template.regex else None}',
+        f'Optimizers: {', '.join(template.optimizer)}',
         f'LR: {template.lr}',
+        f'Decay: {template.decay}',
+        f'Precision: {', '.join(template.precision)}',
         f'Length: {template.length}',
         f'Batch: {template.batch}',
         f'Steps: {template.steps}',
@@ -281,21 +283,21 @@ def generate_max_report(
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
     template = Template.from_args(args)
-    logging.info(f'Template: {template}')
+    console.log('Template:', template)
 
-    train_time = tuple(map(float, args.train_time.split('-')))
-    assert len(train_time) in (1, 2)
-    if len(train_time) == 1:
-        train_time.append(train_time[0])
-
-    result_db = ResultDB.from_args(args.db)
-    logging.info(
-        generate_max_report(result_db, template, train_time, args.system)
-    )
-    logging.info(generate_report_by_weight(result_db, template, args.system))
+    db = ResultDB.from_args(args.db)
+    for conf_score in db.top_confs_global(template):
+        console.log(conf_score.conf)
+        console.log(f'{conf_score.median_score:.3f} ({conf_score.num_runs})  {ttoa3(conf_score.median_time)} on {conf_score.system}')
 
 
 def init_args(parser: argparse.ArgumentParser, config):
+    parser.add_argument(
+        "--db",
+        type=str,
+        default=config.DB,
+        help="path to the SQLite database with the results, or a URL for a PostgreSQL database",
+    )
     parser.add_argument(
         '--tokens-dir',
         type=str,
@@ -312,6 +314,12 @@ def init_args(parser: argparse.ArgumentParser, config):
         help='regex covering the acceptable specs',
     )
     parser.add_argument(
+        '--length',
+        type=str,
+        default=None,
+        help='range of acceptable training sample lengths',
+    )
+    parser.add_argument(
         '-b',
         '--batch',
         type=str,
@@ -319,17 +327,24 @@ def init_args(parser: argparse.ArgumentParser, config):
         help='range of acceptable batch sizes, for example "1-256"',
     )
     parser.add_argument(
+        "--optimizer",
+        type=str,
+        metavar="O",
+        default="adam,fromage",
+        help="the optimizer algorithm",
+    )
+    parser.add_argument(
+        '--decay',
+        type=str,
+        default="0.0-1.0",
+        help="decay of the learning rate over the course of training, i.e. (LR at the last step) / (LR at the first step)",
+    )
+    parser.add_argument(
         '-l',
         '--lr',
         type=str,
         default=None,
         help='range of acceptable learning rates',
-    )
-    parser.add_argument(
-        '--length',
-        type=str,
-        default=None,
-        help='range of acceptable training sample lengths',
     )
     parser.add_argument(
         '--steps',
@@ -341,32 +356,14 @@ def init_args(parser: argparse.ArgumentParser, config):
         '-w',
         '--weights',
         type=str,
-        default='32-4294967296',
+        default='2-4294967296',
         help='range for the _maximal_ number of weights in the model',
-    )
-    parser.add_argument(
-        '-t',
-        '--train-time',
-        default='1-16',
-        help='range for the training time in seconds',
-    )
-    parser.add_argument(
-        '--db',
-        type=str,
-        default=config.DB,
-        help='path to the SQLite database with the results, or a URL for a PostgreSQL database',
-    )
-    parser.add_argument(
-        '--system',
-        type=str,
-        default=config.SYSTEM_NAME,
-        help='the name of the system that will be used to identify runs in the DB',
     )
     parser.add_argument(
         "-p",
         "--precision",
         type=str,
-        default="bf16,fp16,fp32",
+        default="bf16,fp16,fp32,fp64",
         help="precision"
     )
 

@@ -76,6 +76,15 @@ def _render_bounds(b: Bounds):
         return f'{b.min}-{b.max}'
 
 
+def _get_flags(enum, params: dict) -> list:
+    vals = []
+    for val in enum:
+        if params.get(str(val)):
+            vals.append(val)
+    return vals
+
+
+
 class SearchServer(object):
     def __init__(self, db: ResultDB, template: Template, train_time: tuple[float, float], default_spec: str):
         self.db: ResultDB = db
@@ -103,9 +112,6 @@ class SearchServer(object):
 
     def __del__(self):
         self.requests_queue.put(("stop", None))
-
-    def _generate_report(self):
-        pass
 
     def index(self):
         pattern = self.template.regex.pattern if self.template.regex else ""
@@ -153,6 +159,13 @@ class SearchServer(object):
     def update(self, params):
         self.template.update_regex(params["spec"])
         self.template.update_weights(params['weights'])
+        self.template.update_length(params['length'])
+        self.template.update_batch(params['batch'])
+        self.template.update_precision(_get_flags(Precision, params))
+        self.template.update_optimizer(_get_flags(Optimizer, params))
+        self.template.update_lr(params['lr'])
+        self.template.update_decay(params['decay'])
+        self.template.update_steps(params['steps'])
         return redirect("/")
 
     def select(self, args):

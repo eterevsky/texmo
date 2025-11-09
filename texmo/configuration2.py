@@ -288,13 +288,13 @@ def _parse_number(arg: str, num_type: type) -> int|float:
 
 
 def _parse_interval(arg: str, num_type: type) -> tuple:
-    if arg is None:
+    if arg is None or arg == '':
         return None
     comps = arg.split('-')
     assert len(comps) in (1, 2)
     comps = tuple(_parse_number(c, num_type) for c in comps)
     if len(comps) == 1:
-        return (comps[0], comps[1])
+        return (comps[0], comps[0])
     else:
         return comps
 
@@ -366,11 +366,39 @@ class Template(object):
             + f'decay={self.decay})'
         )
 
+    def update_regex(self, regex: Optional[str]):
+        self.regex = re.compile(regex) if regex else None
+
     def update_weights(self, weights: Optional[str]):
         self.max_weights =  Bounds(_parse_interval(weights, int), 2)
 
-    def update_regex(self, regex: Optional[str]):
-        self.regex = re.compile(regex) if regex else None
+    def update_length(self, value: Optional[str]):
+        self.length =  Bounds(_parse_interval(value, int), 1)
+
+    def update_batch(self, value: Optional[str]):
+        self.batch =  Bounds(_parse_interval(value, int), 1)
+
+    def update_precision(self, value: list[Precision]):
+        assert type(value) is list
+        assert len(value) > 0
+        assert type(value[0]) is Precision
+        self.precision = value
+
+    def update_optimizer(self, value: list[Optimizer]):
+        assert type(value) is list
+        assert len(value) > 0
+        assert type(value[0]) is Optimizer
+        console.log('update_optimizer', value)
+        self.optimizer = value
+
+    def update_lr(self, value: Optional[str]):
+        self.lr =  Bounds(_parse_interval(value, float), 0)
+
+    def update_decay(self, value: Optional[str]):
+        self.decay =  Bounds(_parse_interval(value, float), 0)
+
+    def update_steps(self, value: Optional[str]):
+        self.steps =  Bounds(_parse_interval(value, int), 1)
 
     def match_model(self, model: Model3) -> bool:
         if model.weights > self.max_weights.max:

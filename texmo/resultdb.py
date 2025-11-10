@@ -420,12 +420,28 @@ class ResultDB(object):
         where = 'WHERE ' + ' AND '.join(conditions)
 
         query = f"""
-            WITH ranked_conf AS (
+            WITH conf_with_runs AS (
                 SELECT id,
                        {conf_fields},
                        weights,
                        median_score,
                        (SELECT COUNT(*) FROM run WHERE conf_id = ranked_conf.id) AS num_runs,
+                       (SELECT system FROM conf_time WHERE conf_id=ranked_conf.id
+                        ORDER BY median_time LIMIT 1) AS system,
+                       (SELECT MIN(median_time) FROM conf_time WHERE conf_id=ranked_conf.id) AS median_time
+                FROM conf
+                {where}
+            )
+
+                                   ROW_NUMBER() OVER (PARTITION BY weights ORDER BY median_score) AS rn
+        """
+
+        query = f"""
+            WITH ranked_conf AS (
+                SELECT id,
+                       {conf_fields},
+                       weights,
+                       median_score,
                        ROW_NUMBER() OVER (PARTITION BY weights ORDER BY median_score) AS rn
                 FROM conf
                 {where}
@@ -433,7 +449,7 @@ class ResultDB(object):
             SELECT id as conf_id,
                    {conf_fields},
                    median_score,
-                   num_runs,
+                   (SELECT COUNT(*) FROM run WHERE conf_id = ranked_conf.id) AS num_runs,
                    (SELECT system FROM conf_time WHERE conf_id=ranked_conf.id
                     ORDER BY median_time LIMIT 1) AS system,
                    (SELECT MIN(median_time) FROM conf_time WHERE conf_id=ranked_conf.id) AS median_time

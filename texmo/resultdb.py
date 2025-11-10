@@ -441,6 +441,7 @@ class ResultDB(object):
                    median_time
             FROM conf_with_runs
             WHERE ROW_NUMBER() OVER (PARTITION BY weights ORDER BY median_score) = 1
+            ORDER BY weights
         """
 
         # query = f"""

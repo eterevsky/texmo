@@ -443,7 +443,7 @@ class ResultDB(object):
             FROM conf_with_runs
             )
             SELECT conf_id,
-                   {conf_fields}
+                   {conf_fields},
                    weights,
                    median_score,
                    num_runs,

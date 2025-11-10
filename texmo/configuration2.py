@@ -192,7 +192,6 @@ class Configuration2(object):
             and 0 < self.decay <= 1
         )
 
-
     @property
     def learning_str(self) -> str:
         render_lr = lambda lr: str(int(lr)) if lr >= 1 else f'1/{str(int(1/lr))}'

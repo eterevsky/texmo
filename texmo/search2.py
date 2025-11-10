@@ -32,25 +32,29 @@ def top_confs_report_rich(
     t = "" if max_time is None else f" T ≤ {ttoa3(max_time)}"
     table = Table(title=f"Top confs W ≤ {itoa3(max_weights)}{t}{sys}")
 
-    table.add_column('Loss')
-    table.add_column('Time')
-    table.add_column('Length', justify='right')
+    table.add_column('Model', overflow='fold')
+    table.add_column('P')
+    table.add_column('Len', justify='right')
     table.add_column('Batch', justify='right')
     table.add_column('Optimizer')
     table.add_column('Steps', justify='right')
-    table.add_column('P')
-    table.add_column('Model', overflow='fold')
+    table.add_column('Loss')
+    table.add_column('Time', justify='right')
 
 
     for c in confs:
-        t = '?' if c.median_time is None else ttoa3(c.median_time)
+        t = '?' if c.median_time is None else f'{c.median_time:.3f}'
         decay = '' if c.conf.decay == 1 else f'*{c.conf.decay:.4f}'
-        optimizer = f'{c.conf.optimizer.letter}{c.conf.lr:.4f}{decay}'
 
-        table.add_row(f'{c.median_score:.4f} ({c.num_runs})', t, str(c.conf.length),
-                      str(c.conf.batch), optimizer,
-                      str(c.conf.steps), str(c.conf.precision),
-                      f'{c.conf.model} ({c.conf.model.weights})')
+        table.add_row(
+            f'{c.conf.model} ({c.conf.model.weights})',
+            str(c.conf.precision),
+            str(c.conf.length),
+            str(c.conf.batch),
+            c.conf.learning_str,
+            str(c.conf.steps),
+            f'{c.median_score:.4f} ({c.num_runs})',
+            t)
 
     return table
 
@@ -60,7 +64,7 @@ def _generate_limits():
     in the top confs.
 
     Pairs [x0, x1] mean at least x0 runs for the configuration
-    itself, at least x1 runs for the direct neighbors./
+    itself, at least x1 runs for the direct neighbors.
 
     Sequence:
 

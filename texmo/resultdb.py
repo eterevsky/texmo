@@ -411,7 +411,6 @@ class ResultDB(object):
 
         conditions, params = _make_template_conditions(template)
         conditions.append('median_score IS NOT NULL')
-        conditions.append('num_runs > 1')
 
         conf_fields = ', '.join([
             'spec', 'precision', 'optimizer', 'lr',
@@ -431,31 +430,39 @@ class ResultDB(object):
                        (SELECT MIN(median_time) FROM conf_time WHERE conf_id=ranked_conf.id) AS median_time
                 FROM conf
                 {where}
+                HAVING num_runs > 1
             )
-
-                                   ROW_NUMBER() OVER (PARTITION BY weights ORDER BY median_score) AS rn
-        """
-
-        query = f"""
-            WITH ranked_conf AS (
-                SELECT id,
-                       {conf_fields},
-                       weights,
-                       median_score,
-                       ROW_NUMBER() OVER (PARTITION BY weights ORDER BY median_score) AS rn
-                FROM conf
-                {where}
-            )
-            SELECT id as conf_id,
+            SELECT id AS conf_id,
                    {conf_fields},
+                   weights,
                    median_score,
-                   (SELECT COUNT(*) FROM run WHERE conf_id = ranked_conf.id) AS num_runs,
-                   (SELECT system FROM conf_time WHERE conf_id=ranked_conf.id
-                    ORDER BY median_time LIMIT 1) AS system,
-                   (SELECT MIN(median_time) FROM conf_time WHERE conf_id=ranked_conf.id) AS median_time
-            FROM ranked_conf
-            WHERE rn = 1
+                   num_runs,
+                   system,
+                   median_time
+            FROM conf_with_runs
+            WHERE ROW_NUMBER() OVER (PARTITION BY weights ORDER BY median_score) = 1
         """
+
+        # query = f"""
+        #     WITH ranked_conf AS (
+        #         SELECT id,
+        #                {conf_fields},
+        #                weights,
+        #                median_score,
+        #                ROW_NUMBER() OVER (PARTITION BY weights ORDER BY median_score) AS rn
+        #         FROM conf
+        #         {where}
+        #     )
+        #     SELECT id as conf_id,
+        #            {conf_fields},
+        #            median_score,
+        #            (SELECT COUNT(*) FROM run WHERE conf_id = ranked_conf.id) AS num_runs,
+        #            (SELECT system FROM conf_time WHERE conf_id=ranked_conf.id
+        #             ORDER BY median_time LIMIT 1) AS system,
+        #            (SELECT MIN(median_time) FROM conf_time WHERE conf_id=ranked_conf.id) AS median_time
+        #     FROM ranked_conf
+        #     WHERE rn = 1
+        # """
 
         cur = self._db.execute(query, params)
 

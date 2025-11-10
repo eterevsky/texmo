@@ -424,10 +424,10 @@ class ResultDB(object):
                        {conf_fields},
                        weights,
                        median_score,
-                       (SELECT COUNT(*) FROM run WHERE conf_id = ranked_conf.id) AS num_runs,
-                       (SELECT system FROM conf_time WHERE conf_id=ranked_conf.id
+                       (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs,
+                       (SELECT system FROM conf_time WHERE conf_id=conf.id
                         ORDER BY median_time LIMIT 1) AS system,
-                       (SELECT MIN(median_time) FROM conf_time WHERE conf_id=ranked_conf.id) AS median_time
+                       (SELECT MIN(median_time) FROM conf_time WHERE conf_id=conf.id) AS median_time
                 FROM conf
                 {where}
                 HAVING num_runs > 1

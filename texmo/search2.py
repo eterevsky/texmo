@@ -227,7 +227,7 @@ class Search(object):
                     if end > have_confs:
                         console.log('Getting top confs up to ', end)
                         top_confs = list(
-                            self._db.top_confs(
+                            self._db.top_confs_for_system(
                                 max_time=t, max_weights=max_weights, system=system,
                                 limit=end, template=self._template
                             )

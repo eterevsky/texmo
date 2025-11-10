@@ -432,7 +432,7 @@ class ResultDB(object):
                 FROM conf
                 {where}
             ),
-            ranked_confs (SELECT id AS conf_id,
+            ranked_confs AS (SELECT id AS conf_id,
                    {conf_fields},
                    weights,
                    median_score,
@@ -452,27 +452,6 @@ class ResultDB(object):
             FROM ranked_confs
             WHERE rn = 1
         """
-
-        # query = f"""
-        #     WITH ranked_conf AS (
-        #         SELECT id,
-        #                {conf_fields},
-        #                weights,
-        #                median_score,
-        #                ROW_NUMBER() OVER (PARTITION BY weights ORDER BY median_score) AS rn
-        #         FROM conf
-        #         {where}
-        #     )
-        #     SELECT id as conf_id,
-        #            {conf_fields},
-        #            median_score,
-        #            (SELECT COUNT(*) FROM run WHERE conf_id = ranked_conf.id) AS num_runs,
-        #            (SELECT system FROM conf_time WHERE conf_id=ranked_conf.id
-        #             ORDER BY median_time LIMIT 1) AS system,
-        #            (SELECT MIN(median_time) FROM conf_time WHERE conf_id=ranked_conf.id) AS median_time
-        #     FROM ranked_conf
-        #     WHERE rn = 1
-        # """
 
         cur = self._db.execute(query, params)
 

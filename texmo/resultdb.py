@@ -431,8 +431,8 @@ class ResultDB(object):
                        (SELECT MIN(median_time) FROM conf_time WHERE conf_id=conf.id) AS median_time
                 FROM conf
                 {where}
-            )
-            WITH ranked_confs (SELECT id AS conf_id,
+            ),
+            ranked_confs (SELECT id AS conf_id,
                    {conf_fields},
                    weights,
                    median_score,

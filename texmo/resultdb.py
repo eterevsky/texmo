@@ -432,16 +432,25 @@ class ResultDB(object):
                 FROM conf
                 {where}
             )
-            SELECT id AS conf_id,
+            WITH ranked_confs (SELECT id AS conf_id,
                    {conf_fields},
                    weights,
                    median_score,
                    num_runs,
                    system,
-                   median_time
+                   median_time,
+                   ROW_NUMBER() OVER (PARTITION BY weights ORDER BY median_score) AS rn
             FROM conf_with_runs
-            WHERE ROW_NUMBER() OVER (PARTITION BY weights ORDER BY median_score) = 1
-            ORDER BY weights
+            )
+            SELECT conf_id,
+                   {conf_fields}
+                   weights,
+                   median_score,
+                   num_runs,
+                   system,
+                   median_time
+            FROM ranked_confs
+            WHERE rn = 1
         """
 
         # query = f"""

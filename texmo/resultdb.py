@@ -411,6 +411,7 @@ class ResultDB(object):
 
         conditions, params = _make_template_conditions(template)
         conditions.append('median_score IS NOT NULL')
+        conditions.append('num_runs > 1')
 
         conf_fields = ', '.join([
             'spec', 'precision', 'optimizer', 'lr',
@@ -430,7 +431,6 @@ class ResultDB(object):
                        (SELECT MIN(median_time) FROM conf_time WHERE conf_id=conf.id) AS median_time
                 FROM conf
                 {where}
-                HAVING num_runs > 1
             )
             SELECT id AS conf_id,
                    {conf_fields},

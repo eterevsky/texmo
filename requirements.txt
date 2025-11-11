@@ -1,7 +1,0 @@
-flask
-matplotlib
-numpy
-optax
-regex
-requests
-scikit-learn

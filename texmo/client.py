@@ -119,6 +119,7 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, once: bo
         with timer("post(add)"):
             post_result(s, add_url, system, run, out_conf)
 
+        if conf.decay == 1:
         for checkpoint in run.checkpoints.values():
             with timer("post(add)"):
                 post_result(s, add_url, system, checkpoint.make_run(run), out_conf)

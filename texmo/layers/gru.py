@@ -145,11 +145,11 @@ class MinGru(Layer):
         }
         return weights
 
-    def init_state(self, _weights) -> LayerState:
+    def init_state(self, _weights, dtype) -> LayerState:
         return jnp.zeros((self.size,), dtype=dtype)
 
     def step(
-        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray, _dtype
+        self, weights: LayerWeights, state: LayerState, input: jnp.ndarray, dtype
     ) -> tuple[LayerState, jax.Array]:
         input = input.flatten()
         zh = jnp.dot(weights["w"], input) + weights["b"]

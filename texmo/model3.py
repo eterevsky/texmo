@@ -6,6 +6,7 @@ from rich import print as pprint
 import math
 import optax
 
+from .common import console
 from .layer import Layer, LayerState, LayerWeights
 from .layers import build_layer
 from .layers.dense import Dense
@@ -26,6 +27,7 @@ State = list[LayerState]
 
 class Model3(object):
     def __init__(self, spec: str):
+        console.log('spec:', spec)
         spec_parts = spec.split("|")
 
         if len(spec_parts) == 1:
@@ -35,6 +37,8 @@ class Model3(object):
             input_spec, layers_spec = spec_parts
         else:
             raise AssertionError("Model spec can't contain more than one |")
+        
+        console.log('input_spec:', input_spec)
 
         if input_spec.startswith('bits') or input_spec.startswith('bytes'):
             self.input = InputBits.from_spec(input_spec)

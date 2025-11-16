@@ -325,8 +325,8 @@ def init_args(parser: argparse.ArgumentParser, config):
     parser.add_argument(
         '--decay',
         type=str,
-        default="0.0-1.0",
-        help="decay of the learning rate over the course of training, i.e. (LR at the last step) / (LR at the first step)  (default: 1)",
+        default="1",
+        help="decay of the learning rate over the course of training, i.e. (LR at the last step) / (LR at the first step). Incompatible with saving intermediate results. (default: 1)",
     )
     parser.add_argument(
         "--length",

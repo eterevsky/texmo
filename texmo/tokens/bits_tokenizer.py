@@ -85,10 +85,10 @@ class BitsTokenizer4:
 
 class BytesTokenizer:
     def __init__(self):
-        self.tokenset = BitsTokenSet(4)
+        self.tokenset = BitsTokenSet(8)
 
     def tokenize(self, chunk: bytes) -> np.ndarray:
-        return np.ndarray(chunk, dtype=np.uint8)
+        return np.frombuffer(chunk, dtype=np.uint8)
 
     def tokenize_processed(self, chunk: bytes) -> np.ndarray:
         return self.tokenize(chunk)

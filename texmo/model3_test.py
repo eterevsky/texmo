@@ -38,7 +38,6 @@ def test_neighbors():
     model = build_model("tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu")
     neighbors = set(map(str, model.neighbors()))
     assert neighbors == {
-            "tokens.128.raw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu",
             "tokens.128.cw.b2-pos.16-emb.64.norm|gru.64-dense.64.relu",
             "tokens.128.cw.bh-pos.16-emb.128.norm|gru.64-dense.64.relu",
             "tokens.128.cw.bh-pos.16-emb.32.norm|gru.64-dense.64.relu",
@@ -50,13 +49,12 @@ def test_neighbors():
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.128.relu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.32.relu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.gelu",
-            "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-attn.2.2.64",
-            "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-attnmq.2.2.64",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-dense.64.gelu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-dense.64.tanh",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-gru.64",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-lstm.64",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-mgru.64",
+            "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-mingru.64",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-rec.64.gelu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-rec.64.tanh",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-suffix.2",
@@ -64,22 +62,25 @@ def test_neighbors():
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-gru.64",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-lstm.64",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-mgru.64",
+            "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-mingru.64",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-rec.64.gelu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-rec.64.relu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-rec.64.tanh",
+            "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-suffix.2-dense.64.relu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64",
             "tokens.128.cw.bh-pos.16-emb.64.norm|lstm.64-dense.64.relu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|mgru.64-dense.64.relu",
+            "tokens.128.cw.bh-pos.16-emb.64.norm|mingru.64-dense.64.relu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|rec.64.gelu-dense.64.relu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|rec.64.relu-dense.64.relu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|rec.64.tanh-dense.64.relu",
+            "tokens.128.cw.bh-pos.16-emb.64.norm|suffix.2-gru.64-dense.64.relu",
             "tokens.128.cw.bh-pos.16-emb.64|gru.64-dense.64.relu",
             "tokens.128.cw.bh-pos.32-emb.64.norm|gru.64-dense.64.relu",
             "tokens.128.cw.bh-pos.8-emb.64.norm|gru.64-dense.64.relu",
+            "tokens.128.raw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu",
             "tokens.256.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu",
             "tokens.64.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu",
-            "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-mingru.64",
-            "tokens.128.cw.bh-pos.16-emb.64.norm|mingru.64-dense.64.relu",
         }
 
 def test_input():
@@ -102,6 +103,7 @@ def test_bits1_neighbors():
         'bits.1|rec.1.gelu',
         'bits.1|gru.1',
         'bits.1|mgru.1',
+        'bits.1|mingru.1',
         'bits.1|lstm.1',
     }
 
@@ -120,6 +122,7 @@ def test_bits1bp_neighbors():
         'bits.1+bp|rec.1.gelu',
         'bits.1+bp|gru.1',
         'bits.1+bp|mgru.1',
+        'bits.1+bp|mingru.1',
         'bits.1+bp|lstm.1',
     }
 
@@ -140,7 +143,13 @@ def test_bits4bp_neighbors():
         'bits.4+bp|rec.4.gelu',
         'bits.4+bp|gru.4',
         'bits.4+bp|mgru.4',
+        'bits.4+bp|mingru.4',
         'bits.4+bp|lstm.4',
-        'bits.4+bp|attn.2.2.4',
-        'bits.4+bp|attnmq.2.2.4',
     }
+
+def test_suffix_neighbors():
+    model = build_model('bits.4+bp|rec.16.tanh-suffix.2-dense.16.tanh')
+    neighbors = set(map(str, model.neighbors()))
+    assert 'bits.4+bp|rec.16.tanh-dense.16.tanh' in neighbors
+    assert 'bits.4+bp|rec.16.tanh-suffix.4-dense.16.tanh' in neighbors
+    assert 'bits.4+bp|rec.16.tanh-suffix.2-suffix.2-dense.16.tanh' not in neighbors

@@ -36,7 +36,7 @@ class Model3(object):
             input_spec, layers_spec = spec_parts
         else:
             raise AssertionError("Model spec can't contain more than one |")
-
+        
         if input_spec.startswith('bits') or input_spec.startswith('bytes'):
             self.input = InputBits.from_spec(input_spec)
         else:
@@ -97,6 +97,15 @@ class Model3(object):
                     )
                 )
 
+        # Adding suffix.2 at any position
+        for i in range(len(layers_str) + 1):
+            yield input_spec + '|' + '-'.join(chain(layers_str[:i], ('suffix.2',), layers_str[i:]))
+
+        # Removing suffix.2 at any position
+        for i in range(len(layers_str)):
+            if layers_str[i] == 'suffix.2':
+                yield input_spec + '|' + '-'.join(chain(layers_str[:i], layers_str[i+1:]))
+
         # Add layer to the end
         last_layer_size = self.layers[-1].output_size if self.layers else self.input.output_size
         rounded_layer_size = 2**int(round(math.log2(last_layer_size)))
@@ -110,18 +119,9 @@ class Model3(object):
                     )
                 )
 
-        for layer_type in ("gru", "mgru", "lstm"):
+        for layer_type in ("gru", "mgru", "mingru", "lstm"):
             yield input_spec + "|" + "-".join(
                 chain(layers_str, (f"{layer_type}.{new_layer_size}",))
-            )
-
-        yield input_spec + "|" + "-".join(chain(layers_str, (f"suffix.2",)))
-        if new_layer_size >= 2:
-            yield input_spec + "|" + "-".join(
-                chain(layers_str, (f"attn.2.2.{new_layer_size}",))
-            )
-            yield input_spec + "|" + "-".join(
-                chain(layers_str, (f"attnmq.2.2.{new_layer_size}",))
             )
 
         if self.layers:
@@ -133,15 +133,7 @@ class Model3(object):
             output_size = min(prev_size, self.input.ntokens)
             last_layer = self.layers[-1]
 
-            valid_to_remove = False
-            if last_layer.name in _SUFFIX_LIKE_LAYERS:
-                valid_to_remove = last_layer in (
-                    "suffix.2",
-                    "attn.2.2.{output_size}",
-                    "attnmq.2.2.{output_size}",
-                )
-            else:
-                valid_to_remove = last_layer.output_size == output_size
+            valid_to_remove = last_layer.output_size == output_size
 
             if valid_to_remove:
                 yield input_spec + "|" + "-".join(layers_str[:-1])

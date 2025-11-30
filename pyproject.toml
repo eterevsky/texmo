@@ -3,12 +3,11 @@ name = "texmo"
 version = "0.1.0"
 description = "Experimenting with small language models"
 readme = "README.md"
-#requires-python = ">=3.13,<3.14"
 requires-python = ">=3.14"
 dependencies = [
     "flask>=3.1.2",
     "jax>=0.8; 'WSL2' not in platform_release and 'Ubuntu' not in platform_version",
-    "jax[cuda13]; 'WSL2' in platform_release or 'Ubuntu' in platform_version",
+    "jax[cuda13]; 'Darwin' not in platform_system and 'WSL2' in platform_release or 'Ubuntu' in platform_version",
     "matplotlib>=3.10.7",
     "numpy>=2.3.4",
     "optax>=0.2.6",

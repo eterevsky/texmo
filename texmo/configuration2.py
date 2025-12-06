@@ -169,7 +169,7 @@ class Configuration2(object):
             f'{model} ({itoa3(self.model.weights)})  {self.precision}   '
             + f'LEN{itoa3(self.length)}  '
             + f'B{itoa3(self.batch)}  '
-            + f'{optimizer}{steps}'
+            + self.learning_str
         )
 
     def aligned_str(self) -> str:

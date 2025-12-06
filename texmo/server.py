@@ -84,7 +84,6 @@ def _get_flags(enum, params: dict) -> list:
     return vals
 
 
-
 class SearchServer(object):
     def __init__(self, db: ResultDB, template: Template, train_time: tuple[float, float], default_spec: str):
         self.db: ResultDB = db

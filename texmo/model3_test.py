@@ -78,6 +78,8 @@ def test_neighbors():
             "tokens.128.cw.bh-pos.16-emb.64|gru.64-dense.64.relu",
             "tokens.128.cw.bh-pos.32-emb.64.norm|gru.64-dense.64.relu",
             "tokens.128.cw.bh-pos.8-emb.64.norm|gru.64-dense.64.relu",
+            'tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-norm-dense.64.relu',
+            'tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-norm',
             "tokens.128.raw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu",
             "tokens.256.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu",
             "tokens.64.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu",

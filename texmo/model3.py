@@ -56,18 +56,25 @@ class Model3(object):
     def __str__(self) -> str:
         return str(self.input) + "|" + "-".join(map(str, self.layers))
 
-    def __eq__(self, other: Self) -> bool:
+    def __eq__(self, other: Model3) -> bool:
         return str(self) == str(other)
 
     def is_valid(self) -> bool:
         if not self.input.is_valid():
             return False
+        
+        if self.layers and self.layers[0] == 'norm': return False
+
         for layer1, layer2 in zip(self.layers[:-1], self.layers[1:]):
             if (
                 layer1.name in _SUFFIX_LIKE_LAYERS
                 and layer2.name in _SUFFIX_LIKE_LAYERS
             ):
                 return False
+            
+            if layer1.name in ('suffix', 'norm') and layer2.name == 'norm':
+                return False
+            
         return all(l.is_valid() for l in self.layers)
 
     @property
@@ -101,9 +108,13 @@ class Model3(object):
         for i in range(len(layers_str) + 1):
             yield input_spec + '|' + '-'.join(chain(layers_str[:i], ('suffix.2',), layers_str[i:]))
 
-        # Removing suffix.2 at any position
+        # Adding norm
+        for i in range(1, len(layers_str) + 1):
+            yield input_spec + '|' + '-'.join(chain(layers_str[:i], ('norm',), layers_str[i:]))
+
+        # Removing suffix.2 and norm at any position
         for i in range(len(layers_str)):
-            if layers_str[i] == 'suffix.2':
+            if layers_str[i] in ('suffix.2', 'norm'):
                 yield input_spec + '|' + '-'.join(chain(layers_str[:i], layers_str[i+1:]))
 
         # Add layer to the end

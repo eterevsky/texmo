@@ -1,20 +1,66 @@
 import argparse
+import io
 import logging
 import os
 import threading
 from queue import Queue
+import base64
 
+import matplotlib
+import matplotlib.pyplot as plt
 from flask import (Flask, make_response, redirect, render_template, request,
                    send_from_directory)
 
 from .common import console, ttoa3
-from .configuration2 import Bounds, Configuration2, Template, default_from_template, Precision, Optimizer
+from .configuration2 import (Bounds, Configuration2, Optimizer, Precision,
+                             Template, default_from_template)
 from .latency import get_report, timer
 from .report import generate_report_by_weight
 from .resultdb import ResultDB
 from .run import Run
 from .search2 import Search
 from .tokens import set_tokens_dir
+
+matplotlib.use('Agg')
+
+
+def build_graph(confs: list[Configuration2]) -> bytes:
+    plt.ioff()
+    plt.clf()
+
+    _fig, ax = plt.subplots()
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.yaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    ax.yaxis.set_minor_formatter(matplotlib.ticker.ScalarFormatter())
+
+    xs = []
+    ys = []
+
+    prev_x = None
+    prev_y = None
+
+    for conf_score in confs:
+        if prev_y is not None:
+            xs.append(conf_score.conf.model.weights - 0.1)
+            ys.append(prev_y)
+
+        xs.append(conf_score.conf.model.weights)
+        ys.append(conf_score.median_score)
+
+        prev_x = conf_score.conf.model.weights
+        prev_y = conf_score.median_score
+
+    if prev_x is not None:
+        xs.append(prev_x * 2)
+        ys.append(prev_y)
+
+    plt.plot(xs, ys)
+    plt.xlabel('weights')
+    plt.ylabel('enthropy, b/B')
+    f = io.BytesIO()
+    plt.savefig(f, format='png')
+    return f.getvalue()
 
 
 class SearchThread(threading.Thread):
@@ -123,8 +169,13 @@ class SearchServer(object):
         for o in Optimizer:
             optimizer[o] = o in self.template.optimizer
 
+        top_confs = list(self.db.top_confs_global(self.template))
+
+        console.log('top_confs:', top_confs)
+        graph = build_graph(top_confs)
+
         top = []
-        for conf_score in self.db.top_confs_global(self.template):
+        for conf_score in top_confs:
             top.append({
                 'spec': str(conf_score.conf.model),
                 'weights': conf_score.conf.model.weights,
@@ -153,6 +204,7 @@ class SearchServer(object):
             steps=_render_bounds(self.template.steps),
             time=train_time,
             top=top,
+            graph=base64.b64encode(graph).decode('ascii')
         )
 
     def update(self, params):

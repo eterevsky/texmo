@@ -1,6 +1,8 @@
+import jax
 import jax.numpy as jnp
 
-from ..layer import Layer, LayerState, LayerWeights 
+from ..layer import Layer, LayerState, LayerWeights
+from ..prng import Rng
 from .registry import layer_cls
 
 

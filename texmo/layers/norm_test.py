@@ -13,7 +13,7 @@ def test_step():
     assert np.linalg.norm(out - np.array([0.4472136, 0.89442719])) < 1E-5
 
 
-def test_firward_batch():
+def test_forward_batch():
     layer = Norm(input_shape=(2,))
 
     input = np.array([[[1, 2], [2, 3], [0, 0]], [[-1, 2], [2, -3], [0, 0]]])

@@ -171,7 +171,6 @@ class SearchServer(object):
 
         top_confs = list(self.db.top_confs_global(self.template))
 
-        console.log('top_confs:', top_confs)
         graph = build_graph(top_confs)
 
         top = []

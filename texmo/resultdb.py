@@ -246,7 +246,7 @@ class ResultDB(object):
 
         if not exists:
             schema_path = os.path.join(
-                os.path.dirname(__file__), 'persistent-db.sql'
+                os.path.dirname(__file__), 'db.sql'
             )
             with open(schema_path) as schema:
                 self._db.executescript(schema.read())

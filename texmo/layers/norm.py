@@ -25,7 +25,7 @@ class Norm(Layer):
         return 0
     
     def neighbors(self):
-        pass
+        return []
     
     def init_weights(self, _rng: Rng, _init_scale: float, dtype) -> LayerWeights:
         return None

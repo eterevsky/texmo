@@ -12,16 +12,15 @@ from .run import Run
 
 
 def top_confs_report(
-    confs: list[ConfScore], max_weights: int, max_time: float | None, system: str | None
+    confs: list[ConfScore], max_weights: int, max_time: Optional[float], system: Optional[str]
 ) -> str:
     sys = "" if system is None else f" ({system})"
     t = "" if max_time is None else f" T ≤ {ttoa3(max_time)}"
     lines = [f"Top confs W ≤ {itoa3(max_weights)}{t}{sys}:"]
     for c in confs:
-        t = "?       " if c.median_time is None else "{:8}".format(ttoa3(c.median_time))
-        lines.append(
-            f"{c.median_score:.4f} ({c.num_runs})  {t}  {c.conf.aligned_str()}"
-        )
+        t = '   ?    ' if c.median_time is None else f'{c.median_time:7.3f}s'
+        score_runs = f'{c.median_score:.4f} ({c.num_runs})'
+        lines.append(f'    {score_runs:<11} {t}  {c.conf.aligned_str()}')
     return "\n".join(lines)
 
 
@@ -40,7 +39,6 @@ def top_confs_report_rich(
     table.add_column('Steps', justify='right')
     table.add_column('Loss')
     table.add_column('Time', justify='right')
-
 
     for c in confs:
         t = '?' if c.median_time is None else f'{c.median_time:.3f}'
@@ -169,7 +167,8 @@ class Search(object):
                 return self._template.max_weights.min
             if self._template.max_weights.max <= maxw:
                 maxw = self._template.max_weights.max
-            l = random.uniform(log2(self._template.max_weights.min), log2(maxw))
+            l = random.uniform(
+                log2(self._template.max_weights.min), log2(maxw))
             return round(2**l)
 
     def _select_untimed(self, t: float, max_weights: int, system: str):
@@ -196,8 +195,9 @@ class Search(object):
                     selected = i
                     break
             if selected is not None:
-                console.log(top_confs_report_rich(confs=confs, max_weights=max_weights, max_time=t, system=system))
-                console.log('Selecting conf', i)
+                logging.info(top_confs_report(
+                    confs=confs, max_weights=max_weights, max_time=t, system=system))
+                logging.info('Selecting conf %d', i)
                 return confs[selected].conf
 
     def _select_neighbor_fewest_runs(self, conf_id: int, system: str) -> Optional[ConfScore]:
@@ -218,7 +218,8 @@ class Search(object):
             )
             if not top_confs:
                 return None
-            console.log(top_confs_report_rich(confs=top_confs, max_weights=max_weights, max_time=t, system=system))
+            logging.info(top_confs_report(confs=top_confs,
+                         max_weights=max_weights, max_time=t, system=system))
 
             have_confs = 10
             min_runs_neighbor = []
@@ -257,8 +258,8 @@ class Search(object):
 
                         neighbor = min_runs_neighbor[j]
                         if neighbor.num_runs < min_neighbor:
-                            console.log('Getting neighbor of conf', j, 'because it has',
-                                        neighbor.num_runs, 'runs <', min_neighbor)
+                            logging.info(
+                                f'Getting neighbor of conf {j} because it has {neighbor.num_runs} runs < {min_neighbor}')
                             return neighbor.conf
 
     def select_conf(self, system: str) -> tuple[Configuration2, float]:
@@ -274,14 +275,15 @@ class Search(object):
 
             conf = self._select_untimed(t, max_weights, system)
             if conf is not None:
-                console.log(f'Conf for {system}: {conf}, TL: {ttoa3(tmax)}')
+                logging.info(f'Conf for {system}: {conf}, TL: {ttoa3(tmax)}')
                 return conf, tmax
 
             conf = self._select_top_neighbor(t, max_weights, system)
             if conf is not None:
                 tl = min(4*t, tmax)
-                console.log(f'Conf for {system}: {conf}, TL: {ttoa3(tl)}')
+                logging.info(f'Conf for {system}: {conf}, TL: {ttoa3(tl)}')
                 return conf, tl
 
-            console.log(f'Conf for {system}: {self._init_conf} (default), TL: {ttoa3(tmax)}')
+            logging.info(
+                f'Conf for {system}: {self._init_conf} (default), TL: {ttoa3(tmax)}')
             return self._init_conf, tmax

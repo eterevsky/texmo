@@ -239,7 +239,7 @@ class ResultDB(object):
             path = ':memory:'
         exists = path != ':memory:' and os.path.exists(path)
         if path != ':memory:':
-            console.log(f'Connecting to results DB {path}')
+            logging.info(f'Connecting to results DB {path}')
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.create_function('REGEXP', 2, _regexp)

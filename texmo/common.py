@@ -8,16 +8,16 @@ from rich.logging import RichHandler
 console = Console()
 
 
-# logging.basicConfig(
-#         format='%(levelname)s [%(asctime)s.%(msecs)03d %(filename)s:%(lineno)d] %(message)s',
-#         level=logging.INFO,
-#         datefmt='%H:%M:%S')
 logging.basicConfig(
+        format='%(levelname).1s [%(asctime)s.%(msecs)03d %(filename)s:%(lineno)d] %(message)s',
         level=logging.INFO,
-        format="%(message)s",
-        datefmt="[%X]",
-        handlers=[RichHandler(console=console, show_level=False)]
-    )
+        datefmt='%H:%M:%S')
+# logging.basicConfig(
+#         level=logging.INFO,
+#         format="%(message)s",
+#         datefmt="[%X]",
+#         handlers=[RichHandler(console=console, show_level=False)]
+#     )
 
 
 INF = float("inf")

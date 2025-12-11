@@ -167,16 +167,14 @@ class Configuration2(object):
 
         return (
             f'{model} ({itoa3(self.model.weights)})  {self.precision}   '
-            + f'LEN{itoa3(self.length)}  '
-            + f'B{itoa3(self.batch)}  '
+            + f'{self.batch}×{self.length}  S{self.steps}  '
             + self.learning_str
         )
 
     def aligned_str(self) -> str:
         model = str(self.model)
         return (
-            f'L{itoa3_aligned(self.length)} B{itoa3_aligned(self.batch)} '
-            + f'{self.optimizer.letter}{self.lr:.4f}*{self.decay:.4f}   S{itoa3_aligned(self.steps)}  '
+            f'{self.batch:>5d}×{self.length:<5d}  {self.learning_str:<10} S{self.steps:>5d}  '
             + f'{self.precision}  {model} ({self.model.weights})'
         )
 
@@ -387,7 +385,6 @@ class Template(object):
         assert type(value) is list
         assert len(value) > 0
         assert type(value[0]) is Optimizer
-        console.log('update_optimizer', value)
         self.optimizer = value
 
     def update_lr(self, value: Optional[str]):
@@ -433,11 +430,8 @@ class Template(object):
             yield conf.replace(length=length)
         for decay in self.decay.neighbors(conf.decay):
             yield conf.replace(decay=decay)
-        # if str(conf.model) == 'bits.1+bp|':
-        console.log('!!!', conf.model)
         for model in conf.model.neighbors():
             match = self.match_model(model)
-            console.log('->', model, match)
             if self.match_model(model):
                 yield conf.replace(model=model)
 

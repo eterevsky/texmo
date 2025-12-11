@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from flask import (Flask, make_response, redirect, render_template, request,
                    send_from_directory)
 
-from .common import console, ttoa3
+from .common import ttoa3
 from .configuration2 import (Bounds, Configuration2, Optimizer, Precision,
                              Template, default_from_template)
 from .latency import get_report, timer
@@ -230,7 +230,7 @@ class SearchServer(object):
         self.requests_queue.put(("select", system))
 
         conf, soft_tl = response_queue.get()
-        console.log(f"Sending conf for system {system}: {conf}")
+        logging.info(f"Sending conf for system {system}: {conf}")
         result = {
             "system": system,
             "conf": conf.to_dict(),
@@ -241,10 +241,10 @@ class SearchServer(object):
     def add_run(self, params):
         run = Run.from_dict(params["run"])
         if run.loss is None:
-            console.log('run.loss is None!')
+            logging.info('run.loss is None!')
             return
         conf = Configuration2.from_dict(params["conf"])
-        console.log(f"Adding run: {conf} - {run}")
+        logging.info(f"Adding run: {conf} - {run}")
         self.requests_queue.put(("add", (conf, run)))
 
     def report(self, args):

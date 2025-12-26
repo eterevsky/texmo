@@ -15,7 +15,7 @@ from rich import print as pprint
 from jax.errors import JaxRuntimeError
 
 from . import latency
-from .common import INF, ttoa3, console, is_power2_int
+from .common import INF, ttoa3, is_power2_int
 from .configuration2 import Configuration2, Precision
 from .dataset import DataSet, DataSetWrapper
 from .model3 import Model3, Weights
@@ -93,7 +93,8 @@ class Manager(object):
         self.dataset: DataSet = dataset
 
         if weights is None:
-            weights = self.model.init_weights(self._rng, 1.0, dtype=conf.precision.dtype)
+            weights = self.model.init_weights(
+                self._rng, 1.0, dtype=conf.precision.dtype)
         self.weights: Weights = weights
         # Only layers starting from this one will be trained
         self.train_from: int = 0
@@ -165,7 +166,8 @@ class Manager(object):
             spec = json.load(f)
 
         conf = Configuration2.from_dict(spec['conf'])
-        weights = deserialize_weights(spec['weights'], dtype=conf.precision.dtype)
+        weights = deserialize_weights(
+            spec['weights'], dtype=conf.precision.dtype)
 
         manager = Manager(
             conf,
@@ -224,28 +226,31 @@ class Manager(object):
         if self.conf.decay == 1:
             lr = self.conf.lr
         else:
-            lr = lambda count: self.conf.lr * self.conf.decay ** (count / self.conf.steps)
+            def lr(count): return self.conf.lr * \
+                self.conf.decay ** (count / self.conf.steps)
 
         match self.conf.optimizer:
             case 'adam':
-                mask_bias = lambda tree: jax.tree_util.tree_map(
+                def mask_bias(tree): return jax.tree_util.tree_map(
                     lambda g: len(g.shape) > 1, tree
                 )
 
                 eps = 1E-4 if self.conf.precision == Precision.FP16 else 1E-8
-                optimizer = optax.adamw(lr, mask=mask_bias, weight_decay=0.01, eps=eps)
+                optimizer = optax.adamw(
+                    lr, mask=mask_bias, weight_decay=0.01, eps=eps)
             case 'fromage':
                 optimizer = optax.fromage(lr)
             case 'default':
                 raise RuntimeError(f'Unknown optimizer: {self.conf.optimizer}')
-                
+
         return optax.chain(optax.clip_by_global_norm(1.0), optimizer)
 
     def init(self, quiet=False, training=True):
-        console.log(self.conf, highlight=False)
+        logging.info(f'{self.conf}')
 
         if self.train_from == 0:
-            self._loss_avg = lambda w, batch: self.model.loss_batch(w, batch, self.dtype)
+            self._loss_avg = lambda w, batch: self.model.loss_batch(
+                w, batch, self.dtype)
         else:
             self._loss_avg = lambda w, batch: self.model.loss_batch(
                 self.weights[: self.train_from] + w, batch, self.dtype
@@ -260,7 +265,7 @@ class Manager(object):
             self.optimizer = self._build_optimizer()
 
             self.opt_state = self.optimizer.init(
-                self.weights[self.train_from :]
+                self.weights[self.train_from:]
             )
             self.run = Run(loss_trend=LossTrend(), system=self._system)
             self._init_training_data()
@@ -269,10 +274,11 @@ class Manager(object):
             self.optimizer = None
             self.opt_state = None
 
-    def _eval(self, xs, lengths, weights = None):
+    def _eval(self, xs, lengths, weights=None):
         lengths = np.array(lengths)
 
-        if weights is None: weights = self.weights
+        if weights is None:
+            weights = self.weights
 
         assert self.tokenizer is not None
 
@@ -281,7 +287,7 @@ class Manager(object):
         shards = 4
         while shards <= xs.shape[0]:
             if shards > 4:
-                console.log('Evaluating with', shards, 'shards')
+                logging.info(f'Evaluating with {shards} shards')
             shard_size = xs.shape[0] // shards
 
             loss = 0
@@ -330,7 +336,8 @@ class Manager(object):
                 )
                 loss = self._eval(batch, lengths, weights=checkpoint.weights)
                 checkpoint.loss = loss
-                console.log(f'Evaluating checkpoint at step {checkpoint.step}: loss {loss:.4f}')
+                logging.info(
+                    f'Evaluating checkpoint at step {checkpoint.step}: loss {loss:.4f}')
 
             batch, lengths = self.dataset.sample_bytes(
                 nbytes=self.test_sample_len,
@@ -365,7 +372,8 @@ class Manager(object):
         self._rng = Rng()
         state = self.model.init_state(self.weights, dtype=self.dtype)
         for c in prefix[:-1]:
-            state, _ = self.model.step(self.weights, state, c, dtype=self.dtype)
+            state, _ = self.model.step(
+                self.weights, state, c, dtype=self.dtype)
 
         c = prefix[-1]
         out = []
@@ -377,14 +385,14 @@ class Manager(object):
         return out
 
     def train_step(self, xs):
-        trainable_weights = self.weights[self.train_from :]
+        trainable_weights = self.weights[self.train_from:]
         loss, grads = self._loss_grad(trainable_weights, xs)
 
         updates, self.opt_state = self.optimizer.update(
             grads, self.opt_state, trainable_weights
         )
         trainable_weights = optax.apply_updates(trainable_weights, updates)
-        self.weights[self.train_from :] = trainable_weights
+        self.weights[self.train_from:] = trainable_weights
 
         loss = float(loss)
         self.run.add_step(loss)
@@ -424,20 +432,22 @@ class Manager(object):
         t = '' if time_limit is None else f' {time_limit} s'
         s = '' if steps > 1e10 else f' {steps} steps'
 
-        console.log(f'Training for{t}{s}')
+        logging.info(f'Training for{t}{s}')
         deadline = INF
         soft_deadline = INF
         start_time = None
 
         while self.step < steps:
             if perf_counter() > deadline:
-                console.log('Stopped at step', self.step, 'due to hard time limit', ttoa3(time_limit))
+                logging.info(
+                    f'Stopped at step {self.step} due to hard time limit {ttoa3(time_limit)}')
                 break
             if (
                 self.step & (self.step - 1) == 0
                 and perf_counter() > soft_deadline
             ):
-                console.log('Stopped at step', self.step, '/', steps, 'due to soft time limit', ttoa3(soft_tl))
+                logging.info(
+                    'Stopped at step {self.step}/{steps} due to soft time limit {ttoa3(soft_tl)}')
                 break
 
             batch = self._get_batch()
@@ -447,7 +457,8 @@ class Manager(object):
 
             if math.isnan(loss) or math.isinf(loss):
                 # logging.warning(f'Loss is {loss}, stopping training')
-                console.log('Stopping training, loss:', loss / self.tokenizer.tokenset.avg_bytes_per_token)
+                logging.info(
+                    f'Stopping training, loss: {loss / self.tokenizer.tokenset.avg_bytes_per_token}')
                 # Don't register the training time if it diverged.
                 start_time = None
                 break
@@ -478,8 +489,10 @@ class Manager(object):
             t = perf_counter() - start_time
             if t > 1 and 2 <= self.step < steps and is_power2_int(self.step):
                 byte_loss = loss / self.tokenizer.tokenset.avg_bytes_per_token
-                console.log(f'Saving checkpoint for step {self.step}, train loss: {byte_loss:.3f}')
-                self.run.add_checkpoint(self.step, t, jax.device_get(self.weights))
+                logging.info(
+                    f'Saving checkpoint for step {self.step}, train loss: {byte_loss:.3f}')
+                self.run.add_checkpoint(
+                    self.step, t, jax.device_get(self.weights))
 
         total_time = (
             None if start_time is None else perf_counter() - start_time
@@ -497,7 +510,7 @@ class Manager(object):
         log,
         quiet: bool = False,
         soft_tl: Optional[float] = None,
-        weights = None,
+        weights=None,
     ) -> tuple[Run, Weights, Configuration2]:
         """Train a model and evaluate it.
 
@@ -510,7 +523,7 @@ class Manager(object):
             weights = self.weights
 
         try:
-            train_time, final_conf  = self.train(
+            train_time, final_conf = self.train(
                 steps,
                 time_limit,
                 temp_steps,
@@ -538,7 +551,8 @@ class Manager(object):
             steps_log = f'  after {final_conf.steps} steps'
         else:
             steps_log = ''
-        console.log(f'loss {eval_loss:.4f} b/byte  T = {ttoa3(train_time)}{steps_log}')
+        logging.info(
+            f'loss {eval_loss:.4f} b/byte  T = {ttoa3(train_time)}{steps_log}')
 
         return (self.run, self.weights, final_conf)
 

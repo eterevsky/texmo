@@ -5,7 +5,7 @@ from rich.table import Table
 from typing import Optional
 
 from . import latency
-from .common import INF, itoa3, ttoa3, console
+from .common import INF, itoa3, ttoa3
 from .configuration2 import Configuration2, Template, conf_neighbors
 from .resultdb import ResultDB, ConfScore
 from .run import Run
@@ -230,7 +230,7 @@ class Search(object):
                     start = end // 3
 
                     if end > have_confs:
-                        console.log('Getting top confs up to ', end)
+                        logging.info(f'Getting top confs up to {end}')
                         top_confs = list(
                             self._db.top_confs_for_system(
                                 max_time=t, max_weights=max_weights, system=system,
@@ -241,8 +241,8 @@ class Search(object):
 
                     for j in range(start, min(end, len(top_confs))):
                         if top_confs[j].num_runs < min_self:
-                            console.log('Getting conf', j, 'because it has',
-                                        top_confs[j].num_runs, 'runs <', min_self)
+                            logging.info(
+                                f'Getting conf {j} because it has {top_confs[j].num_runs} runs < {min_self}')
                             return top_confs[j].conf
 
                     if min_neighbor == 0:

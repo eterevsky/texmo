@@ -8,7 +8,7 @@ from rich import print as pprint
 from queue import Queue
 from threading import Thread, Lock
 
-from .common import itoa3, console
+from .common import itoa3
 from .tokens import get_tokenizer
 from .tokens.processing import process
 from .latency import timer
@@ -200,7 +200,7 @@ class DataSetWrapper(object):
 
             with self.results_queues_lock:
                 if key not in self.results_queues:
-                    console.log('Initializing the data queue for', key)
+                    logging.info(f'Initializing the data queue for {key}')
                     self.results_queues[key] = Queue()
                     self.jobs_queue.put(key)
                     self.jobs_queue.put(key)

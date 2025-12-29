@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+from math import log2
 
 from ..common import is_power2_int
 from ..layer import Layer, LayerState, LayerWeights
@@ -21,6 +22,15 @@ class Lstm(Layer):
 
     def is_valid(self) -> bool:
         return is_power2_int(self.size)
+
+    def neighbors(self):
+        for neighbor in super().neighbors():
+            yield neighbor
+
+        n = int(log2(self.size))
+        heads = 2 ** ((n + 2) // 3)
+
+        yield f'rwkv.{self.size}.{heads}'
 
     @property
     def weights(self) -> int:

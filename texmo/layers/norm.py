@@ -13,7 +13,7 @@ class Norm(Layer):
     def __init__(self, input_shape=None):
         super().__init__(input_shape=input_shape)
         self.output_shape = self.input_shape
-    
+
     def __str__(self) -> str:
         return 'norm'
 
@@ -23,10 +23,10 @@ class Norm(Layer):
     @property
     def weights(self) -> int:
         return 0
-    
+
     def neighbors(self):
         return []
-    
+
     def init_weights(self, _rng: Rng, _init_scale: float, dtype) -> LayerWeights:
         return None
 
@@ -38,10 +38,7 @@ class Norm(Layer):
     ) -> tuple[LayerState, jnp.ndarray]:
         input = input.flatten()
         norm = jnp.linalg.norm(input)
-        if norm == 0:
-            output = input
-        else:
-            output = input / norm
+        output = input / (norm + 1E-5)
         return _state, output
 
     def forward_batch(

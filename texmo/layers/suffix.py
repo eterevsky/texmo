@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 
-from ..common import is_power2_int, power2_neighbors
+from ..common import is_power2_int
 from ..layer import Layer, LayerState, LayerWeights
 from ..prng import Rng
 from .registry import layer_cls

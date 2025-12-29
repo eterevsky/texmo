@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from rich import print as pprint
@@ -14,6 +15,7 @@ from .tokens import TokenSet, get_tokenizer, set_tokens_dir
 
 
 def show_loss_graph(manager: Manager, output_dir: str):
+    matplotlib.use('TkAgg')
     run = manager.run
 
     scaled_step_loss = np.array(run.step_loss) / manager.tokenizer.tokenset.avg_bytes_per_token

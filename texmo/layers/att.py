@@ -224,7 +224,7 @@ class Attention(Layer):
 
         return attn_value.reshape(input.shape[0], input.shape[1], -1)
 
-    def forward_batch(self, weights: LayerWeights, input: jax.Array) -> jax.Array:
+    def forward_batch(self, weights: LayerWeights, input: jax.Array, dtype) -> jax.Array:
         """
         Args:
             weights: a single set of weights

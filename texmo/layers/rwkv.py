@@ -36,9 +36,11 @@ class Rwkv(Layer):
 
     def neighbors(self):
         yield f'rwkv.{self.size}.{self.heads*2}'
-        yield f'rwkv.{self.size}.{self.heads//2}'
+	if self.heads > 1:
+	        yield f'rwkv.{self.size}.{self.heads//2}'
         yield f'rwkv.{self.size*2}.{self.heads}'
-        yield f'rwkv.{self.size//2}.{self.heads}'
+	if self.size > 2:
+	        yield f'rwkv.{self.size//2}.{self.heads}'
 
         n = int(log2(self.size))
         default_heads = 2 ** ((n + 2) // 3)

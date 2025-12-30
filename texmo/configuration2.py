@@ -499,18 +499,14 @@ def default_from_template(
                             'gru.1',
                             'lstm.1',
                         ):
+                            if found: break
                             full_spec = input_spec + '|' + layer
                             model = build_model(full_spec)
-                            logging.info(f'Trying {full_spec} as default')
                             if not model.is_valid():
-                                logging.info('Invalid')
                                 continue
                             if template.match_model(model):
-                                logging.info('Selected')
                                 spec = str(model)
                                 found = True
-                            else:
-                                logging.info('Desn\'t match')
 
     if spec is not None:
         return Configuration2(

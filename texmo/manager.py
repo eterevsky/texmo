@@ -447,7 +447,7 @@ class Manager(object):
                 and perf_counter() > soft_deadline
             ):
                 logging.info(
-                    'Stopped at step {self.step}/{steps} due to soft time limit {ttoa3(soft_tl)}')
+                    f'Stopped at step {self.step}/{steps} due to soft time limit {ttoa3(soft_tl)}')
                 break
 
             batch = self._get_batch()

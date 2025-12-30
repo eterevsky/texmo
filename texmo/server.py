@@ -159,7 +159,12 @@ class SearchServer(object):
         self.requests_queue.put(("stop", None))
 
     def index(self):
-        pattern = self.template.regex.pattern if self.template.regex else ""
+        if self.template.spec:
+            pattern = self.template.spec
+        elif self.template.regex:
+            pattern = self.template.regex.pattern
+        else:
+            pattern = ''
 
         precision = {}
         for p in Precision:

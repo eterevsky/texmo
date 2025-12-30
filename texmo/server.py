@@ -339,10 +339,10 @@ def init_args(parser: argparse.ArgumentParser, config):
     # Template args
     parser.add_argument(
         "-s",
-        "--spec-regex",
+        "--spec",
         type=str,
         default=None,
-        help="regex covering the acceptable specs",
+        help="regex covering the acceptable specs or an exact spec",
     )
     parser.add_argument(
         "-p",

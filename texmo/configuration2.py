@@ -338,7 +338,7 @@ class Template(object):
             optimizer = list(map(Optimizer, args.optimizer.split(',')))
 
         return Template(
-            spec_regex=args.spec_regex,
+            spec=args.spec,
             lr=_parse_interval(args.lr, float),
             length=_parse_interval(args.length, int),
             batch=_parse_interval(args.batch, int),

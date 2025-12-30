@@ -18,7 +18,7 @@ from .prng import Rng
 Self = ()
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
-_SUFFIX_LIKE_LAYERS = ("suffix", "attn", "attnmq")
+_SUFFIX_LIKE_LAYERS = ("suffix", "attn", "attnmq", 's4')
 
 
 Weights = list[LayerWeights]
@@ -36,7 +36,7 @@ class Model3(object):
             input_spec, layers_spec = spec_parts
         else:
             raise AssertionError("Model spec can't contain more than one |")
-        
+
         if input_spec.startswith('bits') or input_spec.startswith('bytes'):
             self.input = InputBits.from_spec(input_spec)
         else:
@@ -62,7 +62,7 @@ class Model3(object):
     def is_valid(self) -> bool:
         if not self.input.is_valid():
             return False
-        
+
         if self.layers and self.layers[0] == 'norm': return False
 
         for layer1, layer2 in zip(self.layers[:-1], self.layers[1:]):
@@ -71,10 +71,10 @@ class Model3(object):
                 and layer2.name in _SUFFIX_LIKE_LAYERS
             ):
                 return False
-            
+
             if layer1.name in ('suffix', 'norm') and layer2.name == 'norm':
                 return False
-            
+
         return all(l.is_valid() for l in self.layers)
 
     @property
@@ -107,6 +107,10 @@ class Model3(object):
         # Adding suffix.2 at any position
         for i in range(len(layers_str) + 1):
             yield input_spec + '|' + '-'.join(chain(layers_str[:i], ('suffix.2',), layers_str[i:]))
+
+        # Adding s4.1 at any position
+        for i in range(len(layers_str) + 1):
+            yield input_spec + '|' + '-'.join(chain(layers_str[:i], ('s4.1',), layers_str[i:]))
 
         # Adding norm
         for i in range(1, len(layers_str) + 1):

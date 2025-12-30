@@ -39,7 +39,7 @@ class S4(Layer):
 
     def init_weights(self, rng: Rng, init_scale: float, dtype) -> LayerWeights:
         return {
-            'mix': rng.he((self.length, self.input_size), dtype=dtype) * init_scale
+            'mix': rng.he((self.length, self.input_size), input_size=self.length*self.input_size, dtype=dtype) * 0.1
         }
 
     def init_state(self, _weights, dtype) -> LayerState:

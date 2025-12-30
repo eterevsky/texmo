@@ -212,7 +212,7 @@ class SearchServer(object):
         )
 
     def update(self, params):
-        self.template.update_regex(params["spec"])
+        self.template.update_spec(params["spec"])
         self.template.update_weights(params['weights'])
         self.template.update_length(params['length'])
         self.template.update_batch(params['batch'])

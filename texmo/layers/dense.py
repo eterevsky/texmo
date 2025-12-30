@@ -7,13 +7,6 @@ from ..prng import Rng
 from .registry import layer_cls
 
 
-# dense.128.relu batch=128 16 seconds:
-#
-# auto use_step_batch=False -> 246
-# auto use_step_batch=True -> 252
-# custom step_batch -> 262
-# custom forward -> 333
-# custom forward_batch -> 342
 @layer_cls
 class Dense(Layer):
     name = "dense"

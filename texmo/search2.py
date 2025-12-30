@@ -280,9 +280,9 @@ class Search(object):
 
             conf = self._select_top_neighbor(t, max_weights, system)
             if conf is not None:
-                tl = min(4*t, tmax)
-                logging.info(f'Conf for {system}: {conf}, TL: {ttoa3(tl)}')
-                return conf, tl
+                # tl = min(4*t, tmax)
+                logging.info(f'Conf for {system}: {conf}, no TL')
+                return conf, INF
 
             logging.info(
                 f'Conf for {system}: {self._init_conf} (default), TL: {ttoa3(tmax)}')

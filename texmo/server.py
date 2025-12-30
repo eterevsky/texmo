@@ -221,6 +221,7 @@ class SearchServer(object):
         self.template.update_lr(params['lr'])
         self.template.update_decay(params['decay'])
         self.template.update_steps(params['steps'])
+        logging.info(f'New template: {self.template}')
         return redirect("/")
 
     def select(self, args):

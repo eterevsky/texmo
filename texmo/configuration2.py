@@ -1,5 +1,6 @@
 import argparse
 import enum
+import logging
 import re
 from typing import Optional, Iterable
 import math
@@ -489,7 +490,7 @@ def default_from_template(
                     for pos in ('', '+bp', '+pos'):
                         if found: break
                         input_spec = tokens + oh + pos
-                        for layers in (
+                        for layer in (
                             '',
                             'dense.1.gelu',
                             'rec.1.tanh',
@@ -498,13 +499,18 @@ def default_from_template(
                             'gru.1',
                             'lstm.1',
                         ):
-                            full_spec = input_spec + '|' + layers
+                            full_spec = input_spec + '|' + layer
                             model = build_model(full_spec)
+                            logging.info(f'Trying {full_spec} as default')
                             if not model.is_valid():
+                                logging.info('Invalid')
                                 continue
                             if template.match_model(model):
+                                logging.info('Selected')
                                 spec = str(model)
                                 found = True
+                            else:
+                                logging.info('Desn\'t match')
 
     if spec is not None:
         return Configuration2(

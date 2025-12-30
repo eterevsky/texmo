@@ -39,6 +39,9 @@ def _build_loss_trend(step_loss, model_version, params):
 def _make_template_conditions(template: Template) -> tuple[list[str], dict]:
     conditions = []
     params = {}
+    if template.spec is not None:
+        conditions.appen('spec = :spec')
+        params['spec'] = template.spec
     if template.regex is not None:
         conditions.append('spec REGEXP :regex')
         params['regex'] = template.regex.pattern

@@ -299,7 +299,7 @@ def _parse_interval(arg: str, num_type: type) -> tuple:
 class Template(object):
     def __init__(
         self,
-        spec_regex: Optional[str],
+        spec: Optional[str],  # Exact match or a regex
         lr: Optional[float | tuple[float, float]],
         length: Limits,
         batch: Limits,
@@ -309,7 +309,7 @@ class Template(object):
         optimizer: list[Optimizer],
         decay: Optional[float | tuple[float, float]]
     ):
-        self.regex = re.compile(spec_regex) if spec_regex else None
+        self.update_spec(spec)
         self.max_weights = Bounds(max_weights, 16)
 
         self.length = Bounds(length, 1)
@@ -352,8 +352,9 @@ class Template(object):
     def __str__(self):
         precision = ','.join(map(str, self.precision))
         optimizer = ','.join(map(str, self.optimizer))
+        spec = self.spec if self.spec is not None else self.regex
         return (
-            f'Template({self.regex}, '
+            f'Template(spec={repr(spec)}, '
             + f'precision=\'{precision}\', '
             + f'lr={self.lr}, length={self.length}, '
             + f'batch={self.batch}, '
@@ -363,8 +364,21 @@ class Template(object):
             + f'decay={self.decay})'
         )
 
-    def update_regex(self, regex: Optional[str]):
-        self.regex = re.compile(regex) if regex else None
+    def update_spec(self, spec: Optional[str]):
+        if spec is None:
+            self.regex = None
+            self.spec = None
+        else:
+            try:
+                model = build_model(spec)
+            except Exception:
+                model = None
+            if model is None:
+                self.regex = re.compile(spec)
+                self.spec = None
+            else:
+                self.regex = None
+                self.spec = spec
 
     def update_weights(self, weights: Optional[str]):
         self.max_weights =  Bounds(_parse_interval(weights, int), 2)
@@ -399,7 +413,11 @@ class Template(object):
     def match_model(self, model: Model3) -> bool:
         if model.weights > self.max_weights.max:
             return False
-        return self.regex is None or bool(self.regex.fullmatch(str(model)))
+        if self.spec is not None:
+            return self.spec == str(model)
+        if self.regex is not None:
+            return bool(self.regex.fullmatch(str(model)))
+        return True
 
     def match(self, conf: Configuration2) -> bool:
         return (

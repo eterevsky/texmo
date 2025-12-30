@@ -19,7 +19,7 @@ set_tokens_dir(os.path.join(os.path.dirname(__file__), "../tokens"))
 
 def test_conf_neighbors():
     template = Template(
-        spec_regex=r"tokens\.(32|64)\.cw\.bh\|(dense|rec)\.\d+\.relu(-suffix\.\d+)?",
+        spec=r"tokens\.(32|64)\.cw\.bh\|(dense|rec)\.\d+\.relu(-suffix\.\d+)?",
         lr=None,
         length=(128, 128),
         batch=(128, 256),
@@ -54,7 +54,7 @@ def test_conf_neighbors():
 
 def test_dense_layer_neighbor():
     template = Template(
-        spec_regex=r"tokens\.32\.cw\.bh\|dense\.\d+\.\w+",
+        spec=r"tokens\.32\.cw\.bh\|dense\.\d+\.\w+",
         lr=(0.25, 0.25),
         length=(128, 128),
         batch=(128, 128),
@@ -85,7 +85,7 @@ def test_dense_layer_neighbor():
 
 def test_conf_neighbors_suffix():
     template = Template(
-        spec_regex=r"tokens\.(32|64)\.cw\.bh\|suffix\.\d+",
+        spec=r"tokens\.(32|64)\.cw\.bh\|suffix\.\d+",
         lr=None,
         length=(128, 128),
         batch=(128, 256),
@@ -112,6 +112,36 @@ def test_conf_neighbors_suffix():
             conf.replace(lr=0.5),
             conf.replace(batch=128),
             conf.replace(model=build_model("tokens.64.cw.bh|suffix.2")),
+            conf.replace(decay=1/2),
+        }
+
+def test_conf_neighbors_suffix_exact():
+    template = Template(
+        spec='tokens.32.cw.bh|suffix.2',
+        lr=None,
+        length=(128, 128),
+        batch=(128, 256),
+        steps=(256, 256),
+        max_weights=(32, INF),
+        precision=(Precision.FP32,),
+        optimizer=(Optimizer.ADAM,),
+        decay=(0, 1),
+    )
+
+    conf = Configuration2(
+        model=build_model("tokens.32.cw.bh|suffix.2"),
+        lr=0.25,
+        length=128,
+        batch=256,
+        steps=256,
+        precision='fp32',
+        optimizer=Optimizer.ADAM,
+        decay=1,
+    )
+    assert set(conf_neighbors(conf, template)) == {
+            conf.replace(lr=0.125),
+            conf.replace(lr=0.5),
+            conf.replace(batch=128),
             conf.replace(decay=1/2),
         }
 

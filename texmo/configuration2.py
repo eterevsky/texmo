@@ -498,24 +498,25 @@ def default_from_template(
                             'gru.1',
                             'lstm.1',
                         ):
-                            spec = input_spec + '|' + layers
-                            model = build_model(spec)
+                            full_spec = input_spec + '|' + layers
+                            model = build_model(full_spec)
                             if not model.is_valid():
                                 continue
                             if template.match_model(model):
                                 spec = str(model)
                                 found = True
 
-    return Configuration2(
-                    model=build_model(spec),
-                    precision=template.precision[0],
-                    lr=lr,
-                    length=length,
-                    batch=batch,
-                    steps=steps,
-                    optimizer=optimizer,
-                    decay=decay,
-                )
+    if spec is not None:
+        return Configuration2(
+                        model=build_model(spec),
+                        precision=template.precision[0],
+                        lr=lr,
+                        length=length,
+                        batch=batch,
+                        steps=steps,
+                        optimizer=optimizer,
+                        decay=decay,
+                    )
 
 
     raise RuntimeError(

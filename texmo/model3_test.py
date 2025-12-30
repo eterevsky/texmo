@@ -58,6 +58,7 @@ def test_neighbors():
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-rec.64.gelu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-rec.64.tanh",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-suffix.2",
+            "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.relu-s4.1",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-dense.64.tanh",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-gru.64",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-lstm.64",
@@ -67,6 +68,7 @@ def test_neighbors():
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-rec.64.relu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-rec.64.tanh",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-suffix.2-dense.64.relu",
+            "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64-s4.1-dense.64.relu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|gru.64",
             "tokens.128.cw.bh-pos.16-emb.64.norm|lstm.64-dense.64.relu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|mgru.64-dense.64.relu",
@@ -75,6 +77,7 @@ def test_neighbors():
             "tokens.128.cw.bh-pos.16-emb.64.norm|rec.64.relu-dense.64.relu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|rec.64.tanh-dense.64.relu",
             "tokens.128.cw.bh-pos.16-emb.64.norm|suffix.2-gru.64-dense.64.relu",
+            "tokens.128.cw.bh-pos.16-emb.64.norm|s4.1-gru.64-dense.64.relu",
             "tokens.128.cw.bh-pos.16-emb.64|gru.64-dense.64.relu",
             "tokens.128.cw.bh-pos.32-emb.64.norm|gru.64-dense.64.relu",
             "tokens.128.cw.bh-pos.8-emb.64.norm|gru.64-dense.64.relu",
@@ -99,6 +102,7 @@ def test_bits1_neighbors():
         'bits.2|',
         'bits.2.oh|',
         'bits.1|suffix.2',
+        'bits.1|s4.1',
         'bits.1|dense.1.tanh',
         'bits.1|dense.1.gelu',
         'bits.1|rec.1.tanh',
@@ -107,6 +111,27 @@ def test_bits1_neighbors():
         'bits.1|mgru.1',
         'bits.1|mingru.1',
         'bits.1|lstm.1',
+    }
+
+def test_suffix_neighbors():
+    model = build_model('bits.1|suffix.2')
+    neighbors = set(map(str, model.neighbors()))
+    assert neighbors == {
+        'bits.1+bp|suffix.2',
+        'bits.1+pos|suffix.2',
+        'bits.2|suffix.2',
+        'bits.2.oh|suffix.2',
+        'bits.1|',
+        'bits.1|suffix.4',
+        'bits.1|s4.2',
+        'bits.1|suffix.2-dense.1.tanh',
+        'bits.1|suffix.2-dense.1.gelu',
+        'bits.1|suffix.2-rec.1.tanh',
+        'bits.1|suffix.2-rec.1.gelu',
+        'bits.1|suffix.2-gru.1',
+        'bits.1|suffix.2-mgru.1',
+        'bits.1|suffix.2-mingru.1',
+        'bits.1|suffix.2-lstm.1',
     }
 
 def test_bits1bp_neighbors():
@@ -118,6 +143,7 @@ def test_bits1bp_neighbors():
         'bits.2+bp|',
         'bits.2.oh+bp|',
         'bits.1+bp|suffix.2',
+        'bits.1+bp|s4.1',
         'bits.1+bp|dense.1.tanh',
         'bits.1+bp|dense.1.gelu',
         'bits.1+bp|rec.1.tanh',
@@ -139,6 +165,7 @@ def test_bits4bp_neighbors():
         'bits.4.oh+bp|',
         'bits.8|',
         'bits.4+bp|suffix.2',
+        'bits.4+bp|s4.1',
         'bits.4+bp|dense.4.tanh',
         'bits.4+bp|dense.4.gelu',
         'bits.4+bp|rec.4.tanh',

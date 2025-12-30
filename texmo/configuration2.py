@@ -365,7 +365,7 @@ class Template(object):
         )
 
     def update_spec(self, spec: Optional[str]):
-        if spec is None:
+        if not spec:
             self.regex = None
             self.spec = None
         else:

@@ -28,6 +28,7 @@ class Suffix(Layer):
         return 0
 
     def neighbors(self):
+        yield f's4.{self.length}'
         if self.length > 2:
             l = self.length // 2
             yield f"suffix.{l}"

@@ -40,7 +40,7 @@ def _make_template_conditions(template: Template) -> tuple[list[str], dict]:
     conditions = []
     params = {}
     if template.spec is not None:
-        conditions.appen('spec = :spec')
+        conditions.append('spec = :spec')
         params['spec'] = template.spec
     if template.regex is not None:
         conditions.append('spec REGEXP :regex')

@@ -479,46 +479,45 @@ def default_from_template(
     decay = template.decay.pick_default(1.0)
     optimizer = template.optimizer[0]
 
-    if spec is not None:
-        return Configuration2(
-            model=build_model(spec),
-            precision=template.precision[0],
-            lr=lr,
-            length=length,
-            batch=batch,
-            steps=steps,
-            optimizer=optimizer,
-            decay=decay,
-        )
+    if spec is None:
+        if template.spec is not None:
+            spec = template.spec
+        else:
+            found = False
+            for tokens in ('bits.1', 'bits.2', 'bits.4', 'bits.8'):
+                for oh in ('', '.oh'):
+                    for pos in ('', '+bp', '+pos'):
+                        if found: break
+                        input_spec = tokens + oh + pos
+                        for layers in (
+                            '',
+                            'dense.1.gelu',
+                            'rec.1.tanh',
+                            'mingru.1',
+                            'mgru.1',
+                            'gru.1',
+                            'lstm.1',
+                        ):
+                            spec = input_spec + '|' + layers
+                            model = build_model(spec)
+                            if not model.is_valid():
+                                continue
+                            if template.match_model(model):
+                                spec = str(model)
+                                found = True
 
-    for tokens in ('bits.1', 'bits.2', 'bits.4', 'bits.8'):
-        for oh in ('', '.oh'):
-            for pos in ('', '+bp', '+pos'):
-                input_spec = tokens + oh + pos
-                for layers in (
-                    '',
-                    'dense.1.gelu',
-                    'rec.1.tanh',
-                    'mingru.1',
-                    'mgru.1',
-                    'gru.1',
-                    'lstm.1',
-                ):
-                    spec = input_spec + '|' + layers
-                    model = build_model(spec)
-                    if not model.is_valid():
-                        continue
-                    if template.match_model(model):
-                        return Configuration2(
-                            model=model,
-                            precision=template.precision[0],
-                            lr=lr,
-                            length=length,
-                            batch=batch,
-                            steps=steps,
-                            optimizer=optimizer,
-                            decay=decay,
-                        )
+    return Configuration2(
+                    model=build_model(spec),
+                    precision=template.precision[0],
+                    lr=lr,
+                    length=length,
+                    batch=batch,
+                    steps=steps,
+                    optimizer=optimizer,
+                    decay=decay,
+                )
+
+
     raise RuntimeError(
         "Can't pick up a default model that would fit the template"
     )

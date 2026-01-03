@@ -15,8 +15,6 @@ from .layers.input_bytes import InputBytes
 from .layers.input_bits import InputBits
 from .prng import Rng
 
-Self = ()
-
 _1_BY_LOG2 = 1.0 / math.log(2.0)
 _SUFFIX_LIKE_LAYERS = ("suffix", "attn", "attnmq", 's4')
 

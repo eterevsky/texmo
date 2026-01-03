@@ -37,6 +37,13 @@ class Dense(Layer):
         # output layer, but we aren't checking it using this function.
         return is_power2_int(self.size) and self.activation is not None
 
+    def neighbors(self):
+        for n in super().neighbors():
+            yield n
+
+        if self._activation_suffix == '.tanh' and self.size > 1:
+            yield f'latent.{self.size}.2.tanh'
+
     @property
     def weights(self) -> int:
         return self.size * self.input_size + self.size

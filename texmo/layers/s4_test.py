@@ -30,17 +30,3 @@ def test_step_batch():
     _, out2 = layer._step_batch_from_step(weights, state, input, dtype=jnp.float32)
 
     assert (out1 == out2).all()
-
-
-# def test_forward_batch():
-#     layer = Norm(input_shape=(2,))
-
-#     input = np.array([[[1, 2], [2, 3], [0, 0]], [[-1, 2], [2, -3], [0, 0]]])
-
-#     out = layer.forward_batch(None, input, dtype=jnp.float32)
-#     assert out.dtype == jnp.float32
-
-#     expected = np.array([[[0.4472136, 0.89442719], [0.5547002, 0.83205029], [0, 0]],
-#                          [[-0.4472136, 0.89442719], [0.5547002, -0.83205029], [0, 0]]])
-
-#     assert np.linalg.norm(out - expected) < 1E-5

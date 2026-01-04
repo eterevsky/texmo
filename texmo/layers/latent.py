@@ -42,13 +42,13 @@ class Latent(Layer):
         if self.reps == 2:
             yield f'dense.{self.size}.tanh'
 
-        yield f'lateny.{self.size}.{self.reps * 2}.tanh'
+        yield f'latent.{self.size}.{self.reps * 2}.tanh'
         if self.reps > 2:
-            yield f'lateny.{self.size}.{self.reps // 2}.tanh'
+            yield f'latent.{self.size}.{self.reps // 2}.tanh'
 
-        yield f'lateny.{self.size * 2}.{self.reps}.tanh'
+        yield f'latent.{self.size * 2}.{self.reps}.tanh'
         if self.size > 2:
-            yield f'lateny.{self.size // 2}.{self.reps}.tanh'
+            yield f'latent.{self.size // 2}.{self.reps}.tanh'
 
 
     @property

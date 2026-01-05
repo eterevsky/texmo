@@ -74,7 +74,6 @@ def build2(size: int) -> Callable:
         input_oh = jax.nn.one_hot(input, 256, axis=1, dtype=jnp.float32)
         # (position, oh, batch)
         input_oh = jnp.pad(input_oh, ((1, 0), (0, 0), (0, 0)))
-        print('input_oh', input_oh.shape)
 
         mid = forward_batch(weights, input_oh)
         b = jnp.reshape(weights['bout'], (1, -1, 1))
@@ -83,12 +82,33 @@ def build2(size: int) -> Callable:
     return pipeline        
 
 
-# def forward2(weights, input: jax.typing.ArrayLike) -> jax.Array:
-#     """(length, batch)"""
-#     input_oh = jax.nn.one_hot(input, 256, axis=1, dtype=jnp.float32)
-#     print(input_oh.shape)
-#     print(input_oh.dtype)
-#     # (length, oh, batch)
+def build3(size: int) -> Callable:
+    """(length, batch)"""
+
+    def pipeline(weights: dict, input: jax.typing.ArrayLike) -> jax.Array:
+        batch = input.shape[1]
+        input_oh = jax.nn.one_hot(input, 256, axis=1, dtype=jnp.float32)
+        # (position, oh, batch)
+        input_oh = jnp.pad(input_oh, ((1, 0), (0, 0), (0, 0)))
+
+        bmid = jnp.reshape(weights['b'], (-1, 1))
+
+        def step_batch(state, inp):
+            out = jnp.einsum('oi,ib->ob', weights['wi'], inp) + jnp.einsum('oi,ib->ob', weights['ws'], state) + bmid
+            # out = jnp.matmul(weights['wi'], inp) + jnp.matmul(weights['ws'], state) + bmid
+            out = jnp.tanh(out)
+            return out, out
+
+        _, mid = jax.lax.scan(
+            step_batch,
+            jnp.zeros((size, batch), dtype=jnp.float32),
+            input_oh,
+        )
+
+        b = jnp.reshape(weights['bout'], (1, -1, 1))
+        return jnp.einsum('oi,nib->nob', weights['wout'], mid) + b
+
+    return pipeline        
 
 
 def train(pipeline: Callable, steps: int, dataset, length: int, batch: int, lr: float, size, batch_last=False):
@@ -135,10 +155,8 @@ def bench(args: argparse.Namespace):
 
     size = 128
 
-    pipeline = build2(size)
+    pipeline = build3(size)
     train(pipeline, steps=args.steps, dataset=dataset, length=args.length, batch=args.batch, lr=args.lr, size=size, batch_last=True)
-
-
 
 
 def init_args(parser: argparse.ArgumentParser, config):

@@ -1,6 +1,7 @@
 # TexMo — training simple language models
 
-This is a repository in which I attempt to re-implement various language models and related algorithms. All of the ML code is written using JAX, which is basically numpy with JIT compilation and auto differentiation.
+This is a repository in which I attempt to re-implement various machine learning 
+algorithms related to language models. All of the ML code is written using JAX, which is basically numpy with JIT compilation and auto differentiation.
 
 **This is a playground where I test various algorithms. Not intended as a useful product.**
 
@@ -22,19 +23,31 @@ This is a repository in which I attempt to re-implement various language models 
 * Training of pretrained models.
   * Also adding extra layers to a pretrained model making it possible to incrementally train a deep model.
 
-## Non-goals
+## Results
 
-The project explores only whatever you could train on a single desktop computer. Sharding, TPUs and training on clusters is a non-goal.
+Here's a graph of cross-entropy loss per input byte for models with tiny number of weights:
+
+![alt text](graph.png)
+
+These models don't involve tokenization to store all of the knowledge about the text in the weights.
+
+A graph like this can be produced by running
+
+```
+uv run texmo.py server -t 1-120 -w 2-800
+```
+
+on one machine and
+
+```
+uv run client
+```
+
+on one or more "worker" machines.
 
 ## Training data
 
-I'm mostly using a set of books from [The Pile](https://pile.eleuther.ai/), which amount to around 100 GB. All of the texts are concatenated into a single file. The text is encoded in UTF-8 with `\n` as line ends. Paragraphs are separated by `\n\n`. There shouldn't be line breaks within paragraphs, except in verse stanzas.
-
-Code points (characters) from `0x10` to `0x1F` are used as various markers during tokenization. In particular `0x13` is used to separate concatenated texts.
-
-## Tokens
-
-The current version of the models don't yet support tokenization of the text and work directly on bytes. I'm working on generating "good" sets of tokens and transitioning the models to working on tokens.
+I'm mostly using a set of books from [The Pile](https://pile.eleuther.ai/), which amount to around 100 GB. All of the texts are concatenated into a single file. The text is encoded in UTF-8 with `\n` as line ends. Paragraphs are separated by `\n\n`.
 
 ### Token sets
 

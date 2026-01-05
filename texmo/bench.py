@@ -52,6 +52,37 @@ def build1(size: int) -> Callable:
     return pipeline        
 
 
+def build2(size: int) -> Callable:
+    """(length, batch)"""
+
+    def step(weights, state, inp):
+        out = weights['wi'] @ inp + weights['ws'] @ state + weights['b']
+        out = jnp.tanh(out)
+        return out, out
+
+    def forward(weights, input_sample):
+        _, out = jax.lax.scan(
+            lambda state, inp: step(weights, state, inp),
+            jnp.zeros((size,), dtype=jnp.float32),
+            input_sample
+        )
+        return out
+        
+    forward_batch = jax.vmap(forward, in_axes=(None, 2), out_axes=2)
+
+    def pipeline(weights: dict, input: jax.typing.ArrayLike) -> jax.Array:
+        input_oh = jax.nn.one_hot(input, 256, axis=1, dtype=jnp.float32)
+        # (position, oh, batch)
+        input_oh = jnp.pad(input_oh, ((1, 0), (0, 0), (0, 0)))
+        print('input_oh', input_oh.shape)
+
+        mid = forward_batch(weights, input_oh)
+        b = jnp.reshape(weights['bout'], (1, -1, 1))
+        return jnp.einsum('oi,nib->nob', weights['wout'], mid) + b
+
+    return pipeline        
+
+
 # def forward2(weights, input: jax.typing.ArrayLike) -> jax.Array:
 #     """(length, batch)"""
 #     input_oh = jax.nn.one_hot(input, 256, axis=1, dtype=jnp.float32)
@@ -60,10 +91,13 @@ def build1(size: int) -> Callable:
 #     # (length, oh, batch)
 
 
-def train(pipeline: Callable, steps: int, dataset, length: int, batch: int, lr: float, size):
+def train(pipeline: Callable, steps: int, dataset, length: int, batch: int, lr: float, size, batch_last=False):
     def _loss(weights, batch) -> float:
         out = pipeline(weights, batch)
-        loss = optax.softmax_cross_entropy_with_integer_labels(out[:,:-1], batch)
+        if batch_last:
+            loss = optax.softmax_cross_entropy_with_integer_labels(out[:-1,:,:], batch, axis=1)
+        else:
+            loss = optax.softmax_cross_entropy_with_integer_labels(out[:,:-1], batch)
         return (1/math.log(2)) * jnp.mean(loss)
 
     _loss_grad = jax.jit(jax.value_and_grad(_loss))
@@ -79,6 +113,8 @@ def train(pipeline: Callable, steps: int, dataset, length: int, batch: int, lr: 
         if step == 1:
             start = perf_counter()
         data = dataset.sample_tokens(ntokens=length, batch=batch, tokenset_name='bytes')
+        if batch_last:
+            data = np.transpose(data)
         loss, grads = _loss_grad(weights, data)
         updates, opt_state = optimizer.update(grads, opt_state, weights)
         weights = optax.apply_updates(weights, updates)
@@ -99,8 +135,8 @@ def bench(args: argparse.Namespace):
 
     size = 128
 
-    pipeline = build1(size)
-    train(pipeline, steps=args.steps, dataset=dataset, length=args.length, batch=args.batch, lr=args.lr, size=size)
+    pipeline = build2(size)
+    train(pipeline, steps=args.steps, dataset=dataset, length=args.length, batch=args.batch, lr=args.lr, size=size, batch_last=True)
 
 
 

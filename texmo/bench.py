@@ -1,6 +1,7 @@
 import argparse
 import math
 from typing import Callable
+from time import perf_counter
 
 import jax
 import jax.numpy as jnp
@@ -75,6 +76,8 @@ def train(pipeline: Callable, steps: int, dataset, length: int, batch: int, lr: 
     opt_state = optimizer.init(weights)
 
     for step in range(steps):
+        if step == 1:
+            start = perf_counter()
         data = dataset.sample_tokens(ntokens=length, batch=batch, tokenset_name='bytes')
         loss, grads = _loss_grad(weights, data)
         updates, opt_state = optimizer.update(grads, opt_state, weights)
@@ -82,6 +85,10 @@ def train(pipeline: Callable, steps: int, dataset, length: int, batch: int, lr: 
 
         if step < 10 or step % 10 == 0:
             print(step, loss)
+
+    finish = perf_counter()
+
+    print('Latency:', finish - start)
 
 
 def bench(args: argparse.Namespace):

@@ -49,7 +49,7 @@ on one or more "worker" machines.
 
 I'm mostly using a set of books from [The Pile](https://pile.eleuther.ai/), which amount to around 100 GB. All of the texts are concatenated into a single file. The text is encoded in UTF-8 with `\n` as line ends. Paragraphs are separated by `\n\n`.
 
-### Token sets
+## Token sets
 
 The tokenization is designed to work with token sets that could have both small (<256) and big number of tokens.
 
@@ -126,7 +126,7 @@ If `--fallback2` argument is given and no starting token set is provided, the al
 ## Train model
 
 ```
-python3 texmo.py train -s rec.128.relu-gru.512.tanh-dense.128 -t 3600 -o models
+python3 texmo.py train -s 'bytes|rec.128.relu-gru.512.tanh-dense.128' -t 3600 -o models
 ```
 
 ## Client-server search

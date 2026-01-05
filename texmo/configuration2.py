@@ -62,7 +62,7 @@ class Optimizer(enum.StrEnum):
 
 class Configuration2(object):
     __slots__ = ('model', 'precision', 'lr', 'length',
-                 'batch', 'steps', 'optimizer', 'decay')
+                 'batch', 'steps', 'optimizer', 'decay', 'incremental')
 
     def __init__(
         self,
@@ -74,6 +74,7 @@ class Configuration2(object):
         steps: int,
         optimizer: Optimizer | str,
         decay: float,
+        incremental: bool,
     ):
         object.__setattr__(self, 'model', model)
         object.__setattr__(self, 'precision', Precision(precision))
@@ -85,6 +86,7 @@ class Configuration2(object):
         object.__setattr__(self, 'optimizer', Optimizer(optimizer))
         assert decay is not None
         object.__setattr__(self, 'decay', decay)
+        object.__setattr__(self, 'incremental', incremental)
 
     def __setattr__(self, _key, _value):
         raise AttributeError('Configuration is immutable')
@@ -100,7 +102,8 @@ class Configuration2(object):
             batch=d['batch'],
             steps=d['steps'],
             optimizer=d['optimizer'],
-            decay=d['decay']
+            decay=d['decay'],
+            incremental=d['incremental']
         )
 
     def __eq__(self, other: Configuration2) -> bool:
@@ -112,13 +115,14 @@ class Configuration2(object):
             and self.steps == other.steps
             and self.optimizer == other.optimizer
             and self.decay == other.decay
+            and self.incremental == other.incremental
             and self.model == other.model
         )
 
     def __hash__(self) -> int:
         return hash(
             (str(self.model), self.lr, self.length, self.batch,
-             self.steps, self.precision, self.optimizer, self.decay)
+             self.steps, self.precision, self.optimizer, self.decay, self.incremental)
         )
 
     def replace(
@@ -131,6 +135,7 @@ class Configuration2(object):
         steps: Optional[int] = None,
         optimizer: Optional[Optimizer | str] = None,
         decay: Optional[float] = None,
+        incremental: Optional[bool] = None,
     ) -> Configuration2:
         model = model or self.model
         lr = lr or self.lr
@@ -140,9 +145,11 @@ class Configuration2(object):
         precision = precision or self.precision
         optimizer = optimizer or self.optimizer
         decay = decay or self.decay
+        if incremental is None:
+            incremental = self.incremental
         return Configuration2(
             model=model, precision=precision, lr=lr, length=length, batch=batch, steps=steps,
-            optimizer=optimizer, decay=decay
+            optimizer=optimizer, decay=decay, incremental=incremental
         )
 
     def to_dict(self) -> dict:
@@ -155,27 +162,41 @@ class Configuration2(object):
             'steps': self.steps,
             'optimizer': str(self.optimizer),
             'decay': self.decay,
+            'incremental': self.incremental,
         }
 
     def __repr__(self) -> str:
-        return f"Configuration2('{self.model}', '{self.precision}', {self.lr}, {self.length}, {self.batch}, {self.steps}, '{self.optimizer}', {self.decay})"
+        return f"Configuration2('{self.model}', '{self.precision}', {self.lr}, {self.length}, {self.batch}, {self.steps}, '{self.optimizer}', {self.decay}, {self.incremental})"
 
     def __str__(self) -> str:
         model = str(self.model)
-        steps = f'  S{itoa3(self.steps)}' if self.steps else ''
         decay = '' if self.decay == 1 else f'*{self.decay:.4f}'
-        optimizer = f'{self.optimizer.letter}{self.lr:.4f}{decay}'
+        if self.incremental:
+            steps = f'{self.training_stages}×{self.steps}'
+        else:
+            steps = str(self.steps)
 
         return (
             f'{model} ({itoa3(self.model.weights)})  {self.precision}   '
-            + f'{self.batch}×{self.length}  S{self.steps}  '
+            + f'{self.batch}×{self.length}  S{steps}  '
             + self.learning_str
         )
+    
+    @property
+    def training_stages(self) -> int:
+        if self.incremental:
+            return self.model.trainable_layers * 2 - 3
+        else:
+            return 1
 
     def aligned_str(self) -> str:
         model = str(self.model)
+        if self.incremental:
+            steps = f'{self.training_stages}×{self.steps:>4d}'
+        else:
+            steps = f'{self.steps:>5d}'
         return (
-            f'{self.batch:>5d}×{self.length:<5d}  {self.learning_str:<10} S{self.steps:>5d}  '
+            f'{self.batch:>5d}×{self.length:<5d}  {self.learning_str:<10} S{steps}  '
             + f'{self.precision}  {model} ({self.model.weights})'
         )
 

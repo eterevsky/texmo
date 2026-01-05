@@ -82,6 +82,14 @@ class Model3(object):
             + sum(l.weights for l in self.layers)
             + self.output.weights
         )
+    
+    def trainable_layers(self) -> int:
+        """The number of trainable layers."""
+        count = 0
+        for layer in self.layers:
+            if layer.weights > 0:
+                count += 1
+        return count + 1
 
     def _gen_neighbors(self) -> Iterable[str]:
         layers_str = [str(l) for l in self.layers]

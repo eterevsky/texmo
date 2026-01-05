@@ -66,6 +66,7 @@ class Latent(Layer):
         self, weights: LayerWeights, _state: None, input: jax.Array, dtype
     ) -> tuple[None, jax.Array]:
         input = input.flatten()
+        input = input.astype(dtype)
         input = _normalize(input)
 
         input_contrib = weights['wi'] @ input + weights['b']

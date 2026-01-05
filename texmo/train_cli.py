@@ -15,7 +15,7 @@ from .tokens import TokenSet, get_tokenizer, set_tokens_dir
 
 
 def show_loss_graph(manager: Manager, output_dir: str):
-    matplotlib.use('TkAgg')
+    # matplotlib.use('TkAgg')
     run = manager.run
 
     scaled_step_loss = np.array(run.step_loss) / manager.tokenizer.tokenset.avg_bytes_per_token

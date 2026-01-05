@@ -1,23 +1,19 @@
 import argparse
-# import logging
 
+import jax
 import numpy as np
 from rich.logging import RichHandler
-import jax
 
 import config
-from texmo import (
-    sample_cli,
-    latency,
-    train_cli,
-    db_cli,
-    report,
-    server,
-    client,
-)
+from texmo import (bench, client, db_cli, latency, report, sample_cli, server,
+                   train_cli)
 from texmo.common import console
-from texmo.tokens import small_tokens
 from texmo.predict import time_cli
+from texmo.tokens import small_tokens
+
+# import logging
+
+
 
 
 # Need to do this before any JAX code is executed.
@@ -51,6 +47,9 @@ def parse_args():
 
     parser_train = subparsers.add_parser("train", help="train a model")
     train_cli.init_args(parser_train, config)
+
+    parser_bench = subparsers.add_parser("bench", help="benchmark")
+    bench.init_args(parser_bench, config)
 
     parser_benchmark_dataset = subparsers.add_parser(
         "benchmark-dataset", help="benchmark sampling the training data"

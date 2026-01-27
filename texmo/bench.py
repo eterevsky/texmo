@@ -94,8 +94,8 @@ def build3(size: int) -> Callable:
         bmid = jnp.reshape(weights['b'], (-1, 1))
 
         def step_batch(state, inp):
-            out = jnp.einsum('oi,ib->ob', weights['wi'], inp) + jnp.einsum('oi,ib->ob', weights['ws'], state) + bmid
-            # out = jnp.matmul(weights['wi'], inp) + jnp.matmul(weights['ws'], state) + bmid
+            # out = jnp.einsum('oi,ib->ob', weights['wi'], inp) + jnp.einsum('oi,ib->ob', weights['ws'], state) + bmid
+            out = jnp.matmul(weights['wi'], inp) + jnp.matmul(weights['ws'], state) + bmid
             out = jnp.tanh(out)
             return out, out
 
@@ -155,8 +155,8 @@ def bench(args: argparse.Namespace):
 
     size = 128
 
-    pipeline = build3(size)
-    train(pipeline, steps=args.steps, dataset=dataset, length=args.length, batch=args.batch, lr=args.lr, size=size, batch_last=True)
+    pipeline = build1(size)
+    train(pipeline, steps=args.steps, dataset=dataset, length=args.length, batch=args.batch, lr=args.lr, size=size, batch_last=False)
 
 
 def init_args(parser: argparse.ArgumentParser, config):

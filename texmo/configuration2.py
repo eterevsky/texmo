@@ -103,7 +103,7 @@ class Configuration2(object):
             steps=d['steps'],
             optimizer=d['optimizer'],
             decay=d['decay'],
-            incremental=d['incremental']
+            incremental=d.get('incremental', False)
         )
 
     def __eq__(self, other: Configuration2) -> bool:

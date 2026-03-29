@@ -1,0 +1,4 @@
+GRU.256
+
+PyTorch + Widows + CUDA  12.37s (48.5 ms/step)
+JAX + Windows + CPU  131.25s (514.7 ms/step)

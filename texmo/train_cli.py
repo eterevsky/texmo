@@ -85,6 +85,7 @@ def train(args: argparse.Namespace):
             steps=args.steps,
             optimizer=args.optimizer,
             decay=decay,
+            incremental=False,
         )
         manager = Manager(
             conf,

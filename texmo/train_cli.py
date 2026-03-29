@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from rich import print as pprint
 
-from .configuration2 import Configuration, Precision
+from .configuration import Configuration, Precision
 from .dataset import DataSet
 from .manager import Manager
 from .model3 import build_model

@@ -2,7 +2,7 @@ import logging
 import os
 from unittest import TestCase
 
-from texmo.configuration2 import (
+from texmo.configuration import (
     Configuration,
     Precision,
     Template,

@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 from .. import latency
-from ..configuration2 import (Configuration, Template)
+from ..configuration import (Configuration, Template)
 from ..model3 import Model3
 from ..resultdb import ResultDB
 from ..results import ResultSet

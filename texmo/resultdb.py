@@ -13,7 +13,7 @@ import numpy as np
 
 from . import latency
 from .common import INF, console
-from .configuration2 import Configuration, Precision, Template
+from .configuration import Configuration, Precision, Template
 from .model3 import build_model
 from .run import Run
 

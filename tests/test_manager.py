@@ -1,7 +1,7 @@
 import logging
 from unittest import TestCase
 
-from texmo.configuration2 import Configuration, Precision
+from texmo.configuration import Configuration, Precision
 from texmo.dataset import DataSet
 from texmo.manager import Manager
 from texmo.model3 import build_model

@@ -7,7 +7,7 @@ import time
 import numpy as np
 
 from .common import ttoa3
-from .configuration2 import Configuration
+from .configuration import Configuration
 from .dataset import DataSet, DataSetWrapper
 from .latency import timer, report
 from .manager import Manager, release_device_buffers

@@ -6,7 +6,7 @@ from typing import Optional
 
 from . import latency
 from .common import INF, itoa3, ttoa3
-from .configuration2 import Configuration, Template, conf_neighbors
+from .configuration import Configuration, Template, conf_neighbors
 from .resultdb import ResultDB, ConfScore
 from .run import Run
 

@@ -4,7 +4,7 @@ from unittest import TestCase, main
 
 import numpy as np
 
-from texmo.configuration2 import Configuration
+from texmo.configuration import Configuration
 from texmo.model3 import build_model
 from texmo.predict import build_loss_trend
 from texmo.resultdb import ResultDB

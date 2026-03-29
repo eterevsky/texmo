@@ -16,7 +16,7 @@ from jax.errors import JaxRuntimeError
 
 from . import latency
 from .common import INF, ttoa3, is_power2_int
-from .configuration2 import Configuration, Precision
+from .configuration import Configuration, Precision
 from .dataset import DataSet, DataSetWrapper
 from .model3 import Model3, Weights
 from .predict import LossTrend

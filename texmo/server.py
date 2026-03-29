@@ -12,7 +12,7 @@ from flask import (Flask, make_response, redirect, render_template, request,
                    send_from_directory)
 
 from .common import ttoa3
-from .configuration2 import (Bounds, Configuration, Precision,
+from .configuration import (Bounds, Configuration, Precision,
                              Template, default_from_template)
 from .latency import get_report, timer
 from .report import generate_report_by_weight

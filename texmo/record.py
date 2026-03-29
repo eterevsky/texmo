@@ -5,7 +5,7 @@ from typing import Optional
 
 import numpy as np
 
-from .configuration2 import Configuration
+from .configuration import Configuration
 from .common import INF
 
 

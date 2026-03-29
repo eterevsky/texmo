@@ -3,7 +3,7 @@ from statistics import median, StatisticsError
 from typing import Optional
 from itertools import chain
 
-from .configuration2 import Configuration
+from .configuration import Configuration
 from .run import Run
 
 

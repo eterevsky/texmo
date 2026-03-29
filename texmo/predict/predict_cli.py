@@ -4,7 +4,7 @@ import logging
 import numpy as np
 
 from .. import latency
-from ..configuration2 import Template
+from ..configuration import Template
 from ..resultdb import ResultDB
 from ..results import ResultSet
 from ..tokens import set_tokens_dir

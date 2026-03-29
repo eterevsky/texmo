@@ -7,7 +7,7 @@ from datetime import datetime
 
 from . import latency
 from .common import INF
-from .configuration2 import Configuration, Template, conf_neighbors
+from .configuration import Configuration, Template, conf_neighbors
 from .confresults import ConfResults
 from .resultdb import ResultDB
 from .run import Run

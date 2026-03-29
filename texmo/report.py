@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 from .resultdb import ConfScore, ResultDB
 from .results import ResultSet
-from .configuration2 import Template
+from .configuration import Template
 from .common import INF, console, ttoa3
 from .tokens import set_tokens_dir
 

@@ -7,7 +7,7 @@ import time
 import numpy as np
 
 from .common import ttoa3
-from .configuration2 import Configuration2
+from .configuration2 import Configuration
 from .dataset import DataSet, DataSetWrapper
 from .latency import timer, report
 from .manager import Manager, release_device_buffers
@@ -99,7 +99,7 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, once: bo
         logging.info(f'Got configuration in {ttoa3(t.value())}')
         d = r.json()
         assert d["system"] == system
-        conf = Configuration2.from_dict(d["conf"])
+        conf = Configuration.from_dict(d["conf"])
         soft_tl = d.get("soft_tl")  # soft time limit
 
         manager = Manager(conf, system, dataset=dataset)

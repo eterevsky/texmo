@@ -6,7 +6,7 @@ from typing import Optional
 
 from . import latency
 from .common import INF, itoa3, ttoa3
-from .configuration2 import Configuration2, Template, conf_neighbors
+from .configuration2 import Configuration, Template, conf_neighbors
 from .resultdb import ResultDB, ConfScore
 from .run import Run
 
@@ -35,7 +35,6 @@ def top_confs_report_rich(
     table.add_column('P')
     table.add_column('Len', justify='right')
     table.add_column('Batch', justify='right')
-    table.add_column('Optimizer')
     table.add_column('Steps', justify='right')
     table.add_column('Loss')
     table.add_column('Time', justify='right')
@@ -119,7 +118,7 @@ class Search(object):
         self,
         db: ResultDB,
         template: Template,
-        init_conf: Configuration2,
+        init_conf: Configuration,
         train_time: tuple[float, float],
     ):
         assert isinstance(db, ResultDB)
@@ -128,7 +127,7 @@ class Search(object):
         assert isinstance(template, Template)
         self._template = template
 
-        assert isinstance(init_conf, Configuration2)
+        assert isinstance(init_conf, Configuration)
         self._init_conf = init_conf
 
         assert isinstance(train_time[0], float)
@@ -137,10 +136,10 @@ class Search(object):
 
     def add_run(
         self,
-        conf: Configuration2,
+        conf: Configuration,
         run: Run,
     ):
-        assert isinstance(conf, Configuration2)
+        assert isinstance(conf, Configuration)
         assert isinstance(run, Run)
         # assert self._template.match(conf)
 
@@ -208,7 +207,7 @@ class Search(object):
 
     def _select_top_neighbor(
             self, t: float, max_weights: int, system: str
-    ) -> Optional[Configuration2]:
+    ) -> Optional[Configuration]:
         with latency.timer("Search._select_top_neighbor"):
             top_confs = list(
                 self._db.top_confs_for_system(
@@ -262,7 +261,7 @@ class Search(object):
                                 f'Getting neighbor of conf {j} because it has {neighbor.num_runs} runs < {min_neighbor}')
                             return neighbor.conf
 
-    def select_conf(self, system: str) -> tuple[Configuration2, float]:
+    def select_conf(self, system: str) -> tuple[Configuration, float]:
         """Select a configuration to run.
 
             Returns:

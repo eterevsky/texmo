@@ -16,7 +16,7 @@ from jax.errors import JaxRuntimeError
 
 from . import latency
 from .common import INF, ttoa3, is_power2_int
-from .configuration2 import Configuration2, Precision
+from .configuration2 import Configuration, Precision
 from .dataset import DataSet, DataSetWrapper
 from .model3 import Model3, Weights
 from .predict import LossTrend
@@ -70,7 +70,7 @@ class TrainingDiverged(Exception):
 class Manager(object):
     def __init__(
         self,
-        conf: Configuration2,
+        conf: Configuration,
         system: str,
         dataset: DataSet,
         weights: Optional[Weights] = None,
@@ -83,8 +83,8 @@ class Manager(object):
             system, str
         ), f'`system` must be a string, got {system}'
         self._system: str = system
-        assert isinstance(conf, Configuration2)
-        self.conf: Configuration2 = conf
+        assert isinstance(conf, Configuration)
+        self.conf: Configuration = conf
         self.dtype = conf.precision.dtype
 
         assert isinstance(dataset, DataSet) or isinstance(
@@ -165,7 +165,7 @@ class Manager(object):
         with open(path) as f:
             spec = json.load(f)
 
-        conf = Configuration2.from_dict(spec['conf'])
+        conf = Configuration.from_dict(spec['conf'])
         weights = deserialize_weights(
             spec['weights'], dtype=conf.precision.dtype)
 
@@ -229,19 +229,13 @@ class Manager(object):
             def lr(count): return self.conf.lr * \
                 self.conf.decay ** (count / self.conf.steps)
 
-        match self.conf.optimizer:
-            case 'adam':
-                def mask_bias(tree): return jax.tree_util.tree_map(
-                    lambda g: len(g.shape) > 1, tree
-                )
+        def mask_bias(tree): return jax.tree_util.tree_map(
+            lambda g: len(g.shape) > 1, tree
+        )
 
-                eps = 1E-4 if self.conf.precision == Precision.FP16 else 1E-8
-                optimizer = optax.adamw(
-                    lr, mask=mask_bias, weight_decay=0.01, eps=eps)
-            case 'fromage':
-                optimizer = optax.fromage(lr)
-            case 'default':
-                raise RuntimeError(f'Unknown optimizer: {self.conf.optimizer}')
+        eps = 1E-4 if self.conf.precision == Precision.FP16 else 1E-8
+        optimizer = optax.adamw(
+            lr, mask=mask_bias, weight_decay=0.01, eps=eps)
 
         return optax.chain(optax.clip_by_global_norm(1.0), optimizer)
 
@@ -511,7 +505,7 @@ class Manager(object):
         quiet: bool = False,
         soft_tl: Optional[float] = None,
         weights=None,
-    ) -> tuple[Run, Weights, Configuration2]:
+    ) -> tuple[Run, Weights, Configuration]:
         """Train a model and evaluate it.
 
         Args:

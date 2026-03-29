@@ -1,7 +1,7 @@
 import logging
 from unittest import TestCase
 
-from texmo.configuration2 import Configuration2, Precision, Optimizer
+from texmo.configuration2 import Configuration, Precision
 from texmo.dataset import DataSet
 from texmo.manager import Manager
 from texmo.model3 import build_model
@@ -20,14 +20,13 @@ def build_fake_dataset():
 class ManagerTest(TestCase):
     def test_train(self):
         dataset = build_fake_dataset()
-        conf = Configuration2(
+        conf = Configuration(
             build_model("tokens.256.raw.b8-emb.16|gru.32"),
             lr=0.03125,
             length=32,
             batch=8,
             steps=128,
             precision=Precision.FP32,
-            optimizer=Optimizer.ADAM,
             decay=1,
         )
         manager = Manager(conf, system="test", dataset=dataset)

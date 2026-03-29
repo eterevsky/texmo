@@ -13,7 +13,7 @@ import numpy as np
 
 from . import latency
 from .common import INF, console
-from .configuration2 import Configuration2, Optimizer, Precision, Template
+from .configuration2 import Configuration, Precision, Template
 from .model3 import build_model
 from .run import Run
 
@@ -75,9 +75,6 @@ def _make_template_conditions(template: Template) -> tuple[list[str], dict]:
     if len(template.precision) != len(Precision):
         precisions_list = ', '.join(f'"{p}"' for p in template.precision)
         conditions.append(f'precision IN ({precisions_list})')
-    if len(template.optimizer) != len(Optimizer):
-        optimizers_list = ', '.join(f'"{o}"' for o in template.optimizer)
-        conditions.append(f'optimizer IN ({optimizers_list})')
     if template.decay.min > 0:
         conditions.append('decay >= :decay_min')
         params['decay_min'] = template.decay.min
@@ -91,14 +88,14 @@ class ConfScore(object):
     def __init__(
         self,
         conf_id: int,
-        conf: Configuration2,
+        conf: Configuration,
         median_score: Optional[float],
         system: str,
         median_time: Optional[float],
         num_runs: int,
     ):
         self.conf_id: int = conf_id
-        self.conf: Configuration2 = conf
+        self.conf: Configuration = conf
         self.median_score: Optional[float] = median_score
         self.system: str = system
         self.median_time: Optional[float] = median_time
@@ -111,9 +108,9 @@ class ConfScore(object):
         if system is None:
             system = row['system']
 
-        conf = Configuration2(
+        conf = Configuration(
             model, precision=row['precision'], lr=row['lr'], length=row['length'],
-            batch=row['batch'], steps=row['steps'], optimizer=row['optimizer'],
+            batch=row['batch'], steps=row['steps'],
             decay=row['decay']
         )
         return ConfScore(
@@ -148,13 +145,12 @@ WHERE spec = :spec
     AND batch = :batch
     AND steps = :steps
     AND precision = :precision
-    AND optimizer = :optimizer
     AND decay = :decay
 """
 
 _INSERT_CONF = """
-INSERT INTO conf (spec, weights, lr, length, batch, steps, has_neighbors, precision, optimizer, decay)
-VALUES (:spec, :weights, :lr, :length, :batch, :steps, 0, :precision, :optimizer, :decay)
+INSERT INTO conf (spec, weights, lr, length, batch, steps, has_neighbors, precision, decay)
+VALUES (:spec, :weights, :lr, :length, :batch, :steps, 0, :precision, :decay)
 """
 
 _INSERT_RUN = """
@@ -183,20 +179,19 @@ WHERE conf.id = conf_time.conf_id
     AND conf.lr = :lr
     AND conf.length = :length
     AND conf.batch = :batch
-    AND conf.optimizer = :optimizer
     AND conf.decay = :decay
     AND conf_time.system = :system
 """
 
 _GET_CONF = """
-SELECT spec, precision, lr, length, batch, steps, optimizer, decay
+SELECT spec, precision, lr, length, batch, steps, decay
 FROM conf
 WHERE id = :conf_id
 """
 
 _GET_NEIGHBORS_BY_RUNS = """
 SELECT conf.id AS conf_id, spec, precision, lr, length, batch,
-       steps, optimizer, decay, median_score,
+       steps, decay, median_score,
        (SELECT median_time FROM conf_time
         WHERE conf_id = conf.id AND system = :system) AS median_time,
        (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs
@@ -214,7 +209,6 @@ SELECT conf.id AS conf_id,
         length,
         batch,
         steps,
-        optimizer,
         decay,
         run.id AS run_id,
         system,
@@ -223,9 +217,7 @@ SELECT conf.id AS conf_id,
         loss,
         step_loss,
         loss_model_v,
-        loss_model,
-        optimizer,
-        decay
+        loss_model
 FROM conf, run
 WHERE conf.id = run.conf_id
 """
@@ -259,7 +251,7 @@ class ResultDB(object):
         self._db.commit()
 
     def _init_neighbors(
-        self, cur: sqlite3.Cursor, conf: Configuration2, conf_id: int
+        self, cur: sqlite3.Cursor, conf: Configuration, conf_id: int
     ):
         with latency.timer('ResultDB._init_neighbors'):
             for neighbor in conf.neighbors():
@@ -276,7 +268,7 @@ class ResultDB(object):
             cur.execute(_SET_HAS_NEIGHBORS, {'conf_id': conf_id})
 
     def _find_or_add_conf(
-        self, cur: sqlite3.Cursor, conf: Configuration2, init_neighbors: bool
+        self, cur: sqlite3.Cursor, conf: Configuration, init_neighbors: bool
     ) -> int:
         conf_dict = conf.to_dict()
         conf_dict['weights'] = conf.model.weights
@@ -297,7 +289,7 @@ class ResultDB(object):
             return conf_id
 
     def find_or_add_conf(
-        self, conf: Configuration2, init_neighbors: bool
+        self, conf: Configuration, init_neighbors: bool
     ) -> int:
         """Finds the conf in the db and returns the configuration id."""
         with latency.timer('ResultDB.find_or_add_conf'):
@@ -360,7 +352,7 @@ class ResultDB(object):
 
     def _add_run(
         self,
-        conf: Configuration2,
+        conf: Configuration,
         run: Run,
         conf_id: Optional[int],
         timestamp: Optional[datetime],
@@ -399,7 +391,7 @@ class ResultDB(object):
 
     def add_run(
         self,
-        conf: Configuration2,
+        conf: Configuration,
         run: Run,
         conf_id: Optional[int] = None,
         timestamp: Optional[datetime] = None,
@@ -417,7 +409,7 @@ class ResultDB(object):
         conditions.append('num_runs > 1')
 
         conf_fields = ', '.join([
-            'spec', 'precision', 'optimizer', 'lr',
+            'spec', 'precision', 'lr',
             'decay', 'length', 'batch', 'steps'])
 
         where = 'WHERE ' + ' AND '.join(conditions)
@@ -501,7 +493,7 @@ class ResultDB(object):
 
         query = f"""
             SELECT conf.id AS conf_id, spec, precision, lr, length, batch,
-                optimizer, decay, steps, median_score,
+                decay, steps, median_score,
                 (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs,
                 (SELECT median_time FROM conf_time
                  WHERE conf_id = conf.id AND system = :system
@@ -515,7 +507,7 @@ class ResultDB(object):
             yield ConfScore._from_row(row, system)
 
     def get_conf_runs_diff_steps(
-        self, conf: Configuration2, system: str
+        self, conf: Configuration, system: str
     ) -> Iterable[tuple[int, float]]:
         """Find all runs on a given system of configurations which differ from
         `conf` only in the number of steps.
@@ -528,7 +520,6 @@ class ResultDB(object):
                 'lr': conf.lr,
                 'length': conf.length,
                 'batch': conf.batch,
-                'optimizer': conf.optimizer,
                 'decay': conf.decay,
                 'system': system,
             },
@@ -549,7 +540,7 @@ class ResultDB(object):
         if not has_neighbors:
             cur.execute(_GET_CONF, {'conf_id': conf_id})
             row = cur.fetchone()
-            conf = Configuration2.from_dict(row)
+            conf = Configuration.from_dict(row)
             self._init_neighbors(cur, conf, conf_id)
         cur.execute(_GET_NEIGHBORS_BY_RUNS,
                     {'conf_id': conf_id, 'system': system})
@@ -566,7 +557,7 @@ class ResultDB(object):
 
     def get_confs_runs(
         self, with_timestamps: bool = False
-    ) -> Iterable[tuple[int, Configuration2, Run]]:
+    ) -> Iterable[tuple[int, Configuration, Run]]:
         cur = self._db.cursor()
         cur.execute(_GET_CONFS_RUNS)
 
@@ -575,10 +566,10 @@ class ResultDB(object):
                 conf_id = row['conf_id']
 
                 model = build_model(row['spec'])
-                conf = Configuration2(model=model, precision=row['precision'],
+                conf = Configuration(model=model, precision=row['precision'],
                                       lr=row['lr'], length=row['length'],
                                       batch=row['batch'], steps=row['steps'],
-                                      optimizer=row['optimizer'], decay=row['decay'])
+                                      decay=row['decay'])
 
                 step_loss = _unpack_ndarray(row['step_loss'])
                 loss_trend = _build_loss_trend(
@@ -606,7 +597,7 @@ class ResultDB(object):
                     yield conf_id, conf, run
 
     def check_run_exists(
-        self, conf: Configuration2, run: Run, timestamp: datetime
+        self, conf: Configuration, run: Run, timestamp: datetime
     ) -> bool:
         """Check if a run with the same configuration and timestamp exists."""
         conf_id = self.find_or_add_conf(conf, init_neighbors=False)

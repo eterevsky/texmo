@@ -49,20 +49,9 @@ class Precision(enum.StrEnum):
                 return (Precision.FP32, Precision.BF16)
 
 
-class Optimizer(enum.StrEnum):
-    ADAM = enum.auto()
-    FROMAGE = enum.auto()
-
-    @property
-    def letter(self):
-        match self:
-            case Optimizer.ADAM: return 'A'
-            case Optimizer.FROMAGE: return 'F'
-
-
-class Configuration2(object):
+class Configuration(object):
     __slots__ = ('model', 'precision', 'lr', 'length',
-                 'batch', 'steps', 'optimizer', 'decay', 'incremental')
+                 'batch', 'steps', 'decay')
 
     def __init__(
         self,
@@ -72,9 +61,7 @@ class Configuration2(object):
         length: int,
         batch: int,
         steps: int,
-        optimizer: Optimizer | str,
         decay: float,
-        incremental: bool,
     ):
         object.__setattr__(self, 'model', model)
         object.__setattr__(self, 'precision', Precision(precision))
@@ -82,47 +69,40 @@ class Configuration2(object):
         object.__setattr__(self, 'length', length)
         object.__setattr__(self, 'batch', batch)
         object.__setattr__(self, 'steps', steps)
-        assert optimizer is not None
-        object.__setattr__(self, 'optimizer', Optimizer(optimizer))
         assert decay is not None
         object.__setattr__(self, 'decay', decay)
-        object.__setattr__(self, 'incremental', incremental)
 
     def __setattr__(self, _key, _value):
         raise AttributeError('Configuration is immutable')
 
     @staticmethod
-    def from_dict(d: dict) -> Configuration2:
+    def from_dict(d: dict) -> Configuration:
         model = build_model(d['spec'])
-        return Configuration2(
+        return Configuration(
             model=model,
             precision=d['precision'],
             lr=d['lr'],
             length=d['length'],
             batch=d['batch'],
             steps=d['steps'],
-            optimizer=d['optimizer'],
             decay=d['decay'],
-            incremental=d.get('incremental', False)
         )
 
-    def __eq__(self, other: Configuration2) -> bool:
+    def __eq__(self, other: Configuration) -> bool:
         return (
             self.lr == other.lr
             and self.precision == other.precision
             and self.length == other.length
             and self.batch == other.batch
             and self.steps == other.steps
-            and self.optimizer == other.optimizer
             and self.decay == other.decay
-            and self.incremental == other.incremental
             and self.model == other.model
         )
 
     def __hash__(self) -> int:
         return hash(
             (str(self.model), self.lr, self.length, self.batch,
-             self.steps, self.precision, self.optimizer, self.decay, self.incremental)
+             self.steps, self.precision, self.decay)
         )
 
     def replace(
@@ -133,23 +113,18 @@ class Configuration2(object):
         length: Optional[int] = None,
         batch: Optional[int] = None,
         steps: Optional[int] = None,
-        optimizer: Optional[Optimizer | str] = None,
         decay: Optional[float] = None,
-        incremental: Optional[bool] = None,
-    ) -> Configuration2:
+    ) -> Configuration:
         model = model or self.model
         lr = lr or self.lr
         length = length or self.length
         batch = batch or self.batch
         steps = steps or self.steps
         precision = precision or self.precision
-        optimizer = optimizer or self.optimizer
         decay = decay or self.decay
-        if incremental is None:
-            incremental = self.incremental
-        return Configuration2(
+        return Configuration(
             model=model, precision=precision, lr=lr, length=length, batch=batch, steps=steps,
-            optimizer=optimizer, decay=decay, incremental=incremental
+            decay=decay,
         )
 
     def to_dict(self) -> dict:
@@ -160,41 +135,26 @@ class Configuration2(object):
             'length': self.length,
             'batch': self.batch,
             'steps': self.steps,
-            'optimizer': str(self.optimizer),
             'decay': self.decay,
-            'incremental': self.incremental,
         }
 
     def __repr__(self) -> str:
-        return f"Configuration2('{self.model}', '{self.precision}', {self.lr}, {self.length}, {self.batch}, {self.steps}, '{self.optimizer}', {self.decay}, {self.incremental})"
+        return f"Configuration('{self.model}', '{self.precision}', {self.lr}, {self.length}, {self.batch}, {self.steps}, {self.decay})"
 
     def __str__(self) -> str:
         model = str(self.model)
         decay = '' if self.decay == 1 else f'*{self.decay:.4f}'
-        if self.incremental:
-            steps = f'{self.training_stages}×{self.steps}'
-        else:
-            steps = str(self.steps)
+        steps = str(self.steps)
 
         return (
             f'{model} ({itoa3(self.model.weights)})  {self.precision}   '
             + f'{self.batch}×{self.length}  S{steps}  '
             + self.learning_str
         )
-    
-    @property
-    def training_stages(self) -> int:
-        if self.incremental:
-            return self.model.trainable_layers * 2 - 3
-        else:
-            return 1
 
     def aligned_str(self) -> str:
         model = str(self.model)
-        if self.incremental:
-            steps = f'{self.training_stages}×{self.steps:>4d}'
-        else:
-            steps = f'{self.steps:>5d}'
+        steps = f'{self.steps:>5d}'
         return (
             f'{self.batch:>5d}×{self.length:<5d}  {self.learning_str:<10} S{steps}  '
             + f'{self.precision}  {model} ({self.model.weights})'
@@ -208,7 +168,6 @@ class Configuration2(object):
             and is_valid_int(self.batch)
             and is_valid_int(self.steps)
             and type(self.precision) == Precision
-            and type(self.optimizer) == Optimizer
             and 0 < self.decay <= 1
         )
 
@@ -222,7 +181,7 @@ class Configuration2(object):
             final = self.lr * self.decay
             final = '→' + render_lr(final)
 
-        return f'{self.optimizer.letter}{lr}{final}'
+        return f'{lr}{final}'
 
 
     @property
@@ -233,7 +192,7 @@ class Configuration2(object):
     def tokens_name(self) -> str:
         return self.model.input.tokens_name
 
-    def neighbors(self) -> Iterable[Configuration2]:
+    def neighbors(self) -> Iterable[Configuration]:
         if self.steps > 2:
             yield self.replace(steps=self.steps // 2)
         for precision in self.precision.neighbors:
@@ -328,7 +287,6 @@ class Template(object):
         steps: Limits,
         max_weights: Limits,
         precision: list[Precision],
-        optimizer: list[Optimizer],
         decay: Optional[float | tuple[float, float]]
     ):
         self.update_spec(spec)
@@ -339,7 +297,6 @@ class Template(object):
 
         self.precision = precision
 
-        self.optimizer = optimizer
         self.lr = Bounds(lr, 0)
         self.decay = Bounds(decay, 0)
 
@@ -354,11 +311,6 @@ class Template(object):
         else:
             precision = list(map(Precision, args.precision.split(',')))
 
-        if not args.optimizer:
-            optimizer = [Optimizer.ADAM]
-        else:
-            optimizer = list(map(Optimizer, args.optimizer.split(',')))
-
         return Template(
             spec=args.spec,
             lr=_parse_interval(args.lr, float),
@@ -367,13 +319,11 @@ class Template(object):
             steps=_parse_interval(args.steps, int),
             max_weights=_parse_interval(args.weights, int),
             precision=precision,
-            optimizer=optimizer,
             decay=_parse_interval(args.decay, float)
         )
 
     def __str__(self):
         precision = ','.join(map(str, self.precision))
-        optimizer = ','.join(map(str, self.optimizer))
         spec = self.spec if self.spec is not None else self.regex
         return (
             f'Template(spec={repr(spec)}, '
@@ -382,7 +332,6 @@ class Template(object):
             + f'batch={self.batch}, '
             + f'steps={self.steps}, '
             + f'max_weights={self.max_weights}, '
-            + f'optimizer=\'{optimizer}\', '
             + f'decay={self.decay})'
         )
 
@@ -417,12 +366,6 @@ class Template(object):
         assert type(value[0]) is Precision
         self.precision = value
 
-    def update_optimizer(self, value: list[Optimizer]):
-        assert type(value) is list
-        assert len(value) > 0
-        assert type(value[0]) is Optimizer
-        self.optimizer = value
-
     def update_lr(self, value: Optional[str]):
         self.lr =  Bounds(_parse_interval(value, float), 0)
 
@@ -441,7 +384,7 @@ class Template(object):
             return bool(self.regex.fullmatch(str(model)))
         return True
 
-    def match(self, conf: Configuration2) -> bool:
+    def match(self, conf: Configuration) -> bool:
         return (
             self.match_model(conf.model)
             and conf.precision in self.precision
@@ -449,13 +392,12 @@ class Template(object):
             and self.length.match(conf.length)
             and self.batch.match(conf.batch)
             and self.steps.match(conf.steps)
-            and conf.optimizer in self.optimizer
             and self.decay.match(conf.decay)
         )
 
     def _conf_neighbors(
-        self, conf: Configuration2
-    ) -> Iterable[Configuration2]:
+        self, conf: Configuration
+    ) -> Iterable[Configuration]:
         for precision in conf.precision.neighbors:
             if precision in self.precision:
                 yield conf.replace(precision=precision)
@@ -477,8 +419,8 @@ class Template(object):
 
 
 def conf_neighbors(
-    conf: Configuration2, template: Template
-) -> Iterable[Configuration2]:
+    conf: Configuration, template: Template
+) -> Iterable[Configuration]:
     with latency.timer('conf_neighbors'):
         neighbors = template._conf_neighbors_cache.get(conf)
 
@@ -493,13 +435,12 @@ def conf_neighbors(
 
 def default_from_template(
     template: Template, spec: Optional[str]
-) -> Configuration2:
+) -> Configuration:
     lr = template.lr.pick_default(1 / 128)
     length = template.length.pick_default(8)
     batch = template.batch.pick_default(1)
     steps = template.steps.pick_default(2)
     decay = template.decay.pick_default(1.0)
-    optimizer = template.optimizer[0]
 
     if spec is None:
         if template.spec is not None:
@@ -530,14 +471,13 @@ def default_from_template(
                                 found = True
 
     if spec is not None:
-        return Configuration2(
+        return Configuration(
                         model=build_model(spec),
                         precision=template.precision[0],
                         lr=lr,
                         length=length,
                         batch=batch,
                         steps=steps,
-                        optimizer=optimizer,
                         decay=decay,
                     )
 

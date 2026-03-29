@@ -3,8 +3,7 @@ import os
 from unittest import TestCase
 
 from texmo.configuration2 import (
-    Configuration2,
-    Optimizer,
+    Configuration,
     Precision,
     Template,
     conf_neighbors,
@@ -26,18 +25,18 @@ def test_conf_neighbors():
         steps=(256, 256),
         max_weights=(32, INF),
         precision=(Precision.FP32,),
-        optimizer=(Optimizer.ADAM,),
+
         decay=None,
     )
 
-    conf = Configuration2(
+    conf = Configuration(
         model=build_model("tokens.32.cw.bh|dense.1.relu"),
         lr=0.25,
         length=128,
         batch=256,
         steps=256,
         precision='fp32',
-        optimizer='adam',
+
         decay=1/32,
     )
     assert set(conf_neighbors(conf, template)) == {
@@ -61,18 +60,18 @@ def test_dense_layer_neighbor():
         steps=(256, 256),
         max_weights=(32, INF),
         precision=(Precision.FP32,),
-        optimizer='adam,fromage',
+
         decay=1,
     )
 
-    conf = Configuration2(
+    conf = Configuration(
         model=build_model("tokens.32.cw.bh|dense.1.relu"),
         lr=0.25,
         length=128,
         batch=128,
         steps=256,
         precision='fp32',
-        optimizer=Optimizer.FROMAGE,
+
         decay=1,
     )
 
@@ -92,18 +91,18 @@ def test_conf_neighbors_suffix():
         steps=(256, 256),
         max_weights=(32, INF),
         precision=(Precision.FP32,),
-        optimizer=(Optimizer.ADAM,),
+
         decay=(0, 1),
     )
 
-    conf = Configuration2(
+    conf = Configuration(
         model=build_model("tokens.32.cw.bh|suffix.2"),
         lr=0.25,
         length=128,
         batch=256,
         steps=256,
         precision='fp32',
-        optimizer=Optimizer.ADAM,
+
         decay=1,
     )
     assert set(conf_neighbors(conf, template)) == {
@@ -124,18 +123,18 @@ def test_conf_neighbors_suffix_exact():
         steps=(256, 256),
         max_weights=(32, INF),
         precision=(Precision.FP32,),
-        optimizer=(Optimizer.ADAM,),
+
         decay=(0, 1),
     )
 
-    conf = Configuration2(
+    conf = Configuration(
         model=build_model("tokens.32.cw.bh|suffix.2"),
         lr=0.25,
         length=128,
         batch=256,
         steps=256,
         precision='fp32',
-        optimizer=Optimizer.ADAM,
+
         decay=1,
     )
     assert set(conf_neighbors(conf, template)) == {
@@ -146,14 +145,14 @@ def test_conf_neighbors_suffix_exact():
         }
 
 def test_conf_is_valid():
-    conf = Configuration2(
+    conf = Configuration(
         model=build_model("tokens.256.raw.b8|lstm.64-lstm.32"),
         lr=0.5,
         length=128,
         batch=256,
         steps=128,
         precision='fp32',
-        optimizer='fromage',
+
         decay=1/32,
     )
     assert conf.is_valid()

@@ -4,7 +4,7 @@ from unittest import TestCase, main
 import numpy as np
 
 from texmo.common import INF
-from texmo.configuration2 import Configuration2, Template, conf_neighbors, Precision
+from texmo.configuration2 import Configuration, Template, conf_neighbors, Precision
 from texmo.model3 import build_model
 from texmo.resultdb import ResultDB
 from texmo.results import ResultSet

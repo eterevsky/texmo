@@ -5,7 +5,7 @@ from typing import Optional
 
 import numpy as np
 
-from .configuration2 import Configuration2
+from .configuration2 import Configuration
 from .common import INF
 
 
@@ -22,7 +22,7 @@ class TrainingRecord(object):
     def __init__(
         self,
         timestamp: datetime,
-        conf: Configuration2,
+        conf: Configuration,
         steps: int,
         train_time_s: float,
         total_data: int,
@@ -81,7 +81,7 @@ class TrainingRecord(object):
 
     @property
     def conf(self):
-        return Configuration2.from_dict(self._dict["conf"])
+        return Configuration.from_dict(self._dict["conf"])
 
     @property
     def planned_time_s(self):

@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from rich import print as pprint
 
-from .configuration2 import Configuration2, Precision
+from .configuration2 import Configuration, Precision
 from .dataset import DataSet
 from .manager import Manager
 from .model3 import build_model
@@ -76,16 +76,14 @@ def train(args: argparse.Namespace):
             manager.add_layers(args.add_layers)
         manager.init()
     else:
-        conf = Configuration2(
+        conf = Configuration(
             build_model(args.spec),
             precision=args.precision,
             lr=lr,
             length=args.length,
             batch=args.batch,
             steps=args.steps,
-            optimizer=args.optimizer,
             decay=decay,
-            incremental=False,
         )
         manager = Manager(
             conf,
@@ -195,14 +193,6 @@ def init_args(parser: argparse.ArgumentParser, config):
         metavar="N",
         default=32,
         help="batch size (default: 32)",
-    )
-    parser.add_argument(
-        "--optimizer",
-        type=str,
-        choices=['adam', 'fromage'],
-        metavar="O",
-        default="adam",
-        help="the optimizer algorithm",
     )
     parser.add_argument(
         "--lr",

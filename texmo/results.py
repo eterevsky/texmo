@@ -7,7 +7,7 @@ from datetime import datetime
 
 from . import latency
 from .common import INF
-from .configuration2 import Configuration2, Template, conf_neighbors
+from .configuration2 import Configuration, Template, conf_neighbors
 from .confresults import ConfResults
 from .resultdb import ResultDB
 from .run import Run
@@ -29,7 +29,7 @@ class ResultSet(object):
 
         # Configurations matching the template
         self._conf_results_by_id: dict[int, ConfResults] = {}
-        self._conf_results_by_conf: dict[Configuration2, ConfResults] = {}
+        self._conf_results_by_conf: dict[Configuration, ConfResults] = {}
 
         self._init_db()
 
@@ -98,10 +98,10 @@ class ResultSet(object):
             # logging.info("Populating scores from run results")
             # self.update_all_scores()
 
-    def _find_or_add_conf(self, conf: Configuration2, id=None) -> ConfResults:
+    def _find_or_add_conf(self, conf: Configuration, id=None) -> ConfResults:
         """Finds the conf in the db and returns the copy with populated id."""
         with latency.timer("ResultSet._find_or_add_conf"):
-            assert isinstance(conf, Configuration2)
+            assert isinstance(conf, Configuration)
             conf_results = self._conf_results_by_conf.get(conf)
             if conf_results is not None:
                 assert id is None or conf_results.id == id
@@ -128,7 +128,7 @@ class ResultSet(object):
 
             return conf_results
     
-    def get_conf_results(self, conf: Configuration2) -> ConfResults:
+    def get_conf_results(self, conf: Configuration) -> ConfResults:
         return self._find_or_add_conf(conf)
 
     def _update_all_neighbors(self):
@@ -187,7 +187,7 @@ class ResultSet(object):
 
         assert len(found_ids) == len(self._conf_results_by_id)
 
-    def get_conf_results(self, conf: Configuration2) -> Optional[ConfResults]:
+    def get_conf_results(self, conf: Configuration) -> Optional[ConfResults]:
         return self._conf_results_by_conf.get(conf)
 
     def top_confs_any_t(self, max_weights: int = INF, limit: int = INF) -> Iterable[ConfResults]:
@@ -273,7 +273,7 @@ class ResultSet(object):
         for row in cur:
             yield self._conf_results_by_id[row[0]]
     
-    def add_run(self, conf: Configuration2, run: Run):
+    def add_run(self, conf: Configuration, run: Run):
         with latency.timer("ResultSet.add_run"):
             conf_results = self._find_or_add_conf(conf)
 

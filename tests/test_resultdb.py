@@ -4,7 +4,7 @@ from unittest import TestCase, main
 
 import numpy as np
 
-from texmo.configuration2 import Configuration2
+from texmo.configuration2 import Configuration
 from texmo.model3 import build_model
 from texmo.predict import build_loss_trend
 from texmo.resultdb import ResultDB
@@ -17,14 +17,14 @@ set_tokens_dir(os.path.join(os.path.dirname(__file__), "../tokens"))
 
 def create_conf_run(spec="tokens.256.cw.bh-emb.64|gru.64", batch=256, loss=3.123):
     model = build_model(spec)
-    conf = Configuration2(
+    conf = Configuration(
         model=model,
         lr=0.25,
         length=128,
         batch=batch,
         steps=256,
         precision='fp32',
-        optimizer='adam',
+
         decay=1,
     )
     loss_trend = build_loss_trend(None, 1, [1, 2, 3])

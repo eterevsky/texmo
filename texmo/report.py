@@ -223,7 +223,7 @@ def generate_report_by_weight(
         f'Top confs by weights for {system}\n',
         f'Max time: {ttoa3(max_time)}',
         f'Spec: {template.regex.pattern if template.regex else None}',
-        f'Optimizers: {', '.join(template.optimizer)}',
+        f'Optimizer: AdamW',
         f'LR: {template.lr}',
         f'Decay: {template.decay}',
         f'Precision: {', '.join(template.precision)}',

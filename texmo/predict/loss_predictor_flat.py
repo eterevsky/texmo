@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 from .. import latency
-from ..configuration2 import (Configuration2, Template)
+from ..configuration2 import (Configuration, Template)
 from ..model3 import Model3
 from ..resultdb import ResultDB
 from ..results import ResultSet
@@ -16,7 +16,7 @@ from .features import get_layer_cat_features, get_tokens_cat_features
 from .predict_common import decode_loss, encode_loss, prediction_score
 
 
-def make_metaparameter_features(conf: Configuration2, steps: int) -> list[float]:
+def make_metaparameter_features(conf: Configuration, steps: int) -> list[float]:
     assert conf.is_valid()
     assert steps > 0
     return [
@@ -28,7 +28,7 @@ def make_metaparameter_features(conf: Configuration2, steps: int) -> list[float]
     ]
 
 
-def make_tokenset_features(conf: Configuration2) -> list[float]:
+def make_tokenset_features(conf: Configuration) -> list[float]:
     token_set = conf.model.input.tokenizer.token_set
     return get_tokens_cat_features(token_set)
 
@@ -54,7 +54,7 @@ def make_model_features(model: Model3) -> list:
     return features
 
 
-def make_features(conf: Configuration2, steps: int) -> list[float]:
+def make_features(conf: Configuration, steps: int) -> list[float]:
     assert isinstance(steps, int)
     return np.array(
         make_metaparameter_features(conf, steps)
@@ -147,7 +147,7 @@ class LossPredictorFlat(object):
         logging.info(f"Loss on test set ({test_features.shape}): {score}")
 
     def predict(
-        self, confs: list[Configuration2], steps: list[int]
+        self, confs: list[Configuration], steps: list[int]
     ) -> list[float]:
         if not confs:
             return []

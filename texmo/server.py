@@ -12,7 +12,7 @@ from flask import (Flask, make_response, redirect, render_template, request,
                    send_from_directory)
 
 from .common import ttoa3
-from .configuration2 import (Bounds, Configuration2, Optimizer, Precision,
+from .configuration2 import (Bounds, Configuration, Precision,
                              Template, default_from_template)
 from .latency import get_report, timer
 from .report import generate_report_by_weight
@@ -24,7 +24,7 @@ from .tokens import set_tokens_dir
 matplotlib.use('Agg')
 
 
-def build_graph(confs: list[Configuration2]) -> bytes:
+def build_graph(confs: list[Configuration]) -> bytes:
     plt.ioff()
     plt.clf()
 
@@ -69,7 +69,7 @@ class SearchThread(threading.Thread):
         db: ResultDB,
         template: Template,
         train_time: tuple[float, float],
-        default: Configuration2,
+        default: Configuration,
         requests_queue: Queue,
         confs_by_system: dict,
         confs_by_system_lock: threading.Lock,
@@ -170,10 +170,6 @@ class SearchServer(object):
         for p in Precision:
             precision[p] = p in self.template.precision
 
-        optimizer = {}
-        for o in Optimizer:
-            optimizer[o] = o in self.template.optimizer
-
         top_confs = list(self.db.top_confs_global(self.template))
 
         graph = build_graph(top_confs)
@@ -202,7 +198,6 @@ class SearchServer(object):
             length=_render_bounds(self.template.length),
             batch=_render_bounds(self.template.batch),
             precision=precision,
-            optimizer=optimizer,
             lr=_render_bounds(self.template.lr),
             decay=_render_bounds(self.template.decay),
             steps=_render_bounds(self.template.steps),
@@ -217,7 +212,6 @@ class SearchServer(object):
         self.template.update_length(params['length'])
         self.template.update_batch(params['batch'])
         self.template.update_precision(_get_flags(Precision, params))
-        self.template.update_optimizer(_get_flags(Optimizer, params))
         self.template.update_lr(params['lr'])
         self.template.update_decay(params['decay'])
         self.template.update_steps(params['steps'])
@@ -249,7 +243,7 @@ class SearchServer(object):
         if run.loss is None:
             logging.info('run.loss is None!')
             return
-        conf = Configuration2.from_dict(params["conf"])
+        conf = Configuration.from_dict(params["conf"])
         logging.info(f"Adding run: {conf} - {run}")
         self.requests_queue.put(("add", (conf, run)))
 

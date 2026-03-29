@@ -3,7 +3,7 @@ from statistics import median, StatisticsError
 from typing import Optional
 from itertools import chain
 
-from .configuration2 import Configuration2
+from .configuration2 import Configuration
 from .run import Run
 
 
@@ -37,10 +37,10 @@ class ConfTiming(object):
 
 
 class ConfResults(object):
-    def __init__(self, id: int, conf: Configuration2):
+    def __init__(self, id: int, conf: Configuration):
         self.id: int = id
-        assert isinstance(conf, Configuration2)
-        self.conf: Configuration2 = conf
+        assert isinstance(conf, Configuration)
+        self.conf: Configuration = conf
         self.runs: list[Run] = []
         # Median losses for all neighbor configurations.
         self.neighbor_median_scores: dict[int, float] = {}

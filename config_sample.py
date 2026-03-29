@@ -16,3 +16,6 @@ TRAIN_TIMING = "results/train-timing.jsonl"
 SAMPLE_TIMING = "results/sample-timing.jsonl"
 
 SERVER_HOST = "localhost:5000"
+
+# PyTorch device: 'cuda', 'cpu', or 'auto' (auto picks cuda if available)
+TORCH_DEVICE = 'auto'

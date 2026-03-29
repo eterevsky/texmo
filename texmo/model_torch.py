@@ -28,6 +28,10 @@ class Model(nn.Module):
         self.output_module = output_module
         self.ntokens = ntokens
 
+    @property
+    def device(self) -> torch.device:
+        return next(self.output_module.parameters()).device
+
     def initial_step(self) -> tuple[list[LayerState], Tensor]:
         """Predict the first token (before any input).
 
@@ -37,7 +41,8 @@ class Model(nn.Module):
         states = []
         # Zero input for the first step
         v = torch.zeros(self.input_module.ntokens,
-                        dtype=self.input_module.output_dtype)
+                        dtype=self.input_module.output_dtype,
+                        device=self.device)
         for layer in self.layers:
             state = layer.init_state()
             state, v = layer.step(state, v)
@@ -58,7 +63,7 @@ class Model(nn.Module):
             (new_states, logits) where logits is (ntokens,)
         """
         new_states = []
-        v = self.input_module.step(token)
+        v = self.input_module.step(token, device=self.device)
         for layer, state in zip(self.layers, states):
             state, v = layer.step(state, v)
             new_states.append(state)
@@ -92,7 +97,7 @@ class Model(nn.Module):
         """Forward pass on a batch for training.
 
         Args:
-            batch: (batch_size, seq_len) integer token indices
+            batch: (batch_size, seq_len) int64 token indices
 
         Returns:
             logits: (batch_size, seq_len, ntokens)
@@ -115,7 +120,7 @@ class Model(nn.Module):
         """Compute average cross-entropy loss in bits per token.
 
         Args:
-            batch: (batch_size, seq_len) integer token indices
+            batch: (batch_size, seq_len) int64 token indices
 
         Returns:
             scalar loss in bits per token
@@ -148,18 +153,18 @@ class ModelDef(object):
         assert input_spec == '' or input_spec == 'bytes', \
             f"Only 'bytes' input is supported for now, got '{input_spec}'"
 
-        self.input_def = InputBytesDef(dtype=dtype)
+        self.input = InputBytesDef(dtype=dtype)
 
-        self.layer_defs: list[LayerDef] = []
-        shape = self.input_def.output_size
+        self.layers: list[LayerDef] = []
+        shape = self.input.output_size
         if layers_spec:
             for layer_spec in layers_spec.split("-"):
-                layer_def = _build_layer_def(layer_spec, shape)
-                self.layer_defs.append(layer_def)
-                shape = layer_def.output_size
+                layer = _build_layer_def(layer_spec, shape)
+                self.layers.append(layer)
+                shape = layer.output_size
 
-        self.ntokens = self.input_def.ntokens
-        self.output_def = DenseDef(self.ntokens, input_size=shape)
+        self.ntokens = self.input.ntokens
+        self.output = DenseDef(self.ntokens, input_size=shape)
 
     def __str__(self) -> str:
         return self.spec
@@ -173,9 +178,9 @@ class ModelDef(object):
     @property
     def num_weights(self) -> int:
         return (
-            self.input_def.num_weights
-            + sum(l.num_weights for l in self.layer_defs)
-            + self.output_def.num_weights
+            self.input.num_weights
+            + sum(l.num_weights for l in self.layers)
+            + self.output.num_weights
         )
 
     def build_model(self, state_dict: Optional[dict[str, Tensor]] = None) -> Model:
@@ -187,9 +192,9 @@ class ModelDef(object):
         Returns:
             A Model instance.
         """
-        input_module = self.input_def.build_module()
-        layer_modules = [ld.build_module() for ld in self.layer_defs]
-        output_module = self.output_def.build_module()
+        input_module = self.input.build_module()
+        layer_modules = [ld.build_module() for ld in self.layers]
+        output_module = self.output.build_module()
 
         model = Model(input_module, layer_modules, output_module, self.ntokens)
 

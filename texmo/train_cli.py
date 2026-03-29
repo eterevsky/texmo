@@ -7,26 +7,26 @@ import matplotlib.pyplot as plt
 import numpy as np
 from rich import print as pprint
 
-from .configuration import Configuration, Precision
+from .configuration import Configuration
 from .dataset import DataSet
-from .manager import Manager
+from .manager_torch import ManagerTorch
 from .model3 import build_model
 from .tokens import TokenSet, get_tokenizer, set_tokens_dir
 
 
-def show_loss_graph(manager: Manager, output_dir: str):
-    # matplotlib.use('TkAgg')
+def show_loss_graph(manager: ManagerTorch, output_dir: str):
     run = manager.run
 
-    scaled_step_loss = np.array(run.step_loss) / manager.tokenizer.tokenset.avg_bytes_per_token
+    # For bytes tokenset, avg_bytes_per_token = 1.0
+    scaled_step_loss = np.array(run.step_loss)
 
 
     steps = run.steps
     xs = np.array(range(steps // 2, steps * 4 + 1))
-    ys = run.loss_trend.predict(xs) / manager.tokenizer.tokenset.avg_bytes_per_token
+    ys = run.loss_trend.predict(xs)
 
     steps2 = steps * 2
-    loss2 = run.loss_trend.predict([steps2])[0] / manager.tokenizer.tokenset.avg_bytes_per_token
+    loss2 = run.loss_trend.predict([steps2])[0]
     # print(loss2)
     logging.info(f"Expected loss at {steps2} steps: {loss2:.4f}")
 
@@ -65,16 +65,7 @@ def train(args: argparse.Namespace):
     decay = parse_lr(args.decay)
 
     if args.model_path is not None:
-        manager = Manager.load(
-            args.model_path,
-            test_batch=args.test_batch,
-            test_sample_len=args.test_sample_len,
-            system=args.system,
-        )
-        manager.update_conf(lr, args.sample_len, args.batch, args.time, precision=Precision(args.precision))
-        if args.add_layers:
-            manager.add_layers(args.add_layers)
-        manager.init()
+        raise NotImplementedError("Loading pre-trained models not yet supported in PyTorch manager")
     else:
         conf = Configuration(
             build_model(args.spec),
@@ -85,16 +76,17 @@ def train(args: argparse.Namespace):
             steps=args.steps,
             decay=decay,
         )
-        manager = Manager(
+        manager = ManagerTorch(
             conf,
-            test_batch=args.test_batch,
-            test_sample_len=args.test_sample_len,
             system=args.system,
             dataset=train_set,
+            device=args.device,
+            test_sample_len=args.test_sample_len,
+            test_batch=args.test_batch,
         )
         manager.init()
 
-    manager.train_and_eval(
+    run, final_conf = manager.train_and_eval(
         args.steps,
         args.time,
         args.temp_steps,
@@ -281,6 +273,13 @@ def init_args(parser: argparse.ArgumentParser, config):
         type=str,
         default=config.SYSTEM_NAME,
         help=f"the name of the system that will be used to identify runs in the DB (default: '{config.SYSTEM_NAME}')",
+    )
+
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=config.TORCH_DEVICE,
+        help=f"PyTorch device: 'cuda', 'cpu', or 'auto' (default: '{config.TORCH_DEVICE}')",
     )
 
     parser.set_defaults(func=train)

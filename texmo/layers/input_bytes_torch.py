@@ -12,22 +12,23 @@ class InputBytesModule(nn.Module):
         self.ntokens = 256
         self.output_dtype = dtype
 
-    def step(self, token: int) -> Tensor:
+    def step(self, token: int, device: torch.device | None = None) -> Tensor:
         """Convert a single token index to a one-hot vector.
 
         Args:
             token: integer token index (0-255)
+            device: target device for the output tensor
 
         Returns:
             (256,) one-hot tensor
         """
-        return F.one_hot(torch.tensor(token), self.ntokens).to(self.output_dtype)
+        return F.one_hot(torch.tensor(int(token), dtype=torch.long, device=device), self.ntokens).to(self.output_dtype)
 
     def forward(self, tokens: Tensor) -> Tensor:
         """Convert a batch of token sequences to one-hot.
 
         Args:
-            tokens: (batch, seq_len) integer token indices
+            tokens: (batch, seq_len) int64 token indices
 
         Returns:
             (batch, seq_len, 256) one-hot float tensor

@@ -9,6 +9,7 @@ from .layer_torch import LayerDef, LayerModule, LayerState
 from .layers.dense_torch import DenseDef, DenseModule
 from .layers.input_bits_torch import InputBitsDef, InputBitsModule
 from .layers.input_bytes_torch import InputBytesDef, InputBytesModule
+from .layers.suffix_torch import SuffixDef
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
 
@@ -22,12 +23,14 @@ class Model(nn.Module):
         layer_modules: list[LayerModule],
         output_module: DenseModule,
         ntokens: int,
+        total_padding: int = 1,
     ):
         super().__init__()
         self.input_module = input_module
         self.layers = nn.ModuleList(layer_modules)
         self.output_module = output_module
         self.ntokens = ntokens
+        self._total_padding = total_padding
         # For binary tokens (bits.1), the output layer produces a single logit.
         # Padding with 0 gives softmax([x, 0]) = [sigmoid(-x), sigmoid(x)],
         # so the single logit acts as the log-odds of class 1 vs class 0.
@@ -45,12 +48,22 @@ class Model(nn.Module):
             states[0] is the input module state, states[1:] are layer states.
         """
         input_state = self.input_module.init_state()
-        states = [input_state]
-        v = self.input_module.initial_vector(device=self.device)
-        for layer in self.layers:
-            state = layer.init_state()
-            state, v = layer.step(state, v)
-            states.append(state)
+
+        # Initialize layer states
+        layer_states = [layer.init_state(device=self.device)
+                        for layer in self.layers]
+
+        # Feed total_padding initial vectors to warm up stateful layers
+        # (e.g. suffix). Each iteration mirrors one padding position in
+        # forward(), cycling through the correct bp positions.
+        p = self._total_padding
+        for i in range(p):
+            v = self.input_module.initial_vector(
+                device=self.device, position=-p + i)
+            for j, layer in enumerate(self.layers):
+                layer_states[j], v = layer.step(layer_states[j], v)
+
+        states = [input_state] + layer_states
         _, logits = self.output_module.step(None, v)
         if self._pad_output:
             logits = F.pad(logits, (0, 1))
@@ -114,8 +127,9 @@ class Model(nn.Module):
         Returns:
             logits: (batch_size, seq_len, ntokens)
         """
-        # Input: shift right (predict next token), with 1 padding position
-        v = self.input_module(batch[:, :-1], padding=1)
+        # Input: shift right (predict next token). Extra padding beyond 1
+        # is consumed by suffix-like layers that look back multiple steps.
+        v = self.input_module(batch[:, :-1], padding=self._total_padding)
 
         for layer in self.layers:
             v = layer(v)
@@ -175,6 +189,9 @@ class ModelDef(object):
                 shape = layer.output_size
 
         self.ntokens = self.input.ntokens
+        # 1 for the initial "no input" position, plus extra for layers
+        # that look back multiple steps (e.g. suffix).
+        self.total_padding = 1 + sum(l.length - 1 for l in self.layers)
         output_size = self.ntokens if self.ntokens > 2 else 1
         self.output = DenseDef(output_size, input_size=shape)
 
@@ -208,7 +225,8 @@ class ModelDef(object):
         layer_modules = [ld.build_module() for ld in self.layers]
         output_module = self.output.build_module()
 
-        model = Model(input_module, layer_modules, output_module, self.ntokens)
+        model = Model(input_module, layer_modules, output_module,
+                      self.ntokens, self.total_padding)
 
         if state_dict is not None:
             model.load_state_dict(state_dict)
@@ -234,6 +252,10 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
             gelu=(activation == "gelu"),
             input_size=input_size,
         )
+
+    if name == "suffix":
+        length = int(parts[1])
+        return SuffixDef(length, input_size=input_size)
 
     raise ValueError(f"Unknown layer type: {name}")
 

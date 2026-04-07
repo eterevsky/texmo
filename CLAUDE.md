@@ -24,11 +24,12 @@ reference.
 - `texmo/layers/dense_torch.py` — `DenseDef`/`DenseModule`
 - `texmo/layers/input_bytes_torch.py` — `InputBytesDef`/`InputBytesModule`
 - `texmo/layers/input_bits_torch.py` — `InputBitsDef`/`InputBitsModule`
+- `texmo/layers/suffix_torch.py` — `SuffixDef`/`SuffixModule`
 
 ### Not yet migrated
 
 JAX-only layers in `texmo/layers/`: GRU, LSTM, Attn, Input,
-RecurrentBase, S4, Suffix, LatentAttention.
+RecurrentBase, S4, LatentAttention.
 
 ## Conventions
 

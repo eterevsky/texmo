@@ -76,8 +76,15 @@ class InputBitsModule(nn.Module):
 
         return state, out.to(self.dtype)
 
-    def initial_vector(self, device: torch.device | None = None) -> Tensor:
-        """Return the input vector for 'no token observed yet'."""
+    def initial_vector(self, device: torch.device | None = None,
+                        position: int = -1) -> Tensor:
+        """Return the input vector for 'no token observed yet'.
+
+        Args:
+            device: target device
+            position: position in the byte for bp encoding (default -1,
+                      i.e. the last position in the cycle)
+        """
         if self.one_hot:
             # Uniform 1/n: max entropy over tokens
             v = torch.full((self.ntokens,), 1.0 / self.ntokens,
@@ -87,8 +94,7 @@ class InputBitsModule(nn.Module):
             v = torch.full((self.nbits,), 0.5, dtype=self.dtype,
                            device=device)
         if self.bp:
-            # Position encoding for position -1 (wraps to positions - 1)
-            bp_enc = self.pos_encodings[self.positions - 1]
+            bp_enc = self.pos_encodings[position % self.positions]
             v = torch.cat([v, bp_enc.to(dtype=self.dtype, device=device)])
         return v
 
@@ -114,8 +120,9 @@ class InputBitsModule(nn.Module):
             out = torch.cat([out, pos], dim=-1)
 
         if padding > 0:
-            pad = self.initial_vector(device=tokens.device)
-            pad = pad.unsqueeze(0).unsqueeze(0).expand(batch_size, padding, -1)
+            pad_vecs = [self.initial_vector(device=tokens.device, position=-padding + i)
+                        for i in range(padding)]
+            pad = torch.stack(pad_vecs).unsqueeze(0).expand(batch_size, -1, -1)
             out = torch.cat([pad, out], dim=1)
 
         return out.to(self.dtype)

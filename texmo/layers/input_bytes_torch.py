@@ -29,7 +29,8 @@ class InputBytesModule(nn.Module):
         """
         return state, F.one_hot(torch.tensor(int(token), dtype=torch.long, device=device), self.ntokens).to(self.dtype)
 
-    def initial_vector(self, device: torch.device | None = None) -> Tensor:
+    def initial_vector(self, device: torch.device | None = None,
+                        position: int = -1) -> Tensor:
         """Return the input vector for 'no token observed yet'."""
         return torch.full((self.output_size,), 1.0 / self.ntokens,
                           dtype=self.dtype, device=device)

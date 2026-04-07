@@ -6,6 +6,11 @@ Texmo is a project for experimenting with language models, with a focus on
 older recurrent architectures. It includes implementations of various building
 blocks and a search over meta-parameters and model architectures.
 
+## Architecture
+
+See `docs/architecture.md` for a detailed description of the model pipeline,
+layer abstractions, and input encoding schemes.
+
 ## Current goal
 
 Migrating model implementations from JAX to PyTorch. The JAX code remains as

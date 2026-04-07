@@ -14,7 +14,8 @@ def test_def_properties():
 
 def test_step():
     module = InputBytesDef().build_module()
-    out = module.step(65)  # ASCII 'A'
+    state, out = module.step(None, 65)  # ASCII 'A'
+    assert state is None
     assert out.shape == (256,)
     assert out[65] == 1.0
     assert out.sum() == 1.0
@@ -23,7 +24,7 @@ def test_step():
 
 def test_step_zero():
     module = InputBytesDef().build_module()
-    out = module.step(0)
+    _, out = module.step(None, 0)
     assert out[0] == 1.0
     assert out.sum() == 1.0
 
@@ -52,13 +53,13 @@ def test_forward_matches_step():
     fwd_out = module(tokens)
 
     for t in range(tokens.shape[1]):
-        step_out = module.step(tokens[0, t].item())
+        _, step_out = module.step(None, tokens[0, t].item())
         assert torch.equal(fwd_out[0, t], step_out)
 
 
 def test_dtype_fp16():
     module = InputBytesDef(dtype=torch.float16).build_module()
-    out = module.step(42)
+    _, out = module.step(None, 42)
     assert out.dtype == torch.float16
 
     tokens = torch.tensor([[1, 2]], dtype=torch.long)

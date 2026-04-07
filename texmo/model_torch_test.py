@@ -76,7 +76,7 @@ def test_step_and_initial_step():
 
     states, logits0 = model.initial_step()
     assert logits0.shape == (256,)
-    assert len(states) == 1  # one dense layer
+    assert len(states) == 2  # input state + one dense layer
 
     states, logits1 = model.step(states, 65)  # feed 'A'
     assert logits1.shape == (256,)

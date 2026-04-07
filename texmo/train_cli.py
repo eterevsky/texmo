@@ -17,9 +17,8 @@ from .tokens import TokenSet, get_tokenizer, set_tokens_dir
 def show_loss_graph(manager: ManagerTorch, output_dir: str):
     run = manager.run
 
-    # For bytes tokenset, avg_bytes_per_token = 1.0
+    # step_loss is already in b/B (converted in ManagerTorch.train_step)
     scaled_step_loss = np.array(run.step_loss)
-
 
     steps = run.steps
     xs = np.array(range(steps // 2, steps * 4 + 1))
@@ -27,7 +26,6 @@ def show_loss_graph(manager: ManagerTorch, output_dir: str):
 
     steps2 = steps * 2
     loss2 = run.loss_trend.predict([steps2])[0]
-    # print(loss2)
     logging.info(f"Expected loss at {steps2} steps: {loss2:.4f}")
 
     plt.xscale("log")

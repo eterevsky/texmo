@@ -56,6 +56,8 @@ class ManagerTorch(object):
         self.test_batch = test_batch
 
         self.model_def = build_model_def(str(conf.model), dtype=self.dtype)
+        tokenizer = get_tokenizer(self.model_def.input.tokens_name)
+        self.bytes_per_token = tokenizer.tokenset.avg_bytes_per_token
         self.model: Optional[Model] = None
         self.optimizer = None
         self.run: Optional[Run] = None
@@ -117,7 +119,7 @@ class ManagerTorch(object):
         if self.scheduler is not None:
             self.scheduler.step()
 
-        loss_val = loss.item()
+        loss_val = loss.item() / self.bytes_per_token
         self.run.add_step(loss_val)
         return loss_val
 
@@ -203,7 +205,7 @@ class ManagerTorch(object):
         )
         batch = torch.from_numpy(data).long().to(self.device)
         loss = self.model.loss_batch(batch)
-        return loss.item()
+        return loss.item() / self.bytes_per_token
 
     def train_and_eval(
         self,

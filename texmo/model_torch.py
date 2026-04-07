@@ -7,6 +7,7 @@ from typing import Optional
 
 from .layer_torch import LayerDef, LayerModule, LayerState
 from .layers.dense_torch import DenseDef, DenseModule
+from .layers.input_bits_torch import InputBitsDef, InputBitsModule
 from .layers.input_bytes_torch import InputBytesDef, InputBytesModule
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
@@ -17,7 +18,7 @@ class Model(nn.Module):
 
     def __init__(
         self,
-        input_module: InputBytesModule,
+        input_module: InputBytesModule | InputBitsModule,
         layer_modules: list[LayerModule],
         output_module: DenseModule,
         ntokens: int,
@@ -27,6 +28,10 @@ class Model(nn.Module):
         self.layers = nn.ModuleList(layer_modules)
         self.output_module = output_module
         self.ntokens = ntokens
+        # For binary tokens (bits.1), the output layer produces a single logit.
+        # Padding with 0 gives softmax([x, 0]) = [sigmoid(-x), sigmoid(x)],
+        # so the single logit acts as the log-odds of class 1 vs class 0.
+        self._pad_output = ntokens <= 2
 
     @property
     def device(self) -> torch.device:
@@ -37,17 +42,18 @@ class Model(nn.Module):
 
         Returns:
             (states, logits) where logits is (ntokens,)
+            states[0] is the input module state, states[1:] are layer states.
         """
-        states = []
-        # Zero input for the first step
-        v = torch.zeros(self.input_module.ntokens,
-                        dtype=self.input_module.output_dtype,
-                        device=self.device)
+        input_state = self.input_module.init_state()
+        states = [input_state]
+        v = self.input_module.initial_vector(device=self.device)
         for layer in self.layers:
             state = layer.init_state()
             state, v = layer.step(state, v)
             states.append(state)
         _, logits = self.output_module.step(None, v)
+        if self._pad_output:
+            logits = F.pad(logits, (0, 1))
         return states, logits
 
     def step(
@@ -56,18 +62,24 @@ class Model(nn.Module):
         """Run one step of inference.
 
         Args:
-            states: list of layer states from previous step
+            states: list of states; states[0] is input state,
+                    states[1:] are layer states
             token: input token index
 
         Returns:
             (new_states, logits) where logits is (ntokens,)
         """
+        input_state = states[0]
         new_states = []
-        v = self.input_module.step(token, device=self.device)
-        for layer, state in zip(self.layers, states):
+        input_state, v = self.input_module.step(
+            input_state, token, device=self.device)
+        new_states.append(input_state)
+        for layer, state in zip(self.layers, states[1:]):
             state, v = layer.step(state, v)
             new_states.append(state)
         _, logits = self.output_module.step(None, v)
+        if self._pad_output:
+            logits = F.pad(logits, (0, 1))
         return new_states, logits
 
     def step_prob(
@@ -102,18 +114,15 @@ class Model(nn.Module):
         Returns:
             logits: (batch_size, seq_len, ntokens)
         """
-        # Input: shift right (predict next token)
-        v = self.input_module(batch[:, :-1])
-        # Prepend zeros for the first position
-        batch_size = batch.shape[0]
-        pad = torch.zeros(batch_size, 1, self.ntokens,
-                          dtype=v.dtype, device=v.device)
-        v = torch.cat([pad, v], dim=1)
+        # Input: shift right (predict next token), with 1 padding position
+        v = self.input_module(batch[:, :-1], padding=1)
 
         for layer in self.layers:
             v = layer(v)
 
         logits = self.output_module(v)
+        if self._pad_output:
+            logits = F.pad(logits, (0, 1))
         return logits
 
     def loss_batch(self, batch: Tensor) -> Tensor:
@@ -150,10 +159,12 @@ class ModelDef(object):
         else:
             raise ValueError("Model spec can't contain more than one |")
 
-        assert input_spec == '' or input_spec == 'bytes', \
-            f"Only 'bytes' input is supported for now, got '{input_spec}'"
-
-        self.input = InputBytesDef(dtype=dtype)
+        if input_spec == '' or input_spec == 'bytes':
+            self.input = InputBytesDef(dtype=dtype)
+        elif input_spec.startswith('bits.'):
+            self.input = InputBitsDef.from_spec(input_spec, dtype=dtype)
+        else:
+            raise ValueError(f"Unknown input type: '{input_spec}'")
 
         self.layers: list[LayerDef] = []
         shape = self.input.output_size
@@ -164,7 +175,8 @@ class ModelDef(object):
                 shape = layer.output_size
 
         self.ntokens = self.input.ntokens
-        self.output = DenseDef(self.ntokens, input_size=shape)
+        output_size = self.ntokens if self.ntokens > 2 else 1
+        self.output = DenseDef(output_size, input_size=shape)
 
     def __str__(self) -> str:
         return self.spec

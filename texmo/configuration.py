@@ -10,6 +10,7 @@ import jax.numpy as jnp
 
 from .common import INF, console, itoa3, itoa3_aligned
 from .model3 import Model3, build_model
+from .model_torch import ModelDef, build_model_def
 from . import latency
 from .tokens.tokenizer import Tokenizer
 
@@ -55,7 +56,7 @@ class Configuration(object):
 
     def __init__(
         self,
-        model: Model3,
+        model: ModelDef,
         precision: Precision | str,
         lr: float,
         length: int,
@@ -107,7 +108,7 @@ class Configuration(object):
 
     def replace(
         self,
-        model: Optional[Model3] = None,
+        model: Optional[Model3 | ModelDef] = None,
         precision: Optional[Precision | str] = None,
         lr: Optional[float] = None,
         length: Optional[int] = None,
@@ -141,13 +142,18 @@ class Configuration(object):
     def __repr__(self) -> str:
         return f"Configuration('{self.model}', '{self.precision}', {self.lr}, {self.length}, {self.batch}, {self.steps}, {self.decay})"
 
+    @property
+    def num_weights(self) -> int:
+        m = self.model
+        return m.num_weights if isinstance(m, ModelDef) else m.weights
+
     def __str__(self) -> str:
         model = str(self.model)
         decay = '' if self.decay == 1 else f'*{self.decay:.4f}'
         steps = str(self.steps)
 
         return (
-            f'{model} ({itoa3(self.model.weights)})  {self.precision}   '
+            f'{model} ({itoa3(self.num_weights)})  {self.precision}   '
             + f'{self.batch}×{self.length}  S{steps}  '
             + self.learning_str
         )
@@ -157,7 +163,7 @@ class Configuration(object):
         steps = f'{self.steps:>5d}'
         return (
             f'{self.batch:>5d}×{self.length:<5d}  {self.learning_str:<10} S{steps}  '
-            + f'{self.precision}  {model} ({self.model.weights})'
+            + f'{self.precision}  {model} ({self.num_weights})'
         )
 
     def is_valid(self) -> bool:
@@ -375,8 +381,9 @@ class Template(object):
     def update_steps(self, value: Optional[str]):
         self.steps =  Bounds(_parse_interval(value, int), 1)
 
-    def match_model(self, model: Model3) -> bool:
-        if model.weights > self.max_weights.max:
+    def match_model(self, model: Model3 | ModelDef) -> bool:
+        nw = model.num_weights if isinstance(model, ModelDef) else model.weights
+        if nw > self.max_weights.max:
             return False
         if self.spec is not None:
             return self.spec == str(model)

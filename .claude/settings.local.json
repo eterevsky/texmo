@@ -3,7 +3,8 @@
     "allow": [
       "Bash(uv run:*)",
       "Bash(lspci)",
-      "Bash(rocm-smi)"
+      "Bash(rocm-smi)",
+      "Bash(python -m pytest texmo/layers/rnn_torch_test.py texmo/model_torch_test.py -v)"
     ]
   }
 }

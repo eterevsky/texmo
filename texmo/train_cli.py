@@ -10,7 +10,7 @@ from rich import print as pprint
 from .configuration import Configuration
 from .dataset import DataSet
 from .manager_torch import ManagerTorch
-from .model3 import build_model
+from .model_torch import build_model_def
 from .tokens import TokenSet, get_tokenizer, set_tokens_dir
 
 
@@ -66,7 +66,7 @@ def train(args: argparse.Namespace):
         raise NotImplementedError("Loading pre-trained models not yet supported in PyTorch manager")
     else:
         conf = Configuration(
-            build_model(args.spec),
+            build_model_def(args.spec),
             precision=args.precision,
             lr=lr,
             length=args.length,

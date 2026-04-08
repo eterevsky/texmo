@@ -7,162 +7,161 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 from .resultdb import ConfScore, ResultDB
-from .results import ResultSet
 from .configuration import Template
 from .common import INF, console, ttoa3
 from .tokens import set_tokens_dir
 
 
-def max_points(result_set: ResultSet, t: int, maxx: int):
-    x = []
-    y = []
-    max_loss = 5
+# def max_points(result_set: ResultSet, t: int, maxx: int):
+#     x = []
+#     y = []
+#     max_loss = 5
 
-    weight_loss = []
-    max_weights = INF
-    while True:
-        conf_results = result_set.top_conf(t, max_weights)
-        if not conf_results:
-            break
-        conf = conf_results.conf
-        weight_loss.append((conf.model.weights, conf_results.median_score))
-        max_weights = conf.model.weights - 1
+#     weight_loss = []
+#     max_weights = INF
+#     while True:
+#         conf_results = result_set.top_conf(t, max_weights)
+#         if not conf_results:
+#             break
+#         conf = conf_results.conf
+#         weight_loss.append((conf.model.weights, conf_results.median_score))
+#         max_weights = conf.model.weights - 1
 
-    prev_loss = max_loss
+#     prev_loss = max_loss
 
-    for weight, loss in reversed(weight_loss):
-        if loss > max_loss:
-            continue
-        x.append(weight - 1)
-        y.append(prev_loss)
+#     for weight, loss in reversed(weight_loss):
+#         if loss > max_loss:
+#             continue
+#         x.append(weight - 1)
+#         y.append(prev_loss)
 
-        x.append(weight)
-        y.append(loss)
+#         x.append(weight)
+#         y.append(loss)
 
-        prev_loss = loss
+#         prev_loss = loss
 
-    x.append(maxx)
-    y.append(prev_loss)
+#     x.append(maxx)
+#     y.append(prev_loss)
 
-    return x, y
-
-
-def draw_weight_loss_graph(
-    result_set: ResultSet, template: Template, train_time: tuple[float, float]
-):
-    fig, ax = plt.subplots()
-    ax.set_ylabel('cross-entropy (bits per byte)')
-    ax.set_xlabel('weights')
-    ax.set_xscale('log')
-    ax.set_yscale('log')
-    ax.grid(visible=True)
-    ax.set_yticks([1, 2, 3, 4])
-    ax.yaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
-    ax.yaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
-    yticks = [x / 10 for x in range(1, 30)] + [
-        x / 10 for x in range(30, 50, 2)
-    ]
-    ax.set_yticks(yticks, minor=True)
-
-    t = 1
-    legends = []
-
-    top_conf_results = result_set.top_conf(train_time[1])
-
-    while t <= train_time[1]:
-        if t >= train_time[0]:
-            x, y = max_points(
-                result_set, t, top_conf_results.conf.model.weights * 4
-            )
-            ax.plot(x, y)
-            legends.append(t)
-        t *= 2
-
-    ax.legend(legends)
-
-    plt.savefig('results/graph.png')
-    plt.show()
+#     return x, y
 
 
-def draw_loss_by_time(result_set: ResultSet, template: Template):
-    _, ax = plt.subplots()
-    ax.set_xlabel('time (s)')
-    ax.set_ylabel('cross-entropy (bits per byte)')
-    ax.set_xscale('log')
-    ax.set_yscale('log')
-    ax.grid(visible=True)
-    ax.xaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
-    ax.xaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
-    ax.yaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
-    ax.yaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
+# def draw_weight_loss_graph(
+#     result_set: ResultSet, template: Template, train_time: tuple[float, float]
+# ):
+#     fig, ax = plt.subplots()
+#     ax.set_ylabel('cross-entropy (bits per byte)')
+#     ax.set_xlabel('weights')
+#     ax.set_xscale('log')
+#     ax.set_yscale('log')
+#     ax.grid(visible=True)
+#     ax.set_yticks([1, 2, 3, 4])
+#     ax.yaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+#     ax.yaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
+#     yticks = [x / 10 for x in range(1, 30)] + [
+#         x / 10 for x in range(30, 50, 2)
+#     ]
+#     ax.set_yticks(yticks, minor=True)
 
-    times = []
-    t = template.t[0]
-    while t <= template.t[1]:
-        times.append(t)
-        t *= 2
+#     t = 1
+#     legends = []
 
-    best = []
-    best_for_bytes = []
+#     top_conf_results = result_set.top_conf(train_time[1])
 
-    for t in times:
-        best.append(result_set.top_conf(t).median_score)
-        bytes_top_conf = result_set.top_conf_for_tokenset(
-            t, 'tokens256_raw_all'
-        )
-        best_for_bytes.append(
-            bytes_top_conf.median_score if bytes_top_conf else 4
-        )
+#     while t <= train_time[1]:
+#         if t >= train_time[0]:
+#             x, y = max_points(
+#                 result_set, t, top_conf_results.conf.model.weights * 4
+#             )
+#             ax.plot(x, y)
+#             legends.append(t)
+#         t *= 2
 
-    ax.plot(times, best, label='best')
-    ax.plot(times, best_for_bytes, label='best for bytes')
+#     ax.legend(legends)
 
-    plt.show()
+#     plt.savefig('results/graph.png')
+#     plt.show()
 
 
-def get_top_confs(
-    result_set: ResultSet,
-    template: Template,
-    min_max_weights: int,
-    train_time: tuple[float, float],
-    system: str,
-):
-    top_confs = {}  # (weights_limit, planned_time_s) -> (conf, score)
-    count = {}  # (weights_limit, planned_time_s) -> count
-    tlo, thi = train_time
-    for conf_results in result_set.get_results_by_weights():
-        t = conf_results.median_time(system)
-        if not conf_results.median_score or not t:
-            continue
-        t = 2 ** math.ceil(math.log2(t))
-        if not tlo <= t <= thi:
-            continue
-        conf = conf_results.conf
-        weights = conf.model.weights
-        weights_bucket = max(
-            2 ** math.ceil(math.log2(weights)), min_max_weights
-        )
-        try:
-            count[(weights_bucket, t)] += len(conf_results.runs)
-        except KeyError:
-            count[(weights_bucket, t)] = len(conf_results.runs)
+# def draw_loss_by_time(result_set: ResultSet, template: Template):
+#     _, ax = plt.subplots()
+#     ax.set_xlabel('time (s)')
+#     ax.set_ylabel('cross-entropy (bits per byte)')
+#     ax.set_xscale('log')
+#     ax.set_yscale('log')
+#     ax.grid(visible=True)
+#     ax.xaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+#     ax.xaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
+#     ax.yaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+#     ax.yaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
 
-        while weights_bucket < 2**33:
-            key = (weights_bucket, t)
-            if key in top_confs:
-                top_conf, top_score = top_confs[key]
-                if (
-                    conf_results.median_score is not None
-                    and conf_results.median_score < top_score
-                ):
-                    assert conf_results.median_score is not None
-                    top_confs[key] = (conf, conf_results.median_score)
-            else:
-                assert conf_results.median_score is not None
-                top_confs[key] = (conf, conf_results.median_score)
-            weights_bucket *= 2
+#     times = []
+#     t = template.t[0]
+#     while t <= template.t[1]:
+#         times.append(t)
+#         t *= 2
 
-    return top_confs, count
+#     best = []
+#     best_for_bytes = []
+
+#     for t in times:
+#         best.append(result_set.top_conf(t).median_score)
+#         bytes_top_conf = result_set.top_conf_for_tokenset(
+#             t, 'tokens256_raw_all'
+#         )
+#         best_for_bytes.append(
+#             bytes_top_conf.median_score if bytes_top_conf else 4
+#         )
+
+#     ax.plot(times, best, label='best')
+#     ax.plot(times, best_for_bytes, label='best for bytes')
+
+#     plt.show()
+
+
+# def get_top_confs(
+#     result_set: ResultSet,
+#     template: Template,
+#     min_max_weights: int,
+#     train_time: tuple[float, float],
+#     system: str,
+# ):
+#     top_confs = {}  # (weights_limit, planned_time_s) -> (conf, score)
+#     count = {}  # (weights_limit, planned_time_s) -> count
+#     tlo, thi = train_time
+#     for conf_results in result_set.get_results_by_weights():
+#         t = conf_results.median_time(system)
+#         if not conf_results.median_score or not t:
+#             continue
+#         t = 2 ** math.ceil(math.log2(t))
+#         if not tlo <= t <= thi:
+#             continue
+#         conf = conf_results.conf
+#         weights = conf.model.weights
+#         weights_bucket = max(
+#             2 ** math.ceil(math.log2(weights)), min_max_weights
+#         )
+#         try:
+#             count[(weights_bucket, t)] += len(conf_results.runs)
+#         except KeyError:
+#             count[(weights_bucket, t)] = len(conf_results.runs)
+
+#         while weights_bucket < 2**33:
+#             key = (weights_bucket, t)
+#             if key in top_confs:
+#                 top_conf, top_score = top_confs[key]
+#                 if (
+#                     conf_results.median_score is not None
+#                     and conf_results.median_score < top_score
+#                 ):
+#                     assert conf_results.median_score is not None
+#                     top_confs[key] = (conf, conf_results.median_score)
+#             else:
+#                 assert conf_results.median_score is not None
+#                 top_confs[key] = (conf, conf_results.median_score)
+#             weights_bucket *= 2
+
+#     return top_confs, count
 
 
 def print_top_confs(top_confs, run_count) -> str:

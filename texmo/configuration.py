@@ -149,7 +149,6 @@ class Configuration(object):
 
     def __str__(self) -> str:
         model = str(self.model)
-        decay = '' if self.decay == 1 else f'*{self.decay:.4f}'
         steps = str(self.steps)
 
         return (

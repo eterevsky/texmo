@@ -81,7 +81,7 @@ def test_forward_matches_step():
 
 
 def test_activation_relu():
-    layer_def = DenseDef(2, relu=True, input_size=4)
+    layer_def = DenseDef(2, activation="relu", input_size=4)
     module = layer_def.build_module({
         "linear.weight": torch.tensor([[1, 0, 0, 0], [0, 0, 0, 1]], dtype=torch.float32),
         "linear.bias": torch.tensor([-5, -5], dtype=torch.float32),
@@ -95,7 +95,7 @@ def test_activation_relu():
 
 def test_build_module_fresh():
     """build_module() without state_dict produces a module with random weights."""
-    layer_def = DenseDef(8, gelu=True, input_size=4)
+    layer_def = DenseDef(8, activation="gelu", input_size=4)
     module = layer_def.build_module()
 
     assert module.linear.weight.shape == (8, 4)
@@ -108,7 +108,7 @@ def test_build_module_fresh():
 
 def test_roundtrip_state_dict():
     """Weights survive a save/load roundtrip."""
-    layer_def = DenseDef(2, tanh=True, input_size=4)
+    layer_def = DenseDef(2, activation="tanh", input_size=4)
     module1 = layer_def.build_module()
 
     saved = module1.state_dict()
@@ -119,5 +119,5 @@ def test_roundtrip_state_dict():
 
 
 def test_num_weights():
-    layer_def = DenseDef(8, gelu=True, input_size=4)
+    layer_def = DenseDef(8, activation="gelu", input_size=4)
     assert layer_def.num_weights == 8 * 4 + 8

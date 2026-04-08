@@ -181,6 +181,49 @@ def test_multi_layer():
     )
 
 
+def test_rnn_layer_spec():
+    md = ModelDef("bytes|rnn.32.tanh")
+    assert md.num_weights == (
+        0                       # input
+        + 32 * 256 + 32 * 32 + 2 * 32  # rnn.32 (nn.RNN)
+        + 32 * 256 + 256       # output
+    )
+    model = md.build_model()
+    batch = torch.randint(0, 256, (2, 10))
+    logits = model(batch)
+    assert logits.shape == (2, 10, 256)
+
+
+def test_rnn_step_matches_forward():
+    md = ModelDef("bytes|rnn.16.relu")
+    model = md.build_model()
+    model.eval()
+
+    tokens = [10, 20, 30, 40]
+    batch = torch.tensor([tokens], dtype=torch.long)
+
+    with torch.no_grad():
+        fwd_logits = model(batch)
+
+        states, step_logits_0 = model.initial_step()
+        step_logits = [step_logits_0]
+        for t in tokens[:-1]:
+            states, logits_t = model.step(states, t)
+            step_logits.append(logits_t)
+
+    for i in range(len(tokens)):
+        assert torch.allclose(fwd_logits[0, i], step_logits[i], atol=1e-5)
+
+
+def test_rnn_multi_layer():
+    md = ModelDef("bytes|rnn.32.tanh-dense.16.gelu")
+    model = md.build_model()
+
+    batch = torch.randint(0, 256, (2, 8))
+    logits = model(batch)
+    assert logits.shape == (2, 8, 256)
+
+
 def test_from_numpy():
     """Verify it works with numpy arrays from DataSet."""
     md = ModelDef("bytes|dense.32.gelu")

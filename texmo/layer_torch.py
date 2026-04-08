@@ -73,7 +73,7 @@ class LayerDef(object):
     def neighbors(self):
         size = self.size
 
-        for name in ("dense", "rec"):
+        for name in ("dense", "rnn"):
             for activation in ("tanh", "relu", "gelu"):
                 yield f"{name}.{size}.{activation}"
 
@@ -81,8 +81,8 @@ class LayerDef(object):
             yield f"{name}.{size}"
 
         for neighbor_size in power2_neighbors(size):
-            if self.name in ("dense", "rec"):
-                yield f"{self.name}.{neighbor_size}{self._activation_suffix}"
+            if self.name in ("dense", "rnn"):
+                yield f"{self.name}.{neighbor_size}.{self._activation}"
             else:
                 yield f"{self.name}.{neighbor_size}"
 

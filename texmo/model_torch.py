@@ -9,6 +9,7 @@ from .layer_torch import LayerDef, LayerModule, LayerState
 from .layers.dense_torch import DenseDef, DenseModule
 from .layers.input_bits_torch import InputBitsDef, InputBitsModule
 from .layers.input_bytes_torch import InputBytesDef, InputBytesModule
+from .layers.rnn_torch import RnnDef
 from .layers.suffix_torch import SuffixDef
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
@@ -245,13 +246,12 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
     if name == "dense":
         size = int(parts[1])
         activation = parts[2] if len(parts) > 2 else None
-        return DenseDef(
-            size,
-            relu=(activation == "relu"),
-            tanh=(activation == "tanh"),
-            gelu=(activation == "gelu"),
-            input_size=input_size,
-        )
+        return DenseDef(size, activation=activation, input_size=input_size)
+
+    if name == "rnn":
+        size = int(parts[1])
+        activation = parts[2] if len(parts) > 2 else None
+        return RnnDef(size, activation=activation, input_size=input_size)
 
     if name == "suffix":
         length = int(parts[1])

@@ -30,30 +30,27 @@ class DenseModule(LayerModule):
         return out
 
 
+_ACTIVATIONS = {
+    "relu": F.relu,
+    "tanh": torch.tanh,
+    "gelu": F.gelu,
+}
+
+
 class DenseDef(LayerDef):
     name = "dense"
 
-    def __init__(self, size, relu=False, tanh=False, gelu=False, input_size=None):
+    def __init__(self, size, activation: str | None = None, input_size=None):
         super().__init__(input_size=input_size)
         self.size = size
         self.output_size = size
-
-        if relu:
-            assert not tanh
-            self._activation_fn = F.relu
-            self._activation_suffix = ".relu"
-        elif tanh:
-            self._activation_fn = torch.tanh
-            self._activation_suffix = ".tanh"
-        elif gelu:
-            self._activation_fn = F.gelu
-            self._activation_suffix = ".gelu"
-        else:
-            self._activation_fn = None
-            self._activation_suffix = ""
+        self._activation_name = activation
+        self._activation_fn = _ACTIVATIONS[activation] if activation else None
 
     def __str__(self) -> str:
-        return f"dense.{self.size}{self._activation_suffix}"
+        if self._activation_name:
+            return f"dense.{self.size}.{self._activation_name}"
+        return f"dense.{self.size}"
 
     def is_valid(self) -> bool:
         return is_power2_int(self.size) and self._activation_fn is not None
@@ -62,7 +59,7 @@ class DenseDef(LayerDef):
         for n in super().neighbors():
             yield n
 
-        if self._activation_suffix == '.tanh' and self.size > 1:
+        if self._activation_name == 'tanh' and self.size > 1:
             yield f'latent.{self.size}.2.tanh'
 
     @property

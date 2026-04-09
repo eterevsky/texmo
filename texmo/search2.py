@@ -125,7 +125,7 @@ class Search(object):
         self._db = db
 
         assert isinstance(template, Template)
-        self._template = template
+        self.template = template
 
         assert isinstance(init_conf, Configuration)
         self._init_conf = init_conf
@@ -156,17 +156,17 @@ class Search(object):
             try:
                 top_conf = next(
                     self._db.top_confs_for_system(
-                        max_time=t, system=system, limit=1, template=self._template)
+                        max_time=t, system=system, limit=1, template=self.template)
                 )
             except StopIteration:
-                return self._template.max_weights.min
+                return self.template.max_weights.min
             maxw = 8 * top_conf.conf.model.num_weights
-            if self._template.max_weights.min >= maxw:
-                return self._template.max_weights.min
-            if self._template.max_weights.max <= maxw:
-                maxw = self._template.max_weights.max
+            if self.template.max_weights.min >= maxw:
+                return self.template.max_weights.min
+            if self.template.max_weights.max <= maxw:
+                maxw = self.template.max_weights.max
             l = random.uniform(
-                log2(self._template.max_weights.min), log2(maxw))
+                log2(self.template.max_weights.min), log2(maxw))
             return round(2**l)
 
     def _select_untimed(self, t: float, max_weights: int, system: str):
@@ -176,7 +176,7 @@ class Search(object):
                     max_weights=max_weights,
                     system=system,
                     limit=10,
-                    template=self._template
+                    template=self.template
                 )
             )
             if all(c.median_time is not None for c in confs):
@@ -205,7 +205,7 @@ class Search(object):
 
         Returns (neighbor_conf, num_runs) or None.
         """
-        neighbors = conf_neighbors(conf, self._template)
+        neighbors = conf_neighbors(conf, self.template)
         if not neighbors:
             return None
 
@@ -242,7 +242,7 @@ class Search(object):
             top_confs = list(
                 self._db.top_confs_for_system(
                     max_time=t, max_weights=max_weights, system=system,
-                    limit=10, template=self._template
+                    limit=10, template=self.template
                 )
             )
             if not top_confs:
@@ -263,7 +263,7 @@ class Search(object):
                         top_confs = list(
                             self._db.top_confs_for_system(
                                 max_time=t, max_weights=max_weights, system=system,
-                                limit=end, template=self._template
+                                limit=end, template=self.template
                             )
                         )
                         have_confs = end

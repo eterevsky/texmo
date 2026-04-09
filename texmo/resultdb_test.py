@@ -145,3 +145,39 @@ def test_median_score_updated(db):
     cur = db._db.execute("SELECT median_score FROM conf")
     row = cur.fetchone()
     assert row["median_score"] == pytest.approx(3.0)
+
+
+def test_get_conf_id(db):
+    conf, run = _make_conf_run()
+    assert db.get_conf_id(conf) is None
+
+    db.add_run(conf, run)
+    conf_id = db.get_conf_id(conf)
+    assert conf_id is not None
+    assert db.get_conf_id(conf) == conf_id  # cached
+
+
+def test_get_conf_id_cache(db):
+    conf1, run1 = _make_conf_run(loss=1)
+    conf2, run2 = _make_conf_run(spec="bytes|rnn.64.tanh", loss=2)
+    db.add_run(conf1, run1)
+    db.add_run(conf2, run2)
+
+    id1 = db.get_conf_id(conf1)
+    id2 = db.get_conf_id(conf2)
+    assert id1 != id2
+
+
+def test_get_run_counts(db):
+    conf1, run1 = _make_conf_run(loss=1)
+    conf2, run2 = _make_conf_run(loss=2)
+    conf3, run3 = _make_conf_run(spec="bytes|rnn.64.tanh", loss=3)
+    db.add_run(conf1, run1)
+    db.add_run(conf2, run2)
+    db.add_run(conf3, run3)
+
+    id1 = db.get_conf_id(conf1)
+    id3 = db.get_conf_id(conf3)
+    counts = db.get_run_counts([id1, id3])
+    assert counts[id1] == 2  # two runs same conf
+    assert counts[id3] == 1

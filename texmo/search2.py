@@ -44,7 +44,7 @@ def top_confs_report_rich(
         decay = '' if c.conf.decay == 1 else f'*{c.conf.decay:.4f}'
 
         table.add_row(
-            f'{c.conf.model} ({c.conf.model.weights})',
+            f'{c.conf.model} ({c.conf.model.num_weights})',
             str(c.conf.precision),
             str(c.conf.length),
             str(c.conf.batch),
@@ -141,9 +141,8 @@ class Search(object):
     ):
         assert isinstance(conf, Configuration)
         assert isinstance(run, Run)
-        # assert self._template.match(conf)
 
-        self._db.add_run(conf, run, update_neighbors=False)
+        self._db.add_run(conf, run)
 
     def _select_time(self) -> float:
         tmin, tmax = self._train_time
@@ -161,7 +160,7 @@ class Search(object):
                 )
             except StopIteration:
                 return self._template.max_weights.min
-            maxw = 8 * top_conf.conf.model.weights
+            maxw = 8 * top_conf.conf.model.num_weights
             if self._template.max_weights.min >= maxw:
                 return self._template.max_weights.min
             if self._template.max_weights.max <= maxw:
@@ -199,10 +198,41 @@ class Search(object):
                 logging.info('Selecting conf %d', i)
                 return confs[selected].conf
 
-    def _select_neighbor_fewest_runs(self, conf_id: int, system: str) -> Optional[ConfScore]:
-        for neighbor_cs in self._db.get_neighbors_by_runs(conf_id, system):
-            if self._template.match(neighbor_cs.conf):
-                return neighbor_cs
+    def _select_neighbor_fewest_runs(
+        self, conf: Configuration
+    ) -> Optional[tuple[Configuration, int]]:
+        """Find the neighbor with fewest runs that matches the template.
+
+        Returns (neighbor_conf, num_runs) or None.
+        """
+        neighbors = conf_neighbors(conf, self._template)
+        if not neighbors:
+            return None
+
+        # Look up conf_ids for all neighbors
+        neighbor_ids = []
+        id_to_conf = {}
+        for n in neighbors:
+            conf_id = self._db.get_conf_id(n)
+            if conf_id is not None:
+                neighbor_ids.append(conf_id)
+                id_to_conf[conf_id] = n
+
+        # Get run counts in one query
+        run_counts = self._db.get_run_counts(neighbor_ids)
+
+        # Find the neighbor with fewest runs (0 for unknown configs)
+        best_conf = None
+        best_runs = INF
+        for n in neighbors:
+            conf_id = self._db.get_conf_id(n)
+            num_runs = run_counts.get(conf_id, 0) if conf_id else 0
+            if num_runs < best_runs:
+                best_runs = num_runs
+                best_conf = n
+
+        if best_conf is not None:
+            return best_conf, best_runs
         return None
 
     def _select_top_neighbor(
@@ -249,17 +279,17 @@ class Search(object):
 
                     for j in range(start, min(end, len(top_confs))):
                         if len(min_runs_neighbor) < j + 1:
-                            top = top_confs[j]
-                            neighbor = self._select_neighbor_fewest_runs(
-                                top.conf_id, system)
-                            min_runs_neighbor.append(None)
-                            min_runs_neighbor[j] = neighbor
+                            result = self._select_neighbor_fewest_runs(
+                                top_confs[j].conf)
+                            min_runs_neighbor.append(result)
 
-                        neighbor = min_runs_neighbor[j]
-                        if neighbor.num_runs < min_neighbor:
-                            logging.info(
-                                f'Getting neighbor of conf {j} because it has {neighbor.num_runs} runs < {min_neighbor}')
-                            return neighbor.conf
+                        result = min_runs_neighbor[j]
+                        if result is not None:
+                            neighbor_conf, neighbor_runs = result
+                            if neighbor_runs < min_neighbor:
+                                logging.info(
+                                    f'Getting neighbor of conf {j} because it has {neighbor_runs} runs < {min_neighbor}')
+                                return neighbor_conf
 
     def select_conf(self, system: str) -> tuple[Configuration, float]:
         """Select a configuration to run.

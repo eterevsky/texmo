@@ -42,13 +42,13 @@ def build_graph(confs: list[Configuration]) -> bytes:
 
     for conf_score in confs:
         if prev_y is not None:
-            xs.append(conf_score.conf.model.weights - 0.1)
+            xs.append(conf_score.conf.model.num_weights - 0.1)
             ys.append(prev_y)
 
-        xs.append(conf_score.conf.model.weights)
+        xs.append(conf_score.conf.model.num_weights)
         ys.append(conf_score.median_score)
 
-        prev_x = conf_score.conf.model.weights
+        prev_x = conf_score.conf.model.num_weights
         prev_y = conf_score.median_score
 
     if prev_x is not None:
@@ -170,7 +170,7 @@ class SearchServer(object):
         for conf_score in top_confs:
             top.append({
                 'spec': str(conf_score.conf.model),
-                'weights': conf_score.conf.model.weights,
+                'weights': conf_score.conf.model.num_weights,
                 'precision': str(conf_score.conf.precision),
                 'length': conf_score.conf.length,
                 'batch': conf_score.conf.batch,

@@ -351,7 +351,7 @@ class Template(object):
 
 def conf_neighbors(
     conf: Configuration, template: Template
-) -> Iterable[Configuration]:
+) -> list[Configuration]:
     with latency.timer('conf_neighbors'):
         neighbors = template._conf_neighbors_cache.get(conf)
 

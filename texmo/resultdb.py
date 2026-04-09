@@ -144,8 +144,8 @@ WHERE spec = :spec
 """
 
 _INSERT_CONF = """
-INSERT INTO conf (spec, weights, lr, length, batch, steps, has_neighbors, precision, decay)
-VALUES (:spec, :weights, :lr, :length, :batch, :steps, 0, :precision, :decay)
+INSERT INTO conf (spec, weights, lr, length, batch, steps, precision, decay)
+VALUES (:spec, :weights, :lr, :length, :batch, :steps, :precision, :decay)
 """
 
 _INSERT_RUN = """
@@ -224,23 +224,39 @@ class ResultDB(object):
                 self._db.executescript(schema.read())
                 self._db.commit()
 
+        # Cache: Configuration -> conf_id (populated lazily)
+        self._conf_id_cache: dict[Configuration, int | None] = {}
+
     def commit(self):
         self._db.commit()
+
+    def get_conf_id(self, conf: Configuration) -> int | None:
+        """Return conf_id if this configuration exists in the DB, else None.
+
+        Uses an in-memory cache to avoid repeated DB lookups.
+        """
+        if conf in self._conf_id_cache:
+            return self._conf_id_cache[conf]
+
+        conf_dict = conf.to_dict()
+        cur = self._db.execute(_FIND_CONF, conf_dict)
+        row = cur.fetchone()
+        conf_id = row[0] if row else None
+        self._conf_id_cache[conf] = conf_id
+        return conf_id
 
     def _find_or_add_conf(
         self, cur: sqlite3.Cursor, conf: Configuration
     ) -> int:
+        conf_id = self.get_conf_id(conf)
+        if conf_id is not None:
+            return conf_id
         conf_dict = conf.to_dict()
         conf_dict['weights'] = conf.num_weights
-        cur.execute(_FIND_CONF, conf_dict)
-        rows = cur.fetchall()
-        assert len(rows) <= 1
-        if rows:
-            return rows[0][0]
-        else:
-            cur = self._db.cursor()
-            cur.execute(_INSERT_CONF, conf_dict)
-            return cur.lastrowid
+        cur.execute(_INSERT_CONF, conf_dict)
+        conf_id = cur.lastrowid
+        self._conf_id_cache[conf] = conf_id
+        return conf_id
 
     def find_or_add_conf(self, conf: Configuration) -> int:
         """Finds the conf in the db and returns the configuration id."""
@@ -250,6 +266,18 @@ class ResultDB(object):
             conf_id = self._find_or_add_conf(cur, conf)
             cur.execute('COMMIT')
             return conf_id
+
+    def get_run_counts(self, conf_ids: list[int]) -> dict[int, int]:
+        """Return {conf_id: num_runs} for the given conf_ids."""
+        if not conf_ids:
+            return {}
+        placeholders = ','.join('?' for _ in conf_ids)
+        cur = self._db.execute(
+            f'SELECT conf_id, COUNT(*) FROM run '
+            f'WHERE conf_id IN ({placeholders}) GROUP BY conf_id',
+            conf_ids,
+        )
+        return {row[0]: row[1] for row in cur}
 
     def _add_run_execute(self, cur: sqlite3.Cursor, run_dict: dict):
         with latency.timer('ResultDB._add_run_execute'):

@@ -95,7 +95,7 @@ def itoa3_aligned(x: int) -> str:
     return s
 
 
-def ttoa3(t: float) -> str:
+def ttoa3(t: float | None) -> str:
     """Convert time in seconds to a string with 3 significant digits."""
     if t is None: return "null"
     elif t < 1E-6: return f"{t * 1E9:.0f} ns"

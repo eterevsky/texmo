@@ -18,6 +18,9 @@ dependencies = [
     "torch",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["texmo"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.4.2",

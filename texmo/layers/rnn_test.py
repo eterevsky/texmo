@@ -1,6 +1,6 @@
 import torch
 
-from texmo.layers.rnn_torch import RnnDef
+from texmo.layers.rnn import RnnDef
 
 
 def test_def_properties_tanh():

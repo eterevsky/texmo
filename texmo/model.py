@@ -7,13 +7,13 @@ import torch.nn.functional as F
 from torch import Tensor
 from typing import Iterable, Optional
 
-from .layer_torch import LayerDef, LayerModule, LayerState
+from .layer import LayerDef, LayerModule, LayerState
 from .precision import Precision
-from .layers.dense_torch import DenseDef, DenseModule
-from .layers.input_bits_torch import InputBitsDef, InputBitsModule
-from .layers.input_bytes_torch import InputBytesDef, InputBytesModule
-from .layers.rnn_torch import RnnDef
-from .layers.suffix_torch import SuffixDef
+from .layers.dense import DenseDef, DenseModule
+from .layers.input_bits import InputBitsDef, InputBitsModule
+from .layers.input_bytes import InputBytesDef, InputBytesModule
+from .layers.rnn import RnnDef
+from .layers.suffix import SuffixDef
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
 

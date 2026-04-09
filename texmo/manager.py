@@ -9,7 +9,7 @@ import torch
 from .common import INF, ttoa3, is_power2_int
 from .configuration import Configuration
 from .dataset import DataSet, DataSetWrapper
-from .model_torch import ModelDef, Model, build_model_def
+from .model import ModelDef, Model, build_model_def
 from .predict import LossTrend
 from .run import Run
 from .tokens import get_tokenizer
@@ -26,7 +26,7 @@ def _resolve_device(device_str: str) -> torch.device:
     return torch.device(device_str)
 
 
-class ManagerTorch(object):
+class Manager(object):
     def __init__(
         self,
         conf: Configuration,

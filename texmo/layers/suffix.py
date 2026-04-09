@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from ..common import is_power2_int
-from ..layer_torch import LayerDef, LayerModule, LayerState
+from ..layer import LayerDef, LayerModule, LayerState
 
 
 class SuffixModule(LayerModule):

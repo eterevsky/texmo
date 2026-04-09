@@ -1,8 +1,8 @@
 import torch
 import numpy as np
 
-from texmo.layers.input_bits_torch import InputBitsDef
-from texmo.model_torch import ModelDef
+from texmo.layers.input_bits import InputBitsDef
+from texmo.model import ModelDef
 from texmo.precision import Precision
 
 

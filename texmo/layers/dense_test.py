@@ -1,6 +1,6 @@
 import torch
 
-from texmo.layers.dense_torch import DenseDef
+from texmo.layers.dense import DenseDef
 
 
 def _make_module():

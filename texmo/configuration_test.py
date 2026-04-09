@@ -3,7 +3,7 @@ from texmo.configuration import (
     Template,
     conf_neighbors,
 )
-from texmo.model_torch import build_model_def
+from texmo.model import build_model_def
 from texmo.precision import Precision
 from texmo.common import INF
 

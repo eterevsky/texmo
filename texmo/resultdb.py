@@ -14,7 +14,7 @@ import numpy as np
 from . import latency
 from .common import INF, console
 from .configuration import Configuration, Precision, Template
-from .model_torch import build_model_def
+from .model import build_model_def
 from .precision import Precision
 from .run import Run
 

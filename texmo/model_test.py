@@ -2,7 +2,7 @@ import math
 import torch
 import numpy as np
 
-from texmo.model_torch import ModelDef, build_model_def
+from texmo.model import ModelDef, build_model_def
 from texmo.precision import Precision
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)

@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from texmo.configuration import Configuration
-from texmo.model_torch import build_model_def
+from texmo.model import build_model_def
 from texmo.precision import Precision
 from texmo.predict import build_loss_trend
 from texmo.resultdb import ResultDB

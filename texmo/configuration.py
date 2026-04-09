@@ -4,7 +4,7 @@ from typing import Optional, Iterable
 import math
 
 from .common import INF, itoa3
-from .model_torch import ModelDef, build_model_def
+from .model import ModelDef, build_model_def
 from .precision import Precision
 from . import latency
 from .tokens.tokenizer import Tokenizer

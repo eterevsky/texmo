@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from ..common import is_power2_int
-from ..layer_torch import LayerDef, LayerModule, LayerState
+from ..layer import LayerDef, LayerModule, LayerState
 
 
 class DenseModule(LayerModule):

@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from texmo.layers.input_bytes_torch import InputBytesDef
+from texmo.layers.input_bytes import InputBytesDef
 
 
 def test_def_properties():

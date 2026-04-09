@@ -9,16 +9,16 @@ from rich import print as pprint
 
 from .configuration import Configuration
 from .dataset import DataSet
-from .manager_torch import ManagerTorch
-from .model_torch import build_model_def
+from .manager import Manager
+from .model import build_model_def
 from .precision import Precision
 from .tokens import TokenSet, get_tokenizer, set_tokens_dir
 
 
-def show_loss_graph(manager: ManagerTorch, output_dir: str):
+def show_loss_graph(manager: Manager, output_dir: str):
     run = manager.run
 
-    # step_loss is already in b/B (converted in ManagerTorch.train_step)
+    # step_loss is already in b/B (converted in Manager.train_step)
     scaled_step_loss = np.array(run.step_loss)
 
     steps = run.steps
@@ -74,7 +74,7 @@ def train(args: argparse.Namespace):
             steps=args.steps,
             decay=decay,
         )
-        manager = ManagerTorch(
+        manager = Manager(
             conf,
             system=args.system,
             dataset=train_set,

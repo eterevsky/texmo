@@ -1,7 +1,7 @@
 import torch
 
-from texmo.layers.suffix_torch import SuffixDef, SuffixModule
-from texmo.model_torch import ModelDef
+from texmo.layers.suffix import SuffixDef, SuffixModule
+from texmo.model import ModelDef
 from texmo.precision import Precision
 
 

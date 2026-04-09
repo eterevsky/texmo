@@ -202,7 +202,8 @@ class Bounds(object):
             yield value2
 
 
-Limits = Optional[float | tuple[float, float]]
+IntLimits = Optional[int | tuple[int, int]]
+FloatLimits = Optional[float | tuple[float, float]]
 
 
 def _parse_number(arg: str, num_type: type) -> int|float:
@@ -227,25 +228,32 @@ class Template(object):
     def __init__(
         self,
         spec: Optional[str],  # Exact match or a regex
-        lr: Optional[float | tuple[float, float]],
-        length: Limits,
-        batch: Limits,
-        steps: Limits,
-        max_weights: Limits,
+        lr: FloatLimits,
+        length: IntLimits,
+        batch: IntLimits,
+        steps: IntLimits,
+        max_weights: IntLimits,
         precision: list[Precision],
-        decay: Optional[float | tuple[float, float]]
+        decay: FloatLimits
     ):
-        self.update_spec(spec)
-        self.max_weights = Bounds(max_weights, 16)
+        if not spec:
+            self.regex = None
+            self.spec = None
+        else:
+            try:
+                build_model_def(spec, precision=Precision.FP32)
+                self.regex = None
+                self.spec = spec
+            except Exception:
+                self.regex = re.compile(spec)
+                self.spec = None
 
+        self.max_weights = Bounds(max_weights, 16)
         self.length = Bounds(length, 1)
         self.batch = Bounds(batch, 1)
-
         self.precision = precision
-
         self.lr = Bounds(lr, 0)
         self.decay = Bounds(decay, 0)
-
         self.steps = Bounds(steps, 2)
 
         self._conf_neighbors_cache = {}
@@ -268,6 +276,25 @@ class Template(object):
             decay=_parse_interval(args.decay, float)
         )
 
+    @staticmethod
+    def from_form(params: dict):
+        """Create a Template from web form parameters."""
+        precision = []
+        for p in Precision:
+            if params.get(str(p)):
+                precision.append(p)
+
+        return Template(
+            spec=params["spec"],
+            lr=_parse_interval(params['lr'], float),
+            length=_parse_interval(params['length'], int),
+            batch=_parse_interval(params['batch'], int),
+            steps=_parse_interval(params['steps'], int),
+            max_weights=_parse_interval(params['weights'], int),
+            precision=precision,
+            decay=_parse_interval(params['decay'], float),
+        )
+
     def __str__(self):
         precision = ','.join(map(str, self.precision))
         spec = self.spec if self.spec is not None else self.regex
@@ -280,46 +307,6 @@ class Template(object):
             + f'max_weights={self.max_weights}, '
             + f'decay={self.decay})'
         )
-
-    def update_spec(self, spec: Optional[str]):
-        if not spec:
-            self.regex = None
-            self.spec = None
-        else:
-            try:
-                model = build_model_def(spec, precision=Precision.FP32)
-            except Exception:
-                model = None
-            if model is None:
-                self.regex = re.compile(spec)
-                self.spec = None
-            else:
-                self.regex = None
-                self.spec = spec
-
-    def update_weights(self, weights: Optional[str]):
-        self.max_weights =  Bounds(_parse_interval(weights, int), 2)
-
-    def update_length(self, value: Optional[str]):
-        self.length =  Bounds(_parse_interval(value, int), 1)
-
-    def update_batch(self, value: Optional[str]):
-        self.batch =  Bounds(_parse_interval(value, int), 1)
-
-    def update_precision(self, value: list[Precision]):
-        assert type(value) is list
-        assert len(value) > 0
-        assert type(value[0]) is Precision
-        self.precision = value
-
-    def update_lr(self, value: Optional[str]):
-        self.lr =  Bounds(_parse_interval(value, float), 0)
-
-    def update_decay(self, value: Optional[str]):
-        self.decay =  Bounds(_parse_interval(value, float), 0)
-
-    def update_steps(self, value: Optional[str]):
-        self.steps =  Bounds(_parse_interval(value, int), 1)
 
     def match_model(self, model: ModelDef) -> bool:
         if model.num_weights > self.max_weights.max:

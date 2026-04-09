@@ -122,14 +122,6 @@ def _render_bounds(b: Bounds):
         return f'{b.min}-{b.max}'
 
 
-def _get_flags(enum, params: dict) -> list:
-    vals = []
-    for val in enum:
-        if params.get(str(val)):
-            vals.append(val)
-    return vals
-
-
 class SearchServer(object):
     def __init__(self, db: ResultDB, template: Template, train_time: tuple[float, float], default_spec: str):
         self.db: ResultDB = db
@@ -207,14 +199,8 @@ class SearchServer(object):
         )
 
     def update(self, params):
-        self.template.update_spec(params["spec"])
-        self.template.update_weights(params['weights'])
-        self.template.update_length(params['length'])
-        self.template.update_batch(params['batch'])
-        self.template.update_precision(_get_flags(Precision, params))
-        self.template.update_lr(params['lr'])
-        self.template.update_decay(params['decay'])
-        self.template.update_steps(params['steps'])
+        self.template = Template.from_form(params)
+        self.search_thread.search.template = self.template
         logging.info(f'New template: {self.template}')
         return redirect("/")
 

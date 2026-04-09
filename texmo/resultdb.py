@@ -165,19 +165,6 @@ INSERT OR REPLACE INTO conf_time(conf_id, system, median_time)
 VALUES (:conf_id, :system, :median_time)
 """
 
-_GET_CONF_RUNS_DIFF_STEPS = """
-SELECT conf.steps, conf_time.median_time
-FROM conf, conf_time
-WHERE conf.id = conf_time.conf_id
-    AND conf.spec = :spec
-    AND conf.precision = :precision
-    AND conf.lr = :lr
-    AND conf.length = :length
-    AND conf.batch = :batch
-    AND conf.decay = :decay
-    AND conf_time.system = :system
-"""
-
 _GET_CONFS_RUNS = """
 SELECT conf.id AS conf_id,
         spec,
@@ -483,27 +470,6 @@ class ResultDB(object):
 
         for row in cur:
             yield ConfScore._from_row(row, system)
-
-    def get_conf_runs_diff_steps(
-        self, conf: Configuration, system: str
-    ) -> Iterable[tuple[int, float]]:
-        """Find all runs on a given system of configurations which differ from
-        `conf` only in the number of steps.
-        """
-        cur = self._db.execute(
-            _GET_CONF_RUNS_DIFF_STEPS,
-            {
-                'spec': str(conf.model),
-                'precision': str(conf.precision),
-                'lr': conf.lr,
-                'length': conf.length,
-                'batch': conf.batch,
-                'decay': conf.decay,
-                'system': system,
-            },
-        )
-
-        return cur
 
     def total_runs(self) -> int:
         cur = self._db.execute('SELECT COUNT(*) AS count FROM run')

@@ -123,7 +123,6 @@ class Manager(object):
         temp_steps=None,
         temp_dir=None,
         quiet=False,
-        soft_tl: Optional[float] = None,
     ):
         last_report = 0
 
@@ -138,20 +137,12 @@ class Manager(object):
         logging.info(f'Training for{t}{s}')
 
         deadline = INF
-        soft_deadline = INF
         start_time = None
 
         while self.step < steps:
             if perf_counter() > deadline:
                 logging.info(
-                    f'Stopped at step {self.step} due to hard time limit {ttoa3(time_limit)}')
-                break
-            if (
-                self.step & (self.step - 1) == 0  # Step is power of 2
-                and perf_counter() > soft_deadline
-            ):
-                logging.info(
-                    f'Stopped at step {self.step}/{steps} due to soft time limit {ttoa3(soft_tl)}')
+                    f'Stopped at step {self.step} due to time limit {ttoa3(time_limit)}')
                 break
 
             batch = self._get_batch()
@@ -175,7 +166,6 @@ class Manager(object):
             if start_time is None:
                 start_time = step_end
                 deadline = start_time + time_limit if time_limit else INF
-                soft_deadline = start_time + soft_tl if soft_tl else INF
 
         total_time = (
             None if start_time is None else perf_counter() - start_time
@@ -209,7 +199,6 @@ class Manager(object):
         output_dir,
         log,
         quiet: bool = False,
-        soft_tl: Optional[float] = None,
     ) -> tuple[Run, Configuration]:
         try:
             train_time, final_conf = self.train(
@@ -218,7 +207,6 @@ class Manager(object):
                 temp_steps,
                 temp_dir,
                 quiet=quiet,
-                soft_tl=soft_tl,
             )
 
             if train_time is None:

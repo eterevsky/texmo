@@ -98,9 +98,9 @@ class SearchThread(threading.Thread):
                 system = args
                 if system is None:
                     break
-                conf, soft_tl = self.search.select_conf(system)
+                conf = self.search.select_conf(system)
                 with self.confs_by_system_lock:
-                    self.confs_by_system[system].put((conf, soft_tl))
+                    self.confs_by_system[system].put(conf)
             elif command == "add":
                 conf, run = args
                 self.search.add_run(conf, run)
@@ -215,14 +215,12 @@ class SearchServer(object):
 
         self.requests_queue.put(("select", system))
 
-        conf, soft_tl = response_queue.get()
+        conf = response_queue.get()
         logging.info(f"Sending conf for system {system}: {conf}")
-        result = {
+        return {
             "system": system,
             "conf": conf.to_dict(),
-            "soft_tl": soft_tl
         }
-        return result
 
     def add_run(self, params):
         run = Run.from_dict(params["run"])

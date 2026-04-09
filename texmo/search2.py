@@ -169,35 +169,6 @@ class Search(object):
                 log2(self.template.max_weights.min), log2(maxw))
             return round(2**l)
 
-    def _select_untimed(self, t: float, max_weights: int, system: str):
-        with latency.timer("Search._select_untimed"):
-            confs = list(
-                self._db.top_confs_for_system(
-                    max_weights=max_weights,
-                    system=system,
-                    limit=10,
-                    template=self.template
-                )
-            )
-            if all(c.median_time is not None for c in confs):
-                return None
-            selected = None
-            for i, c in enumerate(confs):
-                # Select a conf if it's a) hasn't been run on the given system,
-                # b) there are no similar with fewer steps that took longer
-                # than `t` on this system.
-                if (c.median_time is None and
-                    all(steps > c.conf.steps or median_time < t
-                        for steps, median_time
-                        in self._db.get_conf_runs_diff_steps(c.conf, system))):
-                    selected = i
-                    break
-            if selected is not None:
-                logging.info(top_confs_report(
-                    confs=confs, max_weights=max_weights, max_time=t, system=system))
-                logging.info('Selecting conf %d', i)
-                return confs[selected].conf
-
     def _select_neighbor_fewest_runs(
         self, conf: Configuration
     ) -> Optional[tuple[Configuration, int]]:
@@ -291,28 +262,17 @@ class Search(object):
                                     f'Getting neighbor of conf {j} because it has {neighbor_runs} runs < {min_neighbor}')
                                 return neighbor_conf
 
-    def select_conf(self, system: str) -> tuple[Configuration, float]:
-        """Select a configuration to run.
-
-            Returns:
-                (configuration to run, soft time limit in seconds)
-        """
+    def select_conf(self, system: str) -> Configuration:
+        """Select a configuration to run."""
         with latency.timer("Search.select_conf"):
             t = self._select_time()
-            tmax = self._train_time[1]
             max_weights = self._select_max_weights(t, system)
-
-            conf = self._select_untimed(t, max_weights, system)
-            if conf is not None:
-                logging.info(f'Conf for {system}: {conf}, TL: {ttoa3(tmax)}')
-                return conf, tmax
 
             conf = self._select_top_neighbor(t, max_weights, system)
             if conf is not None:
-                # tl = min(4*t, tmax)
-                logging.info(f'Conf for {system}: {conf}, no TL')
-                return conf, INF
+                logging.info(f'Conf for {system}: {conf}')
+                return conf
 
             logging.info(
-                f'Conf for {system}: {self._init_conf} (default), TL: {ttoa3(tmax)}')
-            return self._init_conf, tmax
+                f'Conf for {system}: {self._init_conf} (default)')
+            return self._init_conf

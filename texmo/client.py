@@ -100,7 +100,6 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, once: bo
         d = r.json()
         assert d["system"] == system
         conf = Configuration.from_dict(d["conf"])
-        soft_tl = d.get("soft_tl")  # soft time limit
 
         manager = Manager(conf, system, dataset=dataset)
         manager.init(quiet=True)
@@ -113,7 +112,6 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, once: bo
             output_dir=None,
             log=None,
             quiet=True,
-            soft_tl=soft_tl,
         )
 
         with timer("post(add)"):

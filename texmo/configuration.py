@@ -1,16 +1,11 @@
 import argparse
-import enum
-import logging
 import re
 from typing import Optional, Iterable
 import math
 
-import jax
-import jax.numpy as jnp
-
-from .common import INF, console, itoa3, itoa3_aligned
-from .model3 import Model3, build_model
+from .common import INF, itoa3
 from .model_torch import ModelDef, build_model_def
+from .precision import Precision
 from . import latency
 from .tokens.tokenizer import Tokenizer
 
@@ -19,45 +14,13 @@ def is_valid_int(x: int) -> bool:
     return isinstance(x, int) and x >= 1
 
 
-class Precision(enum.StrEnum):
-    FP64 = enum.auto()
-    FP32 = enum.auto()
-    FP16 = enum.auto()
-    BF16 = enum.auto()
-
-    @property
-    def dtype(self):
-        match self:
-            case Precision.FP64:
-                return jnp.float64
-            case Precision.FP32:
-                return jnp.float32
-            case Precision.FP16:
-                return jnp.float16
-            case Precision.BF16:
-                return jax.dtypes.bfloat16
-
-    @property
-    def neighbors(self):
-        match self:
-            case Precision.FP64:
-                return (Precision.FP32,)
-            case Precision.FP32:
-                return (Precision.FP64, Precision.FP16, Precision.BF16)
-            case Precision.FP16:
-                return (Precision.FP32, Precision.BF16)
-            case Precision.BF16:
-                return (Precision.FP32, Precision.BF16)
-
-
 class Configuration(object):
-    __slots__ = ('model', 'precision', 'lr', 'length',
+    __slots__ = ('model', 'lr', 'length',
                  'batch', 'steps', 'decay')
 
     def __init__(
         self,
         model: ModelDef,
-        precision: Precision | str,
         lr: float,
         length: int,
         batch: int,
@@ -65,7 +28,6 @@ class Configuration(object):
         decay: float,
     ):
         object.__setattr__(self, 'model', model)
-        object.__setattr__(self, 'precision', Precision(precision))
         object.__setattr__(self, 'lr', lr)
         object.__setattr__(self, 'length', length)
         object.__setattr__(self, 'batch', batch)
@@ -73,15 +35,18 @@ class Configuration(object):
         assert decay is not None
         object.__setattr__(self, 'decay', decay)
 
+    @property
+    def precision(self) -> Precision:
+        return self.model.precision
+
     def __setattr__(self, _key, _value):
         raise AttributeError('Configuration is immutable')
 
     @staticmethod
     def from_dict(d: dict) -> Configuration:
-        model = build_model(d['spec'])
+        model = build_model_def(d['spec'], precision=Precision(d['precision']))
         return Configuration(
             model=model,
-            precision=d['precision'],
             lr=d['lr'],
             length=d['length'],
             batch=d['batch'],
@@ -108,8 +73,8 @@ class Configuration(object):
 
     def replace(
         self,
-        model: Optional[Model3 | ModelDef] = None,
-        precision: Optional[Precision | str] = None,
+        model: Optional[ModelDef] = None,
+        precision: Optional[Precision] = None,
         lr: Optional[float] = None,
         length: Optional[int] = None,
         batch: Optional[int] = None,
@@ -117,14 +82,15 @@ class Configuration(object):
         decay: Optional[float] = None,
     ) -> Configuration:
         model = model or self.model
+        if precision is not None and precision != model.precision:
+            model = build_model_def(str(model), precision=precision)
         lr = lr or self.lr
         length = length or self.length
         batch = batch or self.batch
         steps = steps or self.steps
-        precision = precision or self.precision
         decay = decay or self.decay
         return Configuration(
-            model=model, precision=precision, lr=lr, length=length, batch=batch, steps=steps,
+            model=model, lr=lr, length=length, batch=batch, steps=steps,
             decay=decay,
         )
 
@@ -144,8 +110,7 @@ class Configuration(object):
 
     @property
     def num_weights(self) -> int:
-        m = self.model
-        return m.num_weights if isinstance(m, ModelDef) else m.weights
+        return self.model.num_weights
 
     def __str__(self) -> str:
         model = str(self.model)
@@ -172,7 +137,6 @@ class Configuration(object):
             and is_valid_int(self.length)
             and is_valid_int(self.batch)
             and is_valid_int(self.steps)
-            and type(self.precision) == Precision
             and 0 < self.decay <= 1
         )
 
@@ -242,9 +206,8 @@ class Bounds(object):
             return default
         elif self.min == 0:
             return self.max
-        else:
-            mid = math.sqrt(self.min * self.max)
 
+        mid = math.sqrt(self.min * self.max)
         round_mid = 2 ** round(math.log2(mid))
         assert self.min <= round_mid <= self.max
         return round_mid
@@ -346,7 +309,7 @@ class Template(object):
             self.spec = None
         else:
             try:
-                model = build_model(spec)
+                model = build_model_def(spec, precision=Precision.FP32)
             except Exception:
                 model = None
             if model is None:
@@ -380,9 +343,8 @@ class Template(object):
     def update_steps(self, value: Optional[str]):
         self.steps =  Bounds(_parse_interval(value, int), 1)
 
-    def match_model(self, model: Model3 | ModelDef) -> bool:
-        nw = model.num_weights if isinstance(model, ModelDef) else model.weights
-        if nw > self.max_weights.max:
+    def match_model(self, model: ModelDef) -> bool:
+        if model.num_weights > self.max_weights.max:
             return False
         if self.spec is not None:
             return self.spec == str(model)
@@ -442,6 +404,7 @@ def conf_neighbors(
 def default_from_template(
     template: Template, spec: Optional[str]
 ) -> Configuration:
+    precision = template.precision[0]
     lr = template.lr.pick_default(1 / 128)
     length = template.length.pick_default(8)
     batch = template.batch.pick_default(1)
@@ -469,7 +432,7 @@ def default_from_template(
                         ):
                             if found: break
                             full_spec = input_spec + '|' + layer
-                            model = build_model(full_spec)
+                            model = build_model_def(full_spec, precision=precision)
                             if not model.is_valid():
                                 continue
                             if template.match_model(model):
@@ -478,8 +441,7 @@ def default_from_template(
 
     if spec is not None:
         return Configuration(
-                        model=build_model(spec),
-                        precision=template.precision[0],
+                        model=build_model_def(spec, precision=precision),
                         lr=lr,
                         length=length,
                         batch=batch,

@@ -44,12 +44,12 @@ class DenseDef(LayerDef):
         super().__init__(input_size=input_size)
         self.size = size
         self.output_size = size
-        self._activation_name = activation
+        self._activation = activation
         self._activation_fn = _ACTIVATIONS[activation] if activation else None
 
     def __str__(self) -> str:
-        if self._activation_name:
-            return f"dense.{self.size}.{self._activation_name}"
+        if self._activation:
+            return f"dense.{self.size}.{self._activation}"
         return f"dense.{self.size}"
 
     def is_valid(self) -> bool:
@@ -59,7 +59,7 @@ class DenseDef(LayerDef):
         for n in super().neighbors():
             yield n
 
-        if self._activation_name == 'tanh' and self.size > 1:
+        if self._activation == 'tanh' and self.size > 1:
             yield f'latent.{self.size}.2.tanh'
 
     @property

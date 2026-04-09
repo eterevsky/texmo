@@ -3,12 +3,13 @@ import torch
 import numpy as np
 
 from texmo.model_torch import ModelDef, build_model_def
+from texmo.precision import Precision
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
 
 
 def test_model_def_properties():
-    md = ModelDef("bytes|dense.128.gelu")
+    md = ModelDef("bytes|dense.128.gelu", Precision.FP32)
     assert md.ntokens == 256
     assert str(md) == "bytes|dense.128.gelu"
     assert md.num_weights == (
@@ -19,7 +20,7 @@ def test_model_def_properties():
 
 
 def test_build_model():
-    md = ModelDef("bytes|dense.64.relu")
+    md = ModelDef("bytes|dense.64.relu", Precision.FP32)
     model = md.build_model()
 
     # Check it's an nn.Module with parameters
@@ -28,7 +29,7 @@ def test_build_model():
 
 
 def test_forward_shape():
-    md = ModelDef("bytes|dense.64.gelu")
+    md = ModelDef("bytes|dense.64.gelu", Precision.FP32)
     model = md.build_model()
 
     batch = torch.randint(0, 256, (4, 16))
@@ -37,7 +38,7 @@ def test_forward_shape():
 
 
 def test_loss_batch():
-    md = ModelDef("bytes|dense.64.gelu")
+    md = ModelDef("bytes|dense.64.gelu", Precision.FP32)
     model = md.build_model()
 
     batch = torch.randint(0, 256, (4, 16))
@@ -51,7 +52,7 @@ def test_loss_batch():
 
 def test_loss_decreases():
     """Verify that a few optimization steps reduce the loss."""
-    md = ModelDef("bytes|dense.32.relu")
+    md = ModelDef("bytes|dense.32.relu", Precision.FP32)
     model = md.build_model()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
@@ -70,7 +71,7 @@ def test_loss_decreases():
 
 
 def test_step_and_initial_step():
-    md = ModelDef("bytes|dense.64.tanh")
+    md = ModelDef("bytes|dense.64.tanh", Precision.FP32)
     model = md.build_model()
     model.eval()
 
@@ -84,7 +85,7 @@ def test_step_and_initial_step():
 
 def test_step_matches_forward():
     """step() should produce the same logits as forward() for the same input."""
-    md = ModelDef("bytes|dense.64.tanh")
+    md = ModelDef("bytes|dense.64.tanh", Precision.FP32)
     model = md.build_model()
     model.eval()
 
@@ -106,7 +107,7 @@ def test_step_matches_forward():
 
 
 def test_step_prob():
-    md = ModelDef("bytes|dense.32.gelu")
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
     model = md.build_model()
     model.eval()
 
@@ -119,7 +120,7 @@ def test_step_prob():
 
 
 def test_step_sample():
-    md = ModelDef("bytes|dense.32.gelu")
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
     model = md.build_model()
     model.eval()
 
@@ -131,7 +132,7 @@ def test_step_sample():
 
 
 def test_state_dict_roundtrip():
-    md = ModelDef("bytes|dense.64.gelu")
+    md = ModelDef("bytes|dense.64.gelu", Precision.FP32)
     model1 = md.build_model()
 
     saved = model1.state_dict()
@@ -143,7 +144,7 @@ def test_state_dict_roundtrip():
 
 
 def test_dtype_fp64():
-    md = ModelDef("bytes|dense.32.gelu", dtype=torch.float64)
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP64)
     model = md.build_model()
 
     # Check parameters are fp64
@@ -156,16 +157,16 @@ def test_dtype_fp64():
 
 
 def test_build_model_def_cache():
-    md1 = build_model_def("bytes|dense.32.gelu")
-    md2 = build_model_def("bytes|dense.32.gelu")
+    md1 = build_model_def("bytes|dense.32.gelu", Precision.FP32)
+    md2 = build_model_def("bytes|dense.32.gelu", Precision.FP32)
     assert md1 is md2
 
-    md3 = build_model_def("bytes|dense.32.gelu", dtype=torch.float16)
+    md3 = build_model_def("bytes|dense.32.gelu", Precision.FP16)
     assert md1 is not md3
 
 
 def test_multi_layer():
-    md = ModelDef("bytes|dense.64.relu-dense.32.tanh")
+    md = ModelDef("bytes|dense.64.relu-dense.32.tanh", Precision.FP32)
     model = md.build_model()
 
     batch = torch.randint(0, 256, (2, 8))
@@ -182,7 +183,7 @@ def test_multi_layer():
 
 
 def test_rnn_layer_spec():
-    md = ModelDef("bytes|rnn.32.tanh")
+    md = ModelDef("bytes|rnn.32.tanh", Precision.FP32)
     assert md.num_weights == (
         0                       # input
         + 32 * 256 + 32 * 32 + 2 * 32  # rnn.32 (nn.RNN)
@@ -195,7 +196,7 @@ def test_rnn_layer_spec():
 
 
 def test_rnn_step_matches_forward():
-    md = ModelDef("bytes|rnn.16.relu")
+    md = ModelDef("bytes|rnn.16.relu", Precision.FP32)
     model = md.build_model()
     model.eval()
 
@@ -216,7 +217,7 @@ def test_rnn_step_matches_forward():
 
 
 def test_rnn_multi_layer():
-    md = ModelDef("bytes|rnn.32.tanh-dense.16.gelu")
+    md = ModelDef("bytes|rnn.32.tanh-dense.16.gelu", Precision.FP32)
     model = md.build_model()
 
     batch = torch.randint(0, 256, (2, 8))
@@ -226,7 +227,7 @@ def test_rnn_multi_layer():
 
 def test_from_numpy():
     """Verify it works with numpy arrays from DataSet."""
-    md = ModelDef("bytes|dense.32.gelu")
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
     model = md.build_model()
 
     data = np.random.randint(0, 256, (4, 16), dtype=np.int32)

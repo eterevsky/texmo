@@ -1,11 +1,13 @@
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from typing import Optional
+from typing import Iterable, Optional
 
 from .layer_torch import LayerDef, LayerModule, LayerState
+from .precision import Precision
 from .layers.dense_torch import DenseDef, DenseModule
 from .layers.input_bits_torch import InputBitsDef, InputBitsModule
 from .layers.input_bytes_torch import InputBytesDef, InputBytesModule
@@ -161,10 +163,11 @@ class Model(nn.Module):
 class ModelDef(object):
     """Lightweight model descriptor. No weights."""
 
-    def __init__(self, spec: str, dtype: torch.dtype = torch.float32):
+    def __init__(self, spec: str, precision: Precision):
         self.spec = spec
-        self.dtype = dtype
+        self.precision = precision
 
+        dtype = precision.dtype
         spec_parts = spec.split("|")
         if len(spec_parts) == 1:
             input_spec = ""
@@ -200,10 +203,10 @@ class ModelDef(object):
         return self.spec
 
     def __eq__(self, other) -> bool:
-        return self.spec == other.spec and self.dtype == other.dtype
+        return self.spec == other.spec and self.precision == other.precision
 
     def __hash__(self) -> int:
-        return hash((self.spec, self.dtype))
+        return hash((self.spec, self.precision))
 
     @property
     def num_weights(self) -> int:
@@ -212,6 +215,21 @@ class ModelDef(object):
             + sum(l.num_weights for l in self.layers)
             + self.output.num_weights
         )
+
+    def is_valid(self) -> bool:
+        if not self.input.is_valid():
+            return False
+
+        # Two suffix-like layers can't be one after another.
+        for l1, l2 in zip(self.layers[:-1], self.layers[1:]):
+            if l1.length > 1 and l2.length > 1:
+                return False
+
+        return all(l.is_valid() for l in self.layers)
+
+    def neighbors(self) -> Iterable['ModelDef']:
+        # TODO: implement architecture search neighbors
+        raise NotImplementedError
 
     def build_model(self, state_dict: Optional[dict[str, Tensor]] = None) -> Model:
         """Build a runnable Model (nn.Module).
@@ -233,7 +251,7 @@ class ModelDef(object):
             model.load_state_dict(state_dict)
         else:
             # Cast to target dtype (input module handles its own dtype)
-            model.to(self.dtype)
+            model.to(self.precision.dtype)
 
         return model
 
@@ -260,13 +278,13 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
     raise ValueError(f"Unknown layer type: {name}")
 
 
-_cache: dict[tuple[str, torch.dtype], ModelDef] = {}
+_cache: dict[tuple[str, Precision], ModelDef] = {}
 
 
-def build_model_def(spec: str, dtype: torch.dtype = torch.float32) -> ModelDef:
-    key = (spec, dtype)
+def build_model_def(spec: str, precision: Precision) -> ModelDef:
+    key = (spec, precision)
     model_def = _cache.get(key)
     if model_def is None:
-        model_def = ModelDef(spec, dtype)
+        model_def = ModelDef(spec, precision)
         _cache[key] = model_def
     return model_def

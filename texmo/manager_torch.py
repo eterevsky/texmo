@@ -7,20 +7,13 @@ import numpy as np
 import torch
 
 from .common import INF, ttoa3, is_power2_int
-from .configuration import Configuration, Precision
+from .configuration import Configuration
 from .dataset import DataSet, DataSetWrapper
 from .model_torch import ModelDef, Model, build_model_def
 from .predict import LossTrend
 from .run import Run
 from .tokens import get_tokenizer
 
-
-_PRECISION_TO_DTYPE = {
-    Precision.FP64: torch.float64,
-    Precision.FP32: torch.float32,
-    Precision.FP16: torch.float16,
-    Precision.BF16: torch.bfloat16,
-}
 
 
 def _resolve_device(device_str: str) -> torch.device:
@@ -50,12 +43,12 @@ class ManagerTorch(object):
         self.conf = conf
         self._system = system
         self.dataset = dataset
-        self.dtype = _PRECISION_TO_DTYPE[conf.precision]
+        self.dtype = conf.precision.dtype
         self.device = _resolve_device(device)
         self.test_sample_len = test_sample_len
         self.test_batch = test_batch
 
-        self.model_def = build_model_def(str(conf.model), dtype=self.dtype)
+        self.model_def = build_model_def(str(conf.model), precision=conf.precision)
         tokenizer = get_tokenizer(self.model_def.input.tokens_name)
         self.bytes_per_token = tokenizer.tokenset.avg_bytes_per_token
         self.model: Optional[Model] = None

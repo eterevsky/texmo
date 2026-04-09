@@ -14,7 +14,8 @@ import numpy as np
 from . import latency
 from .common import INF, console
 from .configuration import Configuration, Precision, Template
-from .model3 import build_model
+from .model_torch import build_model_def
+from .precision import Precision
 from .run import Run
 
 
@@ -103,13 +104,14 @@ class ConfScore(object):
 
     @staticmethod
     def _from_row(row: sqlite3.Row, system: Optional[str] = None) -> ConfScore:
-        model = build_model(row['spec'])
+        precision = Precision(row['precision'])
+        model = build_model_def(row['spec'], precision=precision)
 
         if system is None:
             system = row['system']
 
         conf = Configuration(
-            model, precision=row['precision'], lr=row['lr'], length=row['length'],
+            model, lr=row['lr'], length=row['length'],
             batch=row['batch'], steps=row['steps'],
             decay=row['decay']
         )
@@ -271,7 +273,7 @@ class ResultDB(object):
         self, cur: sqlite3.Cursor, conf: Configuration, init_neighbors: bool
     ) -> int:
         conf_dict = conf.to_dict()
-        conf_dict['weights'] = conf.model.weights
+        conf_dict['weights'] = conf.num_weights
         cur.execute(_FIND_CONF, conf_dict)
         rows = cur.fetchall()
         assert len(rows) <= 1
@@ -565,8 +567,9 @@ class ResultDB(object):
             with latency.timer('ResultDB.get_confs_runs-row'):
                 conf_id = row['conf_id']
 
-                model = build_model(row['spec'])
-                conf = Configuration(model=model, precision=row['precision'],
+                precision = Precision(row['precision'])
+                model = build_model_def(row['spec'], precision=precision)
+                conf = Configuration(model=model,
                                       lr=row['lr'], length=row['length'],
                                       batch=row['batch'], steps=row['steps'],
                                       decay=row['decay'])

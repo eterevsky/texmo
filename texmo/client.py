@@ -10,7 +10,7 @@ from .common import ttoa3
 from .configuration import Configuration
 from .dataset import DataSet, DataSetWrapper
 from .latency import timer, report
-from .manager import Manager, release_device_buffers
+from .manager_torch import ManagerTorch
 from .tokens import set_tokens_dir
 
 
@@ -102,10 +102,10 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, once: bo
         conf = Configuration.from_dict(d["conf"])
         soft_tl = d.get("soft_tl")  # soft time limit
 
-        manager = Manager(conf, system, dataset=dataset)
+        manager = ManagerTorch(conf, system, dataset=dataset)
         manager.init(quiet=True)
 
-        run, _weights, out_conf = manager.train_and_eval(
+        run, out_conf = manager.train_and_eval(
             steps=conf.steps,
             time_limit=None,
             temp_steps=None,

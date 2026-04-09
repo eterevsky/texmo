@@ -6,6 +6,20 @@ from torch import Tensor
 # Number of bits used to encode the bit chunk position within a byte.
 _BP = {1: 3, 2: 2, 4: 1, 8: 0}
 
+_INPUT_NEIGHBORS = {
+    'bits.1': ('bits.1+bp', 'bits.2', 'bits.2.oh'),
+    'bits.1+bp': ('bits.1', 'bits.2+bp', 'bits.2.oh+bp'),
+    'bits.2': ('bits.1', 'bits.2+bp', 'bits.2.oh', 'bits.4'),
+    'bits.2+bp': ('bits.1+bp', 'bits.2', 'bits.2.oh+bp', 'bits.4+bp'),
+    'bits.2.oh': ('bits.1', 'bits.2', 'bits.2.oh+bp', 'bits.4.oh'),
+    'bits.2.oh+bp': ('bits.1+bp', 'bits.2+bp', 'bits.2.oh', 'bits.4.oh+bp'),
+    'bits.4': ('bits.2', 'bits.4+bp', 'bits.4.oh', 'bits.8'),
+    'bits.4+bp': ('bits.2+bp', 'bits.4', 'bits.4.oh+bp', 'bits.8'),
+    'bits.4.oh': ('bits.2.oh', 'bits.4', 'bits.4.oh+bp', 'bytes'),
+    'bits.4.oh+bp': ('bits.2.oh+bp', 'bits.4+bp', 'bits.4.oh', 'bytes'),
+    'bits.8': ('bits.4', 'bits.4+bp', 'bytes'),
+}
+
 
 def _to_bit_array(n: int, nbits: int) -> list[float]:
     enc = []
@@ -32,9 +46,9 @@ class InputBitsModule(nn.Module):
             enc_size = self.ntokens
         else:
             enc_size = nbits
-        self.output_size = enc_size
+        self.size = enc_size
         if bp:
-            self.output_size += _BP[nbits]
+            self.size += _BP[nbits]
 
         # Build encoding table
         encodings = []
@@ -107,7 +121,7 @@ class InputBitsModule(nn.Module):
                      input with correct position encoding)
 
         Returns:
-            (batch, seq_len + padding, output_size) float tensor
+            (batch, seq_len + padding, size) float tensor
         """
         batch_size, seq_len = tokens.shape
 
@@ -142,11 +156,11 @@ class InputBitsDef:
         self.num_weights = 0
 
         if one_hot:
-            self.output_size = self.ntokens
+            self.size = self.ntokens
         else:
-            self.output_size = nbits
+            self.size = nbits
         if bp:
-            self.output_size += _BP[nbits]
+            self.size += _BP[nbits]
 
     @staticmethod
     def from_spec(spec: str, dtype: torch.dtype = torch.float32) -> 'InputBitsDef':
@@ -189,8 +203,8 @@ class InputBitsDef:
         return True
 
     def neighbors(self):
-        # TODO when we adapt this to be used in the search
-        return ()
+        spec = str(self)
+        return _INPUT_NEIGHBORS.get(spec, ())
 
     def build_module(self) -> InputBitsModule:
         return InputBitsModule(self.nbits, self.one_hot, self.bp, self.dtype)

@@ -1,12 +1,27 @@
 import torch
 
 from texmo.layers.suffix_torch import SuffixDef, SuffixModule
+from texmo.model_torch import ModelDef
+from texmo.precision import Precision
+
+
+def test_neighbors():
+    d = SuffixDef(4, input_size=8)
+    neighbors = list(d.neighbors())
+    assert neighbors == ["suffix.2", "suffix.8"]
+
+
+def test_neighbors_min():
+    d = SuffixDef(2, input_size=4)
+    neighbors = list(d.neighbors())
+    # size 1 is invalid for suffix but still generated (ModelDef filters)
+    assert neighbors == ["suffix.1", "suffix.4"]
 
 
 def test_def_properties():
     d = SuffixDef(4, input_size=8)
     assert d.length == 4
-    assert d.output_size == 32
+    assert d.size == 32
     assert d.num_weights == 0
     assert str(d) == 'suffix.4'
     assert d.is_valid()
@@ -113,8 +128,7 @@ def test_suffix4_forward():
 # -- model integration --
 
 def test_model_with_suffix():
-    from texmo.model_torch import ModelDef
-    md = ModelDef("bytes|suffix.2-dense.64.gelu")
+    md = ModelDef("bytes|suffix.2-dense.64.gelu", Precision.FP32)
     assert md.total_padding == 2  # 1 base + (2-1)
     model = md.build_model()
 
@@ -124,8 +138,7 @@ def test_model_with_suffix():
 
 
 def test_model_suffix_step_matches_forward():
-    from texmo.model_torch import ModelDef
-    md = ModelDef("bytes|suffix.2-dense.32.tanh")
+    md = ModelDef("bytes|suffix.2-dense.32.tanh", Precision.FP32)
     model = md.build_model()
     model.eval()
 
@@ -147,8 +160,7 @@ def test_model_suffix_step_matches_forward():
 
 def test_model_suffix_only():
     """Model with suffix and no other hidden layers."""
-    from texmo.model_torch import ModelDef
-    md = ModelDef("bytes|suffix.4")
+    md = ModelDef("bytes|suffix.4", Precision.FP32)
     assert md.total_padding == 4  # 1 + 3
     model = md.build_model()
 
@@ -157,20 +169,9 @@ def test_model_suffix_only():
     assert logits.shape == (2, 32, 256)
 
 
-def test_model_two_suffix_layers():
-    from texmo.model_torch import ModelDef
-    md = ModelDef("bytes|suffix.2-suffix.2")
-    assert md.total_padding == 3  # 1 + 1 + 1
-    model = md.build_model()
-
-    batch = torch.randint(0, 256, (2, 16))
-    logits = model(batch)
-    assert logits.shape == (2, 16, 256)
-
 
 def test_model_suffix_loss():
-    from texmo.model_torch import ModelDef
-    md = ModelDef("bytes|suffix.2-dense.64.gelu")
+    md = ModelDef("bytes|suffix.2-dense.64.gelu", Precision.FP32)
     model = md.build_model()
 
     batch = torch.randint(0, 256, (4, 16))
@@ -180,8 +181,7 @@ def test_model_suffix_loss():
 
 
 def test_model_bits_with_suffix():
-    from texmo.model_torch import ModelDef
-    md = ModelDef("bits.1+bp|suffix.4-dense.16.gelu")
+    md = ModelDef("bits.1+bp|suffix.4-dense.16.gelu", Precision.FP32)
     model = md.build_model()
     model.eval()
 

@@ -131,15 +131,8 @@ def _regexp(pattern, input_string):
     return re.fullmatch(pattern, input_string) is not None
 
 
-_INSERT_NEIGHBORS = """
-INSERT OR IGNORE INTO neighbor (conf1_id, conf2_id)
-VALUES (:conf1_id, :conf2_id)
-"""
-
-_SET_HAS_NEIGHBORS = 'UPDATE conf SET has_neighbors = 1 WHERE id = :conf_id'
-
 _FIND_CONF = """
-SELECT id, has_neighbors
+SELECT id
 FROM conf
 WHERE spec = :spec
     AND lr = :lr
@@ -183,24 +176,6 @@ WHERE conf.id = conf_time.conf_id
     AND conf.batch = :batch
     AND conf.decay = :decay
     AND conf_time.system = :system
-"""
-
-_GET_CONF = """
-SELECT spec, precision, lr, length, batch, steps, decay
-FROM conf
-WHERE id = :conf_id
-"""
-
-_GET_NEIGHBORS_BY_RUNS = """
-SELECT conf.id AS conf_id, spec, precision, lr, length, batch,
-       steps, decay, median_score,
-       (SELECT median_time FROM conf_time
-        WHERE conf_id = conf.id AND system = :system) AS median_time,
-       (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs
-FROM conf, neighbor
-WHERE neighbor.conf1_id = :conf_id
-    AND neighbor.conf2_id = conf.id
-ORDER BY num_runs ASC
 """
 
 _GET_CONFS_RUNS = """
@@ -252,25 +227,8 @@ class ResultDB(object):
     def commit(self):
         self._db.commit()
 
-    def _init_neighbors(
-        self, cur: sqlite3.Cursor, conf: Configuration, conf_id: int
-    ):
-        with latency.timer('ResultDB._init_neighbors'):
-            for neighbor in conf.neighbors():
-                neighbor_id = self._find_or_add_conf(
-                    cur, neighbor, init_neighbors=False
-                )
-                cur.executemany(
-                    _INSERT_NEIGHBORS,
-                    [
-                        {'conf1_id': conf_id, 'conf2_id': neighbor_id},
-                        {'conf1_id': neighbor_id, 'conf2_id': conf_id},
-                    ],
-                )
-            cur.execute(_SET_HAS_NEIGHBORS, {'conf_id': conf_id})
-
     def _find_or_add_conf(
-        self, cur: sqlite3.Cursor, conf: Configuration, init_neighbors: bool
+        self, cur: sqlite3.Cursor, conf: Configuration
     ) -> int:
         conf_dict = conf.to_dict()
         conf_dict['weights'] = conf.num_weights
@@ -278,26 +236,18 @@ class ResultDB(object):
         rows = cur.fetchall()
         assert len(rows) <= 1
         if rows:
-            conf_id, has_neighbors = rows[0]
-            if init_neighbors and not has_neighbors:
-                self._init_neighbors(cur, conf, conf_id)
-            return conf_id
+            return rows[0][0]
         else:
             cur = self._db.cursor()
             cur.execute(_INSERT_CONF, conf_dict)
-            conf_id = cur.lastrowid
-            if init_neighbors:
-                self._init_neighbors(cur, conf, conf_id)
-            return conf_id
+            return cur.lastrowid
 
-    def find_or_add_conf(
-        self, conf: Configuration, init_neighbors: bool
-    ) -> int:
+    def find_or_add_conf(self, conf: Configuration) -> int:
         """Finds the conf in the db and returns the configuration id."""
         with latency.timer('ResultDB.find_or_add_conf'):
             cur = self._db.cursor()
             cur.execute('BEGIN TRANSACTION')
-            conf_id = self._find_or_add_conf(cur, conf, init_neighbors)
+            conf_id = self._find_or_add_conf(cur, conf)
             cur.execute('COMMIT')
             return conf_id
 
@@ -358,13 +308,12 @@ class ResultDB(object):
         run: Run,
         conf_id: Optional[int],
         timestamp: Optional[datetime],
-        update_neighbors: bool,
     ):
         cur = self._db.cursor()
         cur.execute('BEGIN TRANSACTION')
 
         if conf_id is None:
-            conf_id = self._find_or_add_conf(cur, conf, update_neighbors)
+            conf_id = self._find_or_add_conf(cur, conf)
 
         if run.loss_trend is None:
             loss_model_v = None
@@ -397,11 +346,10 @@ class ResultDB(object):
         run: Run,
         conf_id: Optional[int] = None,
         timestamp: Optional[datetime] = None,
-        update_neighbors: bool = True,
     ):
         assert run.train_time is None or run.train_time > 0.0001
         with latency.timer('ResultDB.add_run'):
-            self._add_run(conf, run, conf_id, timestamp, update_neighbors)
+            self._add_run(conf, run, conf_id, timestamp)
 
     def top_confs_global(self, template: Template):
         assert type(template) is Template
@@ -529,28 +477,6 @@ class ResultDB(object):
 
         return cur
 
-    def get_neighbors_by_runs(
-        self, conf_id: int, system: str
-    ) -> Iterable[ConfScore]:
-        cur = self._db.cursor()
-        cur.execute('BEGIN TRANSACTION')
-        cur.execute(
-            'SELECT has_neighbors FROM conf WHERE id = :conf_id',
-            {'conf_id': conf_id},
-        )
-        has_neighbors = cur.fetchone()[0]
-        if not has_neighbors:
-            cur.execute(_GET_CONF, {'conf_id': conf_id})
-            row = cur.fetchone()
-            conf = Configuration.from_dict(row)
-            self._init_neighbors(cur, conf, conf_id)
-        cur.execute(_GET_NEIGHBORS_BY_RUNS,
-                    {'conf_id': conf_id, 'system': system})
-        rows = cur.fetchall()
-        cur.execute('COMMIT')
-        for row in rows:
-            yield ConfScore._from_row(row, system)
-
     def total_runs(self) -> int:
         cur = self._db.execute('SELECT COUNT(*) AS count FROM run')
         total = cur.fetchone()['count']
@@ -603,7 +529,7 @@ class ResultDB(object):
         self, conf: Configuration, run: Run, timestamp: datetime
     ) -> bool:
         """Check if a run with the same configuration and timestamp exists."""
-        conf_id = self.find_or_add_conf(conf, init_neighbors=False)
+        conf_id = self.find_or_add_conf(conf)
         timestamp = timestamp.isoformat()
         cur = self._db.cursor()
         cur.execute(

@@ -234,3 +234,87 @@ def test_from_numpy():
     batch = torch.from_numpy(data).long()
     loss = model.loss_batch(batch)
     assert loss.shape == ()
+
+
+# -- neighbors --
+
+def test_neighbors_precision():
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
+    neighbors = list(md.neighbors())
+    precision_neighbors = [n for n in neighbors if str(n) == str(md)]
+    precisions = {n.precision for n in precision_neighbors}
+    assert precisions == {Precision.FP64, Precision.FP16, Precision.BF16}
+
+
+def test_neighbors_input_mutation():
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert "bits.8|dense.32.gelu" in neighbor_specs
+    assert "bits.4.oh|dense.32.gelu" in neighbor_specs
+
+    md2 = ModelDef("bits.2|dense.16.gelu", Precision.FP32)
+    neighbor_specs2 = [str(n) for n in md2.neighbors()]
+    assert "bits.1|dense.16.gelu" in neighbor_specs2
+    assert "bits.2+bp|dense.16.gelu" in neighbor_specs2
+
+
+def test_neighbors_size_mutation():
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert "bytes|dense.16.gelu" in neighbor_specs
+    assert "bytes|dense.64.gelu" in neighbor_specs
+
+
+def test_neighbors_type_swap():
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert "bytes|rnn.32.gelu" in neighbor_specs
+
+    md2 = ModelDef("bytes|rnn.16.tanh", Precision.FP32)
+    neighbor_specs2 = [str(n) for n in md2.neighbors()]
+    assert "bytes|dense.16.tanh" in neighbor_specs2
+
+
+def test_neighbors_append_remove_layer():
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    # Appending: min(32, 256) = 32
+    assert "bytes|dense.32.gelu-dense.32.tanh" in neighbor_specs
+    assert "bytes|dense.32.gelu-rnn.32.relu" in neighbor_specs
+
+    # Removing: symmetric — a 2-layer model should have the 1-layer as neighbor
+    md2 = ModelDef("bytes|dense.32.gelu-dense.32.tanh", Precision.FP32)
+    neighbor_specs2 = [str(n) for n in md2.neighbors()]
+    assert "bytes|dense.32.gelu" in neighbor_specs2
+
+
+def test_neighbors_suffix_insert_remove():
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    # suffix.2 inserted before or after
+    assert "bytes|suffix.2-dense.32.gelu" in neighbor_specs
+    assert "bytes|dense.32.gelu-suffix.2" in neighbor_specs
+
+    # Symmetric: model with suffix.2 should have it removed as neighbor
+    md2 = ModelDef("bytes|suffix.2-dense.32.gelu", Precision.FP32)
+    neighbor_specs2 = [str(n) for n in md2.neighbors()]
+    assert "bytes|dense.32.gelu" in neighbor_specs2
+
+
+def test_neighbors_no_duplicates():
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
+    neighbor_keys = [(str(n), n.precision) for n in md.neighbors()]
+    assert len(neighbor_keys) == len(set(neighbor_keys))
+
+
+def test_neighbors_all_valid():
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
+    for n in md.neighbors():
+        assert n.is_valid(), f"invalid neighbor: {n}"
+
+
+def test_neighbors_no_self():
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
+    for n in md.neighbors():
+        if n.precision == md.precision:
+            assert n != md, f"self in neighbors: {n}"

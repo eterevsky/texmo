@@ -13,7 +13,7 @@ class SuffixModule(LayerModule):
         super().__init__()
         self.length = length
         self.input_size = input_size
-        self.output_size = length * input_size
+        self.size = length * input_size
 
     def init_state(self, device: torch.device | None = None) -> LayerState:
         return torch.zeros(self.length - 1, self.input_size, device=device)
@@ -43,8 +43,7 @@ class SuffixDef(LayerDef):
     def __init__(self, length: int, input_size: int):
         super().__init__(input_size=input_size)
         self.length = length
-        self.size = length
-        self.output_size = length * input_size
+        self.size = length * input_size
 
     def __str__(self) -> str:
         return f"suffix.{self.length}"
@@ -55,9 +54,6 @@ class SuffixDef(LayerDef):
     @property
     def num_weights(self) -> int:
         return 0
-
-    def neighbors(self):
-        return ()
 
     def build_module(self, state_dict=None) -> SuffixModule:
         return SuffixModule(self.length, self.input_size)

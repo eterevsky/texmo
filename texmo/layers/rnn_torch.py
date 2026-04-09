@@ -70,7 +70,6 @@ class RnnDef(LayerDef):
     def __init__(self, size, activation: str | None = None, input_size=None):
         super().__init__(input_size=input_size)
         self.size = size
-        self.output_size = size
         self._activation = activation
 
     def __str__(self) -> str:
@@ -81,17 +80,12 @@ class RnnDef(LayerDef):
     def is_valid(self) -> bool:
         return is_power2_int(self.size) and self._activation is not None
 
-    def neighbors(self):
-        for n in super().neighbors():
-            yield n
-
     @property
     def num_weights(self) -> int:
+        s = self.size
         if self._activation == "gelu":
-            # Single linear: W(input+size, size) + b(size)
-            return self.size * (self.input_size + self.size) + self.size
-        # nn.RNN: W_ih + W_hh + b_ih + b_hh
-        return self.size * self.input_size + self.size * self.size + 2 * self.size
+            return s * (self.input_size + s) + s
+        return s * self.input_size + s * s + 2 * s
 
     def build_module(self, state_dict: dict[str, Tensor] | None = None) -> LayerModule:
         if self._activation == "gelu":

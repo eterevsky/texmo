@@ -1,4 +1,5 @@
 import math
+from itertools import chain
 
 import torch
 import torch.nn as nn
@@ -185,12 +186,12 @@ class ModelDef(object):
             raise ValueError(f"Unknown input type: '{input_spec}'")
 
         self.layers: list[LayerDef] = []
-        shape = self.input.output_size
+        shape = self.input.size
         if layers_spec:
             for layer_spec in layers_spec.split("-"):
                 layer = _build_layer_def(layer_spec, shape)
                 self.layers.append(layer)
-                shape = layer.output_size
+                shape = layer.size
 
         self.ntokens = self.input.ntokens
         # 1 for the initial "no input" position, plus extra for layers
@@ -227,9 +228,75 @@ class ModelDef(object):
 
         return all(l.is_valid() for l in self.layers)
 
+    def _gen_neighbor_specs(self) -> Iterable[str]:
+        """Yield spec strings for all single-mutation neighbors."""
+        layers_str = [str(l) for l in self.layers]
+        input_spec = str(self.input)
+
+        layers_joined = "-".join(layers_str)
+
+        def _make_spec(ls):
+            return input_spec + "|" + "-".join(ls)
+
+        # 0. Mutate input layer
+        for input_neighbor in self.input.neighbors():
+            yield input_neighbor + "|" + layers_joined
+
+        # 1. Mutate each layer (size 2x, type swap — via LayerDef.neighbors)
+        for i in range(len(layers_str)):
+            for layer_neighbor in self.layers[i].neighbors():
+                yield _make_spec(chain(
+                    layers_str[:i], (layer_neighbor,), layers_str[i + 1:]))
+
+        # 2. Append a new layer
+        last_output = (
+            self.layers[-1].size if self.layers
+            else self.input.size
+        )
+        new_size = min(last_output, self.ntokens)
+        for name in ("dense", "rnn"):
+            for activation in ("relu", "gelu", "tanh"):
+                yield _make_spec(chain(
+                    layers_str, (f"{name}.{new_size}.{activation}",)))
+
+        # 3. Remove last layer (symmetric with append)
+        if self.layers:
+            prev_output = (
+                self.input.size if len(self.layers) == 1
+                else self.layers[-2].size
+            )
+            expected_size = min(prev_output, self.ntokens)
+            if self.layers[-1].size == expected_size:
+                yield _make_spec(layers_str[:-1])
+
+        # 4. Insert suffix.2 between any neighboring layers
+        for i in range(len(layers_str) + 1):
+            yield _make_spec(chain(
+                layers_str[:i], ("suffix.2",), layers_str[i:]))
+
+        # 5. Remove suffix.2 at any position (symmetric with insert)
+        for i, ls in enumerate(layers_str):
+            if ls == "suffix.2":
+                yield _make_spec(chain(
+                    layers_str[:i], layers_str[i + 1:]))
+
     def neighbors(self) -> Iterable['ModelDef']:
-        # TODO: implement architecture search neighbors
-        raise NotImplementedError
+        # Precision neighbors
+        for p in self.precision.neighbors:
+            yield build_model_def(self.spec, precision=p)
+
+        # Architecture neighbors
+        seen = set()
+        for spec in self._gen_neighbor_specs():
+            if spec in seen:
+                continue
+            seen.add(spec)
+            try:
+                model = build_model_def(spec, precision=self.precision)
+            except (ValueError, KeyError):
+                continue
+            if model.is_valid() and model != self:
+                yield model
 
     def build_model(self, state_dict: Optional[dict[str, Tensor]] = None) -> Model:
         """Build a runnable Model (nn.Module).

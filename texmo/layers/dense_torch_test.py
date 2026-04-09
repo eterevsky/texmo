@@ -121,3 +121,18 @@ def test_roundtrip_state_dict():
 def test_num_weights():
     layer_def = DenseDef(8, activation="gelu", input_size=4)
     assert layer_def.num_weights == 8 * 4 + 8
+
+
+def test_neighbors():
+    d = DenseDef(32, activation="relu", input_size=16)
+    neighbors = list(d.neighbors())
+    assert "dense.16.relu" in neighbors
+    assert "dense.64.relu" in neighbors
+    assert "rnn.32.relu" in neighbors
+
+
+def test_neighbors_size1():
+    d = DenseDef(1, activation="tanh", input_size=8)
+    neighbors = list(d.neighbors())
+    assert "dense.2.tanh" in neighbors
+    assert "rnn.1.tanh" in neighbors

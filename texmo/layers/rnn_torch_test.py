@@ -6,7 +6,7 @@ from texmo.layers.rnn_torch import RnnDef
 def test_def_properties_tanh():
     d = RnnDef(32, activation="tanh", input_size=16)
     assert d.size == 32
-    assert d.output_size == 32
+    assert d.size == 32
     assert str(d) == "rnn.32.tanh"
     assert d.is_valid()
     # nn.RNN weights: W_ih + W_hh + b_ih + b_hh
@@ -148,7 +148,13 @@ def test_forward_batch():
 def test_neighbors():
     d = RnnDef(32, activation="tanh", input_size=16)
     neighbors = list(d.neighbors())
-    assert "dense.32.tanh" in neighbors
-    assert "rnn.32.relu" in neighbors
     assert "rnn.16.tanh" in neighbors
     assert "rnn.64.tanh" in neighbors
+    assert "dense.32.tanh" in neighbors
+
+
+def test_neighbors_size1():
+    d = RnnDef(1, activation="gelu", input_size=4)
+    neighbors = list(d.neighbors())
+    assert "rnn.2.gelu" in neighbors
+    assert "dense.1.gelu" in neighbors

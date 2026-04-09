@@ -43,7 +43,6 @@ class DenseDef(LayerDef):
     def __init__(self, size, activation: str | None = None, input_size=None):
         super().__init__(input_size=input_size)
         self.size = size
-        self.output_size = size
         self._activation = activation
         self._activation_fn = _ACTIVATIONS[activation] if activation else None
 
@@ -54,13 +53,6 @@ class DenseDef(LayerDef):
 
     def is_valid(self) -> bool:
         return is_power2_int(self.size) and self._activation_fn is not None
-
-    def neighbors(self):
-        for n in super().neighbors():
-            yield n
-
-        if self._activation == 'tanh' and self.size > 1:
-            yield f'latent.{self.size}.2.tanh'
 
     @property
     def num_weights(self) -> int:

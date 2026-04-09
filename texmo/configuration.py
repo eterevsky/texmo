@@ -74,7 +74,6 @@ class Configuration(object):
     def replace(
         self,
         model: Optional[ModelDef] = None,
-        precision: Optional[Precision] = None,
         lr: Optional[float] = None,
         length: Optional[int] = None,
         batch: Optional[int] = None,
@@ -82,8 +81,6 @@ class Configuration(object):
         decay: Optional[float] = None,
     ) -> Configuration:
         model = model or self.model
-        if precision is not None and precision != model.precision:
-            model = build_model_def(str(model), precision=precision)
         lr = lr or self.lr
         length = length or self.length
         batch = batch or self.batch
@@ -161,25 +158,6 @@ class Configuration(object):
     def tokens_name(self) -> str:
         return self.model.input.tokens_name
 
-    def neighbors(self) -> Iterable[Configuration]:
-        if self.steps > 2:
-            yield self.replace(steps=self.steps // 2)
-        for precision in self.precision.neighbors:
-            yield self.replace(precision=precision)
-        yield self.replace(steps=self.steps * 2)
-        yield self.replace(lr=self.lr / 2)
-        yield self.replace(lr=self.lr * 2)
-        if self.batch > 1:
-            yield self.replace(batch=self.batch // 2)
-        yield self.replace(batch=self.batch * 2)
-        if self.length > 1:
-            yield self.replace(length=self.length // 2)
-        yield self.replace(length=self.length * 2)
-        for model in self.model.neighbors():
-            yield self.replace(model=model)
-        if self.decay < 1:
-            yield self.replace(decay=self.decay * 2)
-        yield self.replace(decay=self.decay / 2)
 
 
 class Bounds(object):
@@ -366,9 +344,11 @@ class Template(object):
     def _conf_neighbors(
         self, conf: Configuration
     ) -> Iterable[Configuration]:
-        for precision in conf.precision.neighbors:
-            if precision in self.precision:
-                yield conf.replace(precision=precision)
+        # Model neighbors (includes precision + architecture changes)
+        for model in conf.model.neighbors():
+            if model.precision in self.precision and self.match_model(model):
+                yield conf.replace(model=model)
+        # Training hyperparameter neighbors
         for steps in self.steps.neighbors(conf.steps):
             assert steps >= 2
             yield conf.replace(steps=steps)
@@ -380,10 +360,6 @@ class Template(object):
             yield conf.replace(length=length)
         for decay in self.decay.neighbors(conf.decay):
             yield conf.replace(decay=decay)
-        for model in conf.model.neighbors():
-            match = self.match_model(model)
-            if self.match_model(model):
-                yield conf.replace(model=model)
 
 
 def conf_neighbors(

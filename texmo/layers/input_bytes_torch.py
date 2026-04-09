@@ -10,7 +10,7 @@ class InputBytesModule(nn.Module):
     def __init__(self, dtype: torch.dtype = torch.float32):
         super().__init__()
         self.ntokens = 256
-        self.output_size = 256
+        self.size = 256
         self.dtype = dtype
 
     def init_state(self):
@@ -32,7 +32,7 @@ class InputBytesModule(nn.Module):
     def initial_vector(self, device: torch.device | None = None,
                         position: int = -1) -> Tensor:
         """Return the input vector for 'no token observed yet'."""
-        return torch.full((self.output_size,), 1.0 / self.ntokens,
+        return torch.full((self.size,), 1.0 / self.ntokens,
                           dtype=self.dtype, device=device)
 
     def forward(self, tokens: Tensor, padding: int = 0) -> Tensor:
@@ -60,7 +60,7 @@ class InputBytesDef(object):
 
     def __init__(self, dtype: torch.dtype = torch.float32):
         self.ntokens = 256
-        self.output_size = 256
+        self.size = 256
         self.tokens_name = 'bytes'
         self.num_weights = 0
         self.dtype = dtype
@@ -72,7 +72,7 @@ class InputBytesDef(object):
         return True
 
     def neighbors(self):
-        return ()
+        return ('bits.4.oh', 'bits.4.oh+bp', 'bits.8')
 
     def build_module(self) -> InputBytesModule:
         return InputBytesModule(dtype=self.dtype)

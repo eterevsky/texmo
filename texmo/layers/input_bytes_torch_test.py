@@ -7,7 +7,7 @@ from texmo.layers.input_bytes_torch import InputBytesDef
 def test_def_properties():
     d = InputBytesDef()
     assert d.ntokens == 256
-    assert d.output_size == 256
+    assert d.size == 256
     assert d.num_weights == 0
     assert str(d) == 'bytes'
 

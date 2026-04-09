@@ -6,6 +6,7 @@ from typing import Optional
 from .common import power2_neighbors
 
 
+
 LayerState = Optional[Tensor | dict[str, Tensor]]
 
 
@@ -32,7 +33,7 @@ class LayerModule(nn.Module):
             input: (input_size,)
 
         Returns:
-            (new_state, output) where output is (output_size,)
+            (new_state, output) where output is (size,)
         """
         raise NotImplementedError
 
@@ -43,7 +44,7 @@ class LayerModule(nn.Module):
             inputs: (batch, seq_len, input_size)
 
         Returns:
-            (batch, seq_len, output_size)
+            (batch, seq_len, size)
         """
         raise NotImplementedError
 
@@ -54,7 +55,7 @@ class LayerDef(object):
 
     def __init__(self, input_size: int):
         self.input_size: int = input_size
-        self.output_size: Optional[int] = None
+        self.size: Optional[int] = None
         # The number of the output steps from the previous layers on which
         # this layer depends. Should be 1 for dense and various recursive
         # layers, and length of the suffix for suffix and attn layers.
@@ -71,20 +72,19 @@ class LayerDef(object):
         raise NotImplementedError
 
     def neighbors(self):
-        size = self.size
+        """Yield spec strings for single-mutation neighbors.
 
-        for name in ("dense", "rnn"):
-            for activation in ("tanh", "relu", "gelu"):
-                yield f"{name}.{size}.{activation}"
-
-        for name in ("gru", "mingru", "mgru", "lstm"):
-            yield f"{name}.{size}"
-
-        for neighbor_size in power2_neighbors(size):
-            if self.name in ("dense", "rnn"):
-                yield f"{self.name}.{neighbor_size}.{self._activation}"
-            else:
-                yield f"{self.name}.{neighbor_size}"
+        Includes size/length 2x changes and dense<->rnn type swaps.
+        """
+        if self.name in ("dense", "rnn"):
+            for s in power2_neighbors(self.size):
+                yield f"{self.name}.{s}.{self._activation}"
+            # Type swap
+            other = "rnn" if self.name == "dense" else "dense"
+            yield f"{other}.{self.size}.{self._activation}"
+        elif self.name == "suffix":
+            for l in power2_neighbors(self.length):
+                yield f"suffix.{l}"
 
     def build_module(self, state_dict: Optional[dict[str, Tensor]] = None) -> LayerModule:
         """Create an nn.Module for this layer.

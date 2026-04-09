@@ -2,6 +2,8 @@ import torch
 import numpy as np
 
 from texmo.layers.input_bits_torch import InputBitsDef
+from texmo.model_torch import ModelDef
+from texmo.precision import Precision
 
 
 # -- bits.1 (raw bit, no position) --
@@ -9,7 +11,7 @@ from texmo.layers.input_bits_torch import InputBitsDef
 def test_bits1_def():
     d = InputBitsDef.from_spec('bits.1')
     assert d.ntokens == 2
-    assert d.output_size == 1
+    assert d.size == 1
     assert d.tokens_name == 'bits.1'
     assert d.num_weights == 0
     assert str(d) == 'bits.1'
@@ -57,7 +59,7 @@ def test_bits1_forward_matches_step():
 def test_bits1_bp_def():
     d = InputBitsDef.from_spec('bits.1+bp')
     assert d.ntokens == 2
-    assert d.output_size == 4  # 1 bit + 3 bp bits
+    assert d.size == 4  # 1 bit + 3 bp bits
     assert str(d) == 'bits.1+bp'
     assert d.is_valid()
 
@@ -110,7 +112,7 @@ def test_bits1_bp_forward_matches_step():
 def test_bits2_def():
     d = InputBitsDef.from_spec('bits.2')
     assert d.ntokens == 4
-    assert d.output_size == 2
+    assert d.size == 2
     assert str(d) == 'bits.2'
     assert d.is_valid()
 
@@ -143,7 +145,7 @@ def test_bits2_forward():
 def test_bits2_bp_def():
     d = InputBitsDef.from_spec('bits.2+bp')
     assert d.ntokens == 4
-    assert d.output_size == 4  # 2 bits + 2 bp bits
+    assert d.size == 4  # 2 bits + 2 bp bits
     assert str(d) == 'bits.2+bp'
     assert d.is_valid()
 
@@ -184,7 +186,7 @@ def test_bits2_bp_forward():
 def test_bits2_oh_def():
     d = InputBitsDef.from_spec('bits.2.oh')
     assert d.ntokens == 4
-    assert d.output_size == 4
+    assert d.size == 4
     assert str(d) == 'bits.2.oh'
     assert d.is_valid()
 
@@ -217,7 +219,7 @@ def test_bits2_oh_forward():
 def test_bits2_oh_bp_def():
     d = InputBitsDef.from_spec('bits.2.oh+bp')
     assert d.ntokens == 4
-    assert d.output_size == 6  # 4 one-hot + 2 bp
+    assert d.size == 6  # 4 one-hot + 2 bp
     assert str(d) == 'bits.2.oh+bp'
     assert d.is_valid()
 
@@ -227,7 +229,7 @@ def test_bits2_oh_bp_def():
 def test_bits4_def():
     d = InputBitsDef.from_spec('bits.4')
     assert d.ntokens == 16
-    assert d.output_size == 4
+    assert d.size == 4
     assert str(d) == 'bits.4'
     assert d.is_valid()
 
@@ -250,7 +252,7 @@ def test_bits4_step():
 def test_bits4_oh_def():
     d = InputBitsDef.from_spec('bits.4.oh')
     assert d.ntokens == 16
-    assert d.output_size == 16
+    assert d.size == 16
     assert str(d) == 'bits.4.oh'
     assert d.is_valid()
 
@@ -272,7 +274,7 @@ def test_bits4_oh_forward():
 def test_bits4_bp_def():
     d = InputBitsDef.from_spec('bits.4+bp')
     assert d.ntokens == 16
-    assert d.output_size == 5  # 4 bits + 1 bp bit
+    assert d.size == 5  # 4 bits + 1 bp bit
     assert str(d) == 'bits.4+bp'
     assert d.is_valid()
 
@@ -293,7 +295,7 @@ def test_bits4_bp_forward_matches_step():
 def test_bits8_def():
     d = InputBitsDef.from_spec('bits.8')
     assert d.ntokens == 256
-    assert d.output_size == 8
+    assert d.size == 8
     assert str(d) == 'bits.8'
     assert d.is_valid()
 
@@ -303,7 +305,7 @@ def test_bits8_def():
 def test_bytes_alias():
     d = InputBitsDef.from_spec('bytes')
     assert d.ntokens == 256
-    assert d.output_size == 256
+    assert d.size == 256
     assert d.one_hot is True
     assert str(d) == 'bytes'
     assert d.is_valid()
@@ -332,8 +334,7 @@ def test_dtype_fp16():
 
 def test_model_bits1():
     """Verify bits.1 input works end-to-end with Model."""
-    from texmo.model_torch import ModelDef
-    md = ModelDef("bits.1|")
+    md = ModelDef("bits.1|", Precision.FP32)
     assert md.ntokens == 2
     model = md.build_model()
 
@@ -344,8 +345,7 @@ def test_model_bits1():
 
 
 def test_model_bits1_bp():
-    from texmo.model_torch import ModelDef
-    md = ModelDef("bits.1+bp|")
+    md = ModelDef("bits.1+bp|", Precision.FP32)
     assert md.ntokens == 2
     model = md.build_model()
 
@@ -355,8 +355,7 @@ def test_model_bits1_bp():
 
 
 def test_model_bits4_oh():
-    from texmo.model_torch import ModelDef
-    md = ModelDef("bits.4.oh|")
+    md = ModelDef("bits.4.oh|", Precision.FP32)
     assert md.ntokens == 16
     model = md.build_model()
 
@@ -366,8 +365,7 @@ def test_model_bits4_oh():
 
 
 def test_model_bits1_step_matches_forward():
-    from texmo.model_torch import ModelDef
-    md = ModelDef("bits.1+bp|dense.8.gelu")
+    md = ModelDef("bits.1+bp|dense.8.gelu", Precision.FP32)
     model = md.build_model()
     model.eval()
 
@@ -388,8 +386,7 @@ def test_model_bits1_step_matches_forward():
 
 
 def test_model_bits4_oh_loss():
-    from texmo.model_torch import ModelDef
-    md = ModelDef("bits.4.oh|dense.16.gelu")
+    md = ModelDef("bits.4.oh|dense.16.gelu", Precision.FP32)
     model = md.build_model()
 
     batch = torch.randint(0, 16, (4, 32))

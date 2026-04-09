@@ -40,13 +40,6 @@
                     </td>
                 </tr>
                 <tr>
-                    <td>Optimizer:</td>
-                    <td>
-                        <input type="checkbox" name="adam" {% if optimizer.adam %} checked {% endif %}> <label for="adam">adam</label>
-                        <input type="checkbox" name="fromage" {% if optimizer.fromage %} checked {% endif %}> <label for="fromage">fromage</label>
-                    </td>
-                </tr>
-                <tr>
                     <td>Learning rate:</td>
                     <td><input type="text" name="lr" value="{{ lr }}"></td>
                 </tr>
@@ -73,7 +66,7 @@
                 <th>P</th>
                 <th>Length</th>
                 <th>Batch</th>
-                <th>Optimizer</th>
+                <th>Learning</th>
                 <th>Steps</th>
                 <th>Score</th>
                 <th>Time</th>

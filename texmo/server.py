@@ -345,13 +345,6 @@ def init_args(parser: argparse.ArgumentParser, config):
         help='range of acceptable batch sizes, for example "1-256"',
     )
     parser.add_argument(
-        "--optimizer",
-        type=str,
-        metavar="O",
-        default="adam,fromage",
-        help="the optimizer algorithm",
-    )
-    parser.add_argument(
         "-l",
         "--lr",
         type=str,

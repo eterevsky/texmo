@@ -1,13 +1,13 @@
+from typing import Any, Optional
+
 import torch
 import torch.nn as nn
 from torch import Tensor
-from typing import Optional
 
 from .common import power2_neighbors
 
 
-
-LayerState = Optional[Tensor | dict[str, Tensor]]
+LayerState = Any
 
 
 class LayerModule(nn.Module):

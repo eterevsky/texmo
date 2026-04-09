@@ -220,15 +220,18 @@ class ResultDB(object):
     def get_conf_id(self, conf: Configuration) -> int | None:
         """Return conf_id if this configuration exists in the DB, else None.
 
-        Uses an in-memory cache to avoid repeated DB lookups.
+        Uses an in-memory cache for positive lookups only.
         """
-        if conf in self._conf_id_cache:
-            return self._conf_id_cache[conf]
+        conf_id = self._conf_id_cache.get(conf)
+        if conf_id is not None:
+            return conf_id
 
         conf_dict = conf.to_dict()
         cur = self._db.execute(_FIND_CONF, conf_dict)
         row = cur.fetchone()
-        conf_id = row[0] if row else None
+        if row is None:
+            return None
+        conf_id = row[0]
         self._conf_id_cache[conf] = conf_id
         return conf_id
 

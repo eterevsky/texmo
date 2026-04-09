@@ -78,7 +78,7 @@ class DataSet(object):
         """Generate a random sample of input data.
 
         Returns:
-            An array with the shape (batch, ntokens) of the type np.int32.
+            An integer array with the shape (batch, ntokens).
         """
         tokenizer = get_tokenizer(tokenset_name)
         tokenset = tokenizer.tokenset

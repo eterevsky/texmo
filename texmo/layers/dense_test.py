@@ -121,6 +121,8 @@ def test_roundtrip_state_dict():
 def test_num_weights():
     layer_def = DenseDef(8, activation="gelu", input_size=4)
     assert layer_def.num_weights == 8 * 4 + 8
+    module = layer_def.build_module()
+    assert sum(p.numel() for p in module.parameters()) == layer_def.num_weights
 
 
 def test_neighbors():

@@ -13,6 +13,7 @@ from .layers.dense import DenseDef, DenseModule
 from .layers.gru import GruDef, MgruDef, MinGruDef
 from .layers.input_bits import InputBitsDef, InputBitsModule
 from .layers.input_bytes import InputBytesDef, InputBytesModule
+from .layers.lstm import LstmDef
 from .layers.rnn import RnnDef
 from .layers.suffix import SuffixDef
 
@@ -259,7 +260,7 @@ class ModelDef(object):
             for activation in ("relu", "gelu", "tanh"):
                 yield _make_spec(chain(
                     layers_str, (f"{name}.{new_size}.{activation}",)))
-        for name in ("gru", "mgru", "mingru"):
+        for name in ("gru", "mgru", "mingru", "lstm"):
             yield _make_spec(chain(
                 layers_str, (f"{name}.{new_size}",)))
 
@@ -350,6 +351,9 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
 
     if name == "mingru":
         return MinGruDef(int(parts[1]), input_size=input_size)
+
+    if name == "lstm":
+        return LstmDef(int(parts[1]), input_size=input_size)
 
     if name == "suffix":
         length = int(parts[1])

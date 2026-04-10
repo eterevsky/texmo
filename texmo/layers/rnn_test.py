@@ -11,6 +11,8 @@ def test_def_properties_tanh():
     assert d.is_valid()
     # nn.RNN weights: W_ih + W_hh + b_ih + b_hh
     assert d.num_weights == 32 * 16 + 32 * 32 + 2 * 32
+    module = d.build_module()
+    assert sum(p.numel() for p in module.parameters()) == d.num_weights
 
 
 def test_def_properties_gelu():
@@ -19,6 +21,8 @@ def test_def_properties_gelu():
     assert d.is_valid()
     # Linear weights: W(input+size, size) + b(size)
     assert d.num_weights == 16 * (8 + 16) + 16
+    module = d.build_module()
+    assert sum(p.numel() for p in module.parameters()) == d.num_weights
 
 
 def test_def_no_activation_invalid():

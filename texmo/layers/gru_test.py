@@ -12,6 +12,8 @@ def test_gru_def_properties():
     assert d.is_valid()
     # nn.GRU: 3 gates * (input_weights + hidden_weights + 2 biases)
     assert d.num_weights == 3 * 32 * (16 + 32) + 6 * 32
+    module = d.build_module()
+    assert sum(p.numel() for p in module.parameters()) == d.num_weights
 
 
 def test_gru_non_power2_invalid():
@@ -72,6 +74,8 @@ def test_mgru_def_properties():
     assert d.is_valid()
     # 2 linear(48, 32): 2 * (32*48 + 32)
     assert d.num_weights == 2 * (32 * 48 + 32)
+    module = d.build_module()
+    assert sum(p.numel() for p in module.parameters()) == d.num_weights
 
 
 def test_mgru_step():
@@ -125,6 +129,8 @@ def test_mingru_def_properties():
     assert d.is_valid()
     # linear(16, 64): 64*16 + 64
     assert d.num_weights == 2 * 32 * 16 + 2 * 32
+    module = d.build_module()
+    assert sum(p.numel() for p in module.parameters()) == d.num_weights
 
 
 def test_mingru_step():

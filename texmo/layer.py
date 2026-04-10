@@ -77,7 +77,8 @@ class LayerDef(object):
         Size/length 2x changes and swaps between related layer types:
             dense <-> rnn (with activation preserved)
             rnn <-> {gru, mgru, mingru} (activation dropped/picked)
-            gru/mgru/mingru are also mutual neighbors
+            gru, mgru, mingru, lstm are mutual neighbors (except
+            lstm <-> mingru and lstm <-> rnn, which are not)
         """
         if self.name == "suffix":
             for l in power2_neighbors(self.length):
@@ -88,7 +89,7 @@ class LayerDef(object):
         if self.name in ("dense", "rnn"):
             for s in power2_neighbors(self.size):
                 yield f"{self.name}.{s}.{self._activation}"
-        elif self.name in ("gru", "mgru", "mingru"):
+        elif self.name in ("gru", "mgru", "mingru", "lstm"):
             for s in power2_neighbors(self.size):
                 yield f"{self.name}.{s}"
 
@@ -106,6 +107,12 @@ class LayerDef(object):
             for other in _RECURRENT:
                 if other != self.name:
                     yield f"{other}.{self.size}"
+            # lstm <-> gru, mgru (but not mingru)
+            if self.name in ("gru", "mgru"):
+                yield f"lstm.{self.size}"
+        elif self.name == "lstm":
+            yield f"gru.{self.size}"
+            yield f"mgru.{self.size}"
 
     def build_module(self, state_dict: Optional[dict[str, Tensor]] = None) -> LayerModule:
         """Create an nn.Module for this layer.

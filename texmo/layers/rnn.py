@@ -67,7 +67,7 @@ class RnnGELUModule(LayerModule):
 class RnnDef(LayerDef):
     name = "rnn"
 
-    def __init__(self, size, activation: str | None = None, input_size=None):
+    def __init__(self, size: int, input_size: int, activation: str | None = None):
         super().__init__(input_size=input_size)
         self.size = size
         self._activation = activation

@@ -14,6 +14,7 @@ from .layers.gru import GruDef, MgruDef, MinGruDef
 from .layers.input_bits import InputBitsDef, InputBitsModule
 from .layers.input_bytes import InputBytesDef, InputBytesModule
 from .layers.lstm import LstmDef
+from .layers.norm import NormDef
 from .layers.rnn import RnnDef
 from .layers.suffix import SuffixDef
 
@@ -223,9 +224,19 @@ class ModelDef(object):
         if not self.input.is_valid():
             return False
 
-        # Two suffix-like layers can't be one after another.
+        # Norm can't be the first layer.
+        if self.layers and self.layers[0].name == "norm":
+            return False
+
         for l1, l2 in zip(self.layers[:-1], self.layers[1:]):
+            # Two suffix-like layers can't be one after another.
             if l1.length > 1 and l2.length > 1:
+                return False
+            # Two normalization layers can't be adjacent.
+            if l1.name == "norm" and l2.name == "norm":
+                return False
+            # Norm can't follow a suffix.
+            if l1.name == "suffix" and l2.name == "norm":
                 return False
 
         return all(l.is_valid() for l in self.layers)
@@ -282,6 +293,19 @@ class ModelDef(object):
         # 5. Remove suffix.2 at any position (symmetric with insert)
         for i, ls in enumerate(layers_str):
             if ls == "suffix.2":
+                yield _make_spec(chain(
+                    layers_str[:i], layers_str[i + 1:]))
+
+        # 6. Insert norm between any two existing layers. Invalid positions
+        # (before the first layer, adjacent to another norm, after a suffix)
+        # are filtered out by is_valid() in the neighbors() loop.
+        for i in range(1, len(layers_str) + 1):
+            yield _make_spec(chain(
+                layers_str[:i], ("norm",), layers_str[i:]))
+
+        # 7. Remove norm at any position (symmetric with insert)
+        for i, ls in enumerate(layers_str):
+            if ls == "norm":
                 yield _make_spec(chain(
                     layers_str[:i], layers_str[i + 1:]))
 
@@ -354,6 +378,9 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
 
     if name == "lstm":
         return LstmDef(int(parts[1]), input_size=input_size)
+
+    if name == "norm":
+        return NormDef(input_size=input_size)
 
     if name == "suffix":
         length = int(parts[1])

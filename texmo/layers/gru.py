@@ -131,7 +131,7 @@ class MinGruModule(LayerModule):
 class GruDef(LayerDef):
     name = "gru"
 
-    def __init__(self, size: int, input_size=None):
+    def __init__(self, size: int, input_size: int):
         super().__init__(input_size=input_size)
         self.size = size
 
@@ -158,7 +158,7 @@ class GruDef(LayerDef):
 class MgruDef(LayerDef):
     name = "mgru"
 
-    def __init__(self, size: int, input_size=None):
+    def __init__(self, size: int, input_size: int):
         super().__init__(input_size=input_size)
         self.size = size
 
@@ -185,7 +185,7 @@ class MgruDef(LayerDef):
 class MinGruDef(LayerDef):
     name = "mingru"
 
-    def __init__(self, size: int, input_size=None):
+    def __init__(self, size: int, input_size: int):
         super().__init__(input_size=input_size)
         self.size = size
 

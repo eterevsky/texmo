@@ -40,7 +40,7 @@ class LstmModule(LayerModule):
 class LstmDef(LayerDef):
     name = "lstm"
 
-    def __init__(self, size: int, input_size=None):
+    def __init__(self, size: int, input_size: int):
         super().__init__(input_size=input_size)
         self.size = size
 

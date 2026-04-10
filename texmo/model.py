@@ -10,6 +10,7 @@ from typing import Iterable, Optional
 from .layer import LayerDef, LayerModule, LayerState
 from .precision import Precision
 from .layers.dense import DenseDef, DenseModule
+from .layers.gru import GruDef, MgruDef, MinGruDef
 from .layers.input_bits import InputBitsDef, InputBitsModule
 from .layers.input_bytes import InputBytesDef, InputBytesModule
 from .layers.rnn import RnnDef
@@ -258,6 +259,9 @@ class ModelDef(object):
             for activation in ("relu", "gelu", "tanh"):
                 yield _make_spec(chain(
                     layers_str, (f"{name}.{new_size}.{activation}",)))
+        for name in ("gru", "mgru", "mingru"):
+            yield _make_spec(chain(
+                layers_str, (f"{name}.{new_size}",)))
 
         # 3. Remove last layer (symmetric with append)
         if self.layers:
@@ -337,6 +341,15 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
         size = int(parts[1])
         activation = parts[2] if len(parts) > 2 else None
         return RnnDef(size, activation=activation, input_size=input_size)
+
+    if name == "gru":
+        return GruDef(int(parts[1]), input_size=input_size)
+
+    if name == "mgru":
+        return MgruDef(int(parts[1]), input_size=input_size)
+
+    if name == "mingru":
+        return MinGruDef(int(parts[1]), input_size=input_size)
 
     if name == "suffix":
         length = int(parts[1])

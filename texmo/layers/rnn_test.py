@@ -151,6 +151,10 @@ def test_neighbors():
     assert "rnn.16.tanh" in neighbors
     assert "rnn.64.tanh" in neighbors
     assert "dense.32.tanh" in neighbors
+    # Recurrent family swaps
+    assert "gru.32" in neighbors
+    assert "mgru.32" in neighbors
+    assert "mingru.32" in neighbors
 
 
 def test_neighbors_size1():
@@ -158,3 +162,4 @@ def test_neighbors_size1():
     neighbors = list(d.neighbors())
     assert "rnn.2.gelu" in neighbors
     assert "dense.1.gelu" in neighbors
+    assert "gru.1" in neighbors

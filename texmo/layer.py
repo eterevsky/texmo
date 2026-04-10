@@ -74,17 +74,38 @@ class LayerDef(object):
     def neighbors(self):
         """Yield spec strings for single-mutation neighbors.
 
-        Includes size/length 2x changes and dense<->rnn type swaps.
+        Size/length 2x changes and swaps between related layer types:
+            dense <-> rnn (with activation preserved)
+            rnn <-> {gru, mgru, mingru} (activation dropped/picked)
+            gru/mgru/mingru are also mutual neighbors
         """
+        if self.name == "suffix":
+            for l in power2_neighbors(self.length):
+                yield f"suffix.{l}"
+            return
+
+        # Size mutations (keep same layer type and activation)
         if self.name in ("dense", "rnn"):
             for s in power2_neighbors(self.size):
                 yield f"{self.name}.{s}.{self._activation}"
-            # Type swap
-            other = "rnn" if self.name == "dense" else "dense"
-            yield f"{other}.{self.size}.{self._activation}"
-        elif self.name == "suffix":
-            for l in power2_neighbors(self.length):
-                yield f"suffix.{l}"
+        elif self.name in ("gru", "mgru", "mingru"):
+            for s in power2_neighbors(self.size):
+                yield f"{self.name}.{s}"
+
+        # Type swaps
+        _RECURRENT = ("gru", "mgru", "mingru")
+        if self.name == "dense":
+            yield f"rnn.{self.size}.{self._activation}"
+        elif self.name == "rnn":
+            yield f"dense.{self.size}.{self._activation}"
+            for other in _RECURRENT:
+                yield f"{other}.{self.size}"
+        elif self.name in _RECURRENT:
+            for act in ("relu", "gelu", "tanh"):
+                yield f"rnn.{self.size}.{act}"
+            for other in _RECURRENT:
+                if other != self.name:
+                    yield f"{other}.{self.size}"
 
     def build_module(self, state_dict: Optional[dict[str, Tensor]] = None) -> LayerModule:
         """Create an nn.Module for this layer.

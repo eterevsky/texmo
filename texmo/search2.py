@@ -170,40 +170,49 @@ class Search(object):
             return round(2**l)
 
     def _select_neighbor_fewest_runs(
-        self, conf: Configuration
-    ) -> Optional[tuple[Configuration, int]]:
+        self, conf: Configuration, system: str
+    ) -> Optional[tuple[Configuration, int, int]]:
         """Find the neighbor with fewest runs that matches the template.
 
-        Returns (neighbor_conf, num_runs) or None.
+        Returns (neighbor_conf, total_runs, system_runs) or None. The
+        caller decides whether the candidate is urgent enough to run:
+        a neighbor with system_runs == 0 is always eligible to be
+        selected; otherwise it's compared against the min-runs threshold
+        from _generate_limits.
         """
         neighbors = conf_neighbors(conf, self.template)
         if not neighbors:
             return None
 
-        # Look up conf_ids for all neighbors
-        neighbor_ids = []
-        id_to_conf = {}
-        for n in neighbors:
-            conf_id = self._db.get_conf_id(n)
-            if conf_id is not None:
-                neighbor_ids.append(conf_id)
-                id_to_conf[conf_id] = n
+        neighbor_ids = [
+            cid for cid in (self._db.get_conf_id(n) for n in neighbors)
+            if cid is not None
+        ]
+        run_counts = self._db.get_run_counts(neighbor_ids, system=system)
 
-        # Get run counts in one query
-        run_counts = self._db.get_run_counts(neighbor_ids)
-
-        # Find the neighbor with fewest runs (0 for unknown configs)
+        # Prefer neighbors with system_runs == 0 (bootstrap visibility on
+        # this system), then among the rest pick the one with the fewest
+        # total runs.
         best_conf = None
-        best_runs = INF
+        best_total = INF
+        best_system = INF
         for n in neighbors:
-            conf_id = self._db.get_conf_id(n)
-            num_runs = run_counts.get(conf_id, 0) if conf_id else 0
-            if num_runs < best_runs:
-                best_runs = num_runs
+            cid = self._db.get_conf_id(n)
+            if cid is None:
+                total, sys_runs = 0, 0
+            else:
+                total, sys_runs = run_counts.get(cid, (0, 0))
+
+            # Tuple ordering: (system_runs == 0 first, then fewest total).
+            key = (sys_runs > 0, total)
+            best_key = (best_system > 0, best_total)
+            if key < best_key:
                 best_conf = n
+                best_total = total
+                best_system = sys_runs
 
         if best_conf is not None:
-            return best_conf, best_runs
+            return best_conf, best_total, best_system
         return None
 
     def _select_top_neighbor(
@@ -251,15 +260,22 @@ class Search(object):
                     for j in range(start, min(end, len(top_confs))):
                         if len(min_runs_neighbor) < j + 1:
                             result = self._select_neighbor_fewest_runs(
-                                top_confs[j].conf)
+                                top_confs[j].conf, system)
                             min_runs_neighbor.append(result)
 
                         result = min_runs_neighbor[j]
                         if result is not None:
-                            neighbor_conf, neighbor_runs = result
-                            if neighbor_runs < min_neighbor:
+                            neighbor_conf, total_runs, system_runs = result
+                            # Pick the neighbor if:
+                            # (a) it has no runs on this system yet, or
+                            # (b) its total run count is below the threshold.
+                            if system_runs == 0:
                                 logging.info(
-                                    f'Getting neighbor of conf {j} because it has {neighbor_runs} runs < {min_neighbor}')
+                                    f'Getting neighbor of conf {j}: {system_runs} runs on {system}')
+                                return neighbor_conf
+                            if total_runs < min_neighbor:
+                                logging.info(
+                                    f'Getting neighbor of conf {j}: {total_runs} total runs < {min_neighbor}')
                                 return neighbor_conf
 
     def select_conf(self, system: str) -> Configuration:

@@ -257,17 +257,31 @@ class ResultDB(object):
             cur.execute('COMMIT')
             return conf_id
 
-    def get_run_counts(self, conf_ids: list[int]) -> dict[int, int]:
-        """Return {conf_id: num_runs} for the given conf_ids."""
+    def get_run_counts(
+        self, conf_ids: list[int], system: Optional[str] = None,
+    ) -> dict[int, tuple[int, int]]:
+        """Return {conf_id: (total_runs, system_runs)} for the given conf_ids.
+
+        `total_runs` is the number of runs across all systems.
+        `system_runs` is the number of runs on the given system (0 if
+        `system` is None).
+        """
         if not conf_ids:
             return {}
         placeholders = ','.join('?' for _ in conf_ids)
-        cur = self._db.execute(
-            f'SELECT conf_id, COUNT(*) FROM run '
-            f'WHERE conf_id IN ({placeholders}) GROUP BY conf_id',
-            conf_ids,
-        )
-        return {row[0]: row[1] for row in cur}
+        if system is None:
+            cur = self._db.execute(
+                f'SELECT conf_id, COUNT(*), 0 FROM run '
+                f'WHERE conf_id IN ({placeholders}) GROUP BY conf_id',
+                conf_ids,
+            )
+        else:
+            cur = self._db.execute(
+                f'SELECT conf_id, COUNT(*), SUM(system = ?) FROM run '
+                f'WHERE conf_id IN ({placeholders}) GROUP BY conf_id',
+                [system] + conf_ids,
+            )
+        return {row[0]: (row[1], row[2]) for row in cur}
 
     def _add_run_execute(self, cur: sqlite3.Cursor, run_dict: dict):
         with latency.timer('ResultDB._add_run_execute'):

@@ -181,8 +181,35 @@ def test_get_run_counts(db):
     id1 = db.get_conf_id(conf1)
     id3 = db.get_conf_id(conf3)
     counts = db.get_run_counts([id1, id3])
-    assert counts[id1] == 2  # two runs same conf
-    assert counts[id3] == 1
+    # Without a system arg: system_runs is 0 for both.
+    assert counts[id1] == (2, 0)
+    assert counts[id3] == (1, 0)
+
+
+def test_get_run_counts_with_system(db):
+    conf1, _ = _make_conf_run()
+    conf2, _ = _make_conf_run(spec="bytes|rnn.64.tanh")
+
+    _, r1_rpi1 = _make_conf_run(loss=1.0, system="rpi")
+    _, r1_rpi2 = _make_conf_run(loss=1.2, system="rpi")
+    _, r1_wb = _make_conf_run(loss=1.4, system="whitebox")
+    _, r2_wb = _make_conf_run(spec="bytes|rnn.64.tanh", loss=2.0, system="whitebox")
+
+    db.add_run(conf1, r1_rpi1)
+    db.add_run(conf1, r1_rpi2)
+    db.add_run(conf1, r1_wb)
+    db.add_run(conf2, r2_wb)
+
+    id1 = db.get_conf_id(conf1)
+    id2 = db.get_conf_id(conf2)
+
+    counts = db.get_run_counts([id1, id2], system="rpi")
+    assert counts[id1] == (3, 2)   # 3 total, 2 on rpi
+    assert counts[id2] == (1, 0)   # 1 total, 0 on rpi
+
+    counts = db.get_run_counts([id1, id2], system="whitebox")
+    assert counts[id1] == (3, 1)
+    assert counts[id2] == (1, 1)
 
 
 def test_get_systems_empty(db):

@@ -63,8 +63,22 @@ class TransformerModel(nn.Module):
         return self.output(out)  # (B, T, vocab_size)
 
 
+def _resolve_device(device_str: str) -> torch.device:
+    if device_str == 'auto':
+        if torch.cuda.is_available():
+            return torch.device('cuda')
+        if torch.backends.mps.is_available():
+            return torch.device('mps')
+        return torch.device('cpu')
+    if device_str == 'cuda' and not torch.cuda.is_available():
+        raise RuntimeError("CUDA requested but not available")
+    if device_str == 'mps' and not torch.backends.mps.is_available():
+        raise RuntimeError("MPS requested but not available")
+    return torch.device(device_str)
+
+
 def train(model, name, args):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = _resolve_device(args.device)
     print(f'\n=== {name} ===')
     print(f'Device: {device}')
     if device.type == 'cuda':
@@ -109,6 +123,9 @@ def main():
                         help='number of training steps')
     parser.add_argument('--lr', type=float, default=0.0078125,
                         help='learning rate (default: 1/128)')
+    parser.add_argument('--device', type=str, default='auto',
+                        choices=('auto', 'cpu', 'cuda', 'mps'),
+                        help='torch device (default: auto)')
     args = parser.parse_args()
     train(GRUModel(), 'GRU.256', args)
     train(TransformerModel(), 'Transformer 4h64d', args)

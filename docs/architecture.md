@@ -20,7 +20,7 @@ The output is always a Dense layer producing logits over the token vocabulary.
 
 ## Key abstractions
 
-### ModelDef / Model (`model_torch.py`)
+### ModelDef / Model (`model.py`)
 
 **ModelDef** parses a spec string and builds a lightweight descriptor (no
 weights). It holds:
@@ -28,6 +28,7 @@ weights). It holds:
 - An input def (`InputBytesDef` or `InputBitsDef`)
 - A list of `LayerDef`s for hidden layers
 - An output `DenseDef` projecting to the token vocabulary
+- A `precision` (Precision enum; `precision.py`)
 
 **Model** is the runnable `nn.Module`. It supports two modes:
 
@@ -37,26 +38,47 @@ weights). It holds:
 - `step(states, token)` — single-timestep inference. `states[0]` is the input
   module's state; `states[1:]` are hidden layer states.
 
-### LayerDef / LayerModule (`layer_torch.py`)
+Factory: `build_model_def(spec, precision)` is cached by `(spec, precision)`
+tuple.
+
+### LayerDef / LayerModule (`layer.py`)
 
 Base classes for hidden layers. Each layer type provides:
 
-- **LayerDef** — config/descriptor. Has `input_size`, `output_size`,
-  `num_weights`, `is_valid()`, `neighbors()`, and `build_module()`.
+- **LayerDef** — config/descriptor. Has `input_size`, `size`, `num_weights`,
+  `is_valid()`, `neighbors()`, and `build_module()`. `length` attribute
+  (default 1) is how many previous timesteps the layer depends on
+  (suffix layers are "length > 1").
 - **LayerModule** — `nn.Module` with `step(state, input)` for single-timestep
-  and `forward(inputs)` for batched sequence processing.
+  and `forward(inputs)` for batched sequence processing. `init_state(device,
+  dtype)` creates a matching-dtype recurrent state (or None for stateless).
 
-Currently implemented: `DenseDef`/`DenseModule`.
+Implemented layer types (all in `texmo/layers/`):
 
-### ManagerTorch (`manager_torch.py`)
+- `dense.py` — dense feed-forward (DenseDef)
+- `rnn.py` — Elman RNN (via nn.RNN for tanh/relu, custom for gelu)
+- `gru.py` — standard GRU (nn.GRU), mGRU (single-gate variant), minGRU
+  (input-only gates)
+- `lstm.py` — standard LSTM (nn.LSTM)
+- `suffix.py` — sliding window (stacks last N inputs)
+- `norm.py` — L2 normalization
+- `latent.py` — depth-recurrent dense (Latent) and RNN (Lrnn) layers
+  from https://arxiv.org/abs/2502.05171
+
+### Manager (`manager.py`)
 
 Training and inference manager. Handles:
 
 - Building the model and optimizer from a `Configuration`
 - Training loop with gradient clipping and LR scheduling
-- Evaluation on test data
+- Evaluation on test data (in fp32 regardless of training dtype)
 - Loss conversion from bits/token to bits/byte (b/B)
 - Text generation via `continue_prefix()`
+
+### Precision (`precision.py`)
+
+Enum with `.dtype` property (torch.dtype) and `.neighbors` (search).
+FP64 is supported but not in the default set (isn't supported on MPS).
 
 
 ## Input modules
@@ -68,12 +90,12 @@ Input modules convert integer token indices to float vectors. They all provide:
 - `initial_vector(device)` — uninformative input for the first position
 - `forward(tokens, padding=0)` — batched encoding with optional padding
 
-### InputBytes (`input_bytes_torch.py`)
+### InputBytes (`layers/input_bytes.py`)
 
 Spec: `bytes` (or empty). Encodes each byte (0-255) as a 256-dimensional
 one-hot vector. Stateless. `ntokens = 256`, `output_size = 256`.
 
-### InputBits (`input_bits_torch.py`)
+### InputBits (`layers/input_bits.py`)
 
 Encodes bytes split into sub-byte chunks. A byte is split into `8/nbits`
 chunks, each chunk being an `nbits`-bit value.

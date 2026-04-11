@@ -10,11 +10,9 @@ Given a parameter budget N and compute budget T, answer:
 
 ## Next steps
 
-* **Migrate remaining layers** from the old JAX implementation to PyTorch
-  (GRU, LSTM, attention, latent, S4, RWKV, norm).
-
-* **Use PyTorch's built-in Transformer/attention** instead of porting the
-  custom attention layer from JAX.
+* **Attention / Transformer layer.** Use PyTorch's built-in
+  `nn.MultiheadAttention` or `nn.TransformerEncoderLayer`. Key decisions:
+  causal masking, position encoding (RoPE?), head count as a search axis.
 
 * **Add residual connections.** Possibly make a `skip.N.add`/`skip.N.stack`
   layer that takes current activations, skip the next N layers and either

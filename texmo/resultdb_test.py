@@ -9,7 +9,9 @@ from texmo.resultdb import ResultDB
 from texmo.run import Run
 
 
-def _make_conf_run(spec="bytes|dense.64.gelu", batch=32, loss=3.123):
+def _make_conf_run(
+    spec="bytes|dense.64.gelu", batch=32, loss=3.123, system="test",
+):
     model = build_model_def(spec, precision=Precision.FP32)
     conf = Configuration(
         model=model,
@@ -21,7 +23,7 @@ def _make_conf_run(spec="bytes|dense.64.gelu", batch=32, loss=3.123):
     )
     loss_trend = build_loss_trend(None, 1, [1, 2, 3])
     run = Run(
-        system="test",
+        system=system,
         step_loss=None,
         loss=loss,
         loss_trend=loss_trend,
@@ -181,3 +183,74 @@ def test_get_run_counts(db):
     counts = db.get_run_counts([id1, id3])
     assert counts[id1] == 2  # two runs same conf
     assert counts[id3] == 1
+
+
+def test_get_systems_empty(db):
+    assert db.get_systems() == []
+
+
+def test_get_systems(db):
+    conf, run1 = _make_conf_run(loss=1, system="whitebox")
+    conf, run2 = _make_conf_run(loss=2, system="rpi")
+    conf, run3 = _make_conf_run(loss=3, system="whitebox")
+    db.add_run(conf, run1)
+    db.add_run(conf, run2)
+    db.add_run(conf, run3)
+    assert db.get_systems() == ["rpi", "whitebox"]
+
+
+def _make_template():
+    from texmo.common import INF
+    from texmo.configuration import Template
+    return Template(
+        spec=None, lr=None, length=None, batch=None,
+        steps=None, max_weights=(2, INF),
+        precision=list(Precision), decay=None,
+    )
+
+
+def test_top_confs_global_system_filter(db):
+    # top_confs_global yields a Pareto frontier: only configs whose score
+    # improves as weight count increases. So we need the larger config to
+    # have the better (lower) score.
+    #
+    # conf_small: dense.32.gelu, runs on rpi only, worse score
+    # conf_big: dense.64.gelu, runs on both rpi AND whitebox, better score
+    conf_small, _ = _make_conf_run(spec="bytes|dense.32.gelu")
+    conf_big, _ = _make_conf_run(spec="bytes|dense.64.gelu")
+
+    _, rs_rpi1 = _make_conf_run(spec="bytes|dense.32.gelu", loss=3.0, system="rpi")
+    _, rs_rpi2 = _make_conf_run(spec="bytes|dense.32.gelu", loss=3.2, system="rpi")
+    _, rb_rpi1 = _make_conf_run(spec="bytes|dense.64.gelu", loss=1.0, system="rpi")
+    _, rb_rpi2 = _make_conf_run(spec="bytes|dense.64.gelu", loss=1.2, system="rpi")
+    _, rb_wb1 = _make_conf_run(spec="bytes|dense.64.gelu", loss=1.4, system="whitebox")
+    _, rb_wb2 = _make_conf_run(spec="bytes|dense.64.gelu", loss=1.6, system="whitebox")
+
+    db.add_run(conf_small, rs_rpi1)
+    db.add_run(conf_small, rs_rpi2)
+    db.add_run(conf_big, rb_rpi1)
+    db.add_run(conf_big, rb_rpi2)
+    db.add_run(conf_big, rb_wb1)
+    db.add_run(conf_big, rb_wb2)
+
+    template = _make_template()
+
+    # Without filter: both confs on the frontier.
+    all_specs = {
+        str(cs.conf.model) for cs in db.top_confs_global(template)
+    }
+    assert all_specs == {"bytes|dense.32.gelu", "bytes|dense.64.gelu"}
+
+    # Filter by "whitebox": only conf_big has runs there.
+    wb_specs = {
+        str(cs.conf.model)
+        for cs in db.top_confs_global(template, system="whitebox")
+    }
+    assert wb_specs == {"bytes|dense.64.gelu"}
+
+    # Filter by "rpi": both have runs there.
+    rpi_specs = {
+        str(cs.conf.model)
+        for cs in db.top_confs_global(template, system="rpi")
+    }
+    assert rpi_specs == {"bytes|dense.32.gelu", "bytes|dense.64.gelu"}

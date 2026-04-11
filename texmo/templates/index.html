@@ -58,6 +58,17 @@
             </table>
         </form>
 
+        <form action="/" method="get">
+            <label for="system">System:</label>
+            <select name="system" id="system">
+                <option value="" {% if not selected_system %}selected{% endif %}>All systems</option>
+                {% for s in systems %}
+                <option value="{{ s }}" {% if s == selected_system %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+            <input type="submit" value="Filter">
+        </form>
+
         <img src="data:image/png;base64,{{ graph }}">
 
         <table>

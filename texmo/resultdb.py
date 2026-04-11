@@ -369,18 +369,56 @@ class ResultDB(object):
         with latency.timer('ResultDB.add_run'):
             self._add_run(conf, run, conf_id, timestamp)
 
-    def top_confs_global(self, template: Template):
+    def get_systems(self) -> list[str]:
+        """Return a sorted list of all systems that have runs in the DB."""
+        cur = self._db.execute(
+            'SELECT DISTINCT system FROM run ORDER BY system')
+        return [row[0] for row in cur]
+
+    def top_confs_global(
+        self, template: Template, system: Optional[str] = None
+    ):
+        """Yield top confs ordered by weights, one per weight count.
+
+        Args:
+            template: filter for the configurations.
+            system: if provided, only include configurations that have been
+                run on this system, and report median_time for this system
+                only. Score is still the global median across all systems.
+        """
         assert type(template) is Template
 
         conditions, params = _make_template_conditions(template)
         conditions.append('median_score IS NOT NULL')
         conditions.append('num_runs > 1')
 
+        if system is not None:
+            conditions.append(
+                'EXISTS (SELECT 1 FROM run '
+                'WHERE run.conf_id = conf.id AND run.system = :system)')
+            params['system'] = system
+
         conf_fields = ', '.join([
             'spec', 'precision', 'lr',
             'decay', 'length', 'batch', 'steps'])
 
         where = 'WHERE ' + ' AND '.join(conditions)
+
+        if system is None:
+            # Best median_time across all systems, report the winning system.
+            time_select = (
+                "(SELECT system FROM conf_time WHERE conf_id=conf.id "
+                " ORDER BY median_time LIMIT 1) AS system, "
+                "(SELECT MIN(median_time) FROM conf_time "
+                " WHERE conf_id=conf.id) AS median_time"
+            )
+        else:
+            # Median_time on the selected system specifically.
+            time_select = (
+                ":system AS system, "
+                "(SELECT median_time FROM conf_time "
+                " WHERE conf_id=conf.id AND system=:system) AS median_time"
+            )
 
         query = f"""
             WITH conf_with_runs AS (
@@ -389,9 +427,7 @@ class ResultDB(object):
                        weights,
                        median_score,
                        (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs,
-                       (SELECT system FROM conf_time WHERE conf_id=conf.id
-                        ORDER BY median_time LIMIT 1) AS system,
-                       (SELECT MIN(median_time) FROM conf_time WHERE conf_id=conf.id) AS median_time
+                       {time_select}
                 FROM conf
                 {where}
             ),

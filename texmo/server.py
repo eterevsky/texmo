@@ -1,10 +1,11 @@
 import argparse
+import base64
 import io
 import logging
 import os
 import threading
 from queue import Queue
-import base64
+from typing import Optional
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -15,7 +16,6 @@ from .common import ttoa3
 from .configuration import (Bounds, Configuration, Precision,
                              Template, default_from_template)
 from .latency import get_report, timer
-from .report import generate_report_by_weight
 from .resultdb import ResultDB
 from .run import Run
 from .search2 import Search
@@ -73,7 +73,6 @@ class SearchThread(threading.Thread):
         requests_queue: Queue,
         confs_by_system: dict,
         confs_by_system_lock: threading.Lock,
-        report_queue: Queue,
     ):
         super().__init__()
         self.db = db
@@ -87,7 +86,6 @@ class SearchThread(threading.Thread):
         self.requests_queue = requests_queue
         self.confs_by_system = confs_by_system
         self.confs_by_system_lock = confs_by_system_lock
-        self.report_queue = report_queue
         _, self.max_time = train_time
 
     def run(self):
@@ -104,10 +102,6 @@ class SearchThread(threading.Thread):
             elif command == "add":
                 conf, run = args
                 self.search.add_run(conf, run)
-            elif command == "report":
-                system = args
-                report = generate_report_by_weight(self.db, self.template, system, max_time=self.max_time)
-                self.report_queue.put((system, report))
             elif command == "stop":
                 logging.info("Stopping search thread")
                 break
@@ -133,7 +127,6 @@ class SearchServer(object):
         self.requests_queue = Queue()
         self.confs_by_system: dict[str, Queue] = {}
         self.confs_by_system_lock = threading.Lock()
-        self.report_queue = Queue()
 
         self.search_thread = SearchThread(
             db,
@@ -143,14 +136,13 @@ class SearchServer(object):
             requests_queue=self.requests_queue,
             confs_by_system=self.confs_by_system,
             confs_by_system_lock=self.confs_by_system_lock,
-            report_queue=self.report_queue,
         )
         self.search_thread.start()
 
     def __del__(self):
         self.requests_queue.put(("stop", None))
 
-    def index(self):
+    def index(self, selected_system: Optional[str] = None):
         if self.template.spec:
             pattern = self.template.spec
         elif self.template.regex:
@@ -162,7 +154,9 @@ class SearchServer(object):
         for p in Precision:
             precision[p] = p in self.template.precision
 
-        top_confs = list(self.db.top_confs_global(self.template))
+        systems = self.db.get_systems()
+        top_confs = list(
+            self.db.top_confs_global(self.template, system=selected_system))
 
         graph = build_graph(top_confs)
 
@@ -195,7 +189,9 @@ class SearchServer(object):
             steps=_render_bounds(self.template.steps),
             time=train_time,
             top=top,
-            graph=base64.b64encode(graph).decode('ascii')
+            graph=base64.b64encode(graph).decode('ascii'),
+            systems=systems,
+            selected_system=selected_system,
         )
 
     def update(self, params):
@@ -231,16 +227,6 @@ class SearchServer(object):
         logging.info(f"Adding run: {conf} - {run}")
         self.requests_queue.put(("add", (conf, run)))
 
-    def report(self, args):
-        system = args["system"]
-        logging.info(f"Generating report for system {system}")
-
-        self.requests_queue.put(("report", system))
-        sys, report = self.report_queue.get()
-        assert sys == system
-
-        return report
-
     def join(self):
         self.requests_queue.put(("stop", None))
         self.search_thread.join()
@@ -261,7 +247,8 @@ def main(args: argparse.Namespace):
 
     @app.route("/", methods=["GET"])
     def _index():
-        return server.index()
+        selected_system = request.args.get("system") or None
+        return server.index(selected_system=selected_system)
 
     @app.route("/update", methods=["POST"])
     def _update():
@@ -284,13 +271,6 @@ def main(args: argparse.Namespace):
         response = make_response(get_report(), 200)
         response.mimetype = "text/plain"
         return response
-
-    @app.route("/report", methods=["GET"])
-    def _report():
-        with timer("SearchServer.report"):
-            response = make_response(server.report(request.args), 200)
-            response.mimetype = "text/plain"
-            return response
 
     @app.route('/favicon.ico')
     def _favicon():

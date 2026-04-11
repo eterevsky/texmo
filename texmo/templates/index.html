@@ -16,11 +16,30 @@
         <script>
             function copyCmd(el) {
                 const cmd = el.dataset.cmd;
-                navigator.clipboard.writeText(cmd).then(() => {
+                const flash = () => {
                     const original = el.textContent;
                     el.textContent = 'copied!';
                     setTimeout(() => { el.textContent = original; }, 1000);
-                });
+                };
+                // navigator.clipboard requires a secure context (HTTPS or
+                // localhost). Fall back to the legacy textarea+execCommand
+                // approach when accessing the server over plain HTTP.
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(cmd).then(flash);
+                } else {
+                    const ta = document.createElement('textarea');
+                    ta.value = cmd;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try {
+                        document.execCommand('copy');
+                        flash();
+                    } finally {
+                        document.body.removeChild(ta);
+                    }
+                }
             }
         </script>
     </head>

@@ -288,6 +288,24 @@ def test_neighbors_append_remove_layer():
     assert "bytes|dense.32.gelu" in neighbor_specs2
 
 
+def test_neighbors_append_with_binary_output():
+    """For binary tokens (ntokens == 2), the output layer has size 1, so
+    appended layers should also start at size 1 — not 2."""
+    md = ModelDef("bits.1+bp|", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert "bits.1+bp|rnn.1.tanh" in neighbor_specs
+    assert "bits.1+bp|dense.1.gelu" in neighbor_specs
+    assert "bits.1+bp|gru.1" in neighbor_specs
+    # Size 2 should NOT appear as the initial appended size
+    assert "bits.1+bp|rnn.2.tanh" not in neighbor_specs
+
+    # Symmetric: removing the last layer of a 1-layer model should yield
+    # the empty layer list.
+    md2 = ModelDef("bits.1+bp|rnn.1.tanh", Precision.FP32)
+    neighbor_specs2 = [str(n) for n in md2.neighbors()]
+    assert "bits.1+bp|" in neighbor_specs2
+
+
 def test_neighbors_suffix_insert_remove():
     md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
     neighbor_specs = [str(n) for n in md.neighbors()]

@@ -262,12 +262,14 @@ class ModelDef(object):
                 yield _make_spec(chain(
                     layers_str[:i], (layer_neighbor,), layers_str[i + 1:]))
 
-        # 2. Append a new layer
+        # 2. Append a new layer. The new size matches the output layer size,
+        # capped by the previous layer's (or input's) size — i.e. the
+        # narrowest point of the pipe after the new layer.
         last_output = (
             self.layers[-1].size if self.layers
             else self.input.size
         )
-        new_size = min(last_output, self.ntokens)
+        new_size = min(last_output, self.output.size)
         for name in ("dense", "rnn"):
             for activation in ("relu", "gelu", "tanh"):
                 yield _make_spec(chain(
@@ -282,7 +284,7 @@ class ModelDef(object):
                 self.input.size if len(self.layers) == 1
                 else self.layers[-2].size
             )
-            expected_size = min(prev_output, self.ntokens)
+            expected_size = min(prev_output, self.output.size)
             if self.layers[-1].size == expected_size:
                 yield _make_spec(layers_str[:-1])
 

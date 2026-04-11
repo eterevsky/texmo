@@ -68,6 +68,7 @@ class Manager(object):
 
         self.model = self.model_def.build_model()
         self.model.to(self.device)
+        self.model.flatten_parameters()
 
         if not quiet:
             logging.info('Creating optimizer')
@@ -184,6 +185,7 @@ class Manager(object):
         # Evaluate in fp32 for consistent precision across training dtypes.
         self.model.float()
         self.model.input_module.dtype = torch.float32
+        self.model.flatten_parameters()
         data = self.dataset.sample_tokens(
             ntokens=self.test_sample_len,
             batch=self.test_batch,
@@ -193,6 +195,7 @@ class Manager(object):
         loss = self.model.loss_batch(batch)
         self.model.to(self.dtype)
         self.model.input_module.dtype = self.dtype
+        self.model.flatten_parameters()
         return loss.item() / self.bytes_per_token
 
     def train_and_eval(

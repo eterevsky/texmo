@@ -132,7 +132,7 @@ class Search(object):
 
         assert isinstance(train_time[0], float)
         assert isinstance(train_time[1], float)
-        self._train_time = train_time
+        self.train_time = train_time
 
     def add_run(
         self,
@@ -145,7 +145,7 @@ class Search(object):
         self._db.add_run(conf, run)
 
     def _select_time(self) -> float:
-        tmin, tmax = self._train_time
+        tmin, tmax = self.train_time
         if tmin == tmax:
             return tmin
         assert 0 < tmin < tmax

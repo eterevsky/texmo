@@ -212,7 +212,14 @@ class SearchServer(object):
     def update(self, params):
         self.template = Template.from_form(params)
         self.search_thread.search.template = self.template
+        time_str = params.get("time", "")
+        if time_str:
+            tmin, tmax = map(float, time_str.split("-"))
+            self.train_time = (tmin, tmax)
+            self.search_thread.search.train_time = (tmin, tmax)
+            self.search_thread.max_time = tmax
         logging.info(f'New template: {self.template}')
+        logging.info(f'New train time: {self.train_time}')
         return redirect("/")
 
     def select(self, args):

@@ -320,6 +320,41 @@ class ResultDB(object):
                 self._update_scores(cur, conf_id, system)
             self.commit()
 
+    def clear_system(self, system: str) -> int:
+        """Delete all runs and conf_time entries for a given system.
+
+        Recomputes median_score for any affected configurations.
+        Returns the number of runs that were deleted.
+        """
+        cur = self._db.cursor()
+        cur.execute('BEGIN TRANSACTION')
+
+        # Find affected confs before deleting the runs.
+        cur.execute(
+            'SELECT DISTINCT conf_id FROM run WHERE system = :system',
+            {'system': system},
+        )
+        affected_conf_ids = [row[0] for row in cur.fetchall()]
+
+        cur.execute(
+            'DELETE FROM run WHERE system = :system',
+            {'system': system},
+        )
+        deleted = cur.rowcount
+
+        cur.execute(
+            'DELETE FROM conf_time WHERE system = :system',
+            {'system': system},
+        )
+
+        # Recompute median_score for affected confs (median_time for this
+        # system is already gone).
+        for conf_id in affected_conf_ids:
+            self._update_median_score(cur, conf_id)
+
+        cur.execute('COMMIT')
+        return deleted
+
     def _add_run(
         self,
         conf: Configuration,

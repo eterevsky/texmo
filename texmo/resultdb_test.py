@@ -209,6 +209,65 @@ def _make_template():
     )
 
 
+def test_clear_system_deletes_runs_and_conf_time(db):
+    conf, _ = _make_conf_run()
+    _, r1 = _make_conf_run(loss=1.0, system="rpi")
+    _, r2 = _make_conf_run(loss=2.0, system="rpi")
+    _, r3 = _make_conf_run(loss=3.0, system="whitebox")
+    db.add_run(conf, r1)
+    db.add_run(conf, r2)
+    db.add_run(conf, r3)
+
+    # Both systems are present.
+    assert set(db.get_systems()) == {"rpi", "whitebox"}
+
+    deleted = db.clear_system("rpi")
+    assert deleted == 2
+
+    # Only whitebox remains.
+    assert db.get_systems() == ["whitebox"]
+
+    # run table has only whitebox runs.
+    cur = db._db.execute("SELECT COUNT(*) FROM run WHERE system = 'rpi'")
+    assert cur.fetchone()[0] == 0
+    cur = db._db.execute("SELECT COUNT(*) FROM run WHERE system = 'whitebox'")
+    assert cur.fetchone()[0] == 1
+
+    # conf_time for rpi is gone.
+    cur = db._db.execute(
+        "SELECT COUNT(*) FROM conf_time WHERE system = 'rpi'")
+    assert cur.fetchone()[0] == 0
+
+
+def test_clear_system_recomputes_median_score(db):
+    conf, _ = _make_conf_run()
+    _, r1 = _make_conf_run(loss=1.0, system="rpi")
+    _, r2 = _make_conf_run(loss=3.0, system="rpi")
+    _, r3 = _make_conf_run(loss=5.0, system="whitebox")
+    db.add_run(conf, r1)
+    db.add_run(conf, r2)
+    db.add_run(conf, r3)
+
+    # Before clearing: median over all runs = median(1, 3, 5) = 3.
+    cur = db._db.execute("SELECT median_score FROM conf")
+    assert cur.fetchone()[0] == pytest.approx(3.0)
+
+    db.clear_system("rpi")
+
+    # After clearing: median over remaining runs = median(5) = 5.
+    cur = db._db.execute("SELECT median_score FROM conf")
+    assert cur.fetchone()[0] == pytest.approx(5.0)
+
+
+def test_clear_system_unknown_system(db):
+    conf, run = _make_conf_run()
+    db.add_run(conf, run)
+    # Clearing an unknown system should be a no-op.
+    deleted = db.clear_system("nonexistent")
+    assert deleted == 0
+    assert db.total_runs() == 1
+
+
 def test_top_confs_global_system_filter(db):
     # top_confs_global yields a Pareto frontier: only configs whose score
     # improves as weight count increases. So we need the larger config to

@@ -43,16 +43,17 @@ def parse_args():
     )
     sample_cli.benchmark_init_args(parser_benchmark_dataset, config)
 
-    parser_importdb = subparsers.add_parser(
-        "importdb",
-        help="Import configurations and runs from one databased into another",
-    )
-    db_cli.importdb_init_args(parser_importdb, config)
-
     parser_updatedb = subparsers.add_parser(
-        "updatedb", help="Check databased consistency and update scores and neighbors"
+        "db-update",
+        help="Recompute scores for all configurations in the database",
     )
     db_cli.updatedb_init_args(parser_updatedb, config)
+
+    parser_clear_system = subparsers.add_parser(
+        "db-clear-system",
+        help="Delete all runs from a given system",
+    )
+    db_cli.clear_system_init_args(parser_clear_system, config)
 
     parser_report = subparsers.add_parser(
         "report", help="Print a report of the results in the database"

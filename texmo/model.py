@@ -48,19 +48,6 @@ class Model(nn.Module):
     def device(self) -> torch.device:
         return next(self.output_module.parameters()).device
 
-    def flatten_parameters(self):
-        """Compact cuDNN RNN weights into a contiguous memory block.
-
-        Must be called after any operation that moves or casts parameters
-        (e.g. .to(device), .to(dtype)). Otherwise nn.RNN/GRU/LSTM emit a
-        warning and re-copy weights on every forward pass.
-        """
-        for m in self.modules():
-            if m is self:
-                continue
-            if isinstance(m, (nn.RNN, nn.GRU, nn.LSTM)):
-                m.flatten_parameters()
-
     def initial_step(self) -> tuple[list[LayerState], Tensor]:
         """Predict the first token (before any input).
 
@@ -364,7 +351,6 @@ class ModelDef(object):
         else:
             # Cast to target dtype (input module handles its own dtype)
             model.to(self.precision.dtype)
-        model.flatten_parameters()
 
         return model
 

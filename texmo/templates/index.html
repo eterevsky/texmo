@@ -133,6 +133,39 @@
             </tr>
             {% endfor %}
         </table>
+
+        {% if selected_system and fastest %}
+        <h2>Fastest to reach near-best loss (within 1%) on {{ selected_system }}</h2>
+
+        {% if scaling_graph %}
+        <img src="data:image/png;base64,{{ scaling_graph }}">
+        {% endif %}
+
+        <table>
+            <tr>
+                <th>Model</th>
+                <th>P</th>
+                <th>Data</th>
+                <th>LR</th>
+                <th>Steps</th>
+                <th>Score</th>
+                <th>Time</th>
+                <th></th>
+            </tr>
+            {% for item in fastest %}
+            <tr>
+                <td><code>{{ item.spec }}</code> ({{ item.weights }})</td>
+                <td>{{ item.precision }}</td>
+                <td>{{ item.data }}</td>
+                <td>{{ item.lr }}</td>
+                <td>{{ item.steps }}</td>
+                <td>{{ item.score }}</td>
+                <td>{{ item.time }}</td>
+                <td><span class="copy-link" data-cmd="{{ item.cmd }}" onclick="copyCmd(this)">copy</span></td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% endif %}
         </main>
     </body>
 </html>

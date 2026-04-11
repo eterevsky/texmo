@@ -546,6 +546,116 @@ class ResultDB(object):
                 yield conf_score
 
 
+    def fastest_near_best_segments(
+        self,
+        template: Template,
+        system: str,
+        pareto: list[ConfScore],
+        tolerance: float = 0.01,
+    ) -> list[tuple[int, Optional[int], ConfScore]]:
+        """Build a piecewise-constant "fastest near-best" curve.
+
+        Args:
+            template: filter for the candidate configs.
+            system: only configs with runs on this system are considered.
+            pareto: the Pareto frontier — a list of ConfScores sorted by
+                `weights` ascending with strictly decreasing median_score.
+                Typically the result of `top_confs_global(..., system=...)`.
+            tolerance: a conf is "near-best" at budget W if its score is
+                within `(1 + tolerance)` of the best Pareto loss achievable
+                at weight budget W.
+
+        For each interval between consecutive Pareto points `[W_i, W_{i+1})`,
+        query all confs with `median_score <= L_i * (1 + tolerance) AND
+        weights < W_{i+1}`, ordered by median_time on `system` ASC. Walk
+        the results, assigning each qualifying config to a sub-range of
+        the interval such that for any weight budget `w` in the sub-range,
+        the returned conf is the one with the smallest median_time.
+
+        The last interval has no `W_{i+1}` boundary and extends to
+        infinity — the last segment's `w_high` is None.
+
+        Returns a list of `(w_low, w_high, ConfScore)` segments sorted by
+        `w_low` ascending. The union covers `[W_0, +infty)`.
+        """
+        if not pareto:
+            return []
+
+        conf_fields = ', '.join([
+            'spec', 'precision', 'lr',
+            'decay', 'length', 'batch', 'steps'])
+
+        segments: list[tuple[int, Optional[int], ConfScore]] = []
+
+        n = len(pareto)
+        ws = [cs.conf.model.num_weights for cs in pareto]
+        ls = [cs.median_score for cs in pareto]
+
+        for i in range(n):
+            w_left = ws[i]
+            w_right: Optional[int] = ws[i + 1] if i + 1 < n else None
+            threshold = ls[i] * (1.0 + tolerance)
+
+            # Build the candidate query: all confs with score within
+            # tolerance of L_i, optionally bounded by w_right. Ordered
+            # by time ASC so we can walk greedily.
+            conditions, params = _make_template_conditions(template)
+            conditions.append('median_score IS NOT NULL')
+            conditions.append('median_score <= :threshold')
+            params['threshold'] = threshold
+            params['system'] = system
+            if w_right is not None:
+                conditions.append('weights < :w_right')
+                params['w_right'] = w_right
+            where = 'WHERE ' + ' AND '.join(conditions)
+
+            query = f"""
+                SELECT conf.id AS conf_id, {conf_fields},
+                       weights,
+                       median_score,
+                       (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs,
+                       :system AS system,
+                       ct.median_time AS median_time
+                FROM conf
+                JOIN conf_time AS ct ON ct.conf_id = conf.id AND ct.system = :system
+                {where}
+                ORDER BY ct.median_time ASC
+            """
+            cur = self._db.execute(query, params)
+
+            # Walk results, collecting segments from the right boundary
+            # downward. `uncovered_right` is the exclusive right end of
+            # the still-uncovered portion of [w_left, w_right).
+            #
+            # The Pareto point `(W_i, L_i) = pareto[i]` itself is
+            # guaranteed to satisfy this query (score exactly L_i, weight
+            # W_i, has runs on the system), so we're always guaranteed
+            # to hit a `w <= w_left` row and terminate with the interval
+            # fully covered.
+            uncovered_right: Optional[int] = w_right
+            done = False
+            for row in cur:
+                w = row['weights']
+                if uncovered_right is not None and w >= uncovered_right:
+                    # A faster conf already covers this weight range.
+                    continue
+                # A conf with w <= w_left covers everything still
+                # uncovered in this interval. Clamp its segment to
+                # [w_left, uncovered_right) and stop.
+                seg_low = max(w, w_left)
+                segments.append(
+                    (seg_low, uncovered_right, ConfScore._from_row(row)))
+                uncovered_right = seg_low
+                if w <= w_left:
+                    done = True
+                    break
+            assert done, (
+                f"interval [{w_left}, {w_right}) not fully covered — "
+                "the Pareto point itself should have been in the results")
+
+        segments.sort(key=lambda seg: seg[0])
+        return segments
+
     def top_confs_for_system(
         self,
         system: str,

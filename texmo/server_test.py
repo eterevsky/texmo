@@ -40,6 +40,8 @@ def _render(**overrides):
         graph='',
         systems=[],
         selected_system=None,
+        fastest=[],
+        scaling_graph=None,
     )
     defaults.update(overrides)
     with _make_app().test_request_context():
@@ -82,3 +84,45 @@ def test_index_copy_command_link():
     assert 'copy-link' in html
     # The pipe in the spec is quoted so it's shell-safe.
     assert "bytes|dense.32.gelu&#39;" in html
+
+
+def test_index_fastest_table_hidden_without_system():
+    html = _render(
+        systems=['rpi', 'whitebox'],
+        selected_system=None,
+        fastest=[{
+            'spec': 'bytes|dense.32.gelu',
+            'weights': 8448,
+            'precision': 'fp32',
+            'data': '32×128',
+            'lr': '1/128',
+            'steps': 256,
+            'score': '5.123 (3)',
+            'time': '1.23 s on rpi',
+            'cmd': "uv run texmo.py train",
+        }],
+    )
+    assert 'near-best loss' not in html
+
+
+def test_index_fastest_table_shown_with_system():
+    html = _render(
+        systems=['rpi', 'whitebox'],
+        selected_system='rpi',
+        fastest=[{
+            'spec': 'bytes|rnn.8.tanh',
+            'weights': 80,
+            'precision': 'bf16',
+            'data': '16×64',
+            'lr': '1/16',
+            'steps': 128,
+            'score': '6.123 (4)',
+            'time': '230 ms on rpi',
+            'cmd': "uv run texmo.py train",
+        }],
+        scaling_graph='dGVzdA==',  # base64("test")
+    )
+    assert 'near-best loss' in html
+    assert 'rnn.8.tanh' in html
+    # Scaling graph image
+    assert 'dGVzdA==' in html

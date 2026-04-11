@@ -295,6 +295,161 @@ def test_clear_system_unknown_system(db):
     assert db.total_runs() == 1
 
 
+def _add_runs(db, conf, losses, system, train_time):
+    """Helper: add multiple runs of the same conf with given losses."""
+    import datetime
+    base = datetime.datetime(2026, 4, 11, 12, 0, 0)
+    for i, loss in enumerate(losses):
+        _, run = _make_conf_run(
+            spec=str(conf.model), loss=loss, system=system)
+        run.train_time = train_time
+        db.add_run(conf, run, timestamp=base + datetime.timedelta(seconds=i))
+
+
+def test_fastest_near_best_segments_empty(db):
+    template = _make_template()
+    segments = db.fastest_near_best_segments(
+        template=template, system="whitebox", pareto=[])
+    assert segments == []
+
+
+def test_fastest_near_best_segments(db):
+    """Test building the scaling curve segments.
+
+    Setup (all on whitebox, three dense layers of increasing size):
+    - dense.8.gelu:  W=4360,  score 5.00,  time 8s
+    - dense.16.gelu: W=8464,  score 4.98,  time 2s
+    - dense.32.gelu: W=16672, score 4.00,  time 10s
+
+    All three end up on the Pareto frontier because each has a strictly
+    better score than the previous one (5.00 > 4.98 > 4.00).
+
+    Expected segments: for each Pareto interval, the algorithm walks the
+    confs sorted by time ASC and assigns them to sub-ranges. dense.16 is
+    faster than dense.8 (2s vs 8s) and fits the threshold 5.00*1.01, so
+    it should cover [8464, 16672). For the last interval [16672, inf),
+    the threshold 4.04 excludes dense.16 (score 4.98), so dense.32
+    covers itself.
+    """
+    template = _make_template()
+
+    conf_a, _ = _make_conf_run(spec="bytes|dense.8.gelu")
+    conf_b, _ = _make_conf_run(spec="bytes|dense.16.gelu")
+    conf_c, _ = _make_conf_run(spec="bytes|dense.32.gelu")
+
+    wa = conf_a.model.num_weights
+    wb = conf_b.model.num_weights
+    wc = conf_c.model.num_weights
+    assert wa < wb < wc
+
+    _add_runs(db, conf_a, [5.00, 5.00], "whitebox", 8.0)
+    _add_runs(db, conf_b, [4.98, 4.98], "whitebox", 2.0)
+    _add_runs(db, conf_c, [4.00, 4.00], "whitebox", 10.0)
+
+    pareto = list(db.top_confs_global(template, system="whitebox"))
+    pareto_specs = [str(cs.conf.model) for cs in pareto]
+    assert pareto_specs == [
+        "bytes|dense.8.gelu",
+        "bytes|dense.16.gelu",
+        "bytes|dense.32.gelu",
+    ]
+
+    segments = db.fastest_near_best_segments(
+        template=template, system="whitebox", pareto=pareto)
+
+    # Map by spec for easier assertions.
+    by_spec = {
+        str(cs.conf.model): (lo, hi, cs.median_time)
+        for lo, hi, cs in segments
+    }
+
+    # dense.8 covers [wa, wb): it's the fastest conf reaching within 1%
+    # of its own score (5.05) within [wa, wb).
+    assert "bytes|dense.8.gelu" in by_spec
+    lo, hi, t = by_spec["bytes|dense.8.gelu"]
+    assert lo == wa
+    assert hi == wb
+    assert t == pytest.approx(8.0)
+
+    # dense.16 covers [wb, wc): threshold from the left Pareto point
+    # (dense.16 itself, 4.98*1.01=5.0298). dense.16 is the fastest conf
+    # qualifying at <= wc weights.
+    assert "bytes|dense.16.gelu" in by_spec
+    lo, hi, t = by_spec["bytes|dense.16.gelu"]
+    assert lo == wb
+    assert hi == wc
+
+    # dense.32 covers [wc, inf): threshold 4.04, only dense.32 qualifies.
+    assert "bytes|dense.32.gelu" in by_spec
+    lo, hi, t = by_spec["bytes|dense.32.gelu"]
+    assert lo == wc
+    assert hi is None  # unbounded right
+    assert t == pytest.approx(10.0)
+
+
+def test_fastest_near_best_segments_faster_alternative(db):
+    """Verify that a non-Pareto faster conf is picked when available.
+
+    Setup:
+    - dense.8.gelu:  score 5.00, time 20s (Pareto)
+    - dense.16.gelu: score 5.04, time 2s  (NOT Pareto — worse score)
+    - dense.32.gelu: score 4.00, time 10s (Pareto)
+
+    Since dense.16's score (5.04) is *worse* than dense.8's (5.00),
+    it's not on the Pareto frontier. But it's within 1% of dense.8's
+    score (threshold 5.05) and is much faster, so in the [wa, wc)
+    interval, dense.16 should replace dense.8 for weights >= wb.
+    """
+    template = _make_template()
+
+    conf_a, _ = _make_conf_run(spec="bytes|dense.8.gelu")
+    conf_b, _ = _make_conf_run(spec="bytes|dense.16.gelu")
+    conf_c, _ = _make_conf_run(spec="bytes|dense.32.gelu")
+    wa, wb, wc = (
+        conf_a.model.num_weights,
+        conf_b.model.num_weights,
+        conf_c.model.num_weights,
+    )
+
+    _add_runs(db, conf_a, [5.00, 5.00], "whitebox", 20.0)
+    _add_runs(db, conf_b, [5.04, 5.04], "whitebox", 2.0)
+    _add_runs(db, conf_c, [4.00, 4.00], "whitebox", 10.0)
+
+    pareto = list(db.top_confs_global(template, system="whitebox"))
+    # dense.16 (score 5.04) is worse than dense.8 (5.00), so it should NOT
+    # be on the Pareto frontier.
+    pareto_specs = [str(cs.conf.model) for cs in pareto]
+    assert pareto_specs == [
+        "bytes|dense.8.gelu",
+        "bytes|dense.32.gelu",
+    ]
+
+    segments = db.fastest_near_best_segments(
+        template=template, system="whitebox", pareto=pareto)
+
+    by_spec = {
+        str(cs.conf.model): (lo, hi, cs.median_time)
+        for lo, hi, cs in segments
+    }
+
+    # dense.16 should appear as an alternative in the [wa, wc) interval,
+    # covering [wb, wc).
+    assert "bytes|dense.16.gelu" in by_spec
+    lo, hi, t = by_spec["bytes|dense.16.gelu"]
+    assert lo == wb
+    assert hi == wc
+    assert t == pytest.approx(2.0)
+
+    # dense.8 still covers [wa, wb) (anchor of the interval).
+    assert "bytes|dense.8.gelu" in by_spec
+    lo, hi, _ = by_spec["bytes|dense.8.gelu"]
+    assert lo == wa
+    assert hi == wb
+
+    # dense.32 covers [wc, inf).
+    assert "bytes|dense.32.gelu" in by_spec
+
+
 def test_top_confs_global_system_filter(db):
     # top_confs_global yields a Pareto frontier: only configs whose score
     # improves as weight count increases. So we need the larger config to

@@ -63,6 +63,66 @@ def build_graph(confs: list[Configuration]) -> bytes:
     return f.getvalue()
 
 
+def build_scaling_graph(
+    segments: list[tuple[int, int, float]], system: str
+) -> bytes:
+    """Plot weight budget -> fastest time to reach near-best loss.
+
+    `segments` is a list of (w_low, w_high, time) tuples. Each segment
+    is flat: for any w in [w_low, w_high), the fastest time is `time`.
+    Draws a step function with a single plot() call so matplotlib
+    connects adjacent segments as one line.
+    """
+    plt.ioff()
+    plt.clf()
+    _fig, ax = plt.subplots()
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.yaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    ax.yaxis.set_minor_formatter(matplotlib.ticker.ScalarFormatter())
+
+    xs: list[float] = []
+    ys: list[float] = []
+    for w_low, w_high, t in sorted(segments, key=lambda s: s[0]):
+        xs.append(w_low)
+        ys.append(t)
+        xs.append(w_high - 0.1)
+        ys.append(t)
+    plt.plot(xs, ys)
+
+    plt.xlabel('weights')
+    plt.ylabel(f'fastest time to near-best loss on {system}, s')
+    f = io.BytesIO()
+    plt.savefig(f, format='png')
+    return f.getvalue()
+
+
+def _conf_row(conf_score) -> dict:
+    """Build a template row dict for a ConfScore."""
+    conf = conf_score.conf
+    cmd = (
+        f'uv run texmo.py train'
+        f" -s '{conf.model}'"
+        f' -p {conf.precision}'
+        f' -b {conf.batch}'
+        f' --lr {conf.lr}'
+        f' --decay {conf.decay}'
+        f' -l {conf.length}'
+        f' --steps {conf.steps}'
+    )
+    return {
+        'spec': str(conf.model),
+        'weights': conf.model.num_weights,
+        'precision': str(conf.precision),
+        'data': f'{conf.batch}×{conf.length}',
+        'lr': conf.learning_str,
+        'steps': conf.steps,
+        'score': f'{conf_score.median_score:.3f} ({conf_score.num_runs})',
+        'time': f'{ttoa3(conf_score.median_time)} on {conf_score.system}',
+        'cmd': cmd,
+    }
+
+
 class SearchThread(threading.Thread):
     def __init__(
         self,
@@ -156,38 +216,50 @@ class SearchServer(object):
 
         # Use a dedicated read-only connection to avoid contending with
         # the writer thread for the main connection.
+        scaling_graph = None
+        fastest = []
         with self.db.open_readonly() as ro_db:
             systems = ro_db.get_systems()
             top_confs = list(
                 ro_db.top_confs_global(
                     self.template, system=selected_system))
 
+            # Compute-scaling analysis: only makes sense for a specific
+            # system because training times vary wildly across hardware.
+            if selected_system is not None and top_confs:
+                segments = ro_db.fastest_near_best_segments(
+                    self.template,
+                    system=selected_system,
+                    pareto=top_confs,
+                )
+                # Deduplicate by conf_id: multiple segments may point at
+                # the same conf; we only want one row per conf in the
+                # table.
+                seen_ids = set()
+                for w_low, w_high, cs in segments:
+                    if cs.conf_id in seen_ids:
+                        continue
+                    seen_ids.add(cs.conf_id)
+                    fastest.append(_conf_row(cs))
+                # The last segment has w_high = None (extends to +infty).
+                # Cap it at 2x the max Pareto weight for plotting.
+                max_pareto_w = max(
+                    cs.conf.model.num_weights for cs in top_confs)
+                plot_segments = []
+                for w_low, w_high, cs in segments:
+                    if cs.median_time is None:
+                        continue
+                    if w_high is None:
+                        w_high = max_pareto_w * 2
+                    plot_segments.append((w_low, w_high, cs.median_time))
+                if plot_segments:
+                    scaling_graph = base64.b64encode(
+                        build_scaling_graph(plot_segments, selected_system)
+                    ).decode('ascii')
+
         graph = build_graph(top_confs)
 
-        top = []
-        for conf_score in top_confs:
-            conf = conf_score.conf
-            cmd = (
-                f'uv run texmo.py train'
-                f" -s '{conf.model}'"
-                f' -p {conf.precision}'
-                f' -b {conf.batch}'
-                f' --lr {conf.lr}'
-                f' --decay {conf.decay}'
-                f' -l {conf.length}'
-                f' --steps {conf.steps}'
-            )
-            top.append({
-                'spec': str(conf.model),
-                'weights': conf.model.num_weights,
-                'precision': str(conf.precision),
-                'data': f'{conf.batch}×{conf.length}',
-                'lr': conf.learning_str,
-                'steps': conf.steps,
-                'score': f'{conf_score.median_score:.3f} ({conf_score.num_runs})',
-                'time': f'{ttoa3(conf_score.median_time)} on {conf_score.system}',
-                'cmd': cmd,
-            })
+        top = [_conf_row(tc) for tc in top_confs]
 
         tmin, tmax = self.train_time
         train_time = f'{tmin}-{tmax}'
@@ -205,6 +277,8 @@ class SearchServer(object):
             time=train_time,
             top=top,
             graph=base64.b64encode(graph).decode('ascii'),
+            fastest=fastest,
+            scaling_graph=scaling_graph,
             systems=systems,
             selected_system=selected_system,
         )

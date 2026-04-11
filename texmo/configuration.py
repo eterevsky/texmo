@@ -381,17 +381,17 @@ def default_from_template(
             found = False
             for tokens in ('bits.1', 'bits.2', 'bits.4', 'bits.8'):
                 for oh in ('', '.oh'):
-                    for pos in ('', '+bp', '+pos'):
+                    for pos in ('', '+bp'):
                         if found: break
                         input_spec = tokens + oh + pos
                         for layer in (
                             '',
-                            'dense.1.gelu',
-                            'rec.1.tanh',
-                            'mingru.1',
-                            'mgru.1',
+                            'dense.1.tanh',
+                            'rnn.1.tanh',
                             'gru.1',
                             'lstm.1',
+                            'mingru.1',
+                            'mgru.1',
                         ):
                             if found: break
                             full_spec = input_spec + '|' + layer

@@ -13,6 +13,7 @@ from .layers.dense import DenseDef, DenseModule
 from .layers.gru import GruDef, MgruDef, MinGruDef
 from .layers.input_bits import InputBitsDef, InputBitsModule
 from .layers.input_bytes import InputBytesDef, InputBytesModule
+from .layers.latent import LatentDef, LrnnDef
 from .layers.lstm import LstmDef
 from .layers.norm import NormDef
 from .layers.rnn import RnnDef
@@ -381,6 +382,14 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
 
     if name == "norm":
         return NormDef(input_size=input_size)
+
+    if name == "latent":
+        return LatentDef(
+            int(parts[1]), int(parts[2]), input_size=input_size)
+
+    if name == "lrnn":
+        return LrnnDef(
+            int(parts[1]), int(parts[2]), input_size=input_size)
 
     if name == "suffix":
         length = int(parts[1])

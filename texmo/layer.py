@@ -79,10 +79,33 @@ class LayerDef(object):
             rnn <-> {gru, mgru, mingru} (activation dropped/picked)
             gru, mgru, mingru, lstm are mutual neighbors (except
             lstm <-> mingru and lstm <-> rnn, which are not)
+            dense.X.tanh <-> latent.X.2
+            rnn.X.tanh <-> lrnn.X.2
+            latent.X.Y <-> lrnn.X.Y (and size/reps 2x mutations)
         """
         if self.name == "suffix":
             for l in power2_neighbors(self.length):
                 yield f"suffix.{l}"
+            return
+
+        if self.name in ("latent", "lrnn"):
+            # Size 2x (keep > 1)
+            for s in power2_neighbors(self.size):
+                if s > 1:
+                    yield f"{self.name}.{s}.{self.reps}"
+            # Reps 2x (keep >= 2)
+            for r in power2_neighbors(self.reps):
+                if r >= 2:
+                    yield f"{self.name}.{self.size}.{r}"
+            # Swap latent <-> lrnn
+            other = "lrnn" if self.name == "latent" else "latent"
+            yield f"{other}.{self.size}.{self.reps}"
+            # Collapse to dense/rnn at reps == 2
+            if self.reps == 2:
+                if self.name == "latent":
+                    yield f"dense.{self.size}.tanh"
+                else:
+                    yield f"rnn.{self.size}.tanh"
             return
 
         # Size mutations (keep same layer type and activation)
@@ -97,10 +120,14 @@ class LayerDef(object):
         _RECURRENT = ("gru", "mgru", "mingru")
         if self.name == "dense":
             yield f"rnn.{self.size}.{self._activation}"
+            if self._activation == "tanh" and self.size > 1:
+                yield f"latent.{self.size}.2"
         elif self.name == "rnn":
             yield f"dense.{self.size}.{self._activation}"
             for other in _RECURRENT:
                 yield f"{other}.{self.size}"
+            if self._activation == "tanh" and self.size > 1:
+                yield f"lrnn.{self.size}.2"
         elif self.name in _RECURRENT:
             for act in ("relu", "gelu", "tanh"):
                 yield f"rnn.{self.size}.{act}"

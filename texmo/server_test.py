@@ -29,12 +29,12 @@ def _render(**overrides):
                 'spec': 'bytes|dense.32.gelu',
                 'weights': 8448,
                 'precision': 'fp32',
-                'length': 128,
-                'batch': 32,
-                'learning': '1/128',
+                'data': '32×128',
+                'lr': '1/128',
                 'steps': 256,
                 'score': '5.123 (3)',
                 'time': '1.23 s on test',
+                'cmd': "uv run texmo.py train -s 'bytes|dense.32.gelu'",
             },
         ],
         graph='',
@@ -74,3 +74,11 @@ def test_index_no_systems():
     """With an empty systems list, only 'All systems' should appear."""
     html = _render(systems=[], selected_system=None)
     assert 'All systems' in html
+
+
+def test_index_copy_command_link():
+    """Rows should include a copy link with the train command."""
+    html = _render()
+    assert 'copy-link' in html
+    # The pipe in the spec is quoted so it's shell-safe.
+    assert "bytes|dense.32.gelu&#39;" in html

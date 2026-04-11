@@ -166,16 +166,27 @@ class SearchServer(object):
 
         top = []
         for conf_score in top_confs:
+            conf = conf_score.conf
+            cmd = (
+                f'uv run texmo.py train'
+                f" -s '{conf.model}'"
+                f' -p {conf.precision}'
+                f' -b {conf.batch}'
+                f' --lr {conf.lr}'
+                f' --decay {conf.decay}'
+                f' -l {conf.length}'
+                f' --steps {conf.steps}'
+            )
             top.append({
-                'spec': str(conf_score.conf.model),
-                'weights': conf_score.conf.model.num_weights,
-                'precision': str(conf_score.conf.precision),
-                'length': conf_score.conf.length,
-                'batch': conf_score.conf.batch,
-                'learning': conf_score.conf.learning_str,
-                'steps': conf_score.conf.steps,
+                'spec': str(conf.model),
+                'weights': conf.model.num_weights,
+                'precision': str(conf.precision),
+                'data': f'{conf.batch}×{conf.length}',
+                'lr': conf.learning_str,
+                'steps': conf.steps,
                 'score': f'{conf_score.median_score:.3f} ({conf_score.num_runs})',
                 'time': f'{ttoa3(conf_score.median_time)} on {conf_score.system}',
+                'cmd': cmd,
             })
 
         tmin, tmax = self.train_time

@@ -7,7 +7,22 @@
             input[type="text"] {
                 width: 30rem;
             }
+            .copy-link {
+                cursor: pointer;
+                text-decoration: underline;
+                color: #06c;
+            }
         </style>
+        <script>
+            function copyCmd(el) {
+                const cmd = el.dataset.cmd;
+                navigator.clipboard.writeText(cmd).then(() => {
+                    const original = el.textContent;
+                    el.textContent = 'copied!';
+                    setTimeout(() => { el.textContent = original; }, 1000);
+                });
+            }
+        </script>
     </head>
     <body>
         <main>
@@ -75,23 +90,23 @@
             <tr>
                 <th>Model</th>
                 <th>P</th>
-                <th>Length</th>
-                <th>Batch</th>
-                <th>Learning</th>
+                <th>Data</th>
+                <th>LR</th>
                 <th>Steps</th>
                 <th>Score</th>
                 <th>Time</th>
+                <th></th>
             </tr>
             {% for item in top %}
             <tr>
                 <td><code>{{ item.spec }}</code> ({{ item.weights }})</td>
                 <td>{{ item.precision }}</td>
-                <td>{{ item.length }}</td>
-                <td>{{ item.batch }}</td>
-                <td>{{ item.learning }}</td>
+                <td>{{ item.data }}</td>
+                <td>{{ item.lr }}</td>
                 <td>{{ item.steps }}</td>
                 <td>{{ item.score }}</td>
                 <td>{{ item.time }}</td>
+                <td><span class="copy-link" data-cmd="{{ item.cmd }}" onclick="copyCmd(this)">copy</span></td>
             </tr>
             {% endfor %}
         </table>

@@ -78,8 +78,14 @@ def build_scaling_graph(
     _fig, ax = plt.subplots()
     ax.set_xscale('log')
     ax.set_yscale('log')
-    ax.yaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
-    ax.yaxis.set_minor_formatter(matplotlib.ticker.ScalarFormatter())
+    ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+
+    y_ticks = [0.003, 0.01, 0.03, 0.1, 0.3, 1, 3, 10]
+    y_labels = [
+        '3 ms', '10 ms', '30 ms', '100 ms', '300 ms', '1 s', '3 s', '10 s']
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels)
+    ax.set_yticks([], minor=True)
 
     xs: list[float] = []
     ys: list[float] = []
@@ -88,10 +94,10 @@ def build_scaling_graph(
         ys.append(t)
         xs.append(w_high - 0.1)
         ys.append(t)
-    plt.plot(xs, ys)
+    ax.plot(xs, ys)
 
-    plt.xlabel('weights')
-    plt.ylabel(f'fastest time to near-best loss on {system}, s')
+    ax.set_xlabel('weights')
+    ax.set_ylabel(f'fastest time to near-best loss on {system}')
     f = io.BytesIO()
     plt.savefig(f, format='png')
     return f.getvalue()
@@ -232,14 +238,20 @@ class SearchServer(object):
                     system=selected_system,
                     pareto=top_confs,
                 )
-                # Deduplicate by conf_id: multiple segments may point at
-                # the same conf; we only want one row per conf in the
-                # table.
-                seen_ids = set()
+                # Deduplicate by number of weights: two configs with the
+                # same weight count shouldn't both appear — keep the one
+                # with the lower median_time.
+                by_weights = {}
                 for w_low, w_high, cs in segments:
-                    if cs.conf_id in seen_ids:
-                        continue
-                    seen_ids.add(cs.conf_id)
+                    nw = cs.conf.model.num_weights
+                    existing = by_weights.get(nw)
+                    if (existing is None
+                            or cs.median_time < existing.median_time):
+                        by_weights[nw] = cs
+                for cs in sorted(
+                    by_weights.values(),
+                    key=lambda c: c.conf.model.num_weights,
+                ):
                     fastest.append(_conf_row(cs))
                 # The last segment has w_high = None (extends to +infty).
                 # Cap it at 2x the max Pareto weight for plotting.

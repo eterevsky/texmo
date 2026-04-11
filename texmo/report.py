@@ -362,7 +362,7 @@ def init_args(parser: argparse.ArgumentParser, config):
         "-p",
         "--precision",
         type=str,
-        default="bf16,fp16,fp32,fp64",
+        default="bf16,fp16,fp32",
         help="precision"
     )
 

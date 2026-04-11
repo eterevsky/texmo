@@ -261,7 +261,10 @@ class Template(object):
     @staticmethod
     def from_args(args: argparse.Namespace):
         if not args.precision:
-            precision = list(Precision)
+            # FP64 is supported but not in the default set — it's mostly
+            # useful as a baseline and isn't supported on MPS. Opt in
+            # explicitly via --precision.
+            precision = [Precision.FP32, Precision.FP16, Precision.BF16]
         else:
             precision = list(map(Precision, args.precision.split(',')))
 

@@ -31,4 +31,4 @@ class Precision(enum.StrEnum):
             case Precision.FP16:
                 return (Precision.FP32, Precision.BF16)
             case Precision.BF16:
-                return (Precision.FP32, Precision.BF16)
+                return (Precision.FP32, Precision.FP16)

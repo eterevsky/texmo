@@ -193,17 +193,33 @@ class ResultDB(object):
     def from_args(db: Optional[str]) -> 'ResultDB':
         return ResultDB(db)
 
-    def __init__(self, path: Optional[str] = None):
+    def __init__(self, path: Optional[str] = None, readonly: bool = False):
         if path is None:
             path = ':memory:'
+        self._path = path
+        self._readonly = readonly
         exists = path != ':memory:' and os.path.exists(path)
         if path != ':memory:':
             logging.info(f'Connecting to results DB {path}')
-        self._db = sqlite3.connect(path, check_same_thread=False)
+
+        if readonly:
+            assert path != ':memory:', \
+                "Can't open :memory: database read-only"
+            # Read-only instances are single-threaded by construction —
+            # created, used, and closed within a single scope (typically
+            # a Flask request handler).
+            self._db = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+        else:
+            # The main (writer) instance is created in the main thread
+            # but used by SearchThread; check_same_thread=False disables
+            # SQLite's safety check. By convention only SearchThread
+            # touches this connection after construction.
+            self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.create_function('REGEXP', 2, _regexp)
 
         if not exists:
+            assert not readonly
             schema_path = os.path.join(
                 os.path.dirname(__file__), 'db.sql'
             )
@@ -213,6 +229,24 @@ class ResultDB(object):
 
         # Cache: Configuration -> conf_id (populated lazily)
         self._conf_id_cache: dict[Configuration, int | None] = {}
+
+    def open_readonly(self) -> 'ResultDB':
+        """Open a new read-only ResultDB on the same database.
+
+        Use as a context manager from Flask request handlers to avoid
+        contending with the writer thread holding the main connection.
+        """
+        return ResultDB(self._path, readonly=True)
+
+    def close(self):
+        self._db.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
 
     def commit(self):
         self._db.commit()

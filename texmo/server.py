@@ -154,9 +154,13 @@ class SearchServer(object):
         for p in Precision:
             precision[p] = p in self.template.precision
 
-        systems = self.db.get_systems()
-        top_confs = list(
-            self.db.top_confs_global(self.template, system=selected_system))
+        # Use a dedicated read-only connection to avoid contending with
+        # the writer thread for the main connection.
+        with self.db.open_readonly() as ro_db:
+            systems = ro_db.get_systems()
+            top_confs = list(
+                ro_db.top_confs_global(
+                    self.template, system=selected_system))
 
         graph = build_graph(top_confs)
 

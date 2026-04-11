@@ -15,8 +15,13 @@ class SuffixModule(LayerModule):
         self.input_size = input_size
         self.size = length * input_size
 
-    def init_state(self, device: torch.device | None = None) -> LayerState:
-        return torch.zeros(self.length - 1, self.input_size, device=device)
+    def init_state(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> LayerState:
+        return torch.zeros(
+            self.length - 1, self.input_size, device=device, dtype=dtype)
 
     def step(
         self, state: LayerState, input: Tensor

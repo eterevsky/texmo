@@ -14,8 +14,12 @@ class GruModule(LayerModule):
         self.size = size
         self.gru = nn.GRU(input_size, size, batch_first=True)
 
-    def init_state(self, device: torch.device | None = None) -> LayerState:
-        return torch.zeros(self.size, device=device)
+    def init_state(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> LayerState:
+        return torch.zeros(self.size, device=device, dtype=dtype)
 
     def step(
         self, state: LayerState, input: Tensor
@@ -52,8 +56,12 @@ class MgruModule(LayerModule):
         self.wh_x = nn.Linear(input_size, size)
         self.wh_h = nn.Linear(size, size, bias=False)
 
-    def init_state(self, device: torch.device | None = None) -> LayerState:
-        return torch.zeros(self.size, device=device)
+    def init_state(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> LayerState:
+        return torch.zeros(self.size, device=device, dtype=dtype)
 
     def step(
         self, state: LayerState, input: Tensor
@@ -99,8 +107,12 @@ class MinGruModule(LayerModule):
         self.size = size
         self.linear = nn.Linear(input_size, 2 * size)
 
-    def init_state(self, device: torch.device | None = None) -> LayerState:
-        return torch.zeros(self.size, device=device)
+    def init_state(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> LayerState:
+        return torch.zeros(self.size, device=device, dtype=dtype)
 
     def step(
         self, state: LayerState, input: Tensor

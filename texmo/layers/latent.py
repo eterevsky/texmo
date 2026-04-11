@@ -86,8 +86,12 @@ class LrnnModule(LayerModule):
         # follow that in both train and eval modes.
         self._deterministic_init = False
 
-    def init_state(self, device: torch.device | None = None) -> LayerState:
-        return torch.zeros(self.size, device=device)
+    def init_state(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> LayerState:
+        return torch.zeros(self.size, device=device, dtype=dtype)
 
     def _init_latent(self, e: Tensor) -> Tensor:
         if self._deterministic_init:

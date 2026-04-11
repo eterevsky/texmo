@@ -93,7 +93,10 @@ def train(args: argparse.Namespace):
         args.log,
     )
 
-    if args.prefix is not None:
+    # Skip text sampling if training diverged or produced a nonsensical
+    # loss — the model is likely broken and the sampler may crash on
+    # NaN probabilities.
+    if args.prefix is not None and 0 < run.loss < 10:
         s = manager.continue_prefix(args.prefix, 256, temperature=args.temperature)
         print()
         print(s)

@@ -48,6 +48,10 @@ class Model(nn.Module):
     def device(self) -> torch.device:
         return next(self.output_module.parameters()).device
 
+    @property
+    def dtype(self) -> torch.dtype:
+        return next(self.output_module.parameters()).dtype
+
     def initial_step(self) -> tuple[list[LayerState], Tensor]:
         """Predict the first token (before any input).
 
@@ -58,8 +62,10 @@ class Model(nn.Module):
         input_state = self.input_module.init_state()
 
         # Initialize layer states
-        layer_states = [layer.init_state(device=self.device)
-                        for layer in self.layers]
+        layer_states = [
+            layer.init_state(device=self.device, dtype=self.dtype)
+            for layer in self.layers
+        ]
 
         # Feed total_padding initial vectors to warm up stateful layers
         # (e.g. suffix). Each iteration mirrors one padding position in

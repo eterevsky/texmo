@@ -16,7 +16,11 @@ class LayerModule(nn.Module):
     Produced by LayerDef.create_module().
     """
 
-    def init_state(self, device: torch.device | None = None) -> LayerState:
+    def init_state(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> LayerState:
         """Initialize recurrent state for a single sample.
 
         Returns None for stateless layers (e.g. dense).

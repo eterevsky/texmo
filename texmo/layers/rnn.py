@@ -15,8 +15,12 @@ class RnnModule(LayerModule):
         self.size = size
         self.rnn = nn.RNN(input_size, size, nonlinearity=nonlinearity, batch_first=True)
 
-    def init_state(self, device: torch.device | None = None) -> LayerState:
-        return torch.zeros(self.size, device=device)
+    def init_state(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> LayerState:
+        return torch.zeros(self.size, device=device, dtype=dtype)
 
     def step(
         self, state: LayerState, input: Tensor
@@ -43,8 +47,12 @@ class RnnGELUModule(LayerModule):
         self.size = size
         self.linear = nn.Linear(input_size + size, size)
 
-    def init_state(self, device: torch.device | None = None) -> LayerState:
-        return torch.zeros(self.size, device=device)
+    def init_state(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> LayerState:
+        return torch.zeros(self.size, device=device, dtype=dtype)
 
     def step(
         self, state: LayerState, input: Tensor

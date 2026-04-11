@@ -14,9 +14,13 @@ class LstmModule(LayerModule):
         self.size = size
         self.lstm = nn.LSTM(input_size, size, batch_first=True)
 
-    def init_state(self, device: torch.device | None = None) -> LayerState:
-        h = torch.zeros(self.size, device=device)
-        c = torch.zeros(self.size, device=device)
+    def init_state(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> LayerState:
+        h = torch.zeros(self.size, device=device, dtype=dtype)
+        c = torch.zeros(self.size, device=device, dtype=dtype)
         return (h, c)
 
     def step(

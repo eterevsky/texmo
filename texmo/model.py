@@ -178,7 +178,6 @@ class ModelDef(object):
         self.spec = spec
         self.precision = precision
 
-        dtype = precision.dtype
         spec_parts = spec.split("|")
         if len(spec_parts) == 1:
             input_spec = ""
@@ -189,9 +188,9 @@ class ModelDef(object):
             raise ValueError("Model spec can't contain more than one |")
 
         if input_spec == '' or input_spec == 'bytes':
-            self.input = InputBytesDef(dtype=dtype)
+            self.input = InputBytesDef(dtype=precision.dtype)
         elif input_spec.startswith('bits.'):
-            self.input = InputBitsDef.from_spec(input_spec, dtype=dtype)
+            self.input = InputBitsDef.from_spec(input_spec, precision=precision)
         else:
             raise ValueError(f"Unknown input type: '{input_spec}'")
 

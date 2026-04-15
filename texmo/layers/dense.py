@@ -98,5 +98,5 @@ class DenseDef(LayerDef):
             module.load_state_dict(state_dict)
         return module
 
-    def build_jax(self, dtype=jnp.float32) -> DenseJax:
+    def build_jax(self, dtype) -> DenseJax:
         return DenseJax(self.input_size, self.size, self._activation, dtype)

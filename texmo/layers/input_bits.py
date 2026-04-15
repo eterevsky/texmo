@@ -1,6 +1,10 @@
+import jax
+import jax.numpy as jnp
 import torch
 import torch.nn as nn
 from torch import Tensor
+
+from ..precision import Precision
 
 
 # Number of bits used to encode the bit chunk position within a byte.
@@ -142,16 +146,105 @@ class InputBitsModule(nn.Module):
         return out.to(self.dtype)
 
 
-class InputBitsDef:
-    """Descriptor for the bits input layer."""
+class InputBitsJax:
+    """JAX input encoding for bit-chunks."""
 
-    def __init__(self, nbits: int, one_hot: bool, bp: bool,
-                 dtype: torch.dtype = torch.float32):
+    def __init__(self, nbits: int, one_hot: bool, bp: bool, dtype):
         self.nbits = nbits
         self.one_hot = one_hot
         self.bp = bp
         self.ntokens = 2 ** nbits
         self.dtype = dtype
+
+        if one_hot:
+            enc_size = self.ntokens
+        else:
+            enc_size = nbits
+        self.size = enc_size
+        if bp:
+            self.size += _BP[nbits]
+
+        encodings = []
+        for i in range(self.ntokens):
+            if one_hot:
+                row = [0.0] * self.ntokens
+                row[i] = 1.0
+            else:
+                row = _to_bit_array(i, nbits)
+            encodings.append(row)
+        self.encodings = jnp.array(encodings, dtype=dtype)
+
+        if bp:
+            self.positions = 8 // nbits
+            bp_bits = _BP[nbits]
+            pos_encodings = []
+            for i in range(self.positions):
+                pos_encodings.append(_to_bit_array(i, bp_bits))
+            self.pos_encodings = jnp.array(pos_encodings, dtype=dtype)
+
+    def init_state(self) -> int | None:
+        if self.bp:
+            return 0
+        return None
+
+    def _initial_vector(self, position: int = -1) -> jax.Array:
+        """Input vector for 'no token observed yet' (max entropy)."""
+        if self.one_hot:
+            v = jnp.full((self.ntokens,), 1.0 / self.ntokens, dtype=self.dtype)
+        else:
+            v = jnp.full((self.nbits,), 0.5, dtype=self.dtype)
+        if self.bp:
+            v = jnp.concatenate([v, self.pos_encodings[position % self.positions]])
+        return v
+
+    def step(self, state, token: int) -> tuple:
+        """Encode a single token, returning (new_state, output)."""
+        out = self.encodings[token]
+        if self.bp:
+            out = jnp.concatenate([out, self.pos_encodings[state]])
+            state = (state + 1) % self.positions
+        return state, out
+
+    def forward(self, tokens: jax.Array, padding: int = 0) -> jax.Array:
+        """Encode a batch of token sequences.
+
+        Args:
+            tokens: (batch, seq_len) int array.
+            padding: initial positions to prepend (max-entropy input
+                with correct position encoding).
+
+        Returns:
+            (batch, seq_len + padding, size).
+        """
+        batch, seq_len = tokens.shape
+        out = self.encodings[tokens]  # (batch, seq_len, enc_size)
+
+        if self.bp:
+            reps = (seq_len + self.positions - 1) // self.positions
+            pos = jnp.tile(self.pos_encodings, (reps, 1))[:seq_len]
+            pos = jnp.broadcast_to(pos, (batch, seq_len, pos.shape[-1]))
+            out = jnp.concatenate([out, pos], axis=-1)
+
+        if padding > 0:
+            pad_vecs = jnp.stack(
+                [self._initial_vector(position=-padding + i)
+                 for i in range(padding)])
+            pad = jnp.broadcast_to(pad_vecs, (batch, padding, self.size))
+            out = jnp.concatenate([pad, out], axis=1)
+
+        return out
+
+
+class InputBitsDef:
+    """Descriptor for the bits input layer."""
+
+    def __init__(self, nbits: int, one_hot: bool, bp: bool,
+                 precision: Precision = Precision.FP32):
+        self.nbits = nbits
+        self.one_hot = one_hot
+        self.bp = bp
+        self.ntokens = 2 ** nbits
+        self.precision = precision
         self.tokens_name = f'bits.{nbits}'
         self.num_weights = 0
 
@@ -163,7 +256,7 @@ class InputBitsDef:
             self.size += _BP[nbits]
 
     @staticmethod
-    def from_spec(spec: str, dtype: torch.dtype = torch.float32) -> 'InputBitsDef':
+    def from_spec(spec: str, precision: Precision = Precision.FP32) -> 'InputBitsDef':
         if spec == 'bytes':
             spec = 'bits.8.oh'
 
@@ -181,7 +274,7 @@ class InputBitsDef:
 
         one_hot = len(main) > 2 and main[2] == 'oh'
 
-        return InputBitsDef(nbits, one_hot, bp, dtype)
+        return InputBitsDef(nbits, one_hot, bp, precision)
 
     def __str__(self):
         if self.nbits == 8 and self.one_hot and not self.bp:
@@ -207,4 +300,7 @@ class InputBitsDef:
         return _INPUT_NEIGHBORS.get(spec, ())
 
     def build_module(self) -> InputBitsModule:
-        return InputBitsModule(self.nbits, self.one_hot, self.bp, self.dtype)
+        return InputBitsModule(self.nbits, self.one_hot, self.bp, self.precision.dtype)
+
+    def build_jax(self) -> InputBitsJax:
+        return InputBitsJax(self.nbits, self.one_hot, self.bp, self.precision.jax_dtype)

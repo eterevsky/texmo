@@ -145,7 +145,7 @@ def test_neighbors_size1():
 def test_jax_forward_and_step():
     """Build DenseJax from DenseDef, run forward and step."""
     layer_def = DenseDef(size=16, input_size=8, activation="gelu")
-    layer = layer_def.build_jax(dtype=jnp.float32)
+    layer = layer_def.build_jax(jnp.float32)
 
     rng = jax.random.PRNGKey(0)
     weights = layer.init_weights(rng)
@@ -166,7 +166,7 @@ def test_jax_forward_and_step():
 def test_jax_weight_count():
     """Weight count from DenseDef matches actual init_weights."""
     layer_def = DenseDef(size=32, input_size=16, activation="relu")
-    layer = layer_def.build_jax()
+    layer = layer_def.build_jax(jnp.float32)
     weights = layer.init_weights(jax.random.PRNGKey(0))
     actual = sum(w.size for w in jax.tree.leaves(weights))
     assert actual == layer_def.num_weights

@@ -1,5 +1,6 @@
 import enum
 
+import jax.numpy as jnp
 import torch
 
 
@@ -20,6 +21,18 @@ class Precision(enum.StrEnum):
                 return torch.float16
             case Precision.BF16:
                 return torch.bfloat16
+
+    @property
+    def jax_dtype(self) -> jnp.dtype:
+        match self:
+            case Precision.FP64:
+                return jnp.float64
+            case Precision.FP32:
+                return jnp.float32
+            case Precision.FP16:
+                return jnp.float16
+            case Precision.BF16:
+                return jnp.bfloat16
 
     @property
     def neighbors(self):

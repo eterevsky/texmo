@@ -1,5 +1,7 @@
-import torch
+import jax
+import jax.numpy as jnp
 import numpy as np
+import torch
 
 from texmo.layers.input_bits import InputBitsDef
 from texmo.model import ModelDef
@@ -321,7 +323,7 @@ def test_is_valid():
 # -- dtype --
 
 def test_dtype_fp16():
-    module = InputBitsDef.from_spec('bits.2', dtype=torch.float16).build_module()
+    module = InputBitsDef.from_spec('bits.2', precision=Precision.FP16).build_module()
     _, out = module.step(None, 1)
     assert out.dtype == torch.float16
 
@@ -393,3 +395,54 @@ def test_model_bits4_oh_loss():
     loss = model.loss_batch(batch)
     assert loss.shape == ()
     assert loss.item() > 0
+
+
+# -- JAX --
+
+def test_jax_bits1_forward():
+    layer = InputBitsDef.from_spec('bits.1').build_jax()
+    tokens = jnp.array([[0, 1, 1, 0]], dtype=jnp.int32)
+    out = layer.forward(tokens)
+    assert out.shape == (1, 4, 1)
+    assert out.dtype == jnp.float32
+    np.testing.assert_array_equal(out[0, :, 0], [0, 1, 1, 0])
+
+
+def test_jax_bits1_bp_forward():
+    layer = InputBitsDef.from_spec('bits.1+bp').build_jax()
+    assert layer.size == 1 + 3  # 1 bit + 3 bp bits
+    tokens = jnp.array([[0, 1, 1, 0, 1, 0, 0, 1]], dtype=jnp.int32)
+    out = layer.forward(tokens)
+    assert out.shape == (1, 8, 4)
+
+
+def test_jax_bits1_bp_step_matches_forward():
+    layer = InputBitsDef.from_spec('bits.1+bp').build_jax()
+    tokens = jnp.array([[0, 1, 1, 0, 1, 0, 0, 1]], dtype=jnp.int32)
+    fwd = layer.forward(tokens)
+
+    state = layer.init_state()
+    for t in range(8):
+        state, out = layer.step(state, int(tokens[0, t]))
+        np.testing.assert_allclose(out, fwd[0, t], atol=1e-6)
+
+
+def test_jax_bits2_oh_forward():
+    layer = InputBitsDef.from_spec('bits.2.oh').build_jax()
+    assert layer.size == 4
+    tokens = jnp.array([[0, 1, 2, 3]], dtype=jnp.int32)
+    out = layer.forward(tokens)
+    assert out.shape == (1, 4, 4)
+    # one-hot check
+    np.testing.assert_array_equal(out[0, 0], [1, 0, 0, 0])
+    np.testing.assert_array_equal(out[0, 3], [0, 0, 0, 1])
+
+
+def test_jax_forward_with_padding():
+    layer = InputBitsDef.from_spec('bits.1+bp').build_jax()
+    tokens = jnp.array([[0, 1]], dtype=jnp.int32)
+    out = layer.forward(tokens, padding=2)
+    assert out.shape == (1, 4, 4)
+    # Padding positions should have 0.5 for the bit value (max entropy)
+    assert out[0, 0, 0] == 0.5
+    assert out[0, 1, 0] == 0.5

@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from .common import power2_neighbors
+from .layer_jax import LayerJax
 
 
 LayerState = Any
@@ -155,4 +156,8 @@ class LayerDef(object):
         Returns:
             A LayerModule owning its weights.
         """
+        raise NotImplementedError
+
+    def build_jax(self, dtype) -> LayerJax:
+        """Create a JAX layer implementation."""
         raise NotImplementedError

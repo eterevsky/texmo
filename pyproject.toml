@@ -13,6 +13,7 @@ dependencies = [
     "rich",
     "scipy>=1.17.1",
     "torch",
+    "jax[cpu]",
 ]
 
 [[tool.uv.index]]

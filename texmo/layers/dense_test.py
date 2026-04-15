@@ -1,3 +1,5 @@
+import jax
+import jax.numpy as jnp
 import torch
 
 from texmo.layers.dense import DenseDef
@@ -138,3 +140,33 @@ def test_neighbors_size1():
     neighbors = list(d.neighbors())
     assert "dense.2.tanh" in neighbors
     assert "rnn.1.tanh" in neighbors
+
+
+def test_jax_forward_and_step():
+    """Build DenseJax from DenseDef, run forward and step."""
+    layer_def = DenseDef(size=16, input_size=8, activation="gelu")
+    layer = layer_def.build_jax(dtype=jnp.float32)
+
+    rng = jax.random.PRNGKey(0)
+    weights = layer.init_weights(rng)
+    assert weights['w'].shape == (16, 8)
+    assert weights['b'].shape == (16,)
+
+    inputs = jax.random.normal(rng, (4, 32, 8))
+    outputs = layer.forward(weights, inputs)
+    assert outputs.shape == (4, 32, 16)
+
+    # step should match forward at each position
+    x = inputs[:, 0, :]
+    state, out = layer.step(weights, None, x)
+    assert state is None
+    assert jnp.allclose(out, outputs[:, 0, :], atol=1e-6)
+
+
+def test_jax_weight_count():
+    """Weight count from DenseDef matches actual init_weights."""
+    layer_def = DenseDef(size=32, input_size=16, activation="relu")
+    layer = layer_def.build_jax()
+    weights = layer.init_weights(jax.random.PRNGKey(0))
+    actual = sum(w.size for w in jax.tree.leaves(weights))
+    assert actual == layer_def.num_weights

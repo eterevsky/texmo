@@ -1,10 +1,14 @@
+import jax
+import jax.nn as jax_nn
+import jax.numpy as jnp
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
 from ..common import is_power2_int
-from ..layer import LayerDef, LayerModule, LayerState
+from ..layer import LayerDef, LayerJax, LayerModule, LayerState
+from ..layer_jax import LayerWeights, xavier_uniform
 
 
 class DenseModule(LayerModule):
@@ -36,6 +40,36 @@ _ACTIVATIONS = {
     "gelu": F.gelu,
 }
 
+_JAX_ACTIVATIONS = {
+    "relu": jax_nn.relu,
+    "tanh": jnp.tanh,
+    "gelu": jax_nn.gelu,
+}
+
+
+class DenseJax(LayerJax):
+    def __init__(self, input_size: int, size: int, activation_name: str, dtype):
+        super().__init__(input_size, size, dtype)
+        self.activation = _JAX_ACTIVATIONS[activation_name]
+
+    def init_weights(self, rng: jax.Array) -> LayerWeights:
+        return {
+            'w': xavier_uniform(rng, (self.size, self.input_size), dtype=self.dtype),
+            'b': jnp.zeros(self.size, dtype=self.dtype),
+        }
+
+    def step(
+        self, weights: LayerWeights, state, x: jax.Array
+    ) -> tuple[None, jax.Array]:
+        out = x @ weights['w'].T + weights['b']
+        return None, self.activation(out)
+
+    def forward(
+        self, weights: LayerWeights, inputs: jax.Array
+    ) -> jax.Array:
+        out = inputs @ weights['w'].T + weights['b']
+        return self.activation(out)
+
 
 class DenseDef(LayerDef):
     name = "dense"
@@ -63,3 +97,6 @@ class DenseDef(LayerDef):
         if state_dict is not None:
             module.load_state_dict(state_dict)
         return module
+
+    def build_jax(self, dtype=jnp.float32) -> DenseJax:
+        return DenseJax(self.input_size, self.size, self._activation, dtype)

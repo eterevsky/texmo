@@ -10,7 +10,7 @@ from .common import ttoa3
 from .configuration import Configuration
 from .dataset import DataSet, DataSetWrapper
 from .latency import timer, report
-from .manager import Manager
+from .manager import create_manager
 from .tokens import set_tokens_dir
 
 
@@ -88,7 +88,7 @@ def post_result(session, add_url: str, system, run, conf):
         raise
 
 
-def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, once: bool):
+def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, backend: str, once: bool):
     select_url = f"http://{server_host}/select"
     add_url = f"http://{server_host}/add"
     s = requests.Session()
@@ -101,7 +101,7 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, once: bo
         assert d["system"] == system
         conf = Configuration.from_dict(d["conf"])
 
-        manager = Manager(conf, system, dataset=dataset)
+        manager = create_manager(backend, conf=conf, system=system, dataset=dataset)
         manager.init(quiet=True)
 
         run, out_conf = manager.train_and_eval(
@@ -135,7 +135,8 @@ def main(args: argparse.Namespace):
     try:
         try:
             worker_loop(
-                server_host=args.server, system=args.system, dataset=dataset_wrapper, once=args.once
+                server_host=args.server, system=args.system, dataset=dataset_wrapper,
+                backend=args.backend, once=args.once,
             )
         except KeyboardInterrupt:
             logging.warning("Interrupted\n")
@@ -179,5 +180,12 @@ def init_args(parser: argparse.ArgumentParser, config):
     parser.add_argument(
         '--once',
         action='store_true',
+    )
+    parser.add_argument(
+        "--backend",
+        type=str,
+        choices=["torch", "jax"],
+        default=config.BACKEND,
+        help=f"training backend (default: '{config.BACKEND}')",
     )
     parser.set_defaults(func=main)

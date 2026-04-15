@@ -9,7 +9,7 @@ from rich import print as pprint
 
 from .configuration import Configuration
 from .dataset import DataSet
-from .manager import Manager
+from .manager import create_manager
 from .model import build_model_def
 from .precision import Precision
 from .tokens import TokenSet, get_tokenizer, set_tokens_dir
@@ -74,8 +74,9 @@ def train(args: argparse.Namespace):
             steps=args.steps,
             decay=decay,
         )
-        manager = Manager(
-            conf,
+        manager = create_manager(
+            args.backend,
+            conf=conf,
             system=args.system,
             dataset=train_set,
             device=args.device,
@@ -281,6 +282,13 @@ def init_args(parser: argparse.ArgumentParser, config):
         type=str,
         default=config.TORCH_DEVICE,
         help=f"PyTorch device: 'cuda', 'cpu', or 'auto' (default: '{config.TORCH_DEVICE}')",
+    )
+    parser.add_argument(
+        "--backend",
+        type=str,
+        choices=["torch", "jax"],
+        default=config.BACKEND,
+        help=f"training backend (default: '{config.BACKEND}')",
     )
 
     parser.set_defaults(func=train)

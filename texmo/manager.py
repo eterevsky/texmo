@@ -220,8 +220,8 @@ class Manager(object):
                 eval_loss = self.eval()
                 if math.isnan(eval_loss):
                     eval_loss = INF
-        except Exception:
-            logging.warning('Training stopped early.')
+        except Exception as e:
+            logging.warning('Training stopped early')
             eval_loss = INF
             train_time = None
             final_conf = self.conf.replace(steps=self.step)
@@ -259,3 +259,15 @@ class Manager(object):
 
     def name(self) -> str:
         return str(self.model_def)
+
+
+def create_manager(backend: str, **kwargs):
+    """Create a Manager for the given backend ('torch' or 'jax')."""
+    match backend:
+        case 'torch':
+            return Manager(**kwargs)
+        case 'jax':
+            from .manager_jax import JaxManager
+            return JaxManager(**kwargs)
+        case _:
+            raise ValueError(f"Unknown backend: {backend}")

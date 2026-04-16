@@ -2,6 +2,7 @@ import torch
 import numpy as np
 
 from texmo.layers.input_bytes import InputBytesDef
+from texmo.precision import Precision
 
 
 def test_def_properties():
@@ -58,7 +59,7 @@ def test_forward_matches_step():
 
 
 def test_dtype_fp16():
-    module = InputBytesDef(dtype=torch.float16).build_module()
+    module = InputBytesDef(precision=Precision.FP16).build_module()
     _, out = module.step(None, 42)
     assert out.dtype == torch.float16
 
@@ -68,7 +69,7 @@ def test_dtype_fp16():
 
 
 def test_dtype_bf16():
-    module = InputBytesDef(dtype=torch.bfloat16).build_module()
+    module = InputBytesDef(precision=Precision.BF16).build_module()
     tokens = torch.tensor([[1, 2]], dtype=torch.long)
     out = module(tokens)
     assert out.dtype == torch.bfloat16

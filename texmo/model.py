@@ -8,6 +8,7 @@ from torch import Tensor
 from typing import Iterable, Optional
 
 from .layer import LayerDef, LayerModule, LayerState
+from .model_jax import ModelJax
 from .precision import Precision
 from .layers.dense import DenseDef, DenseModule
 from .layers.gru import GruDef, MgruDef, MinGruDef
@@ -188,7 +189,7 @@ class ModelDef(object):
             raise ValueError("Model spec can't contain more than one |")
 
         if input_spec == '' or input_spec == 'bytes':
-            self.input = InputBytesDef(dtype=precision.dtype)
+            self.input = InputBytesDef(precision=precision)
         elif input_spec.startswith('bits.'):
             self.input = InputBitsDef.from_spec(input_spec, precision=precision)
         else:
@@ -358,6 +359,14 @@ class ModelDef(object):
             model.to(self.precision.dtype)
 
         return model
+
+    def build_jax(self) -> ModelJax:
+        dtype = self.precision.jax_dtype
+        input_layer = self.input.build_jax()
+        layers = [ld.build_jax(dtype) for ld in self.layers]
+        output = self.output.build_jax(dtype)
+        return ModelJax(input_layer, layers, output,
+                        self.ntokens, self.total_padding)
 
 
 def _build_layer_def(spec: str, input_size: int) -> LayerDef:

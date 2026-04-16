@@ -3,6 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from ..precision import Precision
+from .input_bits import InputBitsJax
+
 
 class InputBytesModule(nn.Module):
     """Input module that converts byte token indices to one-hot vectors."""
@@ -58,12 +61,12 @@ class InputBytesModule(nn.Module):
 class InputBytesDef(object):
     """Descriptor for the bytes input layer."""
 
-    def __init__(self, dtype: torch.dtype = torch.float32):
+    def __init__(self, precision: Precision = Precision.FP32):
         self.ntokens = 256
         self.size = 256
         self.tokens_name = 'bytes'
         self.num_weights = 0
-        self.dtype = dtype
+        self.precision = precision
 
     def __str__(self):
         return 'bytes'
@@ -75,4 +78,9 @@ class InputBytesDef(object):
         return ('bits.4.oh', 'bits.4.oh+bp', 'bits.8')
 
     def build_module(self) -> InputBytesModule:
-        return InputBytesModule(dtype=self.dtype)
+        return InputBytesModule(dtype=self.precision.dtype)
+
+    def build_jax(self) -> InputBitsJax:
+        # bytes == bits.8.oh
+        return InputBitsJax(nbits=8, one_hot=True, bp=False,
+                            dtype=self.precision.jax_dtype)

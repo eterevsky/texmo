@@ -48,9 +48,9 @@ _JAX_ACTIVATIONS = {
 
 
 class DenseJax(LayerJax):
-    def __init__(self, input_size: int, size: int, activation_name: str, dtype):
+    def __init__(self, input_size: int, size: int, activation_name: str | None, dtype):
         super().__init__(input_size, size, dtype)
-        self.activation = _JAX_ACTIVATIONS[activation_name]
+        self.activation = _JAX_ACTIVATIONS.get(activation_name)
 
     def init_weights(self, rng: jax.Array) -> LayerWeights:
         return {
@@ -58,17 +58,19 @@ class DenseJax(LayerJax):
             'b': jnp.zeros(self.size, dtype=self.dtype),
         }
 
+    def _apply(self, x, weights):
+        out = x @ weights['w'].T + weights['b']
+        return self.activation(out) if self.activation else out
+
     def step(
         self, weights: LayerWeights, state, x: jax.Array
     ) -> tuple[None, jax.Array]:
-        out = x @ weights['w'].T + weights['b']
-        return None, self.activation(out)
+        return None, self._apply(x, weights)
 
     def forward(
         self, weights: LayerWeights, inputs: jax.Array
     ) -> jax.Array:
-        out = inputs @ weights['w'].T + weights['b']
-        return self.activation(out)
+        return self._apply(inputs, weights)
 
 
 class DenseDef(LayerDef):

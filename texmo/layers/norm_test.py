@@ -1,3 +1,5 @@
+import jax.numpy as jnp
+import numpy as np
 import torch
 
 from texmo.layers.norm import NormDef
@@ -112,3 +114,37 @@ def test_neighbors_remove_norm():
     md = _md("bytes|dense.32.gelu-norm-dense.16.tanh")
     neighbor_specs = [str(n) for n in md.neighbors()]
     assert "bytes|dense.32.gelu-dense.16.tanh" in neighbor_specs
+
+
+# -- JAX --
+
+def test_jax_forward_unit_norm():
+    layer = NormDef(input_size=8).build_jax(jnp.float32)
+    inputs = jnp.array(
+        np.random.RandomState(0).randn(3, 4, 8), dtype=jnp.float32)
+    out = layer.forward(None, inputs)
+    norms = jnp.linalg.norm(out, axis=-1)
+    np.testing.assert_allclose(norms, 1.0, atol=1e-5)
+
+
+def test_jax_step_known_values():
+    layer = NormDef(input_size=4).build_jax(jnp.float32)
+    state, out = layer.step(None, None, jnp.array([3.0, 4.0, 0.0, 0.0]))
+    assert state is None
+    np.testing.assert_allclose(out, [0.6, 0.8, 0.0, 0.0], atol=1e-6)
+
+
+def test_jax_step_zero_vector():
+    layer = NormDef(input_size=4).build_jax(jnp.float32)
+    _, out = layer.step(None, None, jnp.zeros(4))
+    assert jnp.all(jnp.isfinite(out))
+
+
+def test_jax_step_matches_forward():
+    layer = NormDef(input_size=4).build_jax(jnp.float32)
+    inputs = jnp.array(
+        np.random.RandomState(1).randn(1, 6, 4), dtype=jnp.float32)
+    fwd_out = layer.forward(None, inputs)
+    for t in range(inputs.shape[1]):
+        _, step_out = layer.step(None, None, inputs[0, t])
+        np.testing.assert_allclose(fwd_out[0, t], step_out, atol=1e-6)

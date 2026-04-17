@@ -1,8 +1,11 @@
+import jax
+import jax.numpy as jnp
 import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from ..layer import LayerDef, LayerModule, LayerState
+from ..layer import LayerDef, LayerJax, LayerModule, LayerState
+from ..layer_jax import LayerWeights
 
 
 class NormModule(LayerModule):
@@ -24,6 +27,28 @@ class NormModule(LayerModule):
     def forward(self, inputs: Tensor) -> Tensor:
         # inputs: (batch, seq_len, size)
         return F.normalize(inputs, dim=-1, eps=1e-5)
+
+
+class NormJax(LayerJax):
+    """L2 normalization along the feature dimension.
+
+    out = x / max(||x||_2, eps)
+    """
+
+    def __init__(self, input_size: int, dtype):
+        super().__init__(input_size, input_size, dtype)
+
+    def step(
+        self, weights: LayerWeights, state, x: jax.Array
+    ) -> tuple[None, jax.Array]:
+        return None, x / jnp.maximum(jnp.linalg.norm(x), 1e-5)
+
+    def forward(
+        self, weights: LayerWeights, inputs: jax.Array
+    ) -> jax.Array:
+        # inputs: (batch, seq_len, size)
+        norm = jnp.linalg.norm(inputs, axis=-1, keepdims=True)
+        return inputs / jnp.maximum(norm, 1e-5)
 
 
 class NormDef(LayerDef):
@@ -50,3 +75,6 @@ class NormDef(LayerDef):
         if state_dict is not None:
             module.load_state_dict(state_dict)
         return module
+
+    def build_jax(self, dtype) -> NormJax:
+        return NormJax(self.input_size, dtype)

@@ -1,3 +1,6 @@
+import jax
+import jax.numpy as jnp
+import numpy as np
 import torch
 
 from texmo.layers.lstm import LstmDef
@@ -8,10 +11,11 @@ def test_def_properties():
     assert d.size == 32
     assert str(d) == "lstm.32"
     assert d.is_valid()
-    # nn.LSTM: 4 gates * (input_weights + hidden_weights + 2 biases)
-    assert d.num_weights == 4 * 32 * (16 + 32) + 8 * 32
+    # Single-bias per gate (matches LstmJax).
+    assert d.num_weights == 4 * 32 * (16 + 32) + 4 * 32
+    # Torch's nn.LSTM has 4 extra bias vectors.
     module = d.build_module()
-    assert sum(p.numel() for p in module.parameters()) == d.num_weights
+    assert sum(p.numel() for p in module.parameters()) == d.num_weights + 4 * 32
 
 
 def test_non_power2_invalid():
@@ -94,3 +98,42 @@ def test_gru_has_lstm_neighbor():
 
     mg = list(MinGruDef(32, input_size=16).neighbors())
     assert "lstm.32" not in mg
+
+
+# -- JAX --
+
+def test_jax_forward_and_step():
+    d = LstmDef(8, input_size=4)
+    layer = d.build_jax(jnp.float32)
+
+    rng = jax.random.PRNGKey(0)
+    weights = layer.init_weights(rng)
+    assert weights['w_ih'].shape == (32, 4)
+    assert weights['w_hh'].shape == (32, 8)
+    assert weights['b'].shape == (32,)
+
+    inputs = jax.random.normal(rng, (2, 6, 4), dtype=jnp.float32)
+    fwd = layer.forward(weights, inputs)
+    assert fwd.shape == (2, 6, 8)
+
+    state = layer.init_state()
+    for t in range(inputs.shape[1]):
+        state, out = layer.step(weights, state, inputs[0, t])
+        np.testing.assert_allclose(fwd[0, t], out, atol=1e-5)
+
+
+def test_jax_weight_count_matches_def():
+    d = LstmDef(16, input_size=8)
+    layer = d.build_jax(jnp.float32)
+    weights = layer.init_weights(jax.random.PRNGKey(0))
+    actual = sum(w.size for w in jax.tree.leaves(weights))
+    assert actual == d.num_weights
+
+
+def test_jax_init_state_shape():
+    layer = LstmDef(8, input_size=4).build_jax(jnp.float32)
+    h, c = layer.init_state()
+    assert h.shape == (8,)
+    assert c.shape == (8,)
+    assert h.dtype == jnp.float32
+    assert c.dtype == jnp.float32

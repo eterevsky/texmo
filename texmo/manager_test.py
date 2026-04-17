@@ -57,6 +57,7 @@ def test_train_and_eval(backend):
     'bits.1+bp|gru.4-dense.2.tanh',
     'bits.1+bp|mgru.4',
     'bits.1+bp|mingru.4',
+    'bits.1+bp|lstm.4',
 ])
 def test_train_various_specs(backend, spec):
     """Consistency check: model builds and trains without shape errors."""
@@ -85,6 +86,7 @@ def test_train_various_specs(backend, spec):
     'bits.1+bp|gru.4-dense.2.tanh',
     'bits.1+bp|mgru.4',
     'bits.1+bp|mingru.4',
+    'bits.1+bp|lstm.4',
 ])
 def test_jax_num_weights_matches_def(spec):
     """ModelDef.num_weights should equal the total element count of the

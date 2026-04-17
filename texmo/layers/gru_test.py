@@ -224,10 +224,10 @@ def test_jax_gru_forward_and_step():
 
     rng = jax.random.PRNGKey(0)
     weights = layer.init_weights(rng)
-    for gate in ('r', 'z', 'n'):
-        assert weights[f'w_i{gate}'].shape == (8, 4)
-        assert weights[f'w_h{gate}'].shape == (8, 8)
-        assert weights[f'b_{gate}'].shape == (8,)
+    assert weights['w_ih'].shape == (24, 4)   # stacked [r, z, n]
+    assert weights['w_hrz'].shape == (16, 8)  # stacked [r, z]
+    assert weights['w_hn'].shape == (8, 8)
+    assert weights['b'].shape == (24,)
 
     inputs = jax.random.normal(rng, (2, 6, 4), dtype=jnp.float32)
     fwd = layer.forward(weights, inputs)
@@ -263,9 +263,10 @@ def test_jax_mgru_forward_and_step():
 
     rng = jax.random.PRNGKey(0)
     weights = layer.init_weights(rng)
-    assert weights['w_fx'].shape == (8, 4)
+    assert weights['w_ih'].shape == (16, 4)   # stacked [f, h]
     assert weights['w_fh'].shape == (8, 8)
-    assert weights['b_f'].shape == (8,)
+    assert weights['w_hh'].shape == (8, 8)
+    assert weights['b'].shape == (16,)
 
     inputs = jax.random.normal(rng, (2, 6, 4), dtype=jnp.float32)
     fwd = layer.forward(weights, inputs)
@@ -293,8 +294,8 @@ def test_jax_mingru_forward_and_step():
 
     rng = jax.random.PRNGKey(0)
     weights = layer.init_weights(rng)
-    assert weights['w_z'].shape == (8, 4)
-    assert weights['w_h'].shape == (8, 4)
+    assert weights['w_ih'].shape == (16, 4)  # stacked [z, h]
+    assert weights['b'].shape == (16,)
 
     inputs = jax.random.normal(rng, (2, 6, 4), dtype=jnp.float32)
     fwd = layer.forward(weights, inputs)

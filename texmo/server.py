@@ -21,8 +21,6 @@ from .run import Run
 from .search2 import Search
 from .tokens import set_tokens_dir
 
-matplotlib.use('Agg')
-
 
 def build_graph(confs: list[Configuration]) -> bytes:
     plt.ioff()
@@ -342,6 +340,8 @@ class SearchServer(object):
 
 
 def main(args: argparse.Namespace):
+    # Server renders graphs to bytes for the web UI, never to a display.
+    matplotlib.use('Agg')
     set_tokens_dir(args.tokens_dir)
     template = Template.from_args(args)
     logging.info(f"Template: {template}")

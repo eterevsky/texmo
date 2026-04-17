@@ -2,14 +2,13 @@ import argparse
 import logging
 import os
 
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from rich import print as pprint
 
 from .configuration import Configuration
 from .dataset import DataSet
-from .manager import create_manager
+from .manager import Manager, create_manager
 from .model import build_model_def
 from .precision import Precision
 from .tokens import TokenSet, get_tokenizer, set_tokens_dir

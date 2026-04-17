@@ -5,6 +5,7 @@ trained on in-memory random bytes. Verifies the end-to-end pipeline
 doesn't blow up, not the quality of training.
 """
 
+import jax
 import pytest
 
 from texmo.configuration import Configuration
@@ -54,6 +55,8 @@ def test_train_and_eval(backend):
     'bits.1+bp|rnn.4.gelu-dense.2.tanh',
     'bits.1+bp|gru.4',
     'bits.1+bp|gru.4-dense.2.tanh',
+    'bits.1+bp|mgru.4',
+    'bits.1+bp|mingru.4',
 ])
 def test_train_various_specs(backend, spec):
     """Consistency check: model builds and trains without shape errors."""
@@ -69,6 +72,36 @@ def test_train_various_specs(backend, spec):
     )
     run, _ = manager.train_and_eval(steps=2, time_limit=None)
     assert run.steps == 2
+
+
+@pytest.mark.parametrize('spec', [
+    'bits.1+bp|',
+    'bits.1+bp|suffix.2',
+    'bits.1+bp|suffix.4-dense.4.gelu',
+    'bits.2.oh+bp|dense.4.relu',
+    'bits.1+bp|rnn.4.tanh',
+    'bits.1+bp|rnn.4.gelu-dense.2.tanh',
+    'bits.1+bp|gru.4',
+    'bits.1+bp|gru.4-dense.2.tanh',
+    'bits.1+bp|mgru.4',
+    'bits.1+bp|mingru.4',
+])
+def test_jax_num_weights_matches_def(spec):
+    """ModelDef.num_weights should equal the total element count of the
+    JAX weight pytree produced by the manager.
+    """
+    conf = Configuration(
+        build_model_def(spec, precision=Precision.FP32),
+        lr=0.01, length=32, batch=4, steps=1, decay=1.0,
+    )
+    manager = create_manager(
+        'jax', conf=conf, system='test',
+        dataset=_make_dataset(),
+        test_sample_len=32, test_batch=2,
+        verbose=False,
+    )
+    actual = sum(w.size for w in jax.tree.leaves(manager.weights))
+    assert actual == conf.model.num_weights
 
 
 @pytest.mark.parametrize('backend', ['torch', 'jax'])

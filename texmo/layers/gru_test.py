@@ -253,3 +253,62 @@ def test_jax_gru_init_state_shape():
     state = layer.init_state()
     assert state.shape == (8,)
     assert state.dtype == jnp.float32
+
+
+# -- JAX MGRU --
+
+def test_jax_mgru_forward_and_step():
+    d = MgruDef(8, input_size=4)
+    layer = d.build_jax(jnp.float32)
+
+    rng = jax.random.PRNGKey(0)
+    weights = layer.init_weights(rng)
+    assert weights['w_fx'].shape == (8, 4)
+    assert weights['w_fh'].shape == (8, 8)
+    assert weights['b_f'].shape == (8,)
+
+    inputs = jax.random.normal(rng, (2, 6, 4), dtype=jnp.float32)
+    fwd = layer.forward(weights, inputs)
+    assert fwd.shape == (2, 6, 8)
+
+    state = layer.init_state()
+    for t in range(inputs.shape[1]):
+        state, out = layer.step(weights, state, inputs[0, t])
+        np.testing.assert_allclose(fwd[0, t], out, atol=1e-5)
+
+
+def test_jax_mgru_weight_count_matches_def():
+    d = MgruDef(16, input_size=8)
+    layer = d.build_jax(jnp.float32)
+    weights = layer.init_weights(jax.random.PRNGKey(0))
+    actual = sum(w.size for w in jax.tree.leaves(weights))
+    assert actual == d.num_weights
+
+
+# -- JAX MinGRU --
+
+def test_jax_mingru_forward_and_step():
+    d = MinGruDef(8, input_size=4)
+    layer = d.build_jax(jnp.float32)
+
+    rng = jax.random.PRNGKey(0)
+    weights = layer.init_weights(rng)
+    assert weights['w_z'].shape == (8, 4)
+    assert weights['w_h'].shape == (8, 4)
+
+    inputs = jax.random.normal(rng, (2, 6, 4), dtype=jnp.float32)
+    fwd = layer.forward(weights, inputs)
+    assert fwd.shape == (2, 6, 8)
+
+    state = layer.init_state()
+    for t in range(inputs.shape[1]):
+        state, out = layer.step(weights, state, inputs[0, t])
+        np.testing.assert_allclose(fwd[0, t], out, atol=1e-5)
+
+
+def test_jax_mingru_weight_count_matches_def():
+    d = MinGruDef(16, input_size=8)
+    layer = d.build_jax(jnp.float32)
+    weights = layer.init_weights(jax.random.PRNGKey(0))
+    actual = sum(w.size for w in jax.tree.leaves(weights))
+    assert actual == d.num_weights

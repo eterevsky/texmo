@@ -1,3 +1,6 @@
+import jax
+import jax.numpy as jnp
+import numpy as np
 import torch
 
 from texmo.layers.latent import LatentDef, LrnnDef
@@ -218,3 +221,73 @@ def test_rnn_relu_no_lrnn_neighbor():
     d = RnnDef(16, input_size=8, activation="relu")
     neighbors = list(d.neighbors())
     assert "lrnn.16.2" not in neighbors
+
+
+# -- JAX Latent --
+
+def test_jax_latent_forward_and_step():
+    d = LatentDef(8, 4, input_size=4)
+    layer = d.build_jax(jnp.float32)
+
+    rng = jax.random.PRNGKey(0)
+    weights = layer.init_weights(rng)
+    assert weights['w_i'].shape == (8, 4)
+    assert weights['w_r'].shape == (8, 8)
+    assert weights['b'].shape == (8,)
+
+    inputs = jax.random.normal(rng, (2, 6, 4), dtype=jnp.float32)
+    fwd = layer.forward(weights, inputs)
+    assert fwd.shape == (2, 6, 8)
+
+    # Step is stateless; each position is independent of the others.
+    for t in range(inputs.shape[1]):
+        state, out = layer.step(weights, None, inputs[0, t])
+        assert state is None
+        np.testing.assert_allclose(fwd[0, t], out, atol=1e-5)
+
+
+def test_jax_latent_weight_count_matches_def():
+    d = LatentDef(16, 4, input_size=8)
+    layer = d.build_jax(jnp.float32)
+    weights = layer.init_weights(jax.random.PRNGKey(0))
+    actual = sum(w.size for w in jax.tree.leaves(weights))
+    assert actual == d.num_weights
+
+
+# -- JAX Lrnn --
+
+def test_jax_lrnn_forward_and_step():
+    d = LrnnDef(8, 4, input_size=4)
+    layer = d.build_jax(jnp.float32)
+
+    rng = jax.random.PRNGKey(0)
+    weights = layer.init_weights(rng)
+    assert weights['w_i'].shape == (8, 4)
+    assert weights['w_h'].shape == (8, 8)
+    assert weights['w_r'].shape == (8, 8)
+    assert weights['b'].shape == (8,)
+
+    inputs = jax.random.normal(rng, (2, 6, 4), dtype=jnp.float32)
+    fwd = layer.forward(weights, inputs)
+    assert fwd.shape == (2, 6, 8)
+
+    # step should match forward
+    state = layer.init_state()
+    for t in range(inputs.shape[1]):
+        state, out = layer.step(weights, state, inputs[0, t])
+        np.testing.assert_allclose(fwd[0, t], out, atol=1e-5)
+
+
+def test_jax_lrnn_weight_count_matches_def():
+    d = LrnnDef(16, 4, input_size=8)
+    layer = d.build_jax(jnp.float32)
+    weights = layer.init_weights(jax.random.PRNGKey(0))
+    actual = sum(w.size for w in jax.tree.leaves(weights))
+    assert actual == d.num_weights
+
+
+def test_jax_lrnn_init_state_shape():
+    layer = LrnnDef(8, 2, input_size=4).build_jax(jnp.float32)
+    state = layer.init_state()
+    assert state.shape == (8,)
+    assert state.dtype == jnp.float32

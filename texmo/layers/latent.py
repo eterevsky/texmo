@@ -1,10 +1,19 @@
+import jax
+import jax.numpy as jnp
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
 from ..common import is_power2_int
-from ..layer import LayerDef, LayerModule, LayerState
+from ..layer import LayerDef, LayerJax, LayerModule, LayerState
+from ..layer_jax import LayerWeights, xavier_uniform
+
+
+def _normalize_jax(x: jax.Array, eps: float = 1e-5) -> jax.Array:
+    """L2-normalize along the last axis. Matches PyTorch's F.normalize."""
+    norm = jnp.linalg.norm(x, axis=-1, keepdims=True)
+    return x / jnp.maximum(norm, eps)
 
 
 def _normalize(x: Tensor) -> Tensor:
@@ -126,6 +135,124 @@ class LrnnModule(LayerModule):
         return torch.stack(outputs, dim=1)
 
 
+class LatentJax(LayerJax):
+    """Depth-recurrent dense layer (see LatentModule).
+
+    Latent state is always zero-initialized (no RNG needed).
+    """
+
+    def __init__(self, input_size: int, size: int, reps: int, dtype):
+        super().__init__(input_size, size, dtype)
+        self.reps = reps
+
+    def init_weights(self, rng: jax.Array) -> LayerWeights:
+        k_i, k_r = jax.random.split(rng)
+        return {
+            'w_i': xavier_uniform(
+                k_i, (self.size, self.input_size), dtype=self.dtype),
+            'w_r': xavier_uniform(
+                k_r, (self.size, self.size), dtype=self.dtype),
+            'b': jnp.zeros(self.size, dtype=self.dtype),
+        }
+
+    def step(
+        self, weights: LayerWeights, state, x: jax.Array
+    ) -> tuple[None, jax.Array]:
+        # x: (input_size,)
+        e = weights['w_i'] @ _normalize_jax(x) + weights['b']
+        w_r = weights['w_r']
+
+        def body(s, _):
+            return jnp.tanh(w_r @ _normalize_jax(s) + e), None
+
+        s, _ = jax.lax.scan(
+            body, jnp.zeros(self.size, dtype=self.dtype), length=self.reps)
+        return None, s
+
+    def forward(
+        self, weights: LayerWeights, inputs: jax.Array
+    ) -> jax.Array:
+        # inputs: (batch, seq_len, input_size)
+        # No time recurrence — each position is independent.
+        e = _normalize_jax(inputs) @ weights['w_i'].T + weights['b']
+        w_r = weights['w_r']
+
+        def body(s, _):
+            return jnp.tanh(_normalize_jax(s) @ w_r.T + e), None
+
+        s, _ = jax.lax.scan(body, jnp.zeros_like(e), length=self.reps)
+        return s
+
+
+class LrnnJax(LayerJax):
+    """Depth-recurrent RNN combining time recurrence with latent reasoning.
+
+    See LrnnModule. Latent state is always zero-initialized.
+    """
+
+    def __init__(self, input_size: int, size: int, reps: int, dtype):
+        super().__init__(input_size, size, dtype)
+        self.reps = reps
+
+    def init_weights(self, rng: jax.Array) -> LayerWeights:
+        k_i, k_h, k_r = jax.random.split(rng, 3)
+        return {
+            'w_i': xavier_uniform(
+                k_i, (self.size, self.input_size), dtype=self.dtype),
+            'w_h': xavier_uniform(
+                k_h, (self.size, self.size), dtype=self.dtype),
+            'w_r': xavier_uniform(
+                k_r, (self.size, self.size), dtype=self.dtype),
+            'b': jnp.zeros(self.size, dtype=self.dtype),
+        }
+
+    def init_state(self):
+        return jnp.zeros(self.size, dtype=self.dtype)
+
+    def step(
+        self, weights: LayerWeights, state, x: jax.Array
+    ) -> tuple[jax.Array, jax.Array]:
+        # x: (input_size,), state: (size,)
+        e = (weights['w_i'] @ _normalize_jax(x)
+             + weights['w_h'] @ _normalize_jax(state)
+             + weights['b'])
+        w_r = weights['w_r']
+
+        def body(s, _):
+            return jnp.tanh(w_r @ _normalize_jax(s) + e), None
+
+        s, _ = jax.lax.scan(
+            body, jnp.zeros(self.size, dtype=self.dtype), length=self.reps)
+        return s, s
+
+    def forward(
+        self, weights: LayerWeights, inputs: jax.Array
+    ) -> jax.Array:
+        # inputs: (batch, seq_len, input_size)
+        # Hoist the input projection (with normalization) out of the scan.
+        wi_x = (_normalize_jax(inputs) @ weights['w_i'].T + weights['b'])
+        wi_x_t = jnp.transpose(wi_x, (1, 0, 2))
+
+        w_h = weights['w_h']
+        w_r = weights['w_r']
+        reps = self.reps
+
+        def time_step(h, wi):
+            # wi: (batch, size), h: (batch, size)
+            e = wi + _normalize_jax(h) @ w_h.T
+
+            def reps_body(s, _):
+                return jnp.tanh(_normalize_jax(s) @ w_r.T + e), None
+
+            s, _ = jax.lax.scan(reps_body, jnp.zeros_like(e), length=reps)
+            return s, s
+
+        batch = inputs.shape[0]
+        init = jnp.zeros((batch, self.size), dtype=self.dtype)
+        _, outputs_t = jax.lax.scan(time_step, init, wi_x_t)
+        return jnp.transpose(outputs_t, (1, 0, 2))
+
+
 class LatentDef(LayerDef):
     name = "latent"
 
@@ -155,6 +282,9 @@ class LatentDef(LayerDef):
         if state_dict is not None:
             module.load_state_dict(state_dict)
         return module
+
+    def build_jax(self, dtype) -> LatentJax:
+        return LatentJax(self.input_size, self.size, self.reps, dtype)
 
 
 class LrnnDef(LayerDef):
@@ -189,3 +319,6 @@ class LrnnDef(LayerDef):
         if state_dict is not None:
             module.load_state_dict(state_dict)
         return module
+
+    def build_jax(self, dtype) -> LrnnJax:
+        return LrnnJax(self.input_size, self.size, self.reps, dtype)

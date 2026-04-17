@@ -82,7 +82,7 @@ def _generate_limits():
     =0 [4, 3]  <3 [3, 2]  <9 [2, 1]  <27 [1, 0]
     """
     seq = [[1, 0]]
-    while True:
+    while seq[0][0] <= 7:
         yield seq
 
         incremented = False
@@ -278,8 +278,14 @@ class Search(object):
                                     f'Getting neighbor of conf {j}: {total_runs} total runs < {min_neighbor}')
                                 return neighbor_conf
 
-    def select_conf(self, system: str) -> Configuration:
-        """Select a configuration to run."""
+    def select_conf(self, system: str) -> Optional[Configuration]:
+        """Select a configuration to run, or None if nothing matches.
+
+        Returns None when the top-conf search finds nothing and the
+        fallback init_conf either doesn't match the current template
+        or has already been explored enough (>=7 total runs with at
+        least one on this system).
+        """
         with latency.timer("Search.select_conf"):
             t = self._select_time()
             max_weights = self._select_max_weights(t, system)
@@ -288,6 +294,24 @@ class Search(object):
             if conf is not None:
                 logging.info(f'Conf for {system}: {conf}')
                 return conf
+
+            # Template can change on the fly — re-check init_conf still
+            # matches before falling back to it.
+            if not self.template.match(self._init_conf):
+                logging.info(
+                    f'No conf for {system}: init_conf does not match template')
+                return None
+
+            # Skip init_conf if it's already been explored enough.
+            conf_id = self._db.get_conf_id(self._init_conf)
+            if conf_id is not None:
+                counts = self._db.get_run_counts([conf_id], system=system)
+                total_runs, system_runs = counts.get(conf_id, (0, 0))
+                if total_runs >= 7 and system_runs >= 1:
+                    logging.info(
+                        f'No conf for {system}: init_conf has {total_runs} '
+                        f'total runs ({system_runs} on this system)')
+                    return None
 
             logging.info(
                 f'Conf for {system}: {self._init_conf} (default)')

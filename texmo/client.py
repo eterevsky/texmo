@@ -93,12 +93,30 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, backend:
     add_url = f"http://{server_host}/add"
     s = requests.Session()
 
+    delay = 1.0
+    max_delay = 120.0
+
     while True:
-        with timer("get(select)") as t:
-            r = retry(lambda: s.get(select_url, params={"system": system}))
-        logging.info(f'Got configuration in {ttoa3(t.value())}')
+        try:
+            with timer("get(select)") as t:
+                r = s.get(select_url, params={"system": system})
+        except requests.exceptions.RequestException as e:
+            logging.warning(f'Request failed: {e}, retrying in {ttoa3(delay)}')
+            time.sleep(delay)
+            delay = min(delay * 1.5, max_delay)
+            continue
+
         d = r.json()
         assert d["system"] == system
+
+        if d["conf"] is None:
+            logging.info(f'Server has no conf, sleeping {ttoa3(delay)}')
+            time.sleep(delay)
+            delay = min(delay * 1.5, max_delay)
+            continue
+        delay = 1.0
+
+        logging.info(f'Got configuration in {ttoa3(t.value())}')
         conf = Configuration.from_dict(d["conf"])
 
         manager = create_manager(

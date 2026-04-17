@@ -321,7 +321,7 @@ class SearchServer(object):
         logging.info(f"Sending conf for system {system}: {conf}")
         return {
             "system": system,
-            "conf": conf.to_dict(),
+            "conf": conf.to_dict() if conf is not None else None,
         }
 
     def add_run(self, params):

@@ -3,56 +3,44 @@ import math
 from time import perf_counter
 from typing import Optional
 
-import numpy as np
-import torch
-
-from .common import INF, ttoa3, is_power2_int
+from .common import INF, ttoa3
 from .configuration import Configuration
 from .dataset import DataSet, DataSetWrapper
-from .model import ModelDef, Model, build_model_def
-from .predict import LossTrend
 from .run import Run
 from .tokens import get_tokenizer
 
 
+class Manager:
+    """Base class defining the manager interface.
 
-def _resolve_device(device_str: str) -> torch.device:
-    if device_str == 'auto':
-        if torch.cuda.is_available():
-            return torch.device('cuda')
-        if torch.backends.mps.is_available():
-            return torch.device('mps')
-        return torch.device('cpu')
-    return torch.device(device_str)
+    A manager takes a Configuration, trains a model, evaluates it,
+    and produces a Run with the results. The two backends (Torch, JAX)
+    implement this interface independently.
+    """
 
-
-class Manager(object):
     def __init__(
         self,
         conf: Configuration,
         system: str,
         dataset: DataSet,
-        device: str = 'auto',
         test_sample_len: int = 1024,
         test_batch: int = 1024,
+        verbose: bool = True,
     ):
         assert isinstance(system, str)
         assert isinstance(conf, Configuration)
         assert isinstance(dataset, (DataSet, DataSetWrapper))
 
         self.conf = conf
-        self._system = system
+        self.system = system
         self.dataset = dataset
-        self.dtype = conf.precision.dtype
-        self.device = _resolve_device(device)
         self.test_sample_len = test_sample_len
         self.test_batch = test_batch
+        self.verbose = verbose
 
-        self.model_def = build_model_def(str(conf.model), precision=conf.precision)
+        self.model_def = conf.model
         tokenizer = get_tokenizer(self.model_def.input.tokens_name)
         self.bytes_per_token = tokenizer.tokenset.avg_bytes_per_token
-        self.model: Optional[Model] = None
-        self.optimizer = None
         self.run: Optional[Run] = None
 
     @property
@@ -63,67 +51,29 @@ class Manager(object):
     def loss(self) -> float:
         return self.run.loss
 
-    def init(self, quiet=False):
-        logging.info(f'{self.conf}')
+    def _get_batch(self):
+        """Return a training batch as a tensor appropriate for the backend."""
+        raise NotImplementedError
 
-        self.model = self.model_def.build_model()
-        self.model.to(self.device)
+    def train_step(self, batch) -> float:
+        """Run one training step. Returns loss in bits per byte."""
+        raise NotImplementedError
 
-        if not quiet:
-            logging.info('Creating optimizer')
-        self._build_optimizer()
-        self.run = Run(loss_trend=LossTrend(), system=self._system)
-
-    def _build_optimizer(self):
-        lr = self.conf.lr
-        if self.conf.decay != 1:
-            # We'll set up a LambdaLR scheduler
-            decay = self.conf.decay
-            steps = self.conf.steps
-            self.optimizer = torch.optim.AdamW(
-                self.model.parameters(), lr=lr, weight_decay=0.01,
-            )
-            self.scheduler = torch.optim.lr_scheduler.LambdaLR(
-                self.optimizer,
-                lr_lambda=lambda step: decay ** (step / steps),
-            )
-        else:
-            self.optimizer = torch.optim.AdamW(
-                self.model.parameters(), lr=lr, weight_decay=0.01,
-            )
-            self.scheduler = None
-
-    def _get_batch(self) -> torch.Tensor:
-        data = self.dataset.sample_tokens(
-            ntokens=self.conf.length,
-            batch=self.conf.batch,
-            tokenset_name=self.model_def.input.tokens_name,
-        )
-        return torch.from_numpy(data).long().to(self.device)
-
-    def train_step(self, batch: torch.Tensor) -> float:
-        self.model.train()
-        loss = self.model.loss_batch(batch)
-
-        self.optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-        self.optimizer.step()
-        if self.scheduler is not None:
-            self.scheduler.step()
-
-        loss_val = loss.item() / self.bytes_per_token
-        self.run.add_step(loss_val)
-        return loss_val
+    def eval(self) -> float:
+        """Evaluate the model; returns loss in bits per byte."""
+        raise NotImplementedError
 
     def train(
         self,
         steps: Optional[int],
         time_limit: Optional[float],
-        temp_steps=None,
-        temp_dir=None,
-        quiet=False,
-    ):
+    ) -> tuple[Optional[float], Configuration]:
+        """Run the training loop.
+
+        Returns:
+            (train_time, final_configuration) where train_time is None
+            if training diverged.
+        """
         last_report = 0
 
         if steps is None and time_limit is None:
@@ -155,7 +105,7 @@ class Manager(object):
                 start_time = None
                 break
 
-            if not quiet and (
+            if self.verbose and (
                 self.step < 10
                 or (self.step % 10 == 0 and step_end - last_report > 3)
                 or step_end - last_report > 10
@@ -173,46 +123,24 @@ class Manager(object):
 
         return total_time, self.conf.replace(steps=self.step)
 
-    @torch.no_grad()
-    def eval(self) -> float:
-        """Evaluate the model on a random test batch.
-
-        Uses test_sample_len and test_batch, which can differ from the
-        training length and batch size.
-        """
-        self.model.eval()
-        # Evaluate in fp32 for consistent precision across training dtypes.
-        self.model.float()
-        self.model.input_module.dtype = torch.float32
-        data = self.dataset.sample_tokens(
-            ntokens=self.test_sample_len,
-            batch=self.test_batch,
-            tokenset_name=self.model_def.input.tokens_name,
-        )
-        batch = torch.from_numpy(data).long().to(self.device)
-        loss = self.model.loss_batch(batch)
-        self.model.to(self.dtype)
-        self.model.input_module.dtype = self.dtype
-        return loss.item() / self.bytes_per_token
+    def continue_prefix(
+        self, prefix: str, length: int, temperature: float
+    ) -> bytes:
+        """Sample text continuation from the model."""
+        raise NotImplementedError
 
     def train_and_eval(
         self,
         steps: Optional[int],
         time_limit: Optional[float],
-        temp_steps,
-        temp_dir,
-        output_dir,
-        log,
-        quiet: bool = False,
     ) -> tuple[Run, Configuration]:
+        """Train the model and evaluate it.
+
+        Returns:
+            (run, final_configuration).
+        """
         try:
-            train_time, final_conf = self.train(
-                steps,
-                time_limit,
-                temp_steps,
-                temp_dir,
-                quiet=quiet,
-            )
+            train_time, final_conf = self.train(steps, time_limit)
 
             if train_time is None:
                 eval_loss = INF
@@ -220,7 +148,7 @@ class Manager(object):
                 eval_loss = self.eval()
                 if math.isnan(eval_loss):
                     eval_loss = INF
-        except Exception as e:
+        except Exception:
             logging.warning('Training stopped early')
             eval_loss = INF
             train_time = None
@@ -236,38 +164,33 @@ class Manager(object):
 
         return (self.run, final_conf)
 
-    @torch.no_grad()
-    def continue_prefix(
-        self, prefix: str, length: int, temperature: float
-    ) -> bytes:
-        """Sample text continuation from the model."""
-        self.model.eval()
-        tokenizer = get_tokenizer(self.model_def.input.tokens_name)
-        prefix_tokens = tokenizer.tokenize(prefix.encode())
 
-        states, _ = self.model.initial_step()
-        for c in prefix_tokens[:-1]:
-            states, _ = self.model.step(states, c)
+def create_manager(
+    backend: str,
+    conf: Configuration,
+    system: str,
+    dataset: DataSet,
+    device: Optional[str] = None,
+    test_sample_len: int = 1024,
+    test_batch: int = 1024,
+    verbose: bool = True,
+) -> Manager:
+    """Create a Manager for the given backend ('torch' or 'jax').
 
-        c = prefix_tokens[-1]
-        out = []
-        for _ in range(length):
-            states, c = self.model.step_sample(states, c, temperature)
-            out.append(c)
-
-        return tokenizer.untokenize(list(prefix_tokens) + out)
-
-    def name(self) -> str:
-        return str(self.model_def)
-
-
-def create_manager(backend: str, **kwargs):
-    """Create a Manager for the given backend ('torch' or 'jax')."""
+    Uses local imports to avoid circular dependencies — both
+    manager_torch and manager_jax import Manager from this module.
+    """
+    common = dict(
+        conf=conf, system=system, dataset=dataset,
+        test_sample_len=test_sample_len, test_batch=test_batch,
+        verbose=verbose,
+    )
     match backend:
         case 'torch':
-            return Manager(**kwargs)
+            from .manager_torch import ManagerTorch
+            return ManagerTorch(device=device or 'auto', **common)
         case 'jax':
-            from .manager_jax import JaxManager
-            return JaxManager(**kwargs)
+            from .manager_jax import ManagerJax
+            return ManagerJax(**common)
         case _:
             raise ValueError(f"Unknown backend: {backend}")

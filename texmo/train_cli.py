@@ -15,7 +15,7 @@ from .precision import Precision
 from .tokens import TokenSet, get_tokenizer, set_tokens_dir
 
 
-def show_loss_graph(manager: Manager, output_dir: str):
+def show_loss_graph(manager: Manager):
     run = manager.run
 
     # step_loss is already in b/B (converted in Manager.train_step)
@@ -44,9 +44,6 @@ def show_loss_graph(manager: Manager, output_dir: str):
         plt.plot(checkpoint.step + 1, checkpoint.loss, 'ro')
     plt.plot(steps + 1, run.loss, 'ro')
 
-    if output_dir is not None:
-        name = manager.name().replace('|', '!')
-        plt.savefig(os.path.join(output_dir, name + ".png"))
     plt.show()
 
 
@@ -83,15 +80,10 @@ def train(args: argparse.Namespace):
             test_sample_len=args.test_sample_len,
             test_batch=args.test_batch,
         )
-        manager.init()
 
     run, final_conf = manager.train_and_eval(
         args.steps,
         args.time,
-        args.temp_steps,
-        args.temp_dir,
-        args.output_dir,
-        args.log,
     )
 
     # Skip text sampling if training diverged or produced a nonsensical
@@ -104,7 +96,7 @@ def train(args: argparse.Namespace):
         print()
 
     if not args.no_graph:
-        show_loss_graph(manager, args.output_dir)
+        show_loss_graph(manager)
 
 
 def init_args(parser: argparse.ArgumentParser, config):
@@ -145,14 +137,6 @@ def init_args(parser: argparse.ArgumentParser, config):
         metavar="SPEC",
         default=None,
         help="add and train layers to a pre-trained model loaded with -m",
-    )
-    parser.add_argument(
-        "-o",
-        "--output-dir",
-        type=str,
-        metavar="PATH",
-        default=None,
-        help="directory to save the trained model",
     )
     parser.add_argument(
         "--steps", type=int, default=None, help="number of training steps"
@@ -215,28 +199,6 @@ def init_args(parser: argparse.ArgumentParser, config):
         metavar="SECONDS",
         help="time limit for training",
         default=None,
-    )
-
-    # Intermediate models
-    parser.add_argument(
-        "--temp-dir",
-        default=None,
-        metavar="PATH",
-        help="directory for intermediate models",
-    )
-    parser.add_argument(
-        "--temp-steps",
-        metavar="STEPS",
-        type=int,
-        default=1000,
-        help="save intermediate model every N steps",
-    )
-
-    parser.add_argument(
-        "--log",
-        default=None,
-        metavar="PATH",
-        help="path to a CSV file for logging",
     )
 
     # Evaluation

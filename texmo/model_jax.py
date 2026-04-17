@@ -127,3 +127,21 @@ class ModelJax:
         logits = self.forward(weights, batch)
         loss = optax.softmax_cross_entropy_with_integer_labels(logits, batch)
         return _1_BY_LOG2 * jnp.mean(loss)
+
+    def loss_batch_masked(
+        self, weights: Weights, batch: jax.Array, lengths: jax.Array
+    ) -> jax.Array:
+        """Total cross-entropy in bits, masked to actual sample lengths.
+
+        Used for eval where samples have fixed byte length but variable
+        token length. Only the first `lengths[i]` tokens of each sample
+        contribute to the loss.
+
+        Returns:
+            scalar total loss (not averaged).
+        """
+        logits = self.forward(weights, batch)
+        per_token = optax.softmax_cross_entropy_with_integer_labels(
+            logits, batch)
+        mask = jnp.arange(per_token.shape[1]) < lengths[:, jnp.newaxis]
+        return _1_BY_LOG2 * jnp.sum(per_token * mask)

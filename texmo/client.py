@@ -101,17 +101,12 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, backend:
         assert d["system"] == system
         conf = Configuration.from_dict(d["conf"])
 
-        manager = create_manager(backend, conf=conf, system=system, dataset=dataset)
-        manager.init(quiet=True)
+        manager = create_manager(
+            backend, conf=conf, system=system, dataset=dataset, verbose=False)
 
         run, out_conf = manager.train_and_eval(
             steps=conf.steps,
             time_limit=None,
-            temp_steps=None,
-            temp_dir=None,
-            output_dir=None,
-            log=None,
-            quiet=True,
         )
 
         with timer("post(add)"):

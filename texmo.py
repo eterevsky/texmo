@@ -2,11 +2,14 @@ import argparse
 
 import jax
 import numpy as np
-
-jax.config.update('jax_enable_x64', True)
 from rich.logging import RichHandler
 
 import config
+
+# Must happen before any JAX code runs.
+jax.config.update('jax_enable_x64', True)
+jax.config.update('jax_platforms', config.JAX_PLATFORMS)
+
 from texmo import client, db_cli, latency, report, sample_cli, server, train_cli
 from texmo.common import console
 from texmo.predict import time_cli

@@ -26,3 +26,8 @@ TORCH_DEVICE = 'auto'
 # JAX compiles custom recurrent layers via lax.scan + jit, making them
 # competitive with hand-fused kernels.
 BACKEND = 'torch'
+
+# JAX platforms to initialize. Comma-separated list — e.g. 'cpu',
+# 'cuda,cpu'. Setting this explicitly avoids the warning about
+# failing to load the TPU plugin on Windows.
+JAX_PLATFORMS = 'cpu'

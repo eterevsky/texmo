@@ -56,20 +56,17 @@ class ModelJax:
             are layer states, and logits is (ntokens,).
         """
         input_state = self.input.init_state()
-        layer_states = [layer.init_state(1) for layer in self.layers]
+        layer_states = [layer.init_state() for layer in self.layers]
 
         p = self._total_padding
         for i in range(p):
             v = self.input._initial_vector(position=-p + i)
-            # v is (size,), layer.step expects (batch=1, size)
-            v = v[jnp.newaxis, :]
             for j, layer in enumerate(self.layers):
                 layer_states[j], v = layer.step(
                     weights[j + 1], layer_states[j], v)
 
         states = [input_state] + layer_states
         _, logits = self.output.step(weights[-1], None, v)
-        logits = logits.squeeze(0)  # remove batch dim
         if self._pad_output:
             logits = jnp.pad(logits, (0, 1))
         return states, logits
@@ -86,14 +83,11 @@ class ModelJax:
         input_state, v = self.input.step(states[0], token)
         new_states.append(input_state)
 
-        # v from input step is (size,), layers expect (1, size)
-        v = v[jnp.newaxis, :]
         for layer, lw, ls in zip(self.layers, weights[1:-1], states[1:]):
             ls, v = layer.step(lw, ls, v)
             new_states.append(ls)
 
         _, logits = self.output.step(weights[-1], None, v)
-        logits = logits.squeeze(0)
         if self._pad_output:
             logits = jnp.pad(logits, (0, 1))
         return new_states, logits

@@ -46,6 +46,28 @@ def test_train_and_eval(backend):
 
 
 @pytest.mark.parametrize('backend', ['torch', 'jax'])
+@pytest.mark.parametrize('spec', [
+    'bits.1+bp|suffix.2',
+    'bits.1+bp|suffix.4-dense.4.gelu',
+    'bits.2.oh+bp|dense.4.relu',
+])
+def test_train_various_specs(backend, spec):
+    """Consistency check: model builds and trains without shape errors."""
+    conf = Configuration(
+        build_model_def(spec, precision=Precision.FP32),
+        lr=0.01, length=32, batch=4, steps=2, decay=1.0,
+    )
+    manager = create_manager(
+        backend, conf=conf, system='test',
+        dataset=_make_dataset(),
+        test_sample_len=32, test_batch=2,
+        verbose=False,
+    )
+    run, _ = manager.train_and_eval(steps=2, time_limit=None)
+    assert run.steps == 2
+
+
+@pytest.mark.parametrize('backend', ['torch', 'jax'])
 def test_continue_prefix(backend):
     manager = create_manager(
         backend, conf=_make_conf(steps=2), system='test',

@@ -156,11 +156,11 @@ def test_jax_forward_and_step():
     outputs = layer.forward(weights, inputs)
     assert outputs.shape == (4, 32, 16)
 
-    # step should match forward at each position
-    x = inputs[:, 0, :]
+    # step should match forward at each position (step is unbatched)
+    x = inputs[0, 0]
     state, out = layer.step(weights, None, x)
     assert state is None
-    assert jnp.allclose(out, outputs[:, 0, :], atol=1e-6)
+    assert jnp.allclose(out, outputs[0, 0], atol=1e-6)
 
 
 def test_jax_weight_count():

@@ -38,27 +38,25 @@ class LayerJax:
         """
         return None
 
-    def init_state(self, batch_size: int) -> LayerState:
-        """Initialize recurrent state for a batch.
+    def init_state(self) -> LayerState:
+        """Initialize recurrent state for a single sample.
 
-        Returns:
-            State arrays with leading batch dimension, or None for
-            stateless layers.
+        Returns None for stateless layers.
         """
         return None
 
     def step(
         self, weights: LayerWeights, state: LayerState, x: jax.Array
     ) -> tuple[LayerState, jax.Array]:
-        """Single-timestep forward on a batch.
+        """Single-timestep forward on a single sample (no batch dim).
 
         Args:
             weights: from init_weights.
-            state: (batch, ...) recurrent state.
-            x: (batch, input_size) input at one timestep.
+            state: recurrent state, or None for stateless layers.
+            x: (input_size,) input at one timestep.
 
         Returns:
-            (new_state, output) where output is (batch, size).
+            (new_state, output) where output is (size,).
         """
         raise NotImplementedError
 

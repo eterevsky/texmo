@@ -1,9 +1,12 @@
+import jax
+import jax.numpy as jnp
 import torch
 import torch.nn as nn
 from torch import Tensor
 
 from ..common import is_power2_int
-from ..layer import LayerDef, LayerModule, LayerState
+from ..layer import LayerDef, LayerJax, LayerModule, LayerState
+from ..layer_jax import LayerWeights
 
 
 class SuffixModule(LayerModule):
@@ -42,6 +45,38 @@ class SuffixModule(LayerModule):
         return torch.cat(slices, dim=-1)
 
 
+class SuffixJax(LayerJax):
+    """Sliding window over the last `length` inputs, flattened."""
+
+    def __init__(self, input_size: int, length: int, dtype):
+        super().__init__(input_size=input_size, size=length * input_size,
+                         dtype=dtype)
+        self.length = length
+
+    def init_state(self):
+        return jnp.zeros((self.length - 1, self.input_size), dtype=self.dtype)
+
+    def step(
+        self, weights: LayerWeights, state, x: jax.Array
+    ) -> tuple[jax.Array, jax.Array]:
+        # state: (length-1, input_size), x: (input_size,)
+        window = jnp.concatenate([state, x[jnp.newaxis, :]], axis=0)
+        new_state = window[1:]
+        out = window.reshape(-1)
+        return new_state, out
+
+    def forward(
+        self, weights: LayerWeights, inputs: jax.Array
+    ) -> jax.Array:
+        # inputs: (batch, seq_len, input_size)
+        # output: (batch, seq_len - length + 1, length * input_size)
+        seq_len = inputs.shape[1]
+        out_len = seq_len - self.length + 1
+        slices = [inputs[:, offset:offset + out_len]
+                  for offset in range(self.length)]
+        return jnp.concatenate(slices, axis=-1)
+
+
 class SuffixDef(LayerDef):
     name = "suffix"
 
@@ -62,3 +97,6 @@ class SuffixDef(LayerDef):
 
     def build_module(self, state_dict=None) -> SuffixModule:
         return SuffixModule(self.length, self.input_size)
+
+    def build_jax(self, dtype) -> SuffixJax:
+        return SuffixJax(self.input_size, self.length, dtype)

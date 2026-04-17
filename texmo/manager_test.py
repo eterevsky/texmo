@@ -52,6 +52,8 @@ def test_train_and_eval(backend):
     'bits.2.oh+bp|dense.4.relu',
     'bits.1+bp|rnn.4.tanh',
     'bits.1+bp|rnn.4.gelu-dense.2.tanh',
+    'bits.1+bp|gru.4',
+    'bits.1+bp|gru.4-dense.2.tanh',
 ])
 def test_train_various_specs(backend, spec):
     """Consistency check: model builds and trains without shape errors."""

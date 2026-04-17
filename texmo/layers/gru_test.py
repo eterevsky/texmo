@@ -1,3 +1,6 @@
+import jax
+import jax.numpy as jnp
+import numpy as np
 import torch
 
 from texmo.layers.gru import GruDef, MgruDef, MinGruDef
@@ -10,10 +13,11 @@ def test_gru_def_properties():
     assert d.size == 32
     assert str(d) == "gru.32"
     assert d.is_valid()
-    # nn.GRU: 3 gates * (input_weights + hidden_weights + 2 biases)
-    assert d.num_weights == 3 * 32 * (16 + 32) + 6 * 32
+    # Single-bias per gate (matches GruJax).
+    assert d.num_weights == 3 * 32 * (16 + 32) + 3 * 32
+    # Torch's nn.GRU has 3 extra bias vectors.
     module = d.build_module()
-    assert sum(p.numel() for p in module.parameters()) == d.num_weights
+    assert sum(p.numel() for p in module.parameters()) == d.num_weights + 3 * 32
 
 
 def test_gru_non_power2_invalid():
@@ -210,3 +214,42 @@ def test_mingru_neighbors():
     assert "rnn.8.relu" in neighbors
     assert "gru.8" in neighbors
     assert "mgru.8" in neighbors
+
+
+# -- JAX GRU --
+
+def test_jax_gru_forward_and_step():
+    d = GruDef(8, input_size=4)
+    layer = d.build_jax(jnp.float32)
+
+    rng = jax.random.PRNGKey(0)
+    weights = layer.init_weights(rng)
+    for gate in ('r', 'z', 'n'):
+        assert weights[f'w_i{gate}'].shape == (8, 4)
+        assert weights[f'w_h{gate}'].shape == (8, 8)
+        assert weights[f'b_{gate}'].shape == (8,)
+
+    inputs = jax.random.normal(rng, (2, 6, 4), dtype=jnp.float32)
+    fwd = layer.forward(weights, inputs)
+    assert fwd.shape == (2, 6, 8)
+
+    # step should match forward
+    state = layer.init_state()
+    for t in range(inputs.shape[1]):
+        state, out = layer.step(weights, state, inputs[0, t])
+        np.testing.assert_allclose(fwd[0, t], out, atol=1e-5)
+
+
+def test_jax_gru_weight_count_matches_def():
+    d = GruDef(16, input_size=8)
+    layer = d.build_jax(jnp.float32)
+    weights = layer.init_weights(jax.random.PRNGKey(0))
+    actual = sum(w.size for w in jax.tree.leaves(weights))
+    assert actual == d.num_weights
+
+
+def test_jax_gru_init_state_shape():
+    layer = GruDef(8, input_size=4).build_jax(jnp.float32)
+    state = layer.init_state()
+    assert state.shape == (8,)
+    assert state.dtype == jnp.float32

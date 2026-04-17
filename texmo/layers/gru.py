@@ -1,9 +1,12 @@
+import jax
+import jax.numpy as jnp
 import torch
 import torch.nn as nn
 from torch import Tensor
 
 from ..common import is_power2_int
-from ..layer import LayerDef, LayerModule, LayerState
+from ..layer import LayerDef, LayerJax, LayerModule, LayerState
+from ..layer_jax import LayerWeights, xavier_uniform
 
 
 class GruModule(LayerModule):
@@ -140,6 +143,83 @@ class MinGruModule(LayerModule):
         return torch.stack(outputs, dim=1)
 
 
+class GruJax(LayerJax):
+    """Standard GRU with separate input and hidden projections per gate.
+
+    Matches nn.GRU equations with a single bias per gate:
+        r = sigmoid(W_ir x + W_hr h + b_r)       # reset gate
+        z = sigmoid(W_iz x + W_hz h + b_z)       # update gate
+        n = tanh(W_in x + b_n + r * (W_hn h))    # candidate
+        h_new = (1 - z) * n + z * h
+
+    Note: unlike nn.GRU, uses one bias per gate (not two). The JAX
+    param count is thus 3*size less than GruDef.num_weights.
+    """
+
+    def __init__(self, input_size: int, size: int, dtype):
+        super().__init__(input_size, size, dtype)
+
+    def init_weights(self, rng: jax.Array) -> LayerWeights:
+        keys = jax.random.split(rng, 6)
+        w = {}
+        for i, gate in enumerate(('r', 'z', 'n')):
+            w[f'w_i{gate}'] = xavier_uniform(
+                keys[2 * i], (self.size, self.input_size), dtype=self.dtype)
+            w[f'w_h{gate}'] = xavier_uniform(
+                keys[2 * i + 1], (self.size, self.size), dtype=self.dtype)
+            w[f'b_{gate}'] = jnp.zeros(self.size, dtype=self.dtype)
+        return w
+
+    def init_state(self):
+        return jnp.zeros(self.size, dtype=self.dtype)
+
+    def step(
+        self, weights: LayerWeights, state, x: jax.Array
+    ) -> tuple[jax.Array, jax.Array]:
+        # x: (input_size,), state: (size,)
+        r = jax.nn.sigmoid(
+            weights['w_ir'] @ x + weights['w_hr'] @ state + weights['b_r'])
+        z = jax.nn.sigmoid(
+            weights['w_iz'] @ x + weights['w_hz'] @ state + weights['b_z'])
+        n = jnp.tanh(
+            weights['w_in'] @ x + weights['b_n']
+            + r * (weights['w_hn'] @ state))
+        new_state = (1 - z) * n + z * state
+        return new_state, new_state
+
+    def forward(
+        self, weights: LayerWeights, inputs: jax.Array
+    ) -> jax.Array:
+        # inputs: (batch, seq_len, input_size)
+        # Hoist input projections (and biases) for all three gates.
+        Wx_r = inputs @ weights['w_ir'].T + weights['b_r']
+        Wx_z = inputs @ weights['w_iz'].T + weights['b_z']
+        Wx_n = inputs @ weights['w_in'].T + weights['b_n']
+
+        w_hr = weights['w_hr']
+        w_hz = weights['w_hz']
+        w_hn = weights['w_hn']
+
+        def scan_step(state, wx):
+            wx_r, wx_z, wx_n = wx
+            r = jax.nn.sigmoid(wx_r + state @ w_hr.T)
+            z = jax.nn.sigmoid(wx_z + state @ w_hz.T)
+            n = jnp.tanh(wx_n + r * (state @ w_hn.T))
+            new_state = (1 - z) * n + z * state
+            return new_state, new_state
+
+        # (batch, seq_len, size) → (seq_len, batch, size)
+        Wx_r_t = jnp.transpose(Wx_r, (1, 0, 2))
+        Wx_z_t = jnp.transpose(Wx_z, (1, 0, 2))
+        Wx_n_t = jnp.transpose(Wx_n, (1, 0, 2))
+
+        batch = inputs.shape[0]
+        init = jnp.zeros((batch, self.size), dtype=self.dtype)
+        _, outputs_t = jax.lax.scan(
+            scan_step, init, (Wx_r_t, Wx_z_t, Wx_n_t))
+        return jnp.transpose(outputs_t, (1, 0, 2))
+
+
 class GruDef(LayerDef):
     name = "gru"
 
@@ -155,8 +235,9 @@ class GruDef(LayerDef):
 
     @property
     def num_weights(self) -> int:
-        # nn.GRU: 3 gates * (input_weights + hidden_weights + 2 biases)
-        return 3 * self.size * (self.input_size + self.size) + 6 * self.size
+        # Single-bias per gate (matches GruJax). Torch's nn.GRU uses two
+        # biases per gate, so its actual param count is 3*size larger.
+        return 3 * self.size * (self.input_size + self.size) + 3 * self.size
 
     def build_module(
         self, state_dict: dict[str, Tensor] | None = None
@@ -165,6 +246,9 @@ class GruDef(LayerDef):
         if state_dict is not None:
             module.load_state_dict(state_dict)
         return module
+
+    def build_jax(self, dtype) -> GruJax:
+        return GruJax(self.input_size, self.size, dtype)
 
 
 class MgruDef(LayerDef):

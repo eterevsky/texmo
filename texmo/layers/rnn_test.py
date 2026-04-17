@@ -1,3 +1,7 @@
+import jax
+import jax.numpy as jnp
+import numpy as np
+import pytest
 import torch
 
 from texmo.layers.rnn import RnnDef
@@ -9,10 +13,11 @@ def test_def_properties_tanh():
     assert d.size == 32
     assert str(d) == "rnn.32.tanh"
     assert d.is_valid()
-    # nn.RNN weights: W_ih + W_hh + b_ih + b_hh
-    assert d.num_weights == 32 * 16 + 32 * 32 + 2 * 32
+    # Single-bias count (matches RnnJax).
+    assert d.num_weights == 32 * 16 + 32 * 32 + 32
+    # Torch's nn.RNN has one extra bias vector.
     module = d.build_module()
-    assert sum(p.numel() for p in module.parameters()) == d.num_weights
+    assert sum(p.numel() for p in module.parameters()) == d.num_weights + 32
 
 
 def test_def_properties_gelu():
@@ -167,3 +172,43 @@ def test_neighbors_size1():
     assert "rnn.2.gelu" in neighbors
     assert "dense.1.gelu" in neighbors
     assert "gru.1" in neighbors
+
+
+# -- JAX --
+
+@pytest.mark.parametrize('activation', ['tanh', 'relu', 'gelu'])
+def test_jax_forward_and_step(activation):
+    d = RnnDef(8, activation=activation, input_size=4)
+    layer = d.build_jax(jnp.float32)
+
+    rng = jax.random.PRNGKey(0)
+    weights = layer.init_weights(rng)
+    assert weights['w_ih'].shape == (8, 4)
+    assert weights['w_hh'].shape == (8, 8)
+    assert weights['b'].shape == (8,)
+
+    inputs = jax.random.normal(rng, (2, 6, 4), dtype=jnp.float32)
+    fwd = layer.forward(weights, inputs)
+    assert fwd.shape == (2, 6, 8)
+
+    # step should match forward at each timestep
+    state = layer.init_state()
+    for t in range(inputs.shape[1]):
+        state, out = layer.step(weights, state, inputs[0, t])
+        np.testing.assert_allclose(fwd[0, t], out, atol=1e-5)
+
+
+def test_jax_weight_count_gelu_matches_def():
+    """For gelu, JAX param count matches RnnDef.num_weights exactly."""
+    d = RnnDef(16, activation='gelu', input_size=8)
+    layer = d.build_jax(jnp.float32)
+    weights = layer.init_weights(jax.random.PRNGKey(0))
+    actual = sum(w.size for w in jax.tree.leaves(weights))
+    assert actual == d.num_weights
+
+
+def test_jax_init_state_shape():
+    layer = RnnDef(8, activation='tanh', input_size=4).build_jax(jnp.float32)
+    state = layer.init_state()
+    assert state.shape == (8,)
+    assert state.dtype == jnp.float32

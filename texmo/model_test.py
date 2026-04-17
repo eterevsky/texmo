@@ -186,7 +186,7 @@ def test_rnn_layer_spec():
     md = ModelDef("bytes|rnn.32.tanh", Precision.FP32)
     assert md.num_weights == (
         0                       # input
-        + 32 * 256 + 32 * 32 + 2 * 32  # rnn.32 (nn.RNN)
+        + 32 * 256 + 32 * 32 + 32  # rnn.32 (single-bias count)
         + 32 * 256 + 256       # output
     )
     model = md.build_model()

@@ -1,10 +1,21 @@
+import jax
+import jax.nn as jax_nn
+import jax.numpy as jnp
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
 from ..common import is_power2_int
-from ..layer import LayerDef, LayerModule, LayerState
+from ..layer import LayerDef, LayerJax, LayerModule, LayerState
+from ..layer_jax import LayerWeights, xavier_uniform
+
+
+_JAX_ACTIVATIONS = {
+    "relu": jax_nn.relu,
+    "tanh": jnp.tanh,
+    "gelu": jax_nn.gelu,
+}
 
 
 class RnnModule(LayerModule):
@@ -72,6 +83,71 @@ class RnnGELUModule(LayerModule):
         return torch.stack(outputs, dim=1)
 
 
+class RnnJax(LayerJax):
+    """Elman RNN with separate input and hidden projections.
+
+    Splits the weight matrix so forward() can hoist the input
+    projection out of the scan loop (one batched matmul over the full
+    sequence instead of one per timestep). Each matrix is Xavier-init
+    based on its own fan_in/fan_out. Uses a single bias.
+
+    Weights:
+        w_ih: (size, input_size)
+        w_hh: (size, size)
+        b: (size,)
+
+    Note: unlike Torch's nn.RNN, this uses one bias vector instead of
+    two (bias_ih + bias_hh). The JAX param count is thus `size` less
+    than RnnDef.num_weights for tanh/relu activations.
+    """
+
+    def __init__(self, input_size: int, size: int, activation_name: str, dtype):
+        super().__init__(input_size, size, dtype)
+        self.activation = _JAX_ACTIVATIONS[activation_name]
+
+    def init_weights(self, rng: jax.Array) -> LayerWeights:
+        k_ih, k_hh = jax.random.split(rng)
+        return {
+            'w_ih': xavier_uniform(
+                k_ih, (self.size, self.input_size), dtype=self.dtype),
+            'w_hh': xavier_uniform(
+                k_hh, (self.size, self.size), dtype=self.dtype),
+            'b': jnp.zeros(self.size, dtype=self.dtype),
+        }
+
+    def init_state(self):
+        return jnp.zeros(self.size, dtype=self.dtype)
+
+    def step(
+        self, weights: LayerWeights, state, x: jax.Array
+    ) -> tuple[jax.Array, jax.Array]:
+        # x: (input_size,), state: (size,)
+        new_state = self.activation(
+            weights['w_ih'] @ x + weights['w_hh'] @ state + weights['b'])
+        return new_state, new_state
+
+    def forward(
+        self, weights: LayerWeights, inputs: jax.Array
+    ) -> jax.Array:
+        # inputs: (batch, seq_len, input_size)
+        w_hh = weights['w_hh']
+        # Hoist input projection out of the scan: one batched matmul
+        # over the whole sequence.
+        Wx = inputs @ weights['w_ih'].T + weights['b']
+        # (batch, seq_len, size) → (seq_len, batch, size) for scan
+        Wx_t = jnp.transpose(Wx, (1, 0, 2))
+
+        def scan_step(state, wx_batch):
+            # state: (batch, size), wx_batch: (batch, size)
+            new_state = self.activation(wx_batch + state @ w_hh.T)
+            return new_state, new_state
+
+        batch = inputs.shape[0]
+        init = jnp.zeros((batch, self.size), dtype=self.dtype)
+        _, outputs_t = jax.lax.scan(scan_step, init, Wx_t)
+        return jnp.transpose(outputs_t, (1, 0, 2))
+
+
 class RnnDef(LayerDef):
     name = "rnn"
 
@@ -90,10 +166,11 @@ class RnnDef(LayerDef):
 
     @property
     def num_weights(self) -> int:
+        # Single-bias count (matches RnnJax). Torch's nn.RNN uses two
+        # biases for tanh/relu, so its actual param count will be
+        # `size` larger than this.
         s = self.size
-        if self._activation == "gelu":
-            return s * (self.input_size + s) + s
-        return s * self.input_size + s * s + 2 * s
+        return s * self.input_size + s * s + s
 
     def build_module(self, state_dict: dict[str, Tensor] | None = None) -> LayerModule:
         if self._activation == "gelu":
@@ -103,3 +180,6 @@ class RnnDef(LayerDef):
         if state_dict is not None:
             module.load_state_dict(state_dict)
         return module
+
+    def build_jax(self, dtype) -> RnnJax:
+        return RnnJax(self.input_size, self.size, self._activation, dtype)

@@ -249,13 +249,12 @@ def test_neighbors_precision():
 def test_neighbors_input_mutation():
     md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
     neighbor_specs = [str(n) for n in md.neighbors()]
-    assert "bits.8|dense.32.gelu" in neighbor_specs
-    assert "bits.4.oh|dense.32.gelu" in neighbor_specs
+    assert "bits.4.oh+bp|dense.32.gelu" in neighbor_specs
 
-    md2 = ModelDef("bits.2|dense.16.gelu", Precision.FP32)
+    md2 = ModelDef("bits.2.oh+bp|dense.16.gelu", Precision.FP32)
     neighbor_specs2 = [str(n) for n in md2.neighbors()]
-    assert "bits.1|dense.16.gelu" in neighbor_specs2
-    assert "bits.2+bp|dense.16.gelu" in neighbor_specs2
+    assert "bits.1+bp|dense.16.gelu" in neighbor_specs2
+    assert "bits.4.oh+bp|dense.16.gelu" in neighbor_specs2
 
 
 def test_neighbors_size_mutation():

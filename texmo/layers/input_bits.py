@@ -10,18 +10,13 @@ from ..precision import Precision
 # Number of bits used to encode the bit chunk position within a byte.
 _BP = {1: 3, 2: 2, 4: 1, 8: 0}
 
+# Only a small subset of input specs participates in search. Other
+# specs remain constructible (you can run them manually) but won't be
+# discovered as neighbors during exploration.
 _INPUT_NEIGHBORS = {
-    'bits.1': ('bits.1+bp', 'bits.2', 'bits.2.oh'),
-    'bits.1+bp': ('bits.1', 'bits.2+bp', 'bits.2.oh+bp'),
-    'bits.2': ('bits.1', 'bits.2+bp', 'bits.2.oh', 'bits.4'),
-    'bits.2+bp': ('bits.1+bp', 'bits.2', 'bits.2.oh+bp', 'bits.4+bp'),
-    'bits.2.oh': ('bits.1', 'bits.2', 'bits.2.oh+bp', 'bits.4.oh'),
-    'bits.2.oh+bp': ('bits.1+bp', 'bits.2+bp', 'bits.2.oh', 'bits.4.oh+bp'),
-    'bits.4': ('bits.2', 'bits.4+bp', 'bits.4.oh', 'bits.8'),
-    'bits.4+bp': ('bits.2+bp', 'bits.4', 'bits.4.oh+bp', 'bits.8'),
-    'bits.4.oh': ('bits.2.oh', 'bits.4', 'bits.4.oh+bp', 'bytes'),
-    'bits.4.oh+bp': ('bits.2.oh+bp', 'bits.4+bp', 'bits.4.oh', 'bytes'),
-    'bits.8': ('bits.4', 'bits.4+bp', 'bytes'),
+    'bits.1+bp': ('bits.2.oh+bp',),
+    'bits.2.oh+bp': ('bits.1+bp', 'bits.4.oh+bp'),
+    'bits.4.oh+bp': ('bits.2.oh+bp', 'bytes'),
 }
 
 

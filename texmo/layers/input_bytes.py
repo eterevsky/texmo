@@ -75,7 +75,7 @@ class InputBytesDef(object):
         return True
 
     def neighbors(self):
-        return ('bits.4.oh', 'bits.4.oh+bp', 'bits.8')
+        return ('bits.4.oh+bp',)
 
     def build_module(self) -> InputBytesModule:
         return InputBytesModule(dtype=self.precision.dtype)

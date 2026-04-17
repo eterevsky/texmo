@@ -382,28 +382,28 @@ def default_from_template(
             spec = template.spec
         else:
             found = False
-            for tokens in ('bits.1', 'bits.2', 'bits.4', 'bits.8'):
-                for oh in ('', '.oh'):
-                    for pos in ('', '+bp'):
-                        if found: break
-                        input_spec = tokens + oh + pos
-                        for layer in (
-                            '',
-                            'dense.1.tanh',
-                            'rnn.1.tanh',
-                            'gru.1',
-                            'lstm.1',
-                            'mingru.1',
-                            'mgru.1',
-                        ):
-                            if found: break
-                            full_spec = input_spec + '|' + layer
-                            model = build_model_def(full_spec, precision=precision)
-                            if not model.is_valid():
-                                continue
-                            if template.match_model(model):
-                                spec = str(model)
-                                found = True
+            # Same restricted input set as the search neighbors.
+            for input_spec in (
+                'bits.1+bp', 'bits.2.oh+bp', 'bits.4.oh+bp', 'bytes',
+            ):
+                if found: break
+                for layer in (
+                    '',
+                    'dense.1.tanh',
+                    'rnn.1.tanh',
+                    'gru.1',
+                    'lstm.1',
+                    'mingru.1',
+                    'mgru.1',
+                ):
+                    if found: break
+                    full_spec = input_spec + '|' + layer
+                    model = build_model_def(full_spec, precision=precision)
+                    if not model.is_valid():
+                        continue
+                    if template.match_model(model):
+                        spec = str(model)
+                        found = True
 
     if spec is not None:
         return Configuration(

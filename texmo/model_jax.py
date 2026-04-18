@@ -7,11 +7,44 @@ import optax
 from .layer_jax import LayerJax, LayerState, LayerWeights
 from .layers.dense import DenseJax
 from .layers.input_bits import InputBitsJax
+from .layers.skip import SkipJax
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
 
 Weights = list[LayerWeights]
 State = list[LayerState]
+
+
+def _merge_add(v: jax.Array, source: jax.Array) -> jax.Array:
+    # Last-axis merge: max size, sum the overlap, append the tail from
+    # whichever input is longer.
+    d_v = v.shape[-1]
+    d_s = source.shape[-1]
+    if d_v == d_s:
+        return v + source
+    if d_v < d_s:
+        head = v + source[..., :d_v]
+        tail = source[..., d_v:]
+    else:
+        head = v[..., :d_s] + source
+        tail = v[..., d_s:]
+    return jnp.concatenate([head, tail], axis=-1)
+
+
+def _merge_cat(v: jax.Array, source: jax.Array) -> jax.Array:
+    return jnp.concatenate([v, source], axis=-1)
+
+
+def _apply_merges(v, pending, skip_list):
+    """Apply all merges in skip_list to v, popping sources from pending.
+
+    Used in step mode — ignores shrinkage (the saved source is already
+    a single-timestep vector).
+    """
+    for start_pos, op, _ in skip_list:
+        source = pending.pop(start_pos)
+        v = _merge_add(v, source) if op == 'add' else _merge_cat(v, source)
+    return v
 
 
 class ModelJax:
@@ -28,6 +61,7 @@ class ModelJax:
         output: DenseJax,
         ntokens: int,
         total_padding: int = 1,
+        skip_targets: dict[int, list[tuple[int, str, int]]] | None = None,
     ):
         self.input = input_layer
         self.layers = layers
@@ -35,6 +69,8 @@ class ModelJax:
         self.ntokens = ntokens
         self._pad_output = ntokens <= 2
         self._total_padding = total_padding
+        # target position -> [(start_pos, op), ...] sorted by start_pos.
+        self._skip_targets = skip_targets or {}
 
     def init_weights(self, rng: jax.Array) -> Weights:
         keys = jax.random.split(rng, len(self.layers) + 1)
@@ -44,26 +80,33 @@ class ModelJax:
             + [self.output.init_weights(keys[-1])]
         )
 
+    def _run_pipeline_step(self, v, weights, layer_states):
+        """Run v through all layers (save/merge skips). Returns (v, new_states)."""
+        pending: dict[int, jax.Array] = {}
+        new_states: list[LayerState] = []
+        for i, (layer, lw, ls) in enumerate(
+            zip(self.layers, weights[1:-1], layer_states)):
+            if i in self._skip_targets:
+                v = _apply_merges(v, pending, self._skip_targets[i])
+            if isinstance(layer, SkipJax):
+                pending[i] = v
+            ls, v = layer.step(lw, ls, v)
+            new_states.append(ls)
+        n = len(self.layers)
+        if n in self._skip_targets:
+            v = _apply_merges(v, pending, self._skip_targets[n])
+        return v, new_states
+
     def initial_step(self, weights: Weights) -> tuple[State, jax.Array]:
-        """Predict the first token (before any input).
-
-        Feeds total_padding initial vectors through the layers to warm
-        up stateful layers (e.g. suffix), mirroring the padding in
-        forward().
-
-        Returns:
-            (states, logits) where states[0] is input state, states[1:]
-            are layer states, and logits is (ntokens,).
-        """
+        """Predict the first token (before any input)."""
         input_state = self.input.init_state()
         layer_states = [layer.init_state() for layer in self.layers]
 
         p = self._total_padding
+        v = None
         for i in range(p):
             v = self.input._initial_vector(position=-p + i)
-            for j, layer in enumerate(self.layers):
-                layer_states[j], v = layer.step(
-                    weights[j + 1], layer_states[j], v)
+            v, layer_states = self._run_pipeline_step(v, weights, layer_states)
 
         states = [input_state] + layer_states
         _, logits = self.output.step(weights[-1], None, v)
@@ -74,38 +117,37 @@ class ModelJax:
     def step(
         self, weights: Weights, states: State, token: int
     ) -> tuple[State, jax.Array]:
-        """Run one step of inference.
-
-        Returns:
-            (new_states, logits) where logits is (ntokens,).
-        """
-        new_states = []
+        """Run one step of inference."""
         input_state, v = self.input.step(states[0], token)
-        new_states.append(input_state)
-
-        for layer, lw, ls in zip(self.layers, weights[1:-1], states[1:]):
-            ls, v = layer.step(lw, ls, v)
-            new_states.append(ls)
-
+        v, new_layer_states = self._run_pipeline_step(v, weights, states[1:])
         _, logits = self.output.step(weights[-1], None, v)
         if self._pad_output:
             logits = jnp.pad(logits, (0, 1))
-        return new_states, logits
+        return [input_state] + new_layer_states, logits
 
     def forward(self, weights: Weights, batch: jax.Array) -> jax.Array:
-        """Forward pass on a batch for training.
-
-        Args:
-            weights: from init_weights.
-            batch: (batch_size, seq_len) int token indices.
-
-        Returns:
-            logits: (batch_size, seq_len, ntokens).
-        """
+        """Forward pass on a batch for training."""
         v = self.input.forward(batch[:, :-1], padding=self._total_padding)
 
-        for layer, lw in zip(self.layers, weights[1:-1]):
+        pending: dict[int, jax.Array] = {}
+        for i, (layer, lw) in enumerate(zip(self.layers, weights[1:-1])):
+            if i in self._skip_targets:
+                for start_pos, op, shrinkage in self._skip_targets[i]:
+                    source = pending.pop(start_pos)
+                    if shrinkage > 0:
+                        source = source[:, shrinkage:]
+                    v = _merge_add(v, source) if op == 'add' else _merge_cat(v, source)
+            if isinstance(layer, SkipJax):
+                pending[i] = v
             v = layer.forward(lw, v)
+
+        n = len(self.layers)
+        if n in self._skip_targets:
+            for start_pos, op, shrinkage in self._skip_targets[n]:
+                source = pending.pop(start_pos)
+                if shrinkage > 0:
+                    source = source[:, shrinkage:]
+                v = _merge_add(v, source) if op == 'add' else _merge_cat(v, source)
 
         logits = self.output.forward(weights[-1], v)
         if self._pad_output:
@@ -113,11 +155,7 @@ class ModelJax:
         return logits
 
     def loss_batch(self, weights: Weights, batch: jax.Array) -> jax.Array:
-        """Average cross-entropy loss in bits per token.
-
-        Returns:
-            scalar.
-        """
+        """Average cross-entropy loss in bits per token."""
         logits = self.forward(weights, batch)
         loss = optax.softmax_cross_entropy_with_integer_labels(logits, batch)
         return _1_BY_LOG2 * jnp.mean(loss)
@@ -125,15 +163,7 @@ class ModelJax:
     def loss_batch_masked(
         self, weights: Weights, batch: jax.Array, lengths: jax.Array
     ) -> jax.Array:
-        """Total cross-entropy in bits, masked to actual sample lengths.
-
-        Used for eval where samples have fixed byte length but variable
-        token length. Only the first `lengths[i]` tokens of each sample
-        contribute to the loss.
-
-        Returns:
-            scalar total loss (not averaged).
-        """
+        """Total cross-entropy in bits, masked to actual sample lengths."""
         logits = self.forward(weights, batch)
         per_token = optax.softmax_cross_entropy_with_integer_labels(
             logits, batch)

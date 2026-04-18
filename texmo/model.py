@@ -18,9 +18,123 @@ from .layers.latent import LatentDef, LrnnDef
 from .layers.lstm import LstmDef
 from .layers.norm import NormDef
 from .layers.rnn import RnnDef
+from .layers.skip import SkipDef, SkipModule
 from .layers.suffix import SuffixDef
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
+
+
+def _apply_merges(shape: int, merges: list[tuple[int, str, int]]) -> int:
+    """Apply pending skip merges to `shape` (earliest start first).
+
+    Each merge is (source_size, op, start_pos). For '.add' we take
+    max(shape, source_size); for '.cat' we sum.
+    """
+    for source_size, op, _ in sorted(merges, key=lambda m: m[2]):
+        if op == 'add':
+            shape = max(shape, source_size)
+        else:  # cat
+            shape = shape + source_size
+    return shape
+
+
+def _skip_targets(
+    layers: list[LayerDef],
+) -> dict[int, list[tuple[int, str, int]]]:
+    """Build target_position -> [(start_pos, op, shrinkage)] for all skips.
+
+    `shrinkage` is the number of sequence positions that suffix-like
+    layers between start and target consume (= sum of length-1). In
+    forward mode the source must be sliced by this amount to align
+    with the shortened main-path sequence. In step mode it's ignored
+    (per-step processing is length-agnostic).
+
+    Each target's list is sorted by start_pos (earliest first).
+    """
+    targets: dict[int, list[tuple[int, str, int]]] = {}
+    for i, layer in enumerate(layers):
+        if isinstance(layer, SkipDef):
+            target = i + layer.distance + 1
+            shrinkage = sum(
+                l.length - 1 for l in layers[i + 1:target] if l.length > 1)
+            targets.setdefault(target, []).append((i, layer.op, shrinkage))
+    for t in targets:
+        targets[t].sort()
+    return targets
+
+
+def _insert_with_skip_bumps(
+    layers: list[LayerDef], pos: int, new_spec: str
+) -> list[str]:
+    """Insert new_spec at position pos in the spec strings, bumping the
+    distance of any skip that strictly contains pos in its span.
+
+    A skip at index i with distance d spans [i+1, i+d+1). If pos falls
+    strictly between i and i+d+1 (i.e. i < pos < i+d+1), we bump the
+    distance by 1 so the merge still happens at the same original
+    layer. At pos == i+d+1 (exactly the merge point) we don't bump —
+    the merge stays before the newly inserted layer.
+    """
+    result: list[str] = []
+    for i, layer in enumerate(layers):
+        if i == pos:
+            result.append(new_spec)
+        if isinstance(layer, SkipDef):
+            old_target = i + layer.distance + 1
+            if i < pos < old_target:
+                result.append(f"skip.{layer.distance + 1}.{layer.op}")
+            else:
+                result.append(str(layer))
+        else:
+            result.append(str(layer))
+    if pos == len(layers):
+        result.append(new_spec)
+    return result
+
+
+def _remove_with_skip_bumps(
+    layers: list[LayerDef], pos: int
+) -> list[str] | None:
+    """Remove layer at `pos`, decrementing distance for skips that
+    strictly contained pos. Returns None if any skip would end up with
+    distance < 1 (invalid mutation).
+    """
+    result: list[str] = []
+    for i, layer in enumerate(layers):
+        if i == pos:
+            continue
+        if isinstance(layer, SkipDef):
+            old_target = i + layer.distance + 1
+            if i < pos < old_target:
+                new_d = layer.distance - 1
+                if new_d < 1:
+                    return None
+                result.append(f"skip.{new_d}.{layer.op}")
+            else:
+                result.append(str(layer))
+        else:
+            result.append(str(layer))
+    return result
+
+
+def _merge_add(v, source):
+    # v: (..., D_v); source: (..., D_s). Output shape: (..., max(D_v, D_s)).
+    # Sum the overlap, append the tail from whichever is longer.
+    d_v = v.shape[-1]
+    d_s = source.shape[-1]
+    if d_v == d_s:
+        return v + source
+    if d_v < d_s:
+        head = v + source[..., :d_v]
+        tail = source[..., d_v:]
+    else:
+        head = v[..., :d_s] + source
+        tail = v[..., d_s:]
+    return torch.cat([head, tail], dim=-1)
+
+
+def _merge_cat(v, source):
+    return torch.cat([v, source], dim=-1)
 
 
 class Model(nn.Module):
@@ -33,6 +147,7 @@ class Model(nn.Module):
         output_module: DenseModule,
         ntokens: int,
         total_padding: int = 1,
+        skip_targets: dict[int, list[tuple[int, str, int]]] | None = None,
     ):
         super().__init__()
         self.input_module = input_module
@@ -44,6 +159,8 @@ class Model(nn.Module):
         # Padding with 0 gives softmax([x, 0]) = [sigmoid(-x), sigmoid(x)],
         # so the single logit acts as the log-odds of class 1 vs class 0.
         self._pad_output = ntokens <= 2
+        # Maps target position -> [(start_pos, op), ...], sorted by start.
+        self._skip_targets = skip_targets or {}
 
     @property
     def device(self) -> torch.device:
@@ -52,6 +169,31 @@ class Model(nn.Module):
     @property
     def dtype(self) -> torch.dtype:
         return next(self.output_module.parameters()).dtype
+
+    def _run_pipeline_step(self, v, layer_states):
+        """Run v through all layers (with skip save/merge). Returns (v, new_states)."""
+        pending: dict[int, Tensor] = {}
+        new_states: list[LayerState] = []
+        for i, (layer, state) in enumerate(zip(self.layers, layer_states)):
+            # Apply any merges targeting this position (skip ends here).
+            # In step mode shrinkage is ignored — the saved source is
+            # already a single-timestep vector that aligns naturally.
+            if i in self._skip_targets:
+                for start_pos, op, _ in self._skip_targets[i]:
+                    source = pending.pop(start_pos)
+                    v = _merge_add(v, source) if op == 'add' else _merge_cat(v, source)
+            # Save source if this is a skip pseudo-layer.
+            if isinstance(layer, SkipModule):
+                pending[i] = v
+            state, v = layer.step(state, v)
+            new_states.append(state)
+        # Merges targeting the position after the last layer (into output dense).
+        n = len(self.layers)
+        if n in self._skip_targets:
+            for start_pos, op, _ in self._skip_targets[n]:
+                source = pending.pop(start_pos)
+                v = _merge_add(v, source) if op == 'add' else _merge_cat(v, source)
+        return v, new_states
 
     def initial_step(self) -> tuple[list[LayerState], Tensor]:
         """Predict the first token (before any input).
@@ -62,7 +204,6 @@ class Model(nn.Module):
         """
         input_state = self.input_module.init_state()
 
-        # Initialize layer states
         layer_states = [
             layer.init_state(device=self.device, dtype=self.dtype)
             for layer in self.layers
@@ -72,11 +213,11 @@ class Model(nn.Module):
         # (e.g. suffix). Each iteration mirrors one padding position in
         # forward(), cycling through the correct bp positions.
         p = self._total_padding
+        v = None
         for i in range(p):
             v = self.input_module.initial_vector(
                 device=self.device, position=-p + i)
-            for j, layer in enumerate(self.layers):
-                layer_states[j], v = layer.step(layer_states[j], v)
+            v, layer_states = self._run_pipeline_step(v, layer_states)
 
         states = [input_state] + layer_states
         _, logits = self.output_module.step(None, v)
@@ -98,17 +239,13 @@ class Model(nn.Module):
             (new_states, logits) where logits is (ntokens,)
         """
         input_state = states[0]
-        new_states = []
         input_state, v = self.input_module.step(
             input_state, token, device=self.device)
-        new_states.append(input_state)
-        for layer, state in zip(self.layers, states[1:]):
-            state, v = layer.step(state, v)
-            new_states.append(state)
+        v, new_layer_states = self._run_pipeline_step(v, states[1:])
         _, logits = self.output_module.step(None, v)
         if self._pad_output:
             logits = F.pad(logits, (0, 1))
-        return new_states, logits
+        return [input_state] + new_layer_states, logits
 
     def step_prob(
         self, states: list[LayerState], token: int, temperature: float
@@ -146,8 +283,25 @@ class Model(nn.Module):
         # is consumed by suffix-like layers that look back multiple steps.
         v = self.input_module(batch[:, :-1], padding=self._total_padding)
 
-        for layer in self.layers:
+        pending: dict[int, Tensor] = {}
+        for i, layer in enumerate(self.layers):
+            if i in self._skip_targets:
+                for start_pos, op, shrinkage in self._skip_targets[i]:
+                    source = pending.pop(start_pos)
+                    if shrinkage > 0:
+                        source = source[:, shrinkage:]
+                    v = _merge_add(v, source) if op == 'add' else _merge_cat(v, source)
+            if isinstance(layer, SkipModule):
+                pending[i] = v
             v = layer(v)
+
+        n = len(self.layers)
+        if n in self._skip_targets:
+            for start_pos, op, shrinkage in self._skip_targets[n]:
+                source = pending.pop(start_pos)
+                if shrinkage > 0:
+                    source = source[:, shrinkage:]
+                v = _merge_add(v, source) if op == 'add' else _merge_cat(v, source)
 
         logits = self.output_module(v)
         if self._pad_output:
@@ -196,12 +350,37 @@ class ModelDef(object):
             raise ValueError(f"Unknown input type: '{input_spec}'")
 
         self.layers: list[LayerDef] = []
+        # Map from target position -> list of (source_size, op, start_pos).
+        # Populated as we walk the spec; drained as we reach each target.
+        pending_merges: dict[int, list[tuple[int, str, int]]] = {}
         shape = self.input.size
         if layers_spec:
-            for layer_spec in layers_spec.split("-"):
+            specs = layers_spec.split("-")
+            for i, layer_spec in enumerate(specs):
+                # Apply merges landing at position i to the shape that
+                # feeds into layer i.
+                if i in pending_merges:
+                    shape = _apply_merges(shape, pending_merges.pop(i))
+
                 layer = _build_layer_def(layer_spec, shape)
                 self.layers.append(layer)
+
+                if isinstance(layer, SkipDef):
+                    target = i + layer.distance + 1
+                    pending_merges.setdefault(target, []).append(
+                        (shape, layer.op, i))
+
                 shape = layer.size
+
+            # Merges landing at position N (just before output dense).
+            n = len(self.layers)
+            if n in pending_merges:
+                shape = _apply_merges(shape, pending_merges.pop(n))
+
+        # Any remaining pending merges target positions past the output
+        # dense, which means the skip's distance overshoots the pipeline.
+        # Record this so is_valid() can reject the spec.
+        self._skip_overshoots = bool(pending_merges)
 
         self.ntokens = self.input.ntokens
         # 1 for the initial "no input" position, plus extra for layers
@@ -235,6 +414,10 @@ class ModelDef(object):
         if self.layers and self.layers[0].name == "norm":
             return False
 
+        # A skip whose distance went past the output dense is invalid.
+        if self._skip_overshoots:
+            return False
+
         for l1, l2 in zip(self.layers[:-1], self.layers[1:]):
             # Two suffix-like layers can't be one after another.
             if l1.length > 1 and l2.length > 1:
@@ -245,6 +428,23 @@ class ModelDef(object):
             # Norm can't follow a suffix.
             if l1.name == "suffix" and l2.name == "norm":
                 return False
+            # Skip pseudo-layers can't be adjacent.
+            if l1.name == "skip" and l2.name == "skip":
+                return False
+            # Skip source can't be right before a norm (layer after
+            # the skip pseudo-layer is a norm).
+            if l1.name == "skip" and l2.name == "norm":
+                return False
+
+        # Merge point can't be right after a suffix: the layer just
+        # before each skip's target position (i.e. the last skipped
+        # layer) can't be a suffix.
+        for i, layer in enumerate(self.layers):
+            if isinstance(layer, SkipDef):
+                last_skipped = i + layer.distance
+                if last_skipped < len(self.layers):
+                    if self.layers[last_skipped].name == "suffix":
+                        return False
 
         return all(l.is_valid() for l in self.layers)
 
@@ -294,29 +494,87 @@ class ModelDef(object):
             if self.layers[-1].size == expected_size:
                 yield _make_spec(layers_str[:-1])
 
-        # 4. Insert suffix.2 between any neighboring layers
+        # 4. Insert suffix.2 between any neighboring layers (bumping
+        # skip distances that span the insertion point).
         for i in range(len(layers_str) + 1):
-            yield _make_spec(chain(
-                layers_str[:i], ("suffix.2",), layers_str[i:]))
+            bumped = _insert_with_skip_bumps(self.layers, i, "suffix.2")
+            yield _make_spec(bumped)
 
-        # 5. Remove suffix.2 at any position (symmetric with insert)
+        # 5. Remove suffix.2 at any position (symmetric with insert).
         for i, ls in enumerate(layers_str):
             if ls == "suffix.2":
-                yield _make_spec(chain(
-                    layers_str[:i], layers_str[i + 1:]))
+                bumped = _remove_with_skip_bumps(self.layers, i)
+                if bumped is not None:
+                    yield _make_spec(bumped)
 
-        # 6. Insert norm between any two existing layers. Invalid positions
-        # (before the first layer, adjacent to another norm, after a suffix)
-        # are filtered out by is_valid() in the neighbors() loop.
+        # 6. Insert norm between existing layers (bumping skip distances).
         for i in range(1, len(layers_str) + 1):
-            yield _make_spec(chain(
-                layers_str[:i], ("norm",), layers_str[i:]))
+            bumped = _insert_with_skip_bumps(self.layers, i, "norm")
+            yield _make_spec(bumped)
 
-        # 7. Remove norm at any position (symmetric with insert)
+        # 7. Remove norm at any position (symmetric with insert).
         for i, ls in enumerate(layers_str):
             if ls == "norm":
+                bumped = _remove_with_skip_bumps(self.layers, i)
+                if bumped is not None:
+                    yield _make_spec(bumped)
+
+        # 8. Add a skip at each valid insertion position. Preferred
+        # distance is 1; if the layer at the insertion point is a
+        # suffix, bump to 2.
+        for i in range(len(layers_str)):
+            # Need at least one layer after (for the merge point).
+            # Source-before-norm: next layer in new spec (= original
+            # layer at i) can't be norm.
+            if layers_str[i] == "norm":
+                continue
+            # Distance: 1 normally, 2 if original layer at i is suffix
+            # (merge-right-after-suffix rule).
+            distance = 2 if layers_str[i].startswith("suffix") else 1
+            if i + distance + 1 > len(layers_str) + 1:
+                continue  # merge would overshoot the pipeline
+            for op in ("add", "cat"):
+                new_spec = f"skip.{distance}.{op}"
                 yield _make_spec(chain(
-                    layers_str[:i], layers_str[i + 1:]))
+                    layers_str[:i], (new_spec,), layers_str[i:]))
+
+        # 9. Remove a skip (symmetric with add — only distances that
+        # add would have produced at this position).
+        for i, layer in enumerate(self.layers):
+            if not isinstance(layer, SkipDef):
+                continue
+            if i + 1 >= len(self.layers):
+                continue  # add never produces a skip with no layer after it
+            next_spec = layers_str[i + 1]
+            expected = 2 if next_spec.startswith("suffix") else 1
+            if layer.distance != expected:
+                continue
+            yield _make_spec(chain(
+                layers_str[:i], layers_str[i + 1:]))
+
+        # 10. Mutate skip distance by ±1 (context-aware: skip over a
+        # suffix that would end up right before the merge).
+        for i, layer in enumerate(self.layers):
+            if not isinstance(layer, SkipDef):
+                continue
+            for delta in (-1, +1):
+                new_d = layer.distance + delta
+                if new_d < 1:
+                    continue
+                new_target = i + new_d + 1
+                if new_target > len(self.layers) + 1:
+                    continue
+                # If the new merge lands right after a suffix, skip one
+                # more in the same direction.
+                if new_target - 1 < len(self.layers):
+                    if self.layers[new_target - 1].name == "suffix":
+                        new_d += delta
+                        new_target = i + new_d + 1
+                        if new_d < 1 or new_target > len(self.layers) + 1:
+                            continue
+                mutated_layer = f"skip.{new_d}.{layer.op}"
+                yield _make_spec(chain(
+                    layers_str[:i], (mutated_layer,), layers_str[i + 1:]))
 
     def neighbors(self) -> Iterable['ModelDef']:
         # Precision neighbors
@@ -329,10 +587,7 @@ class ModelDef(object):
             if spec in seen:
                 continue
             seen.add(spec)
-            try:
-                model = build_model_def(spec, precision=self.precision)
-            except (ValueError, KeyError):
-                continue
+            model = build_model_def(spec, precision=self.precision)
             if model.is_valid() and model != self:
                 yield model
 
@@ -350,7 +605,8 @@ class ModelDef(object):
         output_module = self.output.build_module()
 
         model = Model(input_module, layer_modules, output_module,
-                      self.ntokens, self.total_padding)
+                      self.ntokens, self.total_padding,
+                      skip_targets=_skip_targets(self.layers))
 
         if state_dict is not None:
             model.load_state_dict(state_dict)
@@ -366,7 +622,8 @@ class ModelDef(object):
         layers = [ld.build_jax(dtype) for ld in self.layers]
         output = self.output.build_jax(dtype)
         return ModelJax(input_layer, layers, output,
-                        self.ntokens, self.total_padding)
+                        self.ntokens, self.total_padding,
+                        skip_targets=_skip_targets(self.layers))
 
 
 def _build_layer_def(spec: str, input_size: int) -> LayerDef:
@@ -410,6 +667,13 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
     if name == "suffix":
         length = int(parts[1])
         return SuffixDef(length, input_size=input_size)
+
+    if name == "skip":
+        distance = int(parts[1])
+        op = parts[2]
+        if op not in ('add', 'cat'):
+            raise ValueError(f"Unknown skip op: {op}")
+        return SkipDef(distance, op, input_size=input_size)
 
     raise ValueError(f"Unknown layer type: {name}")
 

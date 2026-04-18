@@ -1,6 +1,7 @@
 import math
-import torch
 import numpy as np
+import pytest
+import torch
 
 from texmo.model import ModelDef, build_model_def
 from texmo.precision import Precision
@@ -335,3 +336,275 @@ def test_neighbors_no_self():
     for n in md.neighbors():
         if n.precision == md.precision:
             assert n != md, f"self in neighbors: {n}"
+
+
+# -- skip (residual) layer --
+
+def test_skip_add_size_max():
+    """For `.add`, merge output size is max(source, current)."""
+    md = ModelDef(
+        "bytes|skip.2.add-dense.32.gelu-dense.32.gelu-dense.64.gelu",
+        Precision.FP32)
+    assert md.is_valid()
+    # Merge lands before the final dense.64: source=256, current=32.
+    # max(256, 32) = 256 → dense.64 gets input_size=256.
+    layers = md.layers
+    assert layers[3].input_size == 256
+
+
+def test_skip_cat_size_sum():
+    """For `.cat`, merge output size is source + current."""
+    md = ModelDef(
+        "bytes|skip.1.cat-dense.32.gelu-dense.64.gelu", Precision.FP32)
+    assert md.is_valid()
+    # Merge lands before dense.64: source=256, current=32 → cat=288.
+    assert md.layers[2].input_size == 288
+
+
+def test_skip_merge_before_output_dense():
+    """Skip can merge right before the output dense (last valid point)."""
+    md = ModelDef(
+        "bytes|skip.2.add-dense.32.gelu-dense.32.gelu", Precision.FP32)
+    assert md.is_valid()
+    # Target = 0 + 2 + 1 = 3 = len(layers), merge is before output dense.
+    # source=256 vs current=32, so output dense gets input_size=256.
+    assert md.output.input_size == 256
+
+
+def test_skip_distance_past_end_invalid():
+    """Skip distance that overshoots the pipeline → invalid."""
+    md = ModelDef("bytes|skip.5.add-dense.32.gelu", Precision.FP32)
+    assert not md.is_valid()
+
+
+def test_skip_adjacent_skips_invalid():
+    md = ModelDef(
+        "bytes|skip.1.add-skip.1.add-dense.32.gelu", Precision.FP32)
+    assert not md.is_valid()
+
+
+def test_skip_source_before_norm_invalid():
+    md = ModelDef(
+        "bytes|dense.32.gelu-skip.1.add-norm-dense.32.gelu", Precision.FP32)
+    assert not md.is_valid()
+
+
+def test_skip_merge_right_after_suffix_invalid():
+    # skip.1 starts, next layer is suffix → merge right after suffix.
+    md = ModelDef("bytes|skip.1.add-suffix.4-dense.32.gelu", Precision.FP32)
+    assert not md.is_valid()
+
+
+def test_skip_merge_before_norm_ok():
+    """No restriction on end-before-norm."""
+    md = ModelDef(
+        "bytes|skip.1.add-dense.32.gelu-norm-dense.32.gelu", Precision.FP32)
+    assert md.is_valid()
+
+
+def test_skip_before_suffix_ok():
+    """Skip source before suffix is fine — start before, skip over."""
+    md = ModelDef(
+        "bytes|dense.32.gelu-skip.2.add-suffix.2-dense.32.gelu-dense.16.gelu",
+        Precision.FP32)
+    assert md.is_valid()
+
+
+def test_skip_over_suffix_forward():
+    """Skip span that includes a suffix: source must be sliced to
+    align with the shortened main-path sequence. step and forward
+    should still match.
+    """
+    md = ModelDef(
+        "bits.1+bp|skip.2.cat-suffix.4-dense.4.tanh", Precision.FP32)
+    model = md.build_model()
+    model.eval()
+
+    tokens = [0, 1, 1, 0, 1, 0, 0, 1, 0, 1]
+    batch = torch.tensor([tokens], dtype=torch.long)
+    with torch.no_grad():
+        fwd = model(batch)
+        states, log0 = model.initial_step()
+        step_logits = [log0]
+        for t in tokens[:-1]:
+            states, lt = model.step(states, t)
+            step_logits.append(lt)
+    for i in range(len(tokens)):
+        assert torch.allclose(fwd[0, i], step_logits[i], atol=1e-4)
+
+
+def test_skip_step_matches_forward_add():
+    md = ModelDef(
+        "bytes|skip.2.add-dense.16.gelu-dense.16.gelu-dense.32.gelu",
+        Precision.FP32)
+    model = md.build_model()
+    model.eval()
+
+    tokens = [10, 20, 30, 40, 50]
+    batch = torch.tensor([tokens], dtype=torch.long)
+    with torch.no_grad():
+        fwd = model(batch)
+        states, log0 = model.initial_step()
+        step_logits = [log0]
+        for t in tokens[:-1]:
+            states, lt = model.step(states, t)
+            step_logits.append(lt)
+
+    for i in range(len(tokens)):
+        assert torch.allclose(fwd[0, i], step_logits[i], atol=1e-4)
+
+
+def test_skip_step_matches_forward_cat():
+    md = ModelDef(
+        "bytes|skip.1.cat-dense.16.gelu-dense.32.gelu", Precision.FP32)
+    model = md.build_model()
+    model.eval()
+
+    tokens = [10, 20, 30, 40]
+    batch = torch.tensor([tokens], dtype=torch.long)
+    with torch.no_grad():
+        fwd = model(batch)
+        states, log0 = model.initial_step()
+        step_logits = [log0]
+        for t in tokens[:-1]:
+            states, lt = model.step(states, t)
+            step_logits.append(lt)
+
+    for i in range(len(tokens)):
+        assert torch.allclose(fwd[0, i], step_logits[i], atol=1e-4)
+
+
+def test_skip_num_weights():
+    """Skip contributes 0 to num_weights."""
+    md_no_skip = ModelDef(
+        "bytes|dense.32.gelu-dense.32.gelu-dense.64.gelu", Precision.FP32)
+    md_skip = ModelDef(
+        "bytes|skip.2.add-dense.32.gelu-dense.32.gelu-dense.64.gelu",
+        Precision.FP32)
+    # The second dense also differs: input_size expands from 32 to 256
+    # at the merge, so the last dense.64 has more weights.
+    # But if we make the final merge match the original input size it's
+    # a clean check.  Simpler: check the skip layer itself has size 0.
+    from texmo.layers.skip import SkipDef
+    skip_layer = md_skip.layers[0]
+    assert isinstance(skip_layer, SkipDef)
+    assert skip_layer.num_weights == 0
+
+
+# -- skip neighbors --
+
+def test_skip_op_swap_neighbor():
+    md = ModelDef(
+        "bytes|skip.2.add-dense.32.gelu-dense.32.gelu-dense.64.gelu",
+        Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert (
+        "bytes|skip.2.cat-dense.32.gelu-dense.32.gelu-dense.64.gelu"
+        in neighbor_specs)
+
+
+def test_skip_distance_neighbors():
+    md = ModelDef(
+        "bytes|skip.2.add-dense.32.gelu-dense.32.gelu-dense.32.gelu-dense.64.gelu",
+        Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    # Distance ±1
+    assert (
+        "bytes|skip.1.add-dense.32.gelu-dense.32.gelu-dense.32.gelu-dense.64.gelu"
+        in neighbor_specs)
+    assert (
+        "bytes|skip.3.add-dense.32.gelu-dense.32.gelu-dense.32.gelu-dense.64.gelu"
+        in neighbor_specs)
+
+
+def test_add_skip_neighbor():
+    md = ModelDef(
+        "bytes|dense.32.gelu-dense.32.gelu-dense.64.gelu", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    # skip.1 inserted at the front
+    assert (
+        "bytes|skip.1.add-dense.32.gelu-dense.32.gelu-dense.64.gelu"
+        in neighbor_specs)
+    assert (
+        "bytes|skip.1.cat-dense.32.gelu-dense.32.gelu-dense.64.gelu"
+        in neighbor_specs)
+
+
+def test_remove_skip_neighbor():
+    md = ModelDef(
+        "bytes|skip.1.add-dense.32.gelu-dense.32.gelu-dense.64.gelu",
+        Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert (
+        "bytes|dense.32.gelu-dense.32.gelu-dense.64.gelu" in neighbor_specs)
+
+
+def test_remove_skip_only_when_add_symmetric():
+    """skip.2.add before a non-suffix should NOT be removable (add would
+    produce distance 1 there, not 2)."""
+    md = ModelDef(
+        "bytes|skip.2.add-dense.32.gelu-dense.32.gelu-dense.64.gelu",
+        Precision.FP32)
+    # Removal would yield the plain chain; check it's NOT offered.
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert (
+        "bytes|dense.32.gelu-dense.32.gelu-dense.64.gelu"
+        not in neighbor_specs)
+
+
+def test_remove_skip_distance2_before_suffix():
+    """skip.2 before a suffix IS removable (add produces distance 2)."""
+    md = ModelDef(
+        "bytes|skip.2.add-suffix.2-dense.32.gelu-dense.64.gelu",
+        Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert (
+        "bytes|suffix.2-dense.32.gelu-dense.64.gelu" in neighbor_specs)
+
+
+def test_norm_insertion_bumps_skip_distance():
+    """Inserting a norm inside a skip's span increments its distance."""
+    md = ModelDef(
+        "bytes|skip.2.add-dense.32.gelu-dense.32.gelu-dense.64.gelu",
+        Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    # Norm inserted between the two dense.32 layers is inside the skip
+    # span → distance bumped from 2 to 3.
+    assert any(
+        "skip.3.add" in s and "-norm-" in s for s in neighbor_specs)
+
+
+def test_skip_neighbors_all_valid():
+    md = ModelDef(
+        "bytes|skip.2.add-dense.32.gelu-dense.32.gelu-dense.64.gelu",
+        Precision.FP32)
+    for n in md.neighbors():
+        assert n.is_valid(), f"invalid neighbor: {n}"
+
+
+# -- neighborhood symmetry --
+
+@pytest.mark.parametrize('spec', [
+    "bytes|dense.32.gelu",
+    "bits.2.oh+bp|dense.16.relu-dense.32.tanh",
+    "bits.1+bp|rnn.4.tanh",
+    "bits.1+bp|gru.8-dense.4.gelu",
+    "bits.1+bp|suffix.2-dense.8.tanh",
+    "bits.1+bp|dense.8.tanh-norm-dense.16.gelu",
+    "bits.1+bp|skip.1.add-dense.8.gelu-dense.16.gelu",
+    "bits.1+bp|skip.2.cat-dense.4.gelu-dense.4.gelu-dense.8.gelu",
+    "bytes|skip.2.add-suffix.2-dense.16.gelu-dense.32.gelu",
+])
+def test_neighborhood_symmetry(spec):
+    """For every neighbor N of the start spec, the start spec must appear
+    among N's neighbors (modulo precision, which is already symmetric).
+    """
+    md = ModelDef(spec, Precision.FP32)
+    assert md.is_valid(), f"fixture invalid: {spec}"
+
+    start_key = (md.spec, md.precision)
+    for neighbor in md.neighbors():
+        second_order_keys = {(n.spec, n.precision) for n in neighbor.neighbors()}
+        assert start_key in second_order_keys, (
+            f"asymmetric mutation: {md.spec} -> {neighbor.spec}, "
+            f"cannot get back from {neighbor.spec}")

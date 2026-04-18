@@ -60,6 +60,9 @@ def test_train_and_eval(backend):
     'bits.1+bp|lstm.4',
     'bits.1+bp|latent.4.2',
     'bits.1+bp|lrnn.4.2',
+    'bits.1+bp|skip.1.add-dense.4.gelu-dense.8.gelu',
+    'bits.1+bp|skip.2.cat-dense.4.gelu-dense.4.gelu-dense.8.gelu',
+    'bits.1+bp|skip.2.cat-suffix.4-dense.4.tanh',
 ])
 def test_train_various_specs(backend, spec):
     """Consistency check: model builds and trains without shape errors."""
@@ -91,6 +94,12 @@ def test_train_various_specs(backend, spec):
     'bits.1+bp|lstm.4',
     'bits.1+bp|latent.4.2',
     'bits.1+bp|lrnn.4.2',
+    'bits.1+bp|skip.1.add-dense.4.gelu-dense.8.gelu',
+    'bits.1+bp|skip.2.cat-dense.4.gelu-dense.4.gelu-dense.8.gelu',
+    'bits.1+bp|skip.2.cat-suffix.4-dense.4.tanh',
+    # Two overlapping skips with mixed add and cat landing at the same
+    # merge point (just before the output dense).
+    'bits.1+bp|skip.3.add-dense.4.gelu-skip.1.cat-dense.4.gelu-dense.8.gelu',
 ])
 def test_jax_num_weights_matches_def(spec):
     """ModelDef.num_weights should equal the total element count of the

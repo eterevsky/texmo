@@ -139,20 +139,14 @@ class Manager:
         Returns:
             (run, final_configuration).
         """
-        try:
-            train_time, final_conf = self.train(steps, time_limit)
+        train_time, final_conf = self.train(steps, time_limit)
 
-            if train_time is None:
-                eval_loss = INF
-            else:
-                eval_loss = self.eval()
-                if math.isnan(eval_loss):
-                    eval_loss = INF
-        except Exception:
-            logging.warning('Training stopped early')
+        if train_time is None:
             eval_loss = INF
-            train_time = None
-            final_conf = self.conf.replace(steps=self.step)
+        else:
+            eval_loss = self.eval()
+            if math.isnan(eval_loss):
+                eval_loss = INF
 
         self.run.finalize(eval_loss, train_time)
         if final_conf != self.conf:

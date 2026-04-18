@@ -81,9 +81,9 @@ impl<'a> Iterator for FileIterator<'a> {
             } else {
                 self.samples_left = Some(samples_left - 1);
 
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
                 let max_seek = self.file_size - self.sample_size as u64;
-                let start = rng.gen_range(0..max_seek);
+                let start = rng.random_range(0..max_seek);
 
                 self.file.seek(SeekFrom::Start(start)).unwrap();
                 let read_bytes = self.file.read(&mut buffer).unwrap();

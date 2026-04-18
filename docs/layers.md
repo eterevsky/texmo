@@ -185,6 +185,28 @@ timestep's hidden state as additional context:
 - `num_weights = size * input_size + size + size * size + size * size`.
 - Constraints: same as Latent.
 
+## Skip (`skip.<X>.<add|cat>`) — residual connections
+
+Pseudo-layer that marks the start of a residual connection spanning
+`X` layers. It takes no weights and doesn't transform activations on
+its own — it's a marker for `Model`/`ModelJax` to save the source
+activation and merge it back `X` layers later.
+
+- `.add` — elementwise add with soft size matching: the merged output
+  has size `max(skip_src_size, merge_point_size)`. The first
+  `min(skip_src_size, merge_point_size)` channels are summed; the
+  remaining channels from the larger vector pass through unchanged.
+- `.cat` — concatenation; output size is `skip_src_size + merge_point_size`.
+
+Example: `bytes|skip.2.add-dense.32.tanh-dense.32.tanh-dense.64.gelu`.
+The skip starts after the input (256 dims), skips over two `dense.32`
+layers, and merges before the `dense.64`. At the merge point the main
+path has 32 dims and the source has 256, so with `.add` the merged
+activation is 256 dims (32 summed, 224 appended).
+
+See [`skip.md`](skip.md) for the full design: validity rules, search
+mutations, and how merges are handled in `Model`/`ModelJax`.
+
 ## Neighbor relations (search)
 
 The search walks the architecture space by generating "neighbors" of a

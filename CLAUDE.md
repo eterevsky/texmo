@@ -15,6 +15,8 @@ Detailed docs live in [`docs/`](docs/):
   abstractions, input encoding, and how the two backends fit together.
 - [`layers.md`](docs/layers.md) — the available layer types, their
   equations, parameter counts, and neighbor relations.
+- [`skip.md`](docs/skip.md) — design reference for residual
+  connections (`skip.X.add` / `skip.X.cat`).
 - [`backends.md`](docs/backends.md) — PyTorch vs JAX trade-offs and why
   we support both.
 - [`search.md`](docs/search.md) — distributed architecture search:

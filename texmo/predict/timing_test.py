@@ -31,7 +31,7 @@ def _conf(
 
 def test_featurize_types():
     conf = _conf("bits.1+bp|dense.8.gelu", batch=16, length=32)
-    comps = featurize(conf, batch=16, length=32)
+    comps = featurize(conf)
     assert len(comps) == 3
     assert comps[0].type_id == "bits.1+bp"
     assert comps[1].type_id == "dense.gelu"
@@ -41,7 +41,7 @@ def test_featurize_types():
 def test_featurize_feature_sizes():
     """Different types have different feature vector lengths."""
     conf = _conf("bits.1+bp|dense.8.gelu-suffix.2-skip.1.add-norm", batch=4, length=10)
-    comps = featurize(conf, batch=4, length=10)
+    comps = featurize(conf)
     types = {c.type_id: c.features.shape[0] for c in comps}
     assert types["bits.1+bp"] == 3  # input
     assert types["dense.gelu"] == 12  # dense_matmul
@@ -54,7 +54,7 @@ def test_featurize_feature_sizes():
 def test_featurize_base_values():
     """Base features: [1, L, B*L, IS, IS*L, IS*B*L, OS, OS*L, OS*B*L]."""
     conf = _conf("bits.1+bp|dense.8.gelu", batch=4, length=10)
-    comps = featurize(conf, batch=4, length=10)
+    comps = featurize(conf)
     # Dense: IS=4 (bits.1+bp.size), OS=8, B=4, L=10
     dense = comps[1]
     bl = 40
@@ -65,7 +65,7 @@ def test_featurize_base_values():
 
 def test_featurize_suffix_length_feature():
     conf = _conf("bits.1+bp|suffix.4", batch=2, length=8)
-    comps = featurize(conf, batch=2, length=8)
+    comps = featurize(conf)
     suffix = comps[1]
     assert suffix.type_id == "suffix"
     # Last feature is the suffix_length.
@@ -74,7 +74,7 @@ def test_featurize_suffix_length_feature():
 
 def test_featurize_skip_features():
     conf = _conf("bits.1+bp|skip.1.cat-dense.4.tanh", batch=2, length=8)
-    comps = featurize(conf, batch=2, length=8)
+    comps = featurize(conf)
     skip = comps[1]
     assert skip.type_id == "skip.cat"
     # [1, IS=4, IS*L=32, IS*B*L=64]
@@ -85,7 +85,7 @@ def test_predict_with_known_weights():
     """If only the constant feature has nonzero weight, prediction = constant
     × number of components (all sized by their feature count)."""
     conf = _conf("bits.1+bp|dense.8.gelu", batch=4, length=10)
-    comps = featurize(conf, batch=4, length=10)
+    comps = featurize(conf)
     c = 0.001
     log_c = np.log(c)
     weights = {}
@@ -101,7 +101,7 @@ def test_predict_missing_weights_gives_zero():
     """Components with no fitted weights contribute 0 (graceful for
     types absent from training data)."""
     conf = _conf("bits.1+bp|dense.8.gelu", batch=4, length=10)
-    comps = featurize(conf, batch=4, length=10)
+    comps = featurize(conf)
     assert predict_time({}, comps) == 0.0
 
 
@@ -123,7 +123,7 @@ def test_fit_synthetic_linear():
         batch = int(rng.choice([4, 8, 16, 32, 64]))
         length = int(rng.choice([16, 32, 64, 128]))
         conf = _conf("bits.1+bp|dense.8.gelu", batch=batch, length=length)
-        comps = featurize(conf, batch=batch, length=length)
+        comps = featurize(conf)
         t = sum(
             coef * comp.features[idx]
             for comp in comps
@@ -152,7 +152,7 @@ def test_model_fit_and_predict():
         batch = int(rng.choice([8, 16, 32]))
         spec = "bits.1+bp|dense.8.gelu"
         conf = _conf(spec, batch=batch, length=length, steps=100)
-        comps = featurize(conf, batch=batch, length=length)
+        comps = featurize(conf)
         # Use a matmul feature from the dense layer as the "signal".
         # Dense layer is comps[1]; feature 11 is IS*OS*B*L.
         signal = comps[1].features[11]
@@ -165,18 +165,18 @@ def test_model_fit_and_predict():
     assert ("testbench", Precision.FP32) in model.keys()
 
     conf = _conf("bits.1+bp|dense.8.gelu", batch=24, length=48)
-    pred = model.predict("testbench", conf, batch=24, length=48)
-    comps = featurize(conf, 24, 48)
+    pred = model.predict("testbench", conf)
+    comps = featurize(conf)
     signal = comps[1].features[11]
     expected = 0.02 + 1e-7 * signal
     assert pytest.approx(pred, rel=0.3) == expected
 
 
-def test_model_unknown_system_raises():
+def test_model_unknown_system_returns_none():
     model = TrainTimingModel()
     conf = _conf("bits.1+bp|dense.8.gelu")
-    with pytest.raises(KeyError):
-        model.predict("nope", conf, batch=8, length=32)
+    assert model.predict("nope", conf) is None
+    assert model.predict_batch("nope", [conf]) is None
 
 
 def test_model_skips_diverged_runs():

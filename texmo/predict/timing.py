@@ -21,6 +21,7 @@ Positivity is enforced via `exp(θ)`. Fitting minimizes mean squared
 log-relative error.
 """
 
+import functools
 from dataclasses import dataclass
 
 import jax
@@ -157,9 +158,16 @@ def _output_component(output_def, batch: int, length: int) -> Component:
     )
 
 
-def featurize(conf: Configuration, batch: int, length: int) -> list[Component]:
-    """Turn a configuration + runtime shape into a list of components."""
+@functools.cache
+def featurize(conf: Configuration) -> list[Component]:
+    """Turn a configuration into a list of components.
+
+    Cached because Configuration is immutable and the same confs get
+    re-featurized on every bootstrap / refit.
+    """
     model_def = conf.model
+    batch = conf.batch
+    length = conf.length
     components: list[Component] = []
     components.append(_input_component(model_def.input, batch, length))
     for layer in model_def.layers:
@@ -189,6 +197,33 @@ def predict_time(
         if theta is None:
             continue
         total += float(np.dot(np.exp(theta), c.features))
+    return total
+
+
+def predict_time_batch(
+    weights: dict[str, np.ndarray],
+    confs: list[Configuration],
+) -> np.ndarray:
+    """Batched version of predict_time. Unseen types contribute 0.
+
+    Groups features by type into (n_confs, feat_size) matrices and does
+    one `features @ exp(theta)` per type, so the per-conf Python
+    overhead disappears into a handful of numpy matmuls.
+    """
+    n = len(confs)
+    if n == 0:
+        return np.zeros(0)
+    feat_per_type: dict[str, np.ndarray] = {}
+    for i, conf in enumerate(confs):
+        for c in featurize(conf):
+            if c.type_id not in weights:
+                continue
+            if c.type_id not in feat_per_type:
+                feat_per_type[c.type_id] = np.zeros((n, len(c.features)))
+            feat_per_type[c.type_id][i] += c.features
+    total = np.zeros(n)
+    for type_id, feats in feat_per_type.items():
+        total += feats @ np.exp(weights[type_id])
     return total
 
 
@@ -319,7 +354,7 @@ class TrainTimingModel:
             if per_step is None:
                 continue
             key = (run.system, conf.precision)
-            comps = featurize(conf, conf.batch, conf.length)
+            comps = featurize(conf)
             buckets.setdefault(key, []).append((comps, per_step))
 
         for key, samples in buckets.items():
@@ -338,22 +373,28 @@ class TrainTimingModel:
                 )
 
     def predict(
-        self,
-        system: str,
-        conf: Configuration,
-        batch: int,
-        length: int,
-    ) -> float:
-        key = (system, conf.precision)
-        weights = self._weights.get(key)
+        self, system: str, conf: Configuration
+    ) -> float | None:
+        """Predict step time, or None if no model is fit for this pair."""
+        weights = self._weights.get((system, conf.precision))
         if weights is None:
-            raise KeyError(
-                f"no timing model fit for (system={system!r}, "
-                f"precision={conf.precision}). "
-                f"Need at least {self.MIN_SAMPLES} runs to fit."
-            )
-        components = featurize(conf, batch, length)
-        return predict_time(weights, components)
+            return None
+        return predict_time(weights, featurize(conf))
+
+    def predict_batch(
+        self, system: str, confs: list[Configuration]
+    ) -> np.ndarray | None:
+        """Predict step times for many confs of the same precision.
+
+        Returns None if no model is fit for this (system, precision).
+        Returns an empty array if `confs` is empty.
+        """
+        if not confs:
+            return np.zeros(0)
+        weights = self._weights.get((system, confs[0].precision))
+        if weights is None:
+            return None
+        return predict_time_batch(weights, confs)
 
     def keys(self) -> list[tuple[str, Precision]]:
         return list(self._weights.keys())

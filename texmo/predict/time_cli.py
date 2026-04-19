@@ -55,7 +55,13 @@ def main(args: argparse.Namespace):
         steps=args.steps or 100,
         decay=1.0,
     )
-    per_step = model.predict(args.system, conf, batch=args.batch, length=args.length)
+    per_step = model.predict(args.system, conf)
+    if per_step is None:
+        logging.warning(
+            f"No timing model for ({args.system!r}, {args.precision}). "
+            f"Need at least {TrainTimingModel.MIN_SAMPLES} runs to fit."
+        )
+        return
     steps = args.steps or conf.steps
     total = per_step * (steps - 1)
 

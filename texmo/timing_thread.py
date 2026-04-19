@@ -27,6 +27,7 @@ import logging
 import threading
 from queue import Queue
 
+from .configuration import Configuration
 from .precision import Precision
 from .predict.timing import TrainTimingModel
 from .resultdb import ResultDB
@@ -38,19 +39,23 @@ def _refresh_estimates(
     system: str,
     precision: Precision,
 ):
-    if (system, precision) not in model.keys():
+    median_ids = db.get_conf_ids_with_median_time(system, precision)
+    to_predict: list[tuple[int, Configuration]] = [
+        (conf_id, conf)
+        for conf_id, conf in db.iter_confs_by_precision(precision)
+        if conf_id not in median_ids
+    ]
+    if not to_predict:
+        return
+    preds = model.predict_batch(system, [c for _, c in to_predict])
+    if preds is None:
         # Below MIN_SAMPLES — no model yet, nothing to predict with.
         return
-    median_ids = db.get_conf_ids_with_median_time(system, precision)
-    rows = []
-    for conf_id, conf in db.iter_confs_by_precision(precision):
-        if conf_id in median_ids:
-            # Median estimate is kept up to date by add_run.
-            continue
-        pred = model.predict(system, conf, conf.batch, conf.length)
-        rows.append((conf_id, system, pred, 'predicted'))
-    if rows:
-        db.upsert_time_estimates(rows)
+    rows = [
+        (conf_id, system, float(preds[i]), 'predicted')
+        for i, (conf_id, _) in enumerate(to_predict)
+    ]
+    db.upsert_time_estimates(rows)
     logging.info(
         f"refreshed {len(rows)} predicted estimates "
         f"for ({system!r}, {precision})"

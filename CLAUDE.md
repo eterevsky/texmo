@@ -17,6 +17,8 @@ Detailed docs live in [`docs/`](docs/):
   equations, parameter counts, and neighbor relations.
 - [`skip.md`](docs/skip.md) — design reference for residual
   connections (`skip.X.add` / `skip.X.cat`).
+- [`timing.md`](docs/timing.md) — training-step time prediction
+  model (features, fit, and use).
 - [`backends.md`](docs/backends.md) — PyTorch vs JAX trade-offs and why
   we support both.
 - [`search.md`](docs/search.md) — distributed architecture search:

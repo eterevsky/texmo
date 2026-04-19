@@ -219,7 +219,6 @@ class SearchServer(object):
         template: Template,
         train_time: tuple[float, float],
         default_spec: str,
-        bootstrap_timing: bool = False,
     ):
         self.db: ResultDB = db
         self.template: Template = template
@@ -234,8 +233,6 @@ class SearchServer(object):
         self.timing_queue: Queue = Queue()
         self.timing_thread = TimingThread(db.path, self.timing_queue)
         self.timing_thread.start()
-        if bootstrap_timing:
-            self.timing_queue.put(("bootstrap", None))
 
         self.search_thread = SearchThread(
             db,
@@ -401,7 +398,6 @@ def main(args: argparse.Namespace):
     logging.info(f"T ∈ {train_time} s")
     server = SearchServer(
         db, template, train_time, args.default_spec,
-        bootstrap_timing=args.bootstrap_timing,
     )
 
     app = Flask("texmo")
@@ -522,15 +518,5 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="range for the training time in seconds",
     )
     parser.add_argument("--default-spec", type=str, default=None, help="default model")
-    parser.add_argument(
-        "--bootstrap-timing",
-        action="store_true",
-        default=False,
-        help=(
-            "On startup, refit timing models for every (system, precision) "
-            "pair with enough data and refresh all time estimates. "
-            "Otherwise, models are fit lazily as new runs accumulate."
-        ),
-    )
 
     parser.set_defaults(func=main)

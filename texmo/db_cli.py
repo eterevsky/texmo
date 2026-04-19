@@ -2,6 +2,7 @@ import argparse
 import logging
 
 from .resultdb import ResultDB
+from .timing_thread import bootstrap as bootstrap_timing
 
 
 def updatedb(args: argparse.Namespace):
@@ -46,3 +47,20 @@ def clear_system_init_args(parser: argparse.ArgumentParser, config):
     )
 
     parser.set_defaults(func=clear_system)
+
+
+def bootstrap_estimates(args: argparse.Namespace):
+    db = ResultDB.from_args(args.db)
+    bootstrap_timing(db)
+
+
+def bootstrap_estimates_init_args(
+    parser: argparse.ArgumentParser, config
+):
+    parser.add_argument(
+        "--db",
+        type=str,
+        default=config.DB,
+        help="path to the database",
+    )
+    parser.set_defaults(func=bootstrap_estimates)

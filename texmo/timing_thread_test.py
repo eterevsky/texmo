@@ -19,7 +19,7 @@ from texmo.precision import Precision
 from texmo.predict.timing import TrainTimingModel
 from texmo.resultdb import ResultDB
 from texmo.run import Run
-from texmo.timing_thread import TimingThread
+from texmo.timing_thread import TimingThread, bootstrap
 
 
 def _conf(
@@ -126,19 +126,39 @@ def test_refit_skips_when_below_min_samples(tmp_path, monkeypatch):
         assert db.get_time_estimate(unrun_id, "rpi") is None
 
 
-def test_bootstrap_fits_all_pairs(tmp_path):
-    db_path = str(tmp_path / "test.db")
+def test_bootstrap_fits_all_pairs():
     rng = np.random.default_rng(0)
-    with ResultDB(db_path) as db:
-        _seed_runs(db, "rpi", 8, rng)
-        _seed_runs(db, "whitebox", 8, rng)
-        unrun_conf = _conf(batch=4, length=64)
-        unrun_id = db.find_or_add_conf(unrun_conf)
+    db = ResultDB()
+    _seed_runs(db, "rpi", 8, rng)
+    _seed_runs(db, "whitebox", 8, rng)
+    unrun_conf = _conf(batch=4, length=64)
+    unrun_id = db.find_or_add_conf(unrun_conf)
 
-    _run_thread(db_path, [("bootstrap", None)])
+    bootstrap(db)
 
-    with ResultDB(db_path, readonly=True) as db:
-        for system in ("rpi", "whitebox"):
-            est = db.get_time_estimate(unrun_id, system)
-            assert est is not None, f"missing estimate for {system}"
-            assert est[1] == "predicted"
+    for system in ("rpi", "whitebox"):
+        est = db.get_time_estimate(unrun_id, system)
+        assert est is not None, f"missing estimate for {system}"
+        assert est[1] == "predicted"
+
+
+def test_bootstrap_backfills_medians():
+    """Bootstrap should populate medians for confs that have runs but
+    no conf_time_estimate row (i.e. just after a schema migration)."""
+    rng = np.random.default_rng(0)
+    db = ResultDB()
+    _seed_runs(db, "rpi", 8, rng)
+
+    # Simulate the post-migration state: wipe the estimate table so the
+    # 'median' rows are absent even though runs exist.
+    db._db.execute("DELETE FROM conf_time_estimate")
+    db._db.commit()
+
+    bootstrap(db)
+
+    # Every conf with a run on rpi should now have a median estimate.
+    run_conf = next(iter(db.iter_confs_by_precision(Precision.FP32)))[1]
+    run_id = db.get_conf_id(run_conf)
+    time_s, source = db.get_time_estimate(run_id, "rpi")
+    assert source == "median"
+    assert time_s > 0

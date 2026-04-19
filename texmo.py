@@ -61,6 +61,15 @@ def parse_args():
     )
     db_cli.clear_system_init_args(parser_clear_system, config)
 
+    parser_bootstrap_estimates = subparsers.add_parser(
+        "db-bootstrap-estimates",
+        help=(
+            "Backfill median time estimates, fit timing models, and "
+            "write predicted estimates for all confs without runs"
+        ),
+    )
+    db_cli.bootstrap_estimates_init_args(parser_bootstrap_estimates, config)
+
     parser_report = subparsers.add_parser(
         "report", help="Print a report of the results in the database"
     )

@@ -27,6 +27,7 @@ import logging
 import threading
 from queue import Queue
 
+from . import latency
 from .configuration import Configuration
 from .precision import Precision
 from .predict.timing import TrainTimingModel
@@ -39,26 +40,31 @@ def _refresh_estimates(
     system: str,
     precision: Precision,
 ):
-    median_ids = db.get_conf_ids_with_median_time(system, precision)
-    to_predict: list[tuple[int, Configuration]] = [
-        (conf_id, conf)
-        for conf_id, conf in db.iter_confs_by_precision(precision)
-        if conf_id not in median_ids
-    ]
+    with latency.timer('timing._refresh_estimates.median_ids'):
+        median_ids = db.get_conf_ids_with_median_time(system, precision)
+    with latency.timer('timing._refresh_estimates.iter_confs'):
+        to_predict: list[tuple[int, Configuration]] = [
+            (conf_id, conf)
+            for conf_id, conf in db.iter_confs_by_precision(precision)
+            if conf_id not in median_ids
+        ]
     if not to_predict:
         return
-    preds = model.predict_batch(system, [c for _, c in to_predict])
+    with latency.timer('timing._refresh_estimates.predict_batch'):
+        preds = model.predict_batch(system, [c for _, c in to_predict])
     if preds is None:
         # Below MIN_SAMPLES — no model yet, nothing to predict with.
         return
-    # The model predicts per-step time; `conf_time_estimate.time_s`
-    # stores total train_time to match the median side, so multiply
-    # by (steps - 1).
-    rows = [
-        (conf_id, system, float(preds[i]) * (conf.steps - 1), 'predicted')
-        for i, (conf_id, conf) in enumerate(to_predict)
-    ]
-    db.upsert_time_estimates(rows)
+    with latency.timer('timing._refresh_estimates.build_rows'):
+        # The model predicts per-step time; `conf_time_estimate.time_s`
+        # stores total train_time to match the median side, so multiply
+        # by (steps - 1).
+        rows = [
+            (conf_id, system, float(preds[i]) * (conf.steps - 1), 'predicted')
+            for i, (conf_id, conf) in enumerate(to_predict)
+        ]
+    with latency.timer('timing._refresh_estimates.upsert'):
+        db.upsert_time_estimates(rows)
     logging.info(
         f"refreshed {len(rows)} predicted estimates "
         f"for ({system!r}, {precision})"
@@ -71,10 +77,12 @@ def _refit_pair(
     system: str,
     precision: Precision,
 ):
-    runs = list(db.get_runs_for_timing(system, precision))
+    with latency.timer('timing._refit_pair.get_runs'):
+        runs = list(db.get_runs_for_timing(system, precision))
     if not runs:
         return
-    model.fit(runs, verbose=False)
+    with latency.timer('timing._refit_pair.fit'):
+        model.fit(runs, verbose=False)
     _refresh_estimates(db, model, system, precision)
 
 

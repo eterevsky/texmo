@@ -299,25 +299,34 @@ def _fit(
     steps: int = 2000,
     lr: float = 0.05,
 ) -> tuple[dict[str, np.ndarray], float]:
-    """Fit θ to minimize log-MSE on `samples`. Returns (weights, final_loss)."""
+    """Fit θ to minimize log-MSE on `samples`. Returns (weights, final_loss).
+
+    The `steps` iterations run inside `jax.lax.scan` so the whole loop
+    compiles and runs in XLA — much faster than a Python loop calling
+    into a jitted gradient step.
+    """
     type_sizes, feats, times = _prepare_training_arrays(samples)
 
     # Initialize θ small so that exp(θ) starts near zero.
     theta = {t: -14.0 * jnp.ones(sz, dtype=jnp.float64) for t, sz in type_sizes.items()}
 
-    loss_grad = jax.jit(jax.value_and_grad(_loss))
     optimizer = optax.adamw(lr, weight_decay=0.0)
     opt_state = optimizer.init(theta)
 
-    final_loss = float("inf")
-    for _ in range(steps):
-        final_loss, grads = loss_grad(theta, feats, times)
+    def step(carry, _):
+        theta, opt_state = carry
+        loss, grads = jax.value_and_grad(_loss)(theta, feats, times)
         updates, opt_state = optimizer.update(grads, opt_state, theta)
         theta = optax.apply_updates(theta, updates)
+        return (theta, opt_state), loss
+
+    (theta, _), losses = jax.lax.scan(
+        step, (theta, opt_state), None, length=steps,
+    )
 
     return (
         {t: np.asarray(theta[t]) for t in type_sizes},
-        float(final_loss),
+        float(losses[-1]),
     )
 
 

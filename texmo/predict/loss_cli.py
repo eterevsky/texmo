@@ -30,19 +30,25 @@ def _train_val_split(
     return train, val
 
 
-def _eval_log_l2(
+def _eval_log_l1(
     preds_log: np.ndarray, targets: np.ndarray,
 ) -> float:
-    """L2 in log2-space. Targets clipped to [MIN_LOSS, MAX_LOSS]; preds left
-    as-is so predictions outside the range still get a gradient."""
+    """L1 in log2-space. Targets clipped to [MIN_LOSS, MAX_LOSS]; preds left
+    as-is so predictions outside the range still get a gradient.
+
+    L1 rather than L2 so the optimum is the conditional median — the
+    search also uses median_score, and a configuration that's great
+    half the time and diverges the other half should be rated by its
+    good runs, not their average with MAX.
+    """
     targets = np.clip(targets, MIN_LOSS, MAX_LOSS)
     log_targets = np.log2(targets)
-    return float(np.mean((preds_log - log_targets) ** 2))
+    return float(np.mean(np.abs(preds_log - log_targets)))
 
 
 def _format_loss(loss: float) -> str:
-    """Format an L2-log2 loss with its geometric-RMSE relative-error interpretation."""
-    rel = (2.0 ** np.sqrt(loss) - 1.0) * 100.0
+    """Format an L1-log2 loss with its relative-error interpretation."""
+    rel = (2.0 ** loss - 1.0) * 100.0
     return f"{loss:.4f} (~{rel:.1f}% typical error)"
 
 
@@ -50,32 +56,32 @@ def _log_clip_targets(losses: np.ndarray) -> np.ndarray:
     return np.log2(np.clip(losses, MIN_LOSS, MAX_LOSS))
 
 
-def _train_mean_predictor(
+def _train_median_predictor(
     train_data: list[tuple[Configuration, float]],
 ) -> float:
-    """Best-constant baseline: mean of log-clipped training losses."""
+    """Best-constant baseline for L1: median of log-clipped training losses."""
     train_targets = np.array([loss for _, loss in train_data])
-    return float(np.mean(_log_clip_targets(train_targets)))
+    return float(np.median(_log_clip_targets(train_targets)))
 
 
 def _within_conf_oracle(
     val_data: list[tuple[Configuration, float]],
     val_log_targets: np.ndarray,
 ) -> np.ndarray:
-    """For each val run, predict the mean log-loss of its conf's other val runs.
+    """For each val run, predict the median log-loss of its conf's val runs.
 
-    This is the inherent within-conf variance in log space — the
-    theoretical floor for any conf-only predictor, since runs of the
-    same conf are indistinguishable from the model's point of view.
+    The L1 floor for any conf-only predictor — runs of the same conf
+    are indistinguishable from the model's point of view, so the best
+    we can do is the per-conf median.
     """
     by_conf: dict[Configuration, list[int]] = {}
     for i, (conf, _) in enumerate(val_data):
         by_conf.setdefault(conf, []).append(i)
     preds = np.empty(len(val_data))
     for idxs in by_conf.values():
-        mean = float(np.mean(val_log_targets[idxs]))
+        m = float(np.median(val_log_targets[idxs]))
         for i in idxs:
-            preds[i] = mean
+            preds[i] = m
     return preds
 
 
@@ -95,20 +101,20 @@ def main(args: argparse.Namespace):
     val_targets = np.array([loss for _, loss in val_data])
     val_log_targets = _log_clip_targets(val_targets)
 
-    # Baseline: predict the mean of log-clipped training losses.
-    baseline_const = _train_mean_predictor(train_data)
+    # Baseline: predict the median of log-clipped training losses.
+    baseline_const = _train_median_predictor(train_data)
     baseline_preds = np.full(len(val_data), baseline_const)
-    baseline_loss = _eval_log_l2(baseline_preds, val_targets)
+    baseline_loss = _eval_log_l1(baseline_preds, val_targets)
     logging.info(
-        f"Baseline (predict train mean = {baseline_const:.4f}): "
+        f"Baseline (predict train median = {baseline_const:.4f}): "
         f"val {_format_loss(baseline_loss)}"
     )
 
-    # Oracle lower bound: within-conf run-to-run variance.
+    # Oracle lower bound: within-conf run-to-run absolute deviation.
     oracle_preds = _within_conf_oracle(val_data, val_log_targets)
-    oracle_loss = _eval_log_l2(oracle_preds, val_targets)
+    oracle_loss = _eval_log_l1(oracle_preds, val_targets)
     logging.info(
-        f"Oracle (per-conf mean over val runs): "
+        f"Oracle (per-conf median over val runs): "
         f"val {_format_loss(oracle_loss)}"
     )
 

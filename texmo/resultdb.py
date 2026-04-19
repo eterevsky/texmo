@@ -51,7 +51,7 @@ def _make_template_conditions(template: Template) -> tuple[list[str], dict]:
         params['lr_min'] = template.lr.min
     if template.lr.max < INF:
         conditions.append('lr <= :lr_max')
-        params['lr_max'] = template.lr.min
+        params['lr_max'] = template.lr.max
     if template.length.min > 1:
         conditions.append('length >= :length_min')
         params['length_min'] = template.length.min
@@ -80,6 +80,8 @@ def _make_template_conditions(template: Template) -> tuple[list[str], dict]:
         conditions.append('decay >= :decay_min')
         params['decay_min'] = template.decay.min
     if template.decay.max < 1:
+        # decay is bounded at 1 by the Template; when max == 1, the
+        # condition is tautologically true for well-formed data.
         conditions.append('decay <= :decay_max')
         params['decay_max'] = template.decay.max
     return conditions, params

@@ -162,16 +162,22 @@ class Configuration(object):
 
 class Bounds(object):
     def __init__(
-        self, limits: Optional[float | tuple[float, float]], min_value: float
+        self,
+        limits: Optional[float | tuple[float, float]],
+        min_value: float,
+        max_value: float = INF,
     ):
         if limits is None:
             self.min = min_value
-            self.max = INF
+            self.max = max_value
         else:
             try:
                 self.min, self.max = limits
             except TypeError:
                 self.min = self.max = limits
+            # Enforce system-level bounds (e.g. decay ≤ 1).
+            self.min = max(self.min, min_value)
+            self.max = min(self.max, max_value)
 
     def __str__(self) -> str:
         return f'({self.min}, {self.max})'
@@ -253,7 +259,7 @@ class Template(object):
         self.batch = Bounds(batch, 1)
         self.precision = precision
         self.lr = Bounds(lr, 0)
-        self.decay = Bounds(decay, 0)
+        self.decay = Bounds(decay, 0, max_value=1)
         self.steps = Bounds(steps, 2)
 
         self._conf_neighbors_cache = {}

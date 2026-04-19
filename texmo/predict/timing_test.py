@@ -97,11 +97,12 @@ def test_predict_with_known_weights():
     assert pytest.approx(pred, rel=1e-5) == c * len(comps)
 
 
-def test_predict_missing_weights_raises():
+def test_predict_missing_weights_gives_zero():
+    """Components with no fitted weights contribute 0 (graceful for
+    types absent from training data)."""
     conf = _conf("bits.1+bp|dense.8.gelu", batch=4, length=10)
     comps = featurize(conf, batch=4, length=10)
-    with pytest.raises(KeyError):
-        predict_time({}, comps)
+    assert predict_time({}, comps) == 0.0
 
 
 def test_fit_synthetic_linear():

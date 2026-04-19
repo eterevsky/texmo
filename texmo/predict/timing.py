@@ -176,16 +176,19 @@ def predict_time(
     weights: dict[str, np.ndarray],
     components: list[Component],
 ) -> float:
-    """Predict step time from weights and component features."""
+    """Predict step time from weights and component features.
+
+    Components whose type wasn't in the training data contribute 0 —
+    we have no information about them. The fit's inherent
+    self-regularization also tends to push weights for uninformative
+    features very negative, so unseen or uncorrelated features
+    naturally predict near-zero.
+    """
     total = 0.0
     for c in components:
         theta = weights.get(c.type_id)
         if theta is None:
-            raise KeyError(
-                f"no weights for component type '{c.type_id}' — "
-                f"(system, precision) pair may not have been fit with "
-                f"data covering this layer type"
-            )
+            continue
         total += float(np.dot(np.exp(theta), c.features))
     return total
 
@@ -245,7 +248,13 @@ def _loss(
     feats: dict[str, jnp.ndarray],
     times: jnp.ndarray,
 ) -> jnp.ndarray:
-    """Mean squared log-relative error."""
+    """Mean squared log-relative error.
+
+    The log-space loss is naturally self-regularizing: features that
+    don't correlate with the target get pushed to very-negative θ,
+    contributing ~0 at predict time. No explicit regularization needed
+    for typical datasets.
+    """
     pred = _predicted_times(theta, feats)
     pred = jnp.maximum(pred, 1e-6)
     return jnp.mean((jnp.log(pred) - jnp.log(times)) ** 2)

@@ -86,7 +86,11 @@ def test_refit_writes_predicted_estimates(tmp_path):
         assert est is not None
         time_s, source = est
         assert source == "predicted"
-        assert time_s > 0
+        # Predicted estimate stores total train_time (≈ (steps-1) *
+        # per_step), not per-step. For our seeded runs (steps=100,
+        # per_step ≈ 0.01) that's ≈ 1 s; a per-step value would be ≈
+        # 0.01 s. Guard against the units regression.
+        assert time_s > 0.1, f"time_s={time_s} looks like per-step, not total"
 
 
 def test_refit_keeps_median_estimates(tmp_path):
@@ -140,6 +144,9 @@ def test_bootstrap_fits_all_pairs():
         est = db.get_time_estimate(unrun_id, system)
         assert est is not None, f"missing estimate for {system}"
         assert est[1] == "predicted"
+        assert est[0] > 0.1, (
+            f"time_s={est[0]} on {system} looks like per-step, not total"
+        )
 
 
 def test_bootstrap_backfills_medians():

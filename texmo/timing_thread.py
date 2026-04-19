@@ -51,9 +51,12 @@ def _refresh_estimates(
     if preds is None:
         # Below MIN_SAMPLES — no model yet, nothing to predict with.
         return
+    # The model predicts per-step time; `conf_time_estimate.time_s`
+    # stores total train_time to match the median side, so multiply
+    # by (steps - 1).
     rows = [
-        (conf_id, system, float(preds[i]), 'predicted')
-        for i, (conf_id, _) in enumerate(to_predict)
+        (conf_id, system, float(preds[i]) * (conf.steps - 1), 'predicted')
+        for i, (conf_id, conf) in enumerate(to_predict)
     ]
     db.upsert_time_estimates(rows)
     logging.info(

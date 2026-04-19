@@ -3,8 +3,6 @@ import random
 from math import log2
 from typing import Optional
 
-from rich.table import Table
-
 from . import latency
 from .common import INF, itoa3, ttoa3
 from .configuration import Configuration, Template, conf_neighbors

@@ -175,8 +175,7 @@ class Bounds(object):
                 self.min, self.max = limits
             except TypeError:
                 self.min = self.max = limits
-            # Enforce system-level bounds (e.g. decay ≤ 1).
-            self.min = max(self.min, min_value)
+            # Enforce system-level upper bound (e.g. decay ≤ 1).
             self.max = min(self.max, max_value)
 
     def __str__(self) -> str:

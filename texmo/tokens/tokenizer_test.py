@@ -1,4 +1,4 @@
-from texmo.tokens import TokenSet, Tokenizer
+from texmo.tokens import Tokenizer, TokenSet
 
 
 def _tokenize(string, tokens, fallback_bits=4):

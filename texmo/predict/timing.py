@@ -39,7 +39,6 @@ from ..layers.skip import SkipDef
 from ..layers.suffix import SuffixDef
 from ..precision import Precision
 
-
 # -- Feature extractors. Each returns a numpy array of features for
 #    one component. Different component types have different feature
 #    sets (and thus different weight-vector sizes).

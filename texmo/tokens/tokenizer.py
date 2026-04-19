@@ -1,6 +1,5 @@
-from .tokenset import TokenSet
 from .processing import process, unprocess
-from .. import latency
+from .tokenset import TokenSet
 
 
 class Span(object):

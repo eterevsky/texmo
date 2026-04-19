@@ -1,3 +1,4 @@
+from texmo.common import INF
 from texmo.configuration import (
     Configuration,
     Template,
@@ -5,7 +6,6 @@ from texmo.configuration import (
 )
 from texmo.model import build_model_def
 from texmo.precision import Precision
-from texmo.common import INF
 
 
 def _md(spec):

@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
 import torch
-import torch.nn as nn
 from torch import Tensor
 
 from ..common import is_power2_int

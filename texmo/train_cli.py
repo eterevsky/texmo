@@ -1,17 +1,15 @@
 import argparse
 import logging
-import os
 
 import matplotlib.pyplot as plt
 import numpy as np
-from rich import print as pprint
 
 from .configuration import Configuration
 from .dataset import DataSet
 from .manager import Manager, create_manager
 from .model import build_model_def
 from .precision import Precision
-from .tokens import TokenSet, get_tokenizer, set_tokens_dir
+from .tokens import set_tokens_dir
 
 
 def show_loss_graph(manager: Manager):

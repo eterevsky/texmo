@@ -1,11 +1,14 @@
 import logging
-import mmap
-import numpy as np
 import os
 
-from .tokenset import TokenSet, Token
+from .bits_tokenizer import (
+    BitsTokenizer1,
+    BitsTokenizer2,
+    BitsTokenizer4,
+    BytesTokenizer,
+)
 from .tokenizer import Tokenizer
-from .bits_tokenizer import BitsTokenizer1, BitsTokenizer2, BitsTokenizer4, BytesTokenizer
+from .tokenset import TokenSet
 
 
 def _build_literal_bytes() -> TokenSet:

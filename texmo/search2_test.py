@@ -2,6 +2,7 @@ from copy import deepcopy
 
 from .search2 import _generate_limits
 
+
 def test_generate_limits():
     limits = []
     for seq in _generate_limits():

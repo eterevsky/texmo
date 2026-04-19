@@ -1,11 +1,10 @@
 from collections import defaultdict
-from statistics import median, StatisticsError
-from typing import Optional
 from itertools import chain
+from statistics import median
+from typing import Optional
 
 from .configuration import Configuration
 from .run import Run
-
 
 Self = ()
 

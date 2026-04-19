@@ -1,12 +1,12 @@
-from copy import copy
 import logging
 import os
 import pickle
+from copy import copy
 
 from .configuration import Configuration, conf_to_dict
 from .model2 import Weights
-from .run import Run
 from .resultdb import ResultDB
+from .run import Run
 
 
 class Checkpoint(object):

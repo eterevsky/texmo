@@ -1,4 +1,3 @@
-import jax
 import jax.numpy as jnp
 import numpy as np
 import torch
@@ -6,7 +5,6 @@ import torch
 from texmo.layers.input_bits import InputBitsDef
 from texmo.model import ModelDef
 from texmo.precision import Precision
-
 
 # -- bits.1 (raw bit, no position) --
 

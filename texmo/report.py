@@ -1,16 +1,10 @@
 import argparse
-import logging
-import math
 from io import StringIO
 
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-
-from .resultdb import ConfScore, ResultDB
-from .configuration import Template
 from .common import INF, console, ttoa3
+from .configuration import Template
+from .resultdb import ResultDB
 from .tokens import set_tokens_dir
-
 
 # def max_points(result_set: ResultSet, t: int, maxx: int):
 #     x = []

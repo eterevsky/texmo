@@ -2,12 +2,11 @@
 
 from typing import Optional
 
-from math import isnan
 import numpy as np
 
-from .common import INF, ttoa3
-from .tokens import TokenSet
+from .common import ttoa3
 from .predict.loss_trend import LossTrendBase
+from .tokens import TokenSet
 
 
 class Checkpoint:

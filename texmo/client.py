@@ -1,15 +1,15 @@
 import argparse
-import json
 import logging
 import math
-import requests
 import time
+
 import numpy as np
+import requests
 
 from .common import ttoa3
 from .configuration import Configuration
 from .dataset import DataSet, DataSetWrapper
-from .latency import timer, report
+from .latency import report, timer
 from .manager import create_manager
 from .tokens import set_tokens_dir
 

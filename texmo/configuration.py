@@ -1,12 +1,12 @@
 import argparse
-import re
-from typing import Optional, Iterable
 import math
+import re
+from typing import Iterable, Optional
 
+from . import latency
 from .common import INF, itoa3
 from .model import ModelDef, build_model_def
 from .precision import Precision
-from . import latency
 from .tokens.tokenizer import Tokenizer
 
 

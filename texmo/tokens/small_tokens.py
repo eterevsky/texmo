@@ -1,7 +1,4 @@
-from dataclasses import dataclass
 import json
-
-from ..common import INF
 
 
 class Token(object):

@@ -1,5 +1,4 @@
 import logging
-
 from statistics import quantiles
 from time import perf_counter_ns
 

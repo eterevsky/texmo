@@ -1,5 +1,5 @@
-import torch
 import numpy as np
+import torch
 
 from texmo.layers.input_bytes import InputBytesDef
 from texmo.precision import Precision

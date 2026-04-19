@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import torch
 
-from texmo.layers.suffix import SuffixDef, SuffixModule
+from texmo.layers.suffix import SuffixDef
 from texmo.model import ModelDef
 from texmo.precision import Precision
 

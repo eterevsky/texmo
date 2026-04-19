@@ -3,7 +3,6 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 
-
 LayerWeights = Any  # pytree of jax.Array, or None
 LayerState = Any    # pytree of jax.Array, or None
 

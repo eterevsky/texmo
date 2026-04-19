@@ -1,9 +1,10 @@
 import mmap
-import numpy as np
 from typing import Optional
 
-from .tokenset import CharsTokenSet
+import numpy as np
+
 from .tokenizer import process, unprocess
+from .tokenset import CharsTokenSet
 
 
 class CharsTokenizer(object):

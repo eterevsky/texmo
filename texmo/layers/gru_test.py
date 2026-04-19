@@ -5,7 +5,6 @@ import torch
 
 from texmo.layers.gru import GruDef, MgruDef, MinGruDef
 
-
 # -- GRU --
 
 def test_gru_def_properties():

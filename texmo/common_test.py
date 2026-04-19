@@ -1,4 +1,4 @@
-from texmo.common import is_power2, is_power2_int, power2_neighbors, itoa3, ttoa3
+from texmo.common import is_power2, is_power2_int, itoa3, power2_neighbors, ttoa3
 
 
 def test_itoa3():

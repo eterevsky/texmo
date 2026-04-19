@@ -30,6 +30,11 @@ torch = [
 [tool.pytest.ini_options]
 testpaths = ["texmo"]
 
+[tool.ruff.lint]
+# Only sort imports and flag unused imports. Other warnings were
+# mostly noise for this project.
+select = ["I", "F401"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.4.2",

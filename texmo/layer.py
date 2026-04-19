@@ -7,7 +7,6 @@ from torch import Tensor
 from .common import power2_neighbors
 from .layer_jax import LayerJax
 
-
 LayerState = Any
 
 

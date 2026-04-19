@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-import torch
 import torch.nn.functional as F
 from torch import Tensor
 

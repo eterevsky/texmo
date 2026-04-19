@@ -3,8 +3,8 @@ import os
 import numpy as np
 import pytest
 
-from texmo.tokens import set_tokens_dir
 from texmo.dataset import DataSet, DataSetWrapper
+from texmo.tokens import set_tokens_dir
 
 set_tokens_dir(os.path.join(os.path.dirname(__file__), "../tokens"))
 

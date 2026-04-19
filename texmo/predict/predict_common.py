@@ -1,4 +1,5 @@
 import math
+
 import numpy as np
 
 # We aren't differentiating losses above 10 bits per byte.

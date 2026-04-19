@@ -1,15 +1,13 @@
 import math
 from itertools import chain
+from typing import Iterable, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from typing import Iterable, Optional
 
 from .layer import LayerDef, LayerModule, LayerState
-from .model_jax import ModelJax
-from .precision import Precision
 from .layers.dense import DenseDef, DenseModule
 from .layers.gru import GruDef, MgruDef, MinGruDef
 from .layers.input_bits import InputBitsDef, InputBitsModule
@@ -20,6 +18,8 @@ from .layers.norm import NormDef
 from .layers.rnn import RnnDef
 from .layers.skip import SkipDef, SkipModule
 from .layers.suffix import SuffixDef
+from .model_jax import ModelJax
+from .precision import Precision
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
 

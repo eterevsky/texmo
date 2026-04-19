@@ -6,7 +6,6 @@ from typing import Optional
 import numpy as np
 
 from .configuration import Configuration
-from .common import INF
 
 
 def _round_time(t):

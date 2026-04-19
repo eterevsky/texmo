@@ -1,8 +1,6 @@
-from collections import namedtuple
 from math import log2
 
 from ..common import total_size
-
 
 _layers = []
 _activations = []

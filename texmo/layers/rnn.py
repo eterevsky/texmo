@@ -10,7 +10,6 @@ from ..common import is_power2_int
 from ..layer import LayerDef, LayerJax, LayerModule, LayerState
 from ..layer_jax import LayerWeights, xavier_uniform
 
-
 _JAX_ACTIVATIONS = {
     "relu": jax_nn.relu,
     "tanh": jnp.tanh,

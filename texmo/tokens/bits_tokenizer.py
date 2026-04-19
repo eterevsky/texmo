@@ -1,5 +1,4 @@
 import numpy as np
-from rich import print as pprint
 
 
 class BitsTokenSet:

@@ -1,13 +1,14 @@
 import logging
 import random
-from math import log2, sqrt
-from rich.table import Table
+from math import log2
 from typing import Optional
+
+from rich.table import Table
 
 from . import latency
 from .common import INF, itoa3, ttoa3
 from .configuration import Configuration, Template, conf_neighbors
-from .resultdb import ResultDB, ConfScore
+from .resultdb import ConfScore, ResultDB
 from .run import Run
 
 

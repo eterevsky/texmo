@@ -6,7 +6,6 @@ from torch import Tensor
 
 from ..precision import Precision
 
-
 # Number of bits used to encode the bit chunk position within a byte.
 _BP = {1: 3, 2: 2, 4: 1, 8: 0}
 

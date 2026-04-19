@@ -5,7 +5,6 @@ import torch
 
 from texmo.layers.latent import LatentDef, LrnnDef
 
-
 # -- LatentDef --
 
 def test_latent_def_properties():

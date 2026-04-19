@@ -1,6 +1,4 @@
 import json
-import numpy as np
-from typing import Optional
 
 
 def parse_token_set_name(name: str) -> tuple[int, str, str]:

@@ -6,7 +6,6 @@ ModelJax.
 """
 
 import jax
-import torch.nn as nn
 
 from ..layer import LayerDef, LayerJax, LayerModule, LayerState
 from ..layer_jax import LayerWeights

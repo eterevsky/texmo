@@ -1,6 +1,5 @@
 import regex
 
-
 WORD_BOUNDARY = regex.compile(r"(?<=\P{L})(?=\p{L})|(?<=\p{L})(?=\P{L})")
 CAPITALIZED_MARKER = "\x14"
 ALLCAPS_MARKER = "\x15"

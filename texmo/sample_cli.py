@@ -1,12 +1,9 @@
 import argparse
-import mmap
-import os
-import random
 import time
 
+from . import latency
 from .common import itoa3
 from .dataset import DataSet
-from . import latency
 from .tokens import get_tokenizer, set_tokens_dir
 
 

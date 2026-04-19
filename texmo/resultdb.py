@@ -7,12 +7,11 @@ from collections.abc import Iterable
 from datetime import datetime
 from statistics import StatisticsError, median
 from typing import Optional
-from urllib.parse import urlparse
 
 import numpy as np
 
 from . import latency
-from .common import INF, console
+from .common import INF
 from .configuration import Configuration, Precision, Template
 from .model import build_model_def
 from .precision import Precision

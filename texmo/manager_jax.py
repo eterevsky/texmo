@@ -8,8 +8,8 @@ import optax
 from .manager import Manager
 from .model import build_model_def
 from .model_jax import ModelJax, Weights
-from .predict import LossTrend
 from .precision import Precision
+from .predict import LossTrend
 from .run import Run
 from .tokens import get_tokenizer
 

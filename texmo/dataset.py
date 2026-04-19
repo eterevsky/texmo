@@ -1,17 +1,16 @@
+import itertools
 import logging
 import mmap
-from typing import Any
-import numpy as np
 import random
-import itertools
-from rich import print as pprint
 from queue import Queue
-from threading import Thread, Lock
+from threading import Lock, Thread
+
+import numpy as np
 
 from .common import itoa3
+from .latency import timer
 from .tokens import get_tokenizer
 from .tokens.processing import process
-from .latency import timer
 
 
 def _open_mmap(path: str) -> tuple["file", mmap.mmap]:

@@ -329,7 +329,7 @@ class ResultDB(object):
         """Finds the conf in the db and returns the configuration id."""
         with latency.timer('ResultDB.find_or_add_conf'):
             cur = self._db.cursor()
-            cur.execute('BEGIN TRANSACTION')
+            cur.execute('BEGIN IMMEDIATE')
             conf_id = self._find_or_add_conf(cur, conf)
             cur.execute('COMMIT')
             return conf_id
@@ -419,7 +419,7 @@ class ResultDB(object):
         Returns the number of runs that were deleted.
         """
         cur = self._db.cursor()
-        cur.execute('BEGIN TRANSACTION')
+        cur.execute('BEGIN IMMEDIATE')
 
         # Find affected confs before deleting the runs.
         cur.execute(
@@ -455,7 +455,7 @@ class ResultDB(object):
         timestamp: Optional[datetime],
     ):
         cur = self._db.cursor()
-        cur.execute('BEGIN TRANSACTION')
+        cur.execute('BEGIN IMMEDIATE')
 
         if conf_id is None:
             conf_id = self._find_or_add_conf(cur, conf)
@@ -925,7 +925,7 @@ class ResultDB(object):
     ):
         """Bulk insert/replace estimates. `rows` is (conf_id, system, time_s, source)."""
         cur = self._db.cursor()
-        cur.execute('BEGIN TRANSACTION')
+        cur.execute('BEGIN IMMEDIATE')
         cur.executemany(_UPSERT_TIME_ESTIMATE, [
             {'conf_id': cid, 'system': s, 'time_s': t, 'source': src}
             for (cid, s, t, src) in rows

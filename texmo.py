@@ -12,7 +12,7 @@ jax.config.update('jax_platforms', config.JAX_PLATFORMS)
 
 from texmo import client, db_cli, latency, report, sample_cli, server, train_cli
 from texmo.common import console
-from texmo.predict import time_cli
+from texmo.predict import loss_cli, time_cli
 from texmo.tokens import small_tokens
 
 
@@ -88,6 +88,12 @@ def parse_args():
         "time", help="Predict the time that it will take to train a configuration"
     )
     time_cli.init_args(parser_predict_time, config)
+
+    parser_predict_loss = subparsers.add_parser(
+        "loss",
+        help="Train and evaluate a loss-prediction model",
+    )
+    loss_cli.init_args(parser_predict_loss, config)
 
     parser_help = subparsers.add_parser("help")
     parser_help.set_defaults(func=lambda _: help(parser), parser=parser)

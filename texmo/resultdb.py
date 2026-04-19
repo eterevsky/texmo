@@ -13,8 +13,7 @@ import numpy as np
 
 from . import latency
 from .common import INF
-from .configuration import Configuration, Precision, Template
-from .model import build_model_def
+from .configuration import Configuration, Template
 from .precision import Precision
 from .run import Run
 
@@ -106,17 +105,9 @@ class ConfScore(object):
 
     @staticmethod
     def _from_row(row: sqlite3.Row, system: Optional[str] = None) -> ConfScore:
-        precision = Precision(row['precision'])
-        model = build_model_def(row['spec'], precision=precision)
-
         if system is None:
             system = row['system']
-
-        conf = Configuration(
-            model, lr=row['lr'], length=row['length'],
-            batch=row['batch'], steps=row['steps'],
-            decay=row['decay']
-        )
+        conf = Configuration.from_dict(row)
         return ConfScore(
             row['conf_id'],
             conf,
@@ -792,16 +783,9 @@ class ResultDB(object):
         """
         cur = self._db.execute(query, params)
         for row in cur:
-            precision = Precision(row['precision'])
-            model = build_model_def(row['spec'], precision=precision)
-            conf = Configuration(
-                model=model, lr=row['lr'], length=row['length'],
-                batch=row['batch'], steps=row['steps'],
-                decay=row['decay'],
-            )
             yield ConfWithRuns(
                 conf_id=row['conf_id'],
-                conf=conf,
+                conf=Configuration.from_dict(row),
                 median_score=row['median_score'],
                 time_estimate=row['time_estimate'],
                 total_runs=row['total_runs'],
@@ -823,13 +807,7 @@ class ResultDB(object):
         for row in cur:
             with latency.timer('ResultDB.get_confs_runs-row'):
                 conf_id = row['conf_id']
-
-                precision = Precision(row['precision'])
-                model = build_model_def(row['spec'], precision=precision)
-                conf = Configuration(model=model,
-                                      lr=row['lr'], length=row['length'],
-                                      batch=row['batch'], steps=row['steps'],
-                                      decay=row['decay'])
+                conf = Configuration.from_dict(row)
 
                 step_loss = _unpack_ndarray(row['step_loss'])
                 loss_trend = _build_loss_trend(
@@ -876,14 +854,29 @@ class ResultDB(object):
             {'system': system, 'precision': str(precision)},
         )
         for row in cur:
-            precision_v = Precision(row['precision'])
-            model = build_model_def(row['spec'], precision=precision_v)
-            conf = Configuration(
-                model=model, lr=row['lr'], length=row['length'],
-                batch=row['batch'], steps=row['steps'], decay=row['decay'],
-            )
+            conf = Configuration.from_dict(row)
             run = Run(system=system, train_time=row['train_time'])
             yield conf, run
+
+    def iter_labeled_runs(
+        self,
+    ) -> Iterable[tuple[int, Configuration, float]]:
+        """Yield (conf_id, Configuration, run_loss) for every run with a loss.
+
+        Used by loss-prediction training: one example per run, the
+        caller decides how to split (typically by conf_id).
+        """
+        cur = self._db.execute(
+            """
+            SELECT conf.id AS conf_id,
+                   spec, precision, lr, length, batch, steps, decay,
+                   run.loss AS loss
+            FROM conf JOIN run ON run.conf_id = conf.id
+            WHERE run.loss IS NOT NULL
+            """
+        )
+        for row in cur:
+            yield row['conf_id'], Configuration.from_dict(row), row['loss']
 
     def iter_confs_by_precision(
         self, precision: Precision
@@ -897,13 +890,7 @@ class ResultDB(object):
             {'precision': str(precision)},
         )
         for row in cur:
-            precision_v = Precision(row['precision'])
-            model = build_model_def(row['spec'], precision=precision_v)
-            conf = Configuration(
-                model=model, lr=row['lr'], length=row['length'],
-                batch=row['batch'], steps=row['steps'], decay=row['decay'],
-            )
-            yield row['id'], conf
+            yield row['id'], Configuration.from_dict(row)
 
     def get_conf_ids_with_median_time(
         self, system: str, precision: Precision

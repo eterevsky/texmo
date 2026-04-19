@@ -244,6 +244,12 @@ class ResultDB(object):
         if not is_memory and not readonly:
             self._db.execute('PRAGMA journal_mode=WAL')
 
+        # Two writers (search thread + timing thread) still serialize on
+        # the write lock. Without a busy_timeout, the loser of a race
+        # hits SQLITE_BUSY immediately. 30 s is generous enough to absorb
+        # large batched upserts from the timing thread.
+        self._db.execute('PRAGMA busy_timeout = 30000')
+
         # Cache: Configuration -> conf_id (populated lazily)
         self._conf_id_cache: dict[Configuration, int | None] = {}
 

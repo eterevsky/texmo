@@ -14,10 +14,6 @@ Given a parameter budget N and compute budget T, answer:
   `nn.MultiheadAttention` or `nn.TransformerEncoderLayer`. Key decisions:
   causal masking, position encoding (RoPE?), head count as a search axis.
 
-* **Add residual connections.** Possibly make a `skip.N.add`/`skip.N.stack`
-  layer that takes current activations, skip the next N layers and either
-  adds them (if the dimensions match), or stacks them to the later activations.
-
 * **Loss prediction model** taking architecture + metaparameters as input.
   Predict expected loss for a configuration without running it. Could use
   an RNN over the layer sequence, or something like a recurrent random

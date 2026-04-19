@@ -387,7 +387,6 @@ class ResultDB(object):
             for row in cur.fetchall():
                 conf_id = row['conf_id']
                 system = row['system']
-                logging.info(f'{conf_id} {system}')
                 self._update_scores(cur, conf_id, system)
             self.commit()
 

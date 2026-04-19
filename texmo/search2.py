@@ -45,8 +45,9 @@ def time_budget_report(
             f'{c.median_score:.4f} '
             f'({c.total_runs}|{c.system_runs})'
         )
-        lines.append(f'    {score_runs:<32} {t}  {c.conf.aligned_str()}')
+        lines.append(f'    {score_runs:<12} {t}  {c.conf.aligned_str()}')
     return "\n".join(lines)
+
 
 
 def _generate_limits():

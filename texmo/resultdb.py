@@ -4,6 +4,7 @@ import os
 import re
 import sqlite3
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
 from statistics import StatisticsError, median
 from typing import Optional
@@ -124,6 +125,21 @@ class ConfScore(object):
             median_time=row['median_time'],
             num_runs=row['num_runs'],
         )
+
+
+@dataclass
+class ConfWithRuns:
+    """Candidate for the time-budget search strategy.
+
+    Unlike ConfScore, carries both total and per-system run counts and
+    a time estimate from any source (median or predicted).
+    """
+    conf_id: int
+    conf: Configuration
+    median_score: float
+    time_estimate: float
+    total_runs: int
+    system_runs: int
 
 
 def _regexp(pattern, input_string):
@@ -735,6 +751,62 @@ class ResultDB(object):
 
         for row in cur:
             yield ConfScore._from_row(row, system)
+
+    def confs_under_time(
+        self,
+        template: Template,
+        system: str,
+        max_weights: int,
+        max_time: float,
+    ) -> Iterable[ConfWithRuns]:
+        """Yield scored confs with time_estimate <= max_time, ordered by score.
+
+        Time estimate comes from `conf_time_estimate` regardless of
+        source (median or predicted). Confs without any score
+        (median_score IS NULL) are excluded.
+        """
+        conditions, params = _make_template_conditions(template)
+        conditions.append('median_score IS NOT NULL')
+        conditions.append('weights <= :max_weights')
+        conditions.append('cte.time_s <= :max_time')
+        params['max_weights'] = max_weights
+        params['max_time'] = max_time
+        params['system'] = system
+        where = 'WHERE ' + ' AND '.join(conditions)
+
+        query = f"""
+            SELECT conf.id AS conf_id,
+                   spec, precision, lr, decay, length, batch, steps,
+                   median_score,
+                   cte.time_s AS time_estimate,
+                   (SELECT COUNT(*) FROM run
+                    WHERE conf_id = conf.id) AS total_runs,
+                   (SELECT COUNT(*) FROM run
+                    WHERE conf_id = conf.id AND system = :system
+                   ) AS system_runs
+            FROM conf
+            JOIN conf_time_estimate cte
+                ON cte.conf_id = conf.id AND cte.system = :system
+            {where}
+            ORDER BY median_score ASC
+        """
+        cur = self._db.execute(query, params)
+        for row in cur:
+            precision = Precision(row['precision'])
+            model = build_model_def(row['spec'], precision=precision)
+            conf = Configuration(
+                model=model, lr=row['lr'], length=row['length'],
+                batch=row['batch'], steps=row['steps'],
+                decay=row['decay'],
+            )
+            yield ConfWithRuns(
+                conf_id=row['conf_id'],
+                conf=conf,
+                median_score=row['median_score'],
+                time_estimate=row['time_estimate'],
+                total_runs=row['total_runs'],
+                system_runs=row['system_runs'],
+            )
 
     def total_runs(self) -> int:
         cur = self._db.execute('SELECT COUNT(*) AS count FROM run')

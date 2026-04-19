@@ -8,8 +8,12 @@ from rich.table import Table
 from . import latency
 from .common import INF, itoa3, ttoa3
 from .configuration import Configuration, Template, conf_neighbors
-from .resultdb import ConfScore, ResultDB
+from .resultdb import ConfScore, ConfWithRuns, ResultDB
 from .run import Run
+
+# Probability of choosing the time-budget strategy over the top-neighbor
+# one on each select_conf call. The fallback on None still kicks in.
+_TIME_BUDGET_PROB = 0.3
 
 
 def top_confs_report(
@@ -25,36 +29,24 @@ def top_confs_report(
     return "\n".join(lines)
 
 
-def top_confs_report_rich(
-    confs: list[ConfScore], max_weights: int, max_time: float | None, system: str | None
+def time_budget_report(
+    confs: list[ConfWithRuns],
+    max_weights: int,
+    max_time: float,
+    system: str,
 ) -> str:
-    sys = "" if system is None else f" ({system})"
-    t = "" if max_time is None else f" T ≤ {ttoa3(max_time)}"
-    table = Table(title=f"Top confs W ≤ {itoa3(max_weights)}{t}{sys}")
-
-    table.add_column('Model', overflow='fold')
-    table.add_column('P')
-    table.add_column('Len', justify='right')
-    table.add_column('Batch', justify='right')
-    table.add_column('Steps', justify='right')
-    table.add_column('Loss')
-    table.add_column('Time', justify='right')
-
+    lines = [
+        f"Time-budget confs W ≤ {itoa3(max_weights)} "
+        f"T ≤ {ttoa3(max_time)} ({system}):"
+    ]
     for c in confs:
-        t = '?' if c.median_time is None else f'{c.median_time:.3f}'
-        decay = '' if c.conf.decay == 1 else f'*{c.conf.decay:.4f}'
-
-        table.add_row(
-            f'{c.conf.model} ({c.conf.model.num_weights})',
-            str(c.conf.precision),
-            str(c.conf.length),
-            str(c.conf.batch),
-            c.conf.learning_str,
-            str(c.conf.steps),
-            f'{c.median_score:.4f} ({c.num_runs})',
-            t)
-
-    return table
+        t = f'{c.time_estimate:7.3f}s'
+        score_runs = (
+            f'{c.median_score:.4f} '
+            f'({c.total_runs} total, {c.system_runs} on system)'
+        )
+        lines.append(f'    {score_runs:<32} {t}  {c.conf.aligned_str()}')
+    return "\n".join(lines)
 
 
 def _generate_limits():
@@ -110,6 +102,24 @@ def _generate_limits():
             continue
 
         seq[0][0] += 1
+
+
+def _run_limit_sequences():
+    """Sequences of expected total-run counts for the time-budget search.
+
+        iter 1: [1]
+        iter 2: [2, 1, 1]
+        iter 3: [3, 2, 2, 1, 1, 1, 1, 1, 1]
+        iter 4: [4, 3, 3, 2×6, 1×18]
+        ...
+
+    Iter N has length 3^(N-1). Recurrence: iter N = iter N-1 with each
+    value incremented, followed by len(iter N-1) * 2 ones.
+    """
+    seq = [1]
+    for _ in range(7):
+        yield seq
+        seq = [x + 1 for x in seq] + [1] * (2 * len(seq))
 
 
 class Search(object):
@@ -279,17 +289,81 @@ class Search(object):
                                     f'Getting neighbor of conf {j}: {total_runs} total runs < {min_neighbor}')
                                 return neighbor_conf
 
+    def _select_time_budget(
+        self, t: float, max_weights: int, system: str
+    ) -> Optional[Configuration]:
+        """Score-ordered scan with a widening total-runs requirement.
+
+        Pulls confs from the DB lazily in score order — we only
+        instantiate as many as we actually look at across iterations.
+        For each iteration of `_run_limit_sequences`, scan positions
+        until we find a conf whose total_runs is below the iteration's
+        requirement at its position (or which has zero runs on this
+        system). Termination: iteration N's position-0 requirement is
+        N, so once N exceeds candidates[0].total_runs we pick it.
+        """
+        with latency.timer("Search._select_time_budget"):
+            source = iter(self._db.confs_under_time(
+                template=self.template, system=system,
+                max_weights=max_weights, max_time=t,
+            ))
+            candidates: list[ConfWithRuns] = []
+            exhausted = False
+
+            # Materialize the top 10 up front so we can log them like the
+            # neighbor-walk strategy does.
+            while len(candidates) < 10 and not exhausted:
+                try:
+                    candidates.append(next(source))
+                except StopIteration:
+                    exhausted = True
+            if not candidates:
+                return None
+            logging.info(time_budget_report(
+                candidates, max_weights=max_weights, max_time=t,
+                system=system,
+            ))
+
+            for limits in _run_limit_sequences():
+                for i in range(len(limits)):
+                    if i >= len(candidates) and not exhausted:
+                        try:
+                            candidates.append(next(source))
+                        except StopIteration:
+                            exhausted = True
+
+                    if i >= len(candidates):
+                        break
+                    c = candidates[i]
+
+                    if c.system_runs == 0 or c.total_runs < limits[i]:
+                        logging.info(
+                            f'Time-budget conf for {system} at pos {i}: '
+                            f'{c.conf} '
+                            f'(runs: {c.total_runs} total, '
+                            f'{c.system_runs} on system; limit {limits[i]})'
+                        )
+                        return c.conf
+                if exhausted and not candidates:
+                    return None
+
+            return None
+
     def select_conf(self, system: str) -> Optional[Configuration]:
         """Select a configuration to run, or None if nothing matches.
 
-        Returns None when the top-conf search finds nothing and the
-        fallback init_conf either doesn't match the current template
-        or has already been explored enough (>=7 total runs with at
-        least one on this system).
+        Most of the time uses the neighbor-walk strategy on top confs;
+        _TIME_BUDGET_PROB of the time tries the time-budget strategy
+        first and falls back to neighbor-walk if it finds nothing.
         """
         with latency.timer("Search.select_conf"):
             t = self._select_time()
             max_weights = self._select_max_weights(t, system)
+
+            if random.random() < _TIME_BUDGET_PROB:
+                conf = self._select_time_budget(t, max_weights, system)
+                if conf is not None:
+                    return conf
 
             conf = self._select_top_neighbor(t, max_weights, system)
             if conf is not None:

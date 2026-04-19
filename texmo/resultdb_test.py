@@ -236,7 +236,7 @@ def _make_template():
     )
 
 
-def test_clear_system_deletes_runs_and_conf_time(db):
+def test_clear_system_deletes_runs_and_estimates(db):
     conf, _ = _make_conf_run()
     _, r1 = _make_conf_run(loss=1.0, system="rpi")
     _, r2 = _make_conf_run(loss=2.0, system="rpi")
@@ -260,9 +260,9 @@ def test_clear_system_deletes_runs_and_conf_time(db):
     cur = db._db.execute("SELECT COUNT(*) FROM run WHERE system = 'whitebox'")
     assert cur.fetchone()[0] == 1
 
-    # conf_time for rpi is gone.
+    # Time estimates for rpi are gone.
     cur = db._db.execute(
-        "SELECT COUNT(*) FROM conf_time WHERE system = 'rpi'")
+        "SELECT COUNT(*) FROM conf_time_estimate WHERE system = 'rpi'")
     assert cur.fetchone()[0] == 0
 
 
@@ -293,6 +293,70 @@ def test_clear_system_unknown_system(db):
     deleted = db.clear_system("nonexistent")
     assert deleted == 0
     assert db.total_runs() == 1
+
+
+def test_add_run_writes_median_estimate(db):
+    conf, run = _make_conf_run(system="rpi")
+    run.train_time = 5.5
+    db.add_run(conf, run)
+    conf_id = db.get_conf_id(conf)
+    est = db.get_time_estimate(conf_id, "rpi")
+    assert est is not None
+    time_s, source = est
+    assert time_s == pytest.approx(5.5)
+    assert source == "median"
+
+
+def test_predicted_estimate_replaced_by_median_on_add_run(db):
+    conf, _ = _make_conf_run()
+    conf_id = db.find_or_add_conf(conf)
+    # Insert a prediction first.
+    db.upsert_time_estimates([(conf_id, "rpi", 2.0, "predicted")])
+    assert db.get_time_estimate(conf_id, "rpi") == (2.0, "predicted")
+
+    # Adding a run upgrades the estimate to median.
+    _, run = _make_conf_run(system="rpi")
+    run.train_time = 7.0
+    db.add_run(conf, run, conf_id=conf_id)
+    time_s, source = db.get_time_estimate(conf_id, "rpi")
+    assert time_s == pytest.approx(7.0)
+    assert source == "median"
+
+
+def test_iter_confs_by_precision(db):
+    conf_fp32, run_fp32 = _make_conf_run(system="rpi")
+    model_fp16 = build_model_def("bytes|dense.64.gelu", precision=Precision.FP16)
+    conf_fp16 = Configuration(
+        model=model_fp16, lr=0.25, length=128, batch=32, steps=256, decay=1)
+    db.add_run(conf_fp32, run_fp32)
+    db.find_or_add_conf(conf_fp16)
+
+    fp32_confs = list(db.iter_confs_by_precision(Precision.FP32))
+    fp16_confs = list(db.iter_confs_by_precision(Precision.FP16))
+    assert len(fp32_confs) == 1
+    assert len(fp16_confs) == 1
+    assert fp32_confs[0][1] == conf_fp32
+    assert fp16_confs[0][1] == conf_fp16
+
+
+def test_get_runs_for_timing_filters_by_system_and_precision(db):
+    conf, run_rpi = _make_conf_run(system="rpi")
+    run_rpi.train_time = 3.0
+    _, run_whitebox = _make_conf_run(system="whitebox")
+    run_whitebox.train_time = 4.0
+    db.add_run(conf, run_rpi)
+    db.add_run(conf, run_whitebox)
+
+    rpi = list(db.get_runs_for_timing("rpi", Precision.FP32))
+    assert len(rpi) == 1
+    assert rpi[0][0] == conf
+    assert rpi[0][1].system == "rpi"
+    assert rpi[0][1].train_time == pytest.approx(3.0)
+
+    fp16 = list(db.get_runs_for_timing("rpi", Precision.FP16))
+    assert fp16 == []
+
+
 
 
 def _add_runs(db, conf, losses, system, train_time):

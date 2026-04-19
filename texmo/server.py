@@ -4,6 +4,7 @@ import io
 import logging
 import os
 import threading
+from collections import defaultdict
 from queue import Queue
 from typing import Optional
 
@@ -30,7 +31,13 @@ from .latency import get_report, timer
 from .resultdb import ResultDB
 from .run import Run
 from .search2 import Search
+from .timing_thread import TimingThread
 from .tokens import set_tokens_dir
+
+# Threshold of new runs per (system, precision) pair that triggers a
+# timing-model refit. Picked so refits are frequent enough to absorb
+# genuinely new points but not so frequent that fit cost dominates.
+_REFIT_EVERY = 100
 
 
 def build_graph(confs: list[Configuration]) -> bytes:
@@ -148,6 +155,7 @@ class SearchThread(threading.Thread):
         requests_queue: Queue,
         confs_by_system: dict,
         confs_by_system_lock: threading.Lock,
+        timing_queue: Optional[Queue] = None,
     ):
         super().__init__()
         self.db = db
@@ -162,6 +170,9 @@ class SearchThread(threading.Thread):
         self.confs_by_system = confs_by_system
         self.confs_by_system_lock = confs_by_system_lock
         _, self.max_time = train_time
+        self._timing_queue = timing_queue
+        # Per-(system, precision) counter used to throttle timing-model refits.
+        self._run_counter: dict[tuple[str, Precision], int] = defaultdict(int)
 
     def run(self):
         logging.info("Started search thread")
@@ -177,11 +188,21 @@ class SearchThread(threading.Thread):
             elif command == "add":
                 conf, run = args
                 self.search.add_run(conf, run)
+                self._maybe_trigger_refit(run.system, conf.precision)
             elif command == "stop":
                 logging.info("Stopping search thread")
                 break
             else:
                 assert False, f"Unknown command: {command}"
+
+    def _maybe_trigger_refit(self, system: str, precision: Precision):
+        if self._timing_queue is None:
+            return
+        key = (system, precision)
+        self._run_counter[key] += 1
+        if self._run_counter[key] >= _REFIT_EVERY:
+            self._run_counter[key] = 0
+            self._timing_queue.put(("refit", (system, precision)))
 
 
 def _render_bounds(b: Bounds):
@@ -192,7 +213,14 @@ def _render_bounds(b: Bounds):
 
 
 class SearchServer(object):
-    def __init__(self, db: ResultDB, template: Template, train_time: tuple[float, float], default_spec: str):
+    def __init__(
+        self,
+        db: ResultDB,
+        template: Template,
+        train_time: tuple[float, float],
+        default_spec: str,
+        bootstrap_timing: bool = False,
+    ):
         self.db: ResultDB = db
         self.template: Template = template
         self.train_time: tuple[float, float] = train_time
@@ -203,6 +231,12 @@ class SearchServer(object):
         self.confs_by_system: dict[str, Queue] = {}
         self.confs_by_system_lock = threading.Lock()
 
+        self.timing_queue: Queue = Queue()
+        self.timing_thread = TimingThread(db.path, self.timing_queue)
+        self.timing_thread.start()
+        if bootstrap_timing:
+            self.timing_queue.put(("bootstrap", None))
+
         self.search_thread = SearchThread(
             db,
             template,
@@ -211,11 +245,13 @@ class SearchServer(object):
             requests_queue=self.requests_queue,
             confs_by_system=self.confs_by_system,
             confs_by_system_lock=self.confs_by_system_lock,
+            timing_queue=self.timing_queue,
         )
         self.search_thread.start()
 
     def __del__(self):
         self.requests_queue.put(("stop", None))
+        self.timing_queue.put(("stop", None))
 
     def index(self, selected_system: Optional[str] = None):
         if self.template.spec:
@@ -348,6 +384,9 @@ class SearchServer(object):
         self.requests_queue.put(("stop", None))
         self.search_thread.join()
         logging.info("Search thread joined")
+        self.timing_queue.put(("stop", None))
+        self.timing_thread.join()
+        logging.info("Timing thread joined")
 
 
 def main(args: argparse.Namespace):
@@ -360,7 +399,10 @@ def main(args: argparse.Namespace):
     db = ResultDB.from_args(args.db)
     train_time = tuple(map(float, args.train_time.split("-")))
     logging.info(f"T ∈ {train_time} s")
-    server = SearchServer(db, template, train_time, args.default_spec)
+    server = SearchServer(
+        db, template, train_time, args.default_spec,
+        bootstrap_timing=args.bootstrap_timing,
+    )
 
     app = Flask("texmo")
 
@@ -480,5 +522,15 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="range for the training time in seconds",
     )
     parser.add_argument("--default-spec", type=str, default=None, help="default model")
+    parser.add_argument(
+        "--bootstrap-timing",
+        action="store_true",
+        default=False,
+        help=(
+            "On startup, refit timing models for every (system, precision) "
+            "pair with enough data and refresh all time estimates. "
+            "Otherwise, models are fit lazily as new runs accumulate."
+        ),
+    )
 
     parser.set_defaults(func=main)

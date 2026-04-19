@@ -161,9 +161,9 @@ WHERE conf_id = :conf_id
   AND system = :system
 """
 
-_INSERT_MEDIAN_TIME = """
-INSERT OR REPLACE INTO conf_time(conf_id, system, median_time)
-VALUES (:conf_id, :system, :median_time)
+_UPSERT_TIME_ESTIMATE = """
+INSERT OR REPLACE INTO conf_time_estimate(conf_id, system, time_s, source)
+VALUES (:conf_id, :system, :time_s, :source)
 """
 
 _GET_CONFS_RUNS = """
@@ -199,13 +199,15 @@ class ResultDB(object):
             path = ':memory:'
         self._path = path
         self._readonly = readonly
-        exists = path != ':memory:' and os.path.exists(path)
-        if path != ':memory:':
+        # URI mode (file:...) lets tests share an in-memory DB across
+        # connections via cache=shared.
+        is_uri = path.startswith('file:')
+        is_memory = path == ':memory:' or (is_uri and 'mode=memory' in path)
+        if not is_memory:
             logging.info(f'Connecting to results DB {path}')
 
         if readonly:
-            assert path != ':memory:', \
-                "Can't open :memory: database read-only"
+            assert not is_memory, "Can't open in-memory database read-only"
             # Read-only instances are single-threaded by construction —
             # created, used, and closed within a single scope (typically
             # a Flask request handler).
@@ -215,11 +217,20 @@ class ResultDB(object):
             # but used by SearchThread; check_same_thread=False disables
             # SQLite's safety check. By convention only SearchThread
             # touches this connection after construction.
-            self._db = sqlite3.connect(path, check_same_thread=False)
+            self._db = sqlite3.connect(
+                path, uri=is_uri, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.create_function('REGEXP', 2, _regexp)
 
-        if not exists:
+        # Apply schema if no tables exist yet. This is true on a fresh
+        # file DB, on a fresh :memory: DB, and on the first connection
+        # to a shared in-memory DB; subsequent connections to the same
+        # shared DB skip this step.
+        cur = self._db.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='conf'"
+        )
+        if cur.fetchone() is None:
             assert not readonly
             schema_path = os.path.join(
                 os.path.dirname(__file__), 'db.sql'
@@ -228,8 +239,17 @@ class ResultDB(object):
                 self._db.executescript(schema.read())
                 self._db.commit()
 
+        # Enable WAL for file-backed DBs so the timing thread and search
+        # thread can write concurrently without blocking readers.
+        if not is_memory and not readonly:
+            self._db.execute('PRAGMA journal_mode=WAL')
+
         # Cache: Configuration -> conf_id (populated lazily)
         self._conf_id_cache: dict[Configuration, int | None] = {}
+
+    @property
+    def path(self) -> str:
+        return self._path
 
     def open_readonly(self) -> 'ResultDB':
         """Open a new read-only ResultDB on the same database.
@@ -343,12 +363,14 @@ class ResultDB(object):
             except StatisticsError:
                 median_time = None
             if median_time is not None and median_time > 0.0001:
-                cur.execute(_INSERT_MEDIAN_TIME,
-                            {
-                                'median_time': median_time,
-                                'conf_id': conf_id,
-                                'system': system,
-                            })
+                # The median-based estimate supersedes any prediction
+                # previously stored for this (conf, system).
+                cur.execute(_UPSERT_TIME_ESTIMATE, {
+                    'conf_id': conf_id,
+                    'system': system,
+                    'time_s': median_time,
+                    'source': 'median',
+                })
 
     def _update_scores(self, cur: sqlite3.Cursor, conf_id: int, system: str):
         self._update_median_score(cur, conf_id)
@@ -370,7 +392,7 @@ class ResultDB(object):
             self.commit()
 
     def clear_system(self, system: str) -> int:
-        """Delete all runs and conf_time entries for a given system.
+        """Delete all runs and time estimates for a given system.
 
         Recomputes median_score for any affected configurations.
         Returns the number of runs that were deleted.
@@ -392,12 +414,12 @@ class ResultDB(object):
         deleted = cur.rowcount
 
         cur.execute(
-            'DELETE FROM conf_time WHERE system = :system',
+            'DELETE FROM conf_time_estimate WHERE system = :system',
             {'system': system},
         )
 
-        # Recompute median_score for affected confs (median_time for this
-        # system is already gone).
+        # Recompute median_score for affected confs (estimates for this
+        # system are already gone).
         for conf_id in affected_conf_ids:
             self._update_median_score(cur, conf_id)
 
@@ -491,17 +513,19 @@ class ResultDB(object):
         if system is None:
             # Best median_time across all systems, report the winning system.
             time_select = (
-                "(SELECT system FROM conf_time WHERE conf_id=conf.id "
-                " ORDER BY median_time LIMIT 1) AS system, "
-                "(SELECT MIN(median_time) FROM conf_time "
-                " WHERE conf_id=conf.id) AS median_time"
+                "(SELECT system FROM conf_time_estimate "
+                " WHERE conf_id=conf.id AND source='median' "
+                " ORDER BY time_s LIMIT 1) AS system, "
+                "(SELECT MIN(time_s) FROM conf_time_estimate "
+                " WHERE conf_id=conf.id AND source='median') AS median_time"
             )
         else:
             # Median_time on the selected system specifically.
             time_select = (
                 ":system AS system, "
-                "(SELECT median_time FROM conf_time "
-                " WHERE conf_id=conf.id AND system=:system) AS median_time"
+                "(SELECT time_s FROM conf_time_estimate "
+                " WHERE conf_id=conf.id AND system=:system "
+                " AND source='median') AS median_time"
             )
 
         query = f"""
@@ -616,11 +640,13 @@ class ResultDB(object):
                        median_score,
                        (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs,
                        :system AS system,
-                       ct.median_time AS median_time
+                       ct.time_s AS median_time
                 FROM conf
-                JOIN conf_time AS ct ON ct.conf_id = conf.id AND ct.system = :system
+                JOIN conf_time_estimate AS ct
+                    ON ct.conf_id = conf.id AND ct.system = :system
+                    AND ct.source = 'median'
                 {where}
-                ORDER BY ct.median_time ASC
+                ORDER BY ct.time_s ASC
             """
             cur = self._db.execute(query, params)
 
@@ -693,9 +719,10 @@ class ResultDB(object):
             SELECT conf.id AS conf_id, spec, precision, lr, length, batch,
                 decay, steps, median_score,
                 (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs,
-                (SELECT median_time FROM conf_time
+                (SELECT time_s FROM conf_time_estimate
                  WHERE conf_id = conf.id AND system = :system
-                 ORDER BY median_time LIMIT 1) AS median_time
+                   AND source = 'median'
+                 ORDER BY time_s LIMIT 1) AS median_time
             FROM conf {where} ORDER BY median_score ASC {limit}
             """
 
@@ -751,6 +778,96 @@ class ResultDB(object):
                     yield conf_id, conf, run, timestamp
                 else:
                     yield conf_id, conf, run
+
+    def get_runs_for_timing(
+        self, system: str, precision: Precision
+    ) -> Iterable[tuple[Configuration, Run]]:
+        """Yield (conf, run) pairs for fitting a timing model.
+
+        Only the fields the timing model needs are populated on Run:
+        system and train_time. step_loss/loss/loss_trend are omitted.
+        """
+        cur = self._db.execute(
+            """
+            SELECT conf.spec AS spec, conf.precision AS precision,
+                   conf.lr AS lr, conf.length AS length, conf.batch AS batch,
+                   conf.steps AS steps, conf.decay AS decay,
+                   run.train_time AS train_time
+            FROM conf JOIN run ON conf.id = run.conf_id
+            WHERE run.system = :system AND conf.precision = :precision
+            """,
+            {'system': system, 'precision': str(precision)},
+        )
+        for row in cur:
+            precision_v = Precision(row['precision'])
+            model = build_model_def(row['spec'], precision=precision_v)
+            conf = Configuration(
+                model=model, lr=row['lr'], length=row['length'],
+                batch=row['batch'], steps=row['steps'], decay=row['decay'],
+            )
+            run = Run(system=system, train_time=row['train_time'])
+            yield conf, run
+
+    def iter_confs_by_precision(
+        self, precision: Precision
+    ) -> Iterable[tuple[int, Configuration]]:
+        """Yield (conf_id, Configuration) for every conf of the given precision."""
+        cur = self._db.execute(
+            """
+            SELECT id, spec, precision, lr, length, batch, steps, decay
+            FROM conf WHERE precision = :precision
+            """,
+            {'precision': str(precision)},
+        )
+        for row in cur:
+            precision_v = Precision(row['precision'])
+            model = build_model_def(row['spec'], precision=precision_v)
+            conf = Configuration(
+                model=model, lr=row['lr'], length=row['length'],
+                batch=row['batch'], steps=row['steps'], decay=row['decay'],
+            )
+            yield row['id'], conf
+
+    def get_conf_ids_with_median_time(
+        self, system: str, precision: Precision
+    ) -> set[int]:
+        """Return the set of conf_ids with a median_time for this (system, precision)."""
+        cur = self._db.execute(
+            """
+            SELECT conf.id
+            FROM conf JOIN conf_time_estimate ct ON conf.id = ct.conf_id
+            WHERE ct.system = :system AND conf.precision = :precision
+              AND ct.source = 'median'
+            """,
+            {'system': system, 'precision': str(precision)},
+        )
+        return {row[0] for row in cur}
+
+    def upsert_time_estimates(
+        self, rows: Iterable[tuple[int, str, float, str]]
+    ):
+        """Bulk insert/replace estimates. `rows` is (conf_id, system, time_s, source)."""
+        cur = self._db.cursor()
+        cur.execute('BEGIN TRANSACTION')
+        cur.executemany(_UPSERT_TIME_ESTIMATE, [
+            {'conf_id': cid, 'system': s, 'time_s': t, 'source': src}
+            for (cid, s, t, src) in rows
+        ])
+        cur.execute('COMMIT')
+
+    def get_time_estimate(
+        self, conf_id: int, system: str
+    ) -> Optional[tuple[float, str]]:
+        """Return (time_s, source) or None if no estimate stored."""
+        cur = self._db.execute(
+            'SELECT time_s, source FROM conf_time_estimate '
+            'WHERE conf_id = :conf_id AND system = :system',
+            {'conf_id': conf_id, 'system': system},
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return row['time_s'], row['source']
 
     def check_run_exists(
         self, conf: Configuration, run: Run, timestamp: datetime

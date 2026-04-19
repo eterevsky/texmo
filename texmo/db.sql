@@ -1,4 +1,3 @@
--- PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE conf (
@@ -74,12 +73,17 @@ CREATE TABLE run (
 
 CREATE INDEX run_conf_id ON run(conf_id);
 
-CREATE TABLE conf_time (
+-- Per-conf, per-system training-time estimate. Either the median of
+-- observed runs (source='median') or a prediction from the timing
+-- model (source='predicted'). Precision is determined by conf.precision
+-- so it's not stored here.
+CREATE TABLE conf_time_estimate (
     conf_id INTEGER NOT NULL,
     system TEXT NOT NULL,
-    median_time REAL NOT NULL,
+    time_s REAL NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('median', 'predicted')),
     UNIQUE (conf_id, system),
     FOREIGN KEY (conf_id) REFERENCES conf(id) ON DELETE CASCADE
 );
 
-CREATE INDEX conf_time_conf_id ON conf_time(conf_id);
+CREATE INDEX conf_time_estimate_conf_id ON conf_time_estimate(conf_id);

@@ -43,7 +43,7 @@ def time_budget_report(
         t = f'{c.time_estimate:7.3f}s'
         score_runs = (
             f'{c.median_score:.4f} '
-            f'({c.total_runs} total, {c.system_runs} on system)'
+            f'({c.total_runs}|{c.system_runs})'
         )
         lines.append(f'    {score_runs:<32} {t}  {c.conf.aligned_str()}')
     return "\n".join(lines)

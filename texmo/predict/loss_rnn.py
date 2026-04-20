@@ -142,29 +142,46 @@ def _build_targets(
     )
 
 
-def _init_params(rng, n_layer_feat: int, hidden: int) -> dict:
-    """Glorot-ish initialization for the three dense blocks.
-
-    Globals only enter via the initial hidden state — the only way
-    they influence the prediction is through the RNN's temporal
-    pathway, which should strengthen the gradient signal for the
-    hidden-to-hidden connections.
-    """
-    keys = jax.random.split(rng, 4)
+def _init_params(
+    rng, n_layer_feat: int, hidden: int,
+    feat_proj: int, rnn_sub_steps: int, cell_type: str,
+) -> dict:
+    """Glorot-ish initialization for the dense blocks."""
+    gate_mul = 3 if cell_type == 'gru' else 1  # reset, update, candidate
+    keys = jax.random.split(rng, 4 + gate_mul * 3 * rnn_sub_steps)
 
     def init(key, fan_in: int, fan_out: int):
         scale = jnp.sqrt(1.0 / fan_in)
         return jax.random.normal(key, (fan_in, fan_out)) * scale
 
-    return {
+    params = {
         'W_glob': init(keys[0], N_INIT_GLOBAL, hidden),
         'b_glob': jnp.zeros(hidden),
-        'W_h': init(keys[1], hidden, hidden),
-        'W_x': init(keys[2], n_layer_feat, hidden),
-        'b_rnn': jnp.zeros(hidden),
-        'W_out': init(keys[3], hidden, 1),
+        'W_out': init(keys[1], hidden, 1),
         'b_out': jnp.zeros(1),
     }
+    if feat_proj > 0:
+        params['W_proj'] = init(keys[2], n_layer_feat, feat_proj)
+        params['b_proj'] = jnp.zeros(feat_proj)
+        x_in_dim = feat_proj
+    else:
+        x_in_dim = n_layer_feat
+    key_idx = 4
+    for s in range(rnn_sub_steps):
+        if cell_type == 'gru':
+            for gate in ('r', 'z', 'c'):
+                params[f'W_h_{gate}_{s}'] = init(
+                    keys[key_idx], hidden, hidden); key_idx += 1
+                params[f'W_x_{gate}_{s}'] = init(
+                    keys[key_idx], x_in_dim, hidden); key_idx += 1
+                params[f'b_{gate}_{s}'] = jnp.zeros(hidden)
+        else:
+            params[f'W_h_{s}'] = init(
+                keys[key_idx], hidden, hidden); key_idx += 1
+            params[f'W_x_{s}'] = init(
+                keys[key_idx], x_in_dim, hidden); key_idx += 1
+            params[f'b_rnn_{s}'] = jnp.zeros(hidden)
+    return params
 
 
 _ACTIVATIONS = {
@@ -174,7 +191,9 @@ _ACTIVATIONS = {
 }
 
 
-def _forward(params, init_globals, layer_feats, masks, cell_activation):
+def _forward(params, init_globals, layer_feats, masks, cell_activation,
+             feat_proj: int, rnn_sub_steps: int, cell_type: str,
+             pooling: str):
     """Predict log-loss for each sample in the batch.
 
     init_globals: [B, N_INIT_GLOBAL]  (output_size + batch/len/steps/lr/decay)
@@ -184,23 +203,63 @@ def _forward(params, init_globals, layer_feats, masks, cell_activation):
     """
     act = _ACTIVATIONS[cell_activation]
     h = jax.nn.gelu(init_globals @ params['W_glob'] + params['b_glob'])
+    if feat_proj > 0:
+        # Project layer features once, before the scan. Saves compute and
+        # produces the right gradient structure.
+        layer_feats = jax.nn.gelu(
+            layer_feats @ params['W_proj'] + params['b_proj'])
     # Transpose to scan along the layer axis.
-    lf_t = jnp.transpose(layer_feats, (1, 0, 2))  # [max_layers, B, n_feat]
+    lf_t = jnp.transpose(layer_feats, (1, 0, 2))  # [max_layers, B, *]
     m_t = jnp.transpose(masks, (1, 0))            # [max_layers, B]
 
     def step(h, inp):
         lf, m = inp
-        new_h = act(h @ params['W_h'] + lf @ params['W_x'] + params['b_rnn'])
-        return jnp.where(m[:, None] > 0.5, new_h, h), None
+        new_h = h
+        for s in range(rnn_sub_steps):
+            if cell_type == 'gru':
+                r = jax.nn.sigmoid(
+                    new_h @ params[f'W_h_r_{s}']
+                    + lf @ params[f'W_x_r_{s}']
+                    + params[f'b_r_{s}'])
+                z = jax.nn.sigmoid(
+                    new_h @ params[f'W_h_z_{s}']
+                    + lf @ params[f'W_x_z_{s}']
+                    + params[f'b_z_{s}'])
+                cand = act(
+                    (r * new_h) @ params[f'W_h_c_{s}']
+                    + lf @ params[f'W_x_c_{s}']
+                    + params[f'b_c_{s}'])
+                new_h = (1.0 - z) * new_h + z * cand
+            else:
+                new_h = act(
+                    new_h @ params[f'W_h_{s}']
+                    + lf @ params[f'W_x_{s}']
+                    + params[f'b_rnn_{s}']
+                )
+        kept = jnp.where(m[:, None] > 0.5, new_h, h)
+        return kept, kept
 
-    h_final, _ = jax.lax.scan(step, h, (lf_t, m_t))
-    out = h_final @ params['W_out'] + params['b_out']
+    h_final, h_stack = jax.lax.scan(step, h, (lf_t, m_t))
+
+    if pooling == 'mean':
+        # Masked mean over valid steps of h_stack [max_layers, B, hidden].
+        m_expand = m_t[..., None]  # [max_layers, B, 1]
+        total = jnp.sum(h_stack * m_expand, axis=0)
+        denom = jnp.maximum(jnp.sum(m_expand, axis=0), 1.0)
+        h_used = total / denom
+    else:  # 'last'
+        h_used = h_final
+
+    out = h_used @ params['W_out'] + params['b_out']
     return out.squeeze(-1)
 
 
-def _loss_fn(params, init_globals, layer_feats, masks, targets, cell_activation):
+def _loss_fn(params, init_globals, layer_feats, masks, targets,
+             cell_activation, feat_proj: int, rnn_sub_steps: int,
+             cell_type: str, pooling: str):
     preds = _forward(
-        params, init_globals, layer_feats, masks, cell_activation)
+        params, init_globals, layer_feats, masks, cell_activation,
+        feat_proj, rnn_sub_steps, cell_type, pooling)
     return jnp.mean(jnp.abs(preds - targets))
 
 
@@ -211,6 +270,12 @@ def fit(
     lr: float = 0.01,
     seed: int | None = None,
     cell_activation: str = 'tanh',
+    hidden: int = HIDDEN,
+    lr_schedule: str = 'constant',  # 'constant' | 'cosine'
+    feat_proj: int = 0,  # 0 = no projection; >0 = pre-RNN dense width
+    rnn_sub_steps: int = 1,
+    cell_type: str = 'vanilla',  # 'vanilla' | 'gru'
+    pooling: str = 'last',  # 'last' | 'mean'
 ) -> tuple[dict, int, np.ndarray]:
     """Fit RNN params on (conf, loss) pairs.
 
@@ -235,8 +300,15 @@ def fit(
     n_layer_feat = _layer_feature_dim(len(simple_types))
     rng = jax.random.PRNGKey(seed)
     rng, init_key = jax.random.split(rng)
-    params = _init_params(init_key, n_layer_feat, HIDDEN)
-    optimizer = optax.adamw(lr, weight_decay=0.0)
+    params = _init_params(
+        init_key, n_layer_feat, hidden, feat_proj, rnn_sub_steps, cell_type)
+    if lr_schedule == 'cosine':
+        schedule = optax.cosine_decay_schedule(
+            init_value=lr, decay_steps=steps, alpha=0.01,
+        )
+        optimizer = optax.adamw(schedule, weight_decay=0.0)
+    else:
+        optimizer = optax.adamw(lr, weight_decay=0.0)
     opt_state = optimizer.init(params)
 
     # Pre-sample mini-batch indices for every training step.
@@ -253,6 +325,10 @@ def fit(
             masks[idx],
             targets[idx],
             cell_activation,
+            feat_proj,
+            rnn_sub_steps,
+            cell_type,
+            pooling,
         )
         updates, opt_state = optimizer.update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
@@ -269,11 +345,15 @@ def predict(
     simple_types: list[str],
     max_layers: int,
     cell_activation: str = 'tanh',
+    feat_proj: int = 0,
+    rnn_sub_steps: int = 1,
+    cell_type: str = 'vanilla',
+    pooling: str = 'last',
 ) -> np.ndarray:
     type_idx = {t: i for i, t in enumerate(simple_types)}
     ig_np, lf_np, m_np = _build_input_arrays(
         confs, type_idx, max_layers)
     preds = _forward(
         params, jnp.asarray(ig_np), jnp.asarray(lf_np), jnp.asarray(m_np),
-        cell_activation)
+        cell_activation, feat_proj, rnn_sub_steps, cell_type, pooling)
     return np.asarray(preds)

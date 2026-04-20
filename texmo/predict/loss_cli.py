@@ -244,15 +244,50 @@ class RnnPredictor(Predictor):
     are handled by padding + masked jax.lax.scan.
     """
 
-    def __init__(self, cell_activation: str = 'tanh'):
+    def __init__(
+        self,
+        cell_activation: str = 'tanh',
+        hidden: int = loss_rnn.HIDDEN,
+        lr: float = 0.01,
+        steps: int = 2000,
+        lr_schedule: str = 'constant',
+        feat_proj: int = 0,
+        rnn_sub_steps: int = 1,
+        cell_type: str = 'vanilla',
+        pooling: str = 'last',
+    ):
         self._cell_activation = cell_activation
-        self.name = f"rnn ({cell_activation}, h={loss_rnn.HIDDEN})"
+        self._hidden = hidden
+        self._lr = lr
+        self._steps = steps
+        self._lr_schedule = lr_schedule
+        self._feat_proj = feat_proj
+        self._rnn_sub_steps = rnn_sub_steps
+        self._cell_type = cell_type
+        self._pooling = pooling
+        sched = f" {lr_schedule}" if lr_schedule != 'constant' else ''
+        proj = f" proj={feat_proj}" if feat_proj else ''
+        sub = f" sub={rnn_sub_steps}" if rnn_sub_steps != 1 else ''
+        pool = f" pool={pooling}" if pooling != 'last' else ''
+        kind = cell_type if cell_type != 'vanilla' else cell_activation
+        self.name = (
+            f"rnn ({kind}, h={hidden}{proj}{sub}{pool}, "
+            f"lr={lr}{sched}, steps={steps})"
+        )
 
     def fit(self, train_data):
         self._simple_types = loss_rnn.discover_simple_types(train_data)
         self._params, self._max_layers, trace = loss_rnn.fit(
             train_data, self._simple_types,
             cell_activation=self._cell_activation,
+            hidden=self._hidden,
+            lr=self._lr,
+            steps=self._steps,
+            lr_schedule=self._lr_schedule,
+            feat_proj=self._feat_proj,
+            rnn_sub_steps=self._rnn_sub_steps,
+            cell_type=self._cell_type,
+            pooling=self._pooling,
         )
         logging.info(f"  {self.name} scan depth: {self._max_layers}")
         n = len(trace)
@@ -264,6 +299,10 @@ class RnnPredictor(Predictor):
         return loss_rnn.predict(
             self._params, confs, self._simple_types, self._max_layers,
             cell_activation=self._cell_activation,
+            feat_proj=self._feat_proj,
+            rnn_sub_steps=self._rnn_sub_steps,
+            cell_type=self._cell_type,
+            pooling=self._pooling,
         )
 
 
@@ -332,7 +371,10 @@ def main(args: argparse.Namespace):
         # RandomForestBigPredictor(),  # slow; re-enable for comparisons.
         HistGBRPredictor(),
         HistGBRPredictor(with_second_layer=True),
-        RnnPredictor(cell_activation='tanh'),
+        RnnPredictor(
+            cell_activation='tanh', hidden=32,
+            lr=0.02, steps=8000, lr_schedule='cosine',
+        ),
     ]
     for p in predictors:
         logging.info(f"Training {p.name}")

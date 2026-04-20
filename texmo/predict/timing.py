@@ -39,6 +39,7 @@ from ..layers.rnn import RnnDef
 from ..layers.skip import SkipDef
 from ..layers.suffix import SuffixDef
 from ..precision import Precision
+from .predict_common import layer_type_id
 
 # -- Feature extractors. Each returns a numpy array of features for
 #    one component. Different component types have different feature
@@ -122,14 +123,7 @@ def _input_component(input_def, batch: int, length: int) -> Component:
 
 
 def _layer_component(layer, batch: int, length: int) -> Component:
-    if isinstance(layer, DenseDef):
-        type_id = f"dense.{layer._activation}"
-    elif isinstance(layer, RnnDef):
-        type_id = f"rnn.{layer._activation}"
-    elif isinstance(layer, SkipDef):
-        type_id = f"skip.{layer.op}"
-    else:
-        type_id = layer.name
+    type_id = layer_type_id(layer)
 
     if isinstance(layer, SuffixDef):
         features = _features_suffix(layer.input_size, batch, length, layer.length)

@@ -12,12 +12,13 @@ import argparse
 import logging
 
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
 
 from ..configuration import Configuration
+from ..layers.skip import SkipDef
 from ..resultdb import ResultDB
 from ..tokens import set_tokens_dir
-from .predict_common import MAX_LOSS, MIN_LOSS
+from .predict_common import MAX_LOSS, MIN_LOSS, layer_type_id
 
 
 def _train_val_split(
@@ -78,6 +79,128 @@ def _rf_features(conf: Configuration) -> list[float]:
         np.log2(conf.num_weights),
         np.log2(conf.batch * conf.length * conf.steps),
     ]
+
+
+def _discover_type_ids(
+    train_data: list[tuple[Configuration, float]],
+) -> list[str]:
+    """Sorted list of every layer type_id seen in training."""
+    seen: set[str] = set()
+    for conf, _ in train_data:
+        for layer in conf.model.layers:
+            seen.add(layer_type_id(layer))
+    return sorted(seen)
+
+
+def _rf_big_features(
+    conf: Configuration,
+    type_ids: list[str],
+    missing_sentinel: float = -1.0,
+) -> list[float]:
+    log_decay = np.log2(max(conf.decay, 2**-20))
+    out_size = conf.model.output.size
+
+    # First non-skip layer in the hidden stack.
+    first_non_skip = next(
+        (l for l in conf.model.layers if not isinstance(l, SkipDef)),
+        None,
+    )
+
+    counts = {t: 0 for t in type_ids}
+    first_size = {t: missing_sentinel for t in type_ids}
+    for layer in conf.model.layers:
+        t = layer_type_id(layer)
+        if t in counts:
+            counts[t] += 1
+    if first_non_skip is not None:
+        t = layer_type_id(first_non_skip)
+        if t in first_size:
+            first_size[t] = float(np.log2(max(first_non_skip.size, 1)))
+
+    skip_add_sum = sum(
+        layer.distance
+        for layer in conf.model.layers
+        if isinstance(layer, SkipDef) and layer.op == 'add'
+    )
+    skip_cat_sum = sum(
+        layer.distance
+        for layer in conf.model.layers
+        if isinstance(layer, SkipDef) and layer.op == 'cat'
+    )
+
+    base = [
+        np.log2(conf.num_weights),
+        np.log2(conf.batch * conf.length * conf.steps),
+        np.log2(conf.steps),
+        np.log2(conf.batch),
+        np.log2(conf.length),
+        np.log2(conf.lr),
+        log_decay,
+        np.log2(max(out_size, 1)),
+        float(skip_add_sum),
+        float(skip_cat_sum),
+    ]
+    for t in type_ids:
+        base.append(first_size[t])
+        base.append(float(counts[t]))
+    return base
+
+
+class RandomForestBigPredictor(Predictor):
+    """Random forest with per-layer-type features in addition to shape.
+
+    Feature set: log of shape params (weights, batch, length, steps,
+    lr, decay, output_size, batch*length*steps), skip-distance sums by
+    op, and per-layer-type pairs (first-layer-size-or-sentinel, count).
+    """
+    name = "random forest (big features)"
+
+    def fit(self, train_data):
+        self._type_ids = _discover_type_ids(train_data)
+        X = np.array(
+            [_rf_big_features(c, self._type_ids) for c, _ in train_data])
+        y = _log_clip_targets(
+            np.array([loss for _, loss in train_data]))
+        self._model = RandomForestRegressor(
+            n_estimators=100, criterion='absolute_error',
+            n_jobs=-1, random_state=0,
+        )
+        self._model.fit(X, y)
+
+    def predict(self, confs):
+        X = np.array([_rf_big_features(c, self._type_ids) for c in confs])
+        return self._model.predict(X)
+
+
+class HistGBRPredictor(Predictor):
+    """Histogram gradient boosting on the big-feature set.
+
+    "First layer is not of this type" is encoded as NaN;
+    HistGradientBoostingRegressor learns a routing direction per split
+    for missing values. loss='absolute_error' aligns with the L1-log
+    eval metric.
+    """
+    name = "hist gbr (big features)"
+
+    def fit(self, train_data):
+        self._type_ids = _discover_type_ids(train_data)
+        X = np.array([
+            _rf_big_features(c, self._type_ids, float('nan'))
+            for c, _ in train_data
+        ])
+        y = _log_clip_targets(
+            np.array([loss for _, loss in train_data]))
+        self._model = HistGradientBoostingRegressor(
+            loss='absolute_error', random_state=0,
+        )
+        self._model.fit(X, y)
+
+    def predict(self, confs):
+        X = np.array([
+            _rf_big_features(c, self._type_ids, float('nan'))
+            for c in confs
+        ])
+        return self._model.predict(X)
 
 
 class RandomForestPredictor(Predictor):
@@ -142,6 +265,8 @@ def main(args: argparse.Namespace):
     predictors: list[Predictor] = [
         ConstantPredictor(),
         RandomForestPredictor(),
+        RandomForestBigPredictor(),
+        HistGBRPredictor(),
     ]
     for p in predictors:
         logging.info(f"Training {p.name}")

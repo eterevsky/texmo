@@ -1,36 +1,26 @@
-import math
+"""Shared helpers for the predictors (timing, loss)."""
 
-import numpy as np
+from ..layers.dense import DenseDef
+from ..layers.rnn import RnnDef
+from ..layers.skip import SkipDef
 
-# We aren't differentiating losses above 10 bits per byte.
+# Losses above this are treated as "diverged" and not differentiated;
+# below MIN_LOSS is a log-validity floor.
 MIN_LOSS = 0.1
 MAX_LOSS = 10
-MAX_LOG_LOSS = math.log2(MAX_LOSS)
 
 
-def encode_loss(loss: np.ndarray):
-    if loss is None:
-        return None
-    loss = np.minimum(loss, 2**16)
-    loss = np.log2(loss)
-    return loss
+def layer_type_id(layer) -> str:
+    """Stable categorical ID for a layer, used as a feature key.
 
-
-def decode_loss(loss):
-    if loss is None:
-        return None
-    loss = np.minimum(loss, MAX_LOG_LOSS)
-    return np.exp2(loss)
-
-
-def prediction_score(true_losses: np.ndarray, predicted_losses: np.ndarray):
-    n = len(true_losses)
-    assert len(predicted_losses) == n
-
-    all_losses = np.concatenate((true_losses, predicted_losses))
-    all_losses = np.minimum(all_losses, MAX_LOSS)
-    all_losses = np.maximum(all_losses, MIN_LOSS)
-    all_losses = np.log2(all_losses)
-
-    return np.average(np.abs(all_losses[:n] - all_losses[n:]))
-
+    Dense and RNN include the activation (`dense.tanh`, `rnn.relu`) so
+    different activations get their own model parameters. Skip includes
+    the op (`skip.add`, `skip.cat`). Other layers use the bare name.
+    """
+    if isinstance(layer, DenseDef):
+        return f"dense.{layer._activation}"
+    if isinstance(layer, RnnDef):
+        return f"rnn.{layer._activation}"
+    if isinstance(layer, SkipDef):
+        return f"skip.{layer.op}"
+    return layer.name

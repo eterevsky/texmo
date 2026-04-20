@@ -1,5 +1,6 @@
 """Shared helpers for the predictors (timing, loss)."""
 
+from ..configuration import Configuration
 from ..layers.dense import DenseDef
 from ..layers.rnn import RnnDef
 from ..layers.skip import SkipDef
@@ -24,3 +25,14 @@ def layer_type_id(layer) -> str:
     if isinstance(layer, SkipDef):
         return f"skip.{layer.op}"
     return layer.name
+
+
+def discover_type_ids(
+    train_data: list[tuple[Configuration, float]],
+) -> list[str]:
+    """Sorted list of every layer type_id seen in training."""
+    seen: set[str] = set()
+    for conf, _ in train_data:
+        for layer in conf.model.layers:
+            seen.add(layer_type_id(layer))
+    return sorted(seen)

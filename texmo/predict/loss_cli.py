@@ -18,7 +18,13 @@ from ..configuration import Configuration
 from ..layers.skip import SkipDef
 from ..resultdb import ResultDB
 from ..tokens import set_tokens_dir
-from .predict_common import MAX_LOSS, MIN_LOSS, layer_type_id
+from . import loss_rnn
+from .predict_common import (
+    MAX_LOSS,
+    MIN_LOSS,
+    discover_type_ids,
+    layer_type_id,
+)
 
 
 def _train_val_split(
@@ -81,23 +87,12 @@ def _rf_features(conf: Configuration) -> list[float]:
     ]
 
 
-def _discover_type_ids(
-    train_data: list[tuple[Configuration, float]],
-) -> list[str]:
-    """Sorted list of every layer type_id seen in training."""
-    seen: set[str] = set()
-    for conf, _ in train_data:
-        for layer in conf.model.layers:
-            seen.add(layer_type_id(layer))
-    return sorted(seen)
-
-
 def _rf_big_features(
     conf: Configuration,
     type_ids: list[str],
     missing_sentinel: float = -1.0,
 ) -> list[float]:
-    log_decay = np.log2(max(conf.decay, 2**-20))
+    log_decay = np.log2(conf.decay)
     out_size = conf.model.output.size
 
     # First non-skip layer in the hidden stack.
@@ -156,7 +151,7 @@ class RandomForestBigPredictor(Predictor):
     name = "random forest (big features)"
 
     def fit(self, train_data):
-        self._type_ids = _discover_type_ids(train_data)
+        self._type_ids = discover_type_ids(train_data)
         X = np.array(
             [_rf_big_features(c, self._type_ids) for c, _ in train_data])
         y = _log_clip_targets(
@@ -183,7 +178,7 @@ class HistGBRPredictor(Predictor):
     name = "hist gbr (big features)"
 
     def fit(self, train_data):
-        self._type_ids = _discover_type_ids(train_data)
+        self._type_ids = discover_type_ids(train_data)
         X = np.array([
             _rf_big_features(c, self._type_ids, float('nan'))
             for c, _ in train_data
@@ -201,6 +196,39 @@ class HistGBRPredictor(Predictor):
             for c in confs
         ])
         return self._model.predict(X)
+
+
+class RnnPredictor(Predictor):
+    """Tiny RNN over the hidden-layer sequence.
+
+    Hidden state is initialized from global features (data volume,
+    weights, lr, ...), then updated once per layer via
+    activation(W_h h + W_x layer_feats + b). A final dense maps the
+    final hidden state to a predicted log-loss. Variable layer counts
+    are handled by padding + masked jax.lax.scan.
+    """
+
+    def __init__(self, cell_activation: str = 'tanh'):
+        self._cell_activation = cell_activation
+        self.name = f"rnn ({cell_activation}, h={loss_rnn.HIDDEN})"
+
+    def fit(self, train_data):
+        self._simple_types = loss_rnn.discover_simple_types(train_data)
+        self._params, self._max_layers, trace = loss_rnn.fit(
+            train_data, self._simple_types,
+            cell_activation=self._cell_activation,
+        )
+        logging.info(f"  {self.name} scan depth: {self._max_layers}")
+        n = len(trace)
+        for i in range(0, n, max(1, n // 10)):
+            logging.info(f"  {self.name} step {i:5d}: train L1 = {trace[i]:.4f}")
+        logging.info(f"  {self.name} step {n-1:5d}: train L1 = {trace[-1]:.4f}")
+
+    def predict(self, confs):
+        return loss_rnn.predict(
+            self._params, confs, self._simple_types, self._max_layers,
+            cell_activation=self._cell_activation,
+        )
 
 
 class RandomForestPredictor(Predictor):
@@ -265,8 +293,9 @@ def main(args: argparse.Namespace):
     predictors: list[Predictor] = [
         ConstantPredictor(),
         RandomForestPredictor(),
-        RandomForestBigPredictor(),
+        # RandomForestBigPredictor(),  # slow; re-enable for comparisons.
         HistGBRPredictor(),
+        RnnPredictor(cell_activation='tanh'),
     ]
     for p in predictors:
         logging.info(f"Training {p.name}")

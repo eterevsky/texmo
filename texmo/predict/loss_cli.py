@@ -91,18 +91,19 @@ def _rf_big_features(
     conf: Configuration,
     type_ids: list[str],
     missing_sentinel: float = -1.0,
+    with_second_layer: bool = False,
 ) -> list[float]:
     log_decay = np.log2(conf.decay)
     out_size = conf.model.output.size
 
-    # First non-skip layer in the hidden stack.
-    first_non_skip = next(
-        (l for l in conf.model.layers if not isinstance(l, SkipDef)),
-        None,
-    )
+    # First and second non-skip layers.
+    non_skip = [l for l in conf.model.layers if not isinstance(l, SkipDef)]
+    first_non_skip = non_skip[0] if len(non_skip) > 0 else None
+    second_non_skip = non_skip[1] if len(non_skip) > 1 else None
 
     counts = {t: 0 for t in type_ids}
     first_size = {t: missing_sentinel for t in type_ids}
+    second_size = {t: missing_sentinel for t in type_ids}
     for layer in conf.model.layers:
         t = layer_type_id(layer)
         if t in counts:
@@ -111,6 +112,10 @@ def _rf_big_features(
         t = layer_type_id(first_non_skip)
         if t in first_size:
             first_size[t] = float(np.log2(max(first_non_skip.size, 1)))
+    if second_non_skip is not None:
+        t = layer_type_id(second_non_skip)
+        if t in second_size:
+            second_size[t] = float(np.log2(max(second_non_skip.size, 1)))
 
     skip_add_sum = sum(
         layer.distance
@@ -122,6 +127,16 @@ def _rf_big_features(
         for layer in conf.model.layers
         if isinstance(layer, SkipDef) and layer.op == 'cat'
     )
+
+    # Distance of skip.X.{add,cat} at raw positions 0 and 1, or 0 if
+    # that position isn't a skip (or doesn't exist).
+    def _skip_at(pos: int, op: str) -> float:
+        if pos >= len(conf.model.layers):
+            return 0.0
+        layer = conf.model.layers[pos]
+        if isinstance(layer, SkipDef) and layer.op == op:
+            return float(layer.distance)
+        return 0.0
 
     base = [
         np.log2(conf.num_weights),
@@ -135,9 +150,18 @@ def _rf_big_features(
         float(skip_add_sum),
         float(skip_cat_sum),
     ]
+    if with_second_layer:
+        base.extend([
+            _skip_at(0, 'add'),
+            _skip_at(0, 'cat'),
+            _skip_at(1, 'add'),
+            _skip_at(1, 'cat'),
+        ])
     for t in type_ids:
         base.append(first_size[t])
         base.append(float(counts[t]))
+        if with_second_layer:
+            base.append(second_size[t])
     return base
 
 
@@ -174,13 +198,24 @@ class HistGBRPredictor(Predictor):
     HistGradientBoostingRegressor learns a routing direction per split
     for missing values. loss='absolute_error' aligns with the L1-log
     eval metric.
+
+    `with_second_layer=True` extends the feature set with:
+      * second-non-skip-layer size per type (like first_size, but for
+        the second non-skip layer);
+      * skip.add / skip.cat distance at raw positions 0 and 1
+        (4 extra slots — X or 0 if that position isn't a skip of that op).
     """
-    name = "hist gbr (big features)"
+
+    def __init__(self, with_second_layer: bool = False):
+        self._with_second_layer = with_second_layer
+        suffix = " + 2nd layer" if with_second_layer else ""
+        self.name = f"hist gbr (big features{suffix})"
 
     def fit(self, train_data):
         self._type_ids = discover_type_ids(train_data)
         X = np.array([
-            _rf_big_features(c, self._type_ids, float('nan'))
+            _rf_big_features(
+                c, self._type_ids, float('nan'), self._with_second_layer)
             for c, _ in train_data
         ])
         y = _log_clip_targets(
@@ -192,7 +227,8 @@ class HistGBRPredictor(Predictor):
 
     def predict(self, confs):
         X = np.array([
-            _rf_big_features(c, self._type_ids, float('nan'))
+            _rf_big_features(
+                c, self._type_ids, float('nan'), self._with_second_layer)
             for c in confs
         ])
         return self._model.predict(X)
@@ -295,6 +331,7 @@ def main(args: argparse.Namespace):
         RandomForestPredictor(),
         # RandomForestBigPredictor(),  # slow; re-enable for comparisons.
         HistGBRPredictor(),
+        HistGBRPredictor(with_second_layer=True),
         RnnPredictor(cell_activation='tanh'),
     ]
     for p in predictors:

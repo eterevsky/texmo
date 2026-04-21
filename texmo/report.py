@@ -1,6 +1,8 @@
 import argparse
 
-from .common import console, ttoa3
+from rich.table import Table
+
+from .common import console, itoa3, ttoa3
 from .configuration import Template
 from .resultdb import ResultDB
 from .tokens import set_tokens_dir
@@ -12,9 +14,29 @@ def main(args: argparse.Namespace):
     console.log('Template:', template)
 
     db = ResultDB.from_args(args.db)
-    for conf_score in db.top_confs_global(template):
-        console.log(conf_score.conf)
-        console.log(f'{conf_score.median_score:.3f} ({conf_score.num_runs})  {ttoa3(conf_score.median_time)} on {conf_score.system}')
+    table = Table(title="Top configurations")
+    table.add_column("Model", overflow='fold')
+    table.add_column("P")
+    table.add_column("Data", justify='right')
+    table.add_column("LR")
+    table.add_column("Steps", justify='right')
+    table.add_column("Score")
+    table.add_column("Time", justify='right')
+
+    for c in db.top_confs_global(template):
+        conf = c.conf
+        spec = f'{conf.model} ({itoa3(conf.model.num_weights)})'
+        score = f'{c.median_score:.3f} ({c.num_runs})'
+        time = (
+            f'{ttoa3(c.median_time)} on {c.system}'
+            if c.median_time is not None else '?'
+        )
+        table.add_row(
+            spec, str(conf.precision), f'{conf.batch}×{conf.length}',
+            conf.learning_str, str(conf.steps), score, time,
+        )
+
+    console.print(table)
 
 
 def init_args(parser: argparse.ArgumentParser, config):
@@ -31,13 +53,13 @@ def init_args(parser: argparse.ArgumentParser, config):
         help='directory with tokensets',
     )
 
-    # Template args
+    # Template args (matching server CLI / Template.from_args).
     parser.add_argument(
         '-s',
-        '--spec-regex',
+        '--spec',
         type=str,
         default=None,
-        help='regex covering the acceptable specs',
+        help='exact spec or regex over acceptable specs',
     )
     parser.add_argument(
         '--length',
@@ -53,17 +75,10 @@ def init_args(parser: argparse.ArgumentParser, config):
         help='range of acceptable batch sizes, for example "1-256"',
     )
     parser.add_argument(
-        "--optimizer",
-        type=str,
-        metavar="O",
-        default="adam,fromage",
-        help="the optimizer algorithm",
-    )
-    parser.add_argument(
         '--decay',
         type=str,
         default="0.0-1.0",
-        help="decay of the learning rate over the course of training, i.e. (LR at the last step) / (LR at the first step)",
+        help="decay of the learning rate over training",
     )
     parser.add_argument(
         '-l',

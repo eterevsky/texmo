@@ -1,8 +1,17 @@
 import logging
 import math
+import sys
 from collections.abc import Iterable
 
 from rich.console import Console
+
+# Windows Python defaults stdout/stderr to cp1252, which can't encode
+# characters like U+2192 '→' used in Configuration.learning_str. Force
+# UTF-8 so rich and plain prints both work.
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
 
 console = Console()
 

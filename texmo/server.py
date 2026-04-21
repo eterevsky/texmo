@@ -39,6 +39,10 @@ from .tokens import set_tokens_dir
 # genuinely new points but not so frequent that fit cost dominates.
 _REFIT_EVERY = 100
 
+# Threshold of total new runs (any system/precision) that triggers a
+# retrain of the loss-prediction model.
+_LOSS_REFIT_EVERY = 1000
+
 
 def build_graph(confs: list[Configuration]) -> bytes:
     plt.ioff()
@@ -173,6 +177,10 @@ class SearchThread(threading.Thread):
         self._timing_queue = timing_queue
         # Per-(system, precision) counter used to throttle timing-model refits.
         self._run_counter: dict[tuple[str, Precision], int] = defaultdict(int)
+        # Total-run counter for loss-model refits.
+        self._total_run_counter = 0
+        # Latest loss-prediction model pushed by the timing thread.
+        self._loss_model = None
 
     def run(self):
         logging.info("Started search thread")
@@ -189,6 +197,14 @@ class SearchThread(threading.Thread):
                 conf, run = args
                 self.search.add_run(conf, run)
                 self._maybe_trigger_refit(run.system, conf.precision)
+                self._maybe_trigger_loss_refit()
+            elif command == "loss_weights":
+                self._loss_model = args
+                logging.info(
+                    f"Search thread: received new loss model "
+                    f"(max_layers={self._loss_model.max_layers}, "
+                    f"{len(self._loss_model.simple_types)} simple types)"
+                )
             elif command == "stop":
                 logging.info("Stopping search thread")
                 break
@@ -203,6 +219,14 @@ class SearchThread(threading.Thread):
         if self._run_counter[key] >= _REFIT_EVERY:
             self._run_counter[key] = 0
             self._timing_queue.put(("refit", (system, precision)))
+
+    def _maybe_trigger_loss_refit(self):
+        if self._timing_queue is None:
+            return
+        self._total_run_counter += 1
+        if self._total_run_counter >= _LOSS_REFIT_EVERY:
+            self._total_run_counter = 0
+            self._timing_queue.put(("loss_refit", None))
 
 
 def _render_bounds(b: Bounds):
@@ -231,7 +255,10 @@ class SearchServer(object):
         self.confs_by_system_lock = threading.Lock()
 
         self.timing_queue: Queue = Queue()
-        self.timing_thread = TimingThread(db.path, self.timing_queue)
+        self.timing_thread = TimingThread(
+            db.path, self.timing_queue,
+            search_queue=self.requests_queue,
+        )
         self.timing_thread.start()
 
         self.search_thread = SearchThread(

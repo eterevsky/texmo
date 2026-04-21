@@ -26,7 +26,7 @@ default RnnPredictor in `loss_cli.py`.
 
 ## Experiments
 
-Unless noted: tanh cell, vanilla cell type, globals only at init,
+Unless noted: tanh cell, elman cell type, globals only at init,
 mini-batch=1024, optax adamw, 5 seeds.
 
 | # | Config | val L1 | ~typ | range | note |

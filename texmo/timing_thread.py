@@ -1,15 +1,20 @@
-"""Background thread that fits timing models and writes time estimates.
+"""Background thread that fits timing & loss models and writes estimates.
 
 Opens its own `ResultDB` connection (separate from the SearchThread's)
 so transactions on the two threads don't interleave on a shared SQLite
-connection. Owns an in-memory `TrainTimingModel`. Receives messages on
-a queue:
+connection. Owns an in-memory `TrainTimingModel` and handles these
+messages:
 
     ("refit", (system, precision))
         Reload runs for that (system, precision), refit just that pair's
-        model, then overwrite `conf_time_estimate` for every conf of that
-        precision on that system with either the median (if runs exist)
-        or a prediction.
+        timing model, then overwrite `conf_time_estimate` for every
+        conf of that precision on that system with either the median
+        (if runs exist) or a prediction.
+
+    ("loss_refit", None)
+        Retrain the loss-prediction RNN on all labeled runs and push
+        the new LossModel back to the search thread's queue as
+        ("loss_weights", loss_model).
 
     ("stop", None)
         Exit the loop.
@@ -26,10 +31,12 @@ so startup can block on it before serving requests.
 import logging
 import threading
 from queue import Queue
+from typing import Optional
 
 from . import latency
 from .configuration import Configuration
 from .precision import Precision
+from .predict import loss_rnn
 from .predict.timing import TrainTimingModel
 from .resultdb import ResultDB
 
@@ -109,10 +116,18 @@ def bootstrap(db: ResultDB):
 
 
 class TimingThread(threading.Thread):
-    def __init__(self, db_path: str | None, queue: Queue):
+    def __init__(
+        self,
+        db_path: str | None,
+        queue: Queue,
+        search_queue: Optional[Queue] = None,
+    ):
+        """`search_queue` is used to send newly-trained loss models back
+        to the search thread as ('loss_weights', LossModel)."""
         super().__init__(daemon=True)
         self._db_path = db_path
         self._queue = queue
+        self._search_queue = search_queue
         self._model = TrainTimingModel()
 
     def run(self):
@@ -124,6 +139,11 @@ class TimingThread(threading.Thread):
                 if command == "refit":
                     system, precision = args
                     _refit_pair(db, self._model, system, precision)
+                elif command == "loss_refit":
+                    loss_model = loss_rnn.train_loss_model(db)
+                    if loss_model is not None and self._search_queue:
+                        self._search_queue.put(
+                            ("loss_weights", loss_model))
                 elif command == "stop":
                     logging.info("Stopping timing thread")
                     break

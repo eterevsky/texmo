@@ -253,7 +253,7 @@ class RnnPredictor(Predictor):
         lr_schedule: str = 'constant',
         feat_proj: int = 0,
         rnn_sub_steps: int = 1,
-        cell_type: str = 'vanilla',
+        cell_type: str = 'elman',
         pooling: str = 'last',
     ):
         self._cell_activation = cell_activation
@@ -269,7 +269,7 @@ class RnnPredictor(Predictor):
         proj = f" proj={feat_proj}" if feat_proj else ''
         sub = f" sub={rnn_sub_steps}" if rnn_sub_steps != 1 else ''
         pool = f" pool={pooling}" if pooling != 'last' else ''
-        kind = cell_type if cell_type != 'vanilla' else cell_activation
+        kind = cell_type if cell_type != 'elman' else cell_activation
         self.name = (
             f"rnn ({kind}, h={hidden}{proj}{sub}{pool}, "
             f"lr={lr}{sched}, steps={steps})"

@@ -13,20 +13,50 @@ inside jax.lax.scan: on padded steps the hidden state is carried
 through unchanged via jnp.where.
 """
 
+import dataclasses
+import logging
 import random
+from typing import TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
 
+from .. import latency
 from ..configuration import Configuration
 from ..layers.skip import SkipDef
 from ..layers.suffix import SuffixDef
 from .predict_common import MAX_LOSS, MIN_LOSS, layer_type_id
 
+if TYPE_CHECKING:
+    from ..resultdb import ResultDB
+
 HIDDEN = 8
 BATCH_SIZE = 1024
+
+
+@dataclasses.dataclass
+class LossModel:
+    """All state needed to predict with a trained loss_rnn."""
+    params: dict
+    simple_types: list[str]
+    max_layers: int
+    cell_activation: str = 'tanh'
+    feat_proj: int = 0
+    rnn_sub_steps: int = 1
+    cell_type: str = 'elman'
+    pooling: str = 'last'
+
+    def predict(self, confs: list['Configuration']) -> np.ndarray:
+        return predict(
+            self.params, confs, self.simple_types, self.max_layers,
+            cell_activation=self.cell_activation,
+            feat_proj=self.feat_proj,
+            rnn_sub_steps=self.rnn_sub_steps,
+            cell_type=self.cell_type,
+            pooling=self.pooling,
+        )
 
 
 # A layer is "simple" if it's fully described by its input/output sizes
@@ -274,7 +304,7 @@ def fit(
     lr_schedule: str = 'constant',  # 'constant' | 'cosine'
     feat_proj: int = 0,  # 0 = no projection; >0 = pre-RNN dense width
     rnn_sub_steps: int = 1,
-    cell_type: str = 'vanilla',  # 'vanilla' | 'gru'
+    cell_type: str = 'elman',  # 'elman' | 'gru'
     pooling: str = 'last',  # 'last' | 'mean'
 ) -> tuple[dict, int, np.ndarray]:
     """Fit RNN params on (conf, loss) pairs.
@@ -339,6 +369,37 @@ def fit(
     return params, max_layers, np.asarray(losses)
 
 
+def train_loss_model(
+    db: 'ResultDB',
+) -> LossModel | None:
+    """Retrain the loss-prediction model on all labeled runs in `db`.
+
+    Applies the best config found in the sweep
+    (docs/loss_rnn_experiments.md). Returns None if there are no
+    labeled runs.
+    """
+    with latency.timer('train_loss_model.load'):
+        train_data = [
+            (conf, loss) for _, conf, loss in db.iter_labeled_runs()
+        ]
+    if not train_data:
+        return None
+    simple_types = discover_simple_types(train_data)
+    with latency.timer('train_loss_model.fit'):
+        params, max_layers, _trace = fit(
+            train_data, simple_types,
+            hidden=32, lr=0.02, steps=8000, lr_schedule='cosine',
+            cell_activation='tanh',
+        )
+    logging.info(f"Trained loss model on {len(train_data)} labeled runs")
+    return LossModel(
+        params=params,
+        simple_types=simple_types,
+        max_layers=max_layers,
+        cell_activation='tanh',
+    )
+
+
 def predict(
     params: dict,
     confs: list[Configuration],
@@ -347,7 +408,7 @@ def predict(
     cell_activation: str = 'tanh',
     feat_proj: int = 0,
     rnn_sub_steps: int = 1,
-    cell_type: str = 'vanilla',
+    cell_type: str = 'elman',
     pooling: str = 'last',
 ) -> np.ndarray:
     type_idx = {t: i for i, t in enumerate(simple_types)}

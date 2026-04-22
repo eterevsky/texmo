@@ -52,7 +52,7 @@ def _predicted_best_report(
     lines = [
         f"Predicted-best confs W <= {itoa3(max_weights)} "
         f"T <= {ttoa3(max_time)} ({system}):",
-        f'    {seed_score:<12}  {seed.conf}  [seed]',
+        f'    {seed_score:<12}  {seed.conf.aligned_str()}  [seed]',
     ]
     for compound, total_runs, c in candidate_data[:9]:
         score = f'{2.0 ** compound:.4f} ({total_runs})'

@@ -87,3 +87,12 @@ CREATE TABLE conf_time_estimate (
 );
 
 CREATE INDEX conf_time_estimate_conf_id ON conf_time_estimate(conf_id);
+
+-- Serialized trained models (pickled). `name` is a short key like
+-- 'timing' or 'loss'. Saved by ModelTrainingThread after each refit
+-- so restarts don't have to redo minutes of training.
+CREATE TABLE model (
+    name TEXT NOT NULL PRIMARY KEY,
+    data BLOB NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);

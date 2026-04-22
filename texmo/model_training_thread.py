@@ -118,6 +118,7 @@ def bootstrap(db: ResultDB) -> TrainTimingModel:
     for system in db.get_systems():
         for precision in Precision:
             _refit_pair(db, model, system, precision)
+    db.save_model('timing', model.snapshot())
     return model
 
 
@@ -146,14 +147,17 @@ class ModelTrainingThread(threading.Thread):
                 if command == "refit":
                     system, precision = args
                     _refit_pair(db, self._model, system, precision)
+                    snap = self._model.snapshot()
+                    db.save_model('timing', snap)
                     if self._search_queue:
-                        self._search_queue.put(
-                            ("timing_weights", self._model.snapshot()))
+                        self._search_queue.put(("timing_weights", snap))
                 elif command == "loss_refit":
                     loss_model = loss_rnn.train_loss_model(db)
-                    if loss_model is not None and self._search_queue:
-                        self._search_queue.put(
-                            ("loss_weights", loss_model))
+                    if loss_model is not None:
+                        db.save_model('loss', loss_model)
+                        if self._search_queue:
+                            self._search_queue.put(
+                                ("loss_weights", loss_model))
                 elif command == "stop":
                     logging.info("Stopping model-training thread")
                     break

@@ -256,11 +256,10 @@ class SearchServer(object):
         self.confs_by_system: dict[str, Queue] = {}
         self.confs_by_system_lock = threading.Lock()
 
-        # If bootstrap_models is set, synchronously fit both models
-        # before serving any requests so the predicted-best strategy
-        # is immediately usable. Otherwise the models arrive async
-        # via the search queue and the strategy falls through until
-        # they do.
+        # Load any persisted models from the DB. With --bootstrap-models
+        # we retrain from scratch (overwriting what's persisted).
+        # Otherwise we use whatever was saved; if nothing is there we
+        # fall through to the async refit at the end of init.
         initial_timing_model = None
         initial_loss_model = None
         if bootstrap_models:
@@ -268,6 +267,19 @@ class SearchServer(object):
             initial_timing_model = bootstrap(db)
             logging.info("Bootstrap: training loss model synchronously")
             initial_loss_model = loss_rnn.train_loss_model(db)
+            if initial_loss_model is not None:
+                db.save_model('loss', initial_loss_model)
+        else:
+            initial_timing_model = db.load_model('timing')
+            if initial_timing_model is not None:
+                logging.info(
+                    "Loaded persisted timing model from DB "
+                    f"({len(initial_timing_model.keys())} pairs)")
+            initial_loss_model = db.load_model('loss')
+            if initial_loss_model is not None:
+                logging.info(
+                    "Loaded persisted loss model from DB "
+                    f"(max_layers={initial_loss_model.max_layers})")
 
         self.timing_queue: Queue = Queue()
         self.timing_thread = ModelTrainingThread(
@@ -275,10 +287,10 @@ class SearchServer(object):
             search_queue=self.requests_queue,
         )
         self.timing_thread.start()
-        if not bootstrap_models:
-            # Train an initial loss model async against whatever data
-            # is in the DB. Before this completes, the predicted-best
-            # strategy falls through.
+        if initial_loss_model is None and not bootstrap_models:
+            # No persisted loss model — train one async against
+            # whatever data is in the DB. Before this completes the
+            # predicted-best strategy falls through.
             self.timing_queue.put(("loss_refit", None))
 
         self.search_thread = SearchThread(

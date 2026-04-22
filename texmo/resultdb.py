@@ -1,11 +1,12 @@
 import logging
 import math
 import os
+import pickle
 import re
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from statistics import StatisticsError, median
 from typing import Optional
 
@@ -171,6 +172,11 @@ WHERE conf_id = :conf_id
 _UPSERT_TIME_ESTIMATE = """
 INSERT OR REPLACE INTO conf_time_estimate(conf_id, system, time_s, source)
 VALUES (:conf_id, :system, :time_s, :source)
+"""
+
+_UPSERT_MODEL = """
+INSERT OR REPLACE INTO model(name, data, updated_at)
+VALUES (:name, :data, :updated_at)
 """
 
 _GET_CONFS_RUNS = """
@@ -935,6 +941,30 @@ class ResultDB(object):
         for cid, loss in cur:
             out[cid].append(loss)
         return out
+
+    def save_model(self, name: str, obj) -> None:
+        """Pickle `obj` and upsert into the model table under `name`."""
+        data = pickle.dumps(obj)
+        cur = self._db.cursor()
+        cur.execute('BEGIN IMMEDIATE')
+        cur.execute(_UPSERT_MODEL, {
+            'name': name,
+            'data': data,
+            'updated_at': datetime.now(timezone.utc).isoformat(),
+        })
+        cur.execute('COMMIT')
+        logging.info(f"Saved model '{name}' ({len(data)} bytes)")
+
+    def load_model(self, name: str):
+        """Return the unpickled model stored under `name`, or None."""
+        cur = self._db.execute(
+            'SELECT data FROM model WHERE name = :name',
+            {'name': name},
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return pickle.loads(row['data'])
 
     def get_time_estimate(
         self, conf_id: int, system: str

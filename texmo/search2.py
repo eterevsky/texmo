@@ -39,19 +39,20 @@ def top_confs_report(
 
 
 def _predicted_best_report(
-    seed: Configuration,
+    seed: ConfScore,
     candidate_data: list[tuple[float, int, Configuration]],
     system: str,
     max_weights: int,
     max_time: float,
 ) -> str:
-    """Log the seed and the top 9 candidates considered by the
-    predicted-best strategy (we only ever look at the top 9 during
-    the run-limit walk)."""
+    """Log the seed (with its known median loss for comparison) and
+    the top 9 candidates — we only look at the top 9 during the
+    run-limit walk."""
+    seed_score = f'{seed.median_score:.4f} ({seed.num_runs})'
     lines = [
         f"Predicted-best confs W <= {itoa3(max_weights)} "
         f"T <= {ttoa3(max_time)} ({system}):",
-        f"    seed: {seed}",
+        f'    {seed_score:<12}  {seed.conf}  [seed]',
     ]
     for compound, total_runs, c in candidate_data[:9]:
         score = f'{2.0 ** compound:.4f} ({total_runs})'
@@ -444,6 +445,13 @@ class Search(object):
             for nn in conf_neighbors(n, self.template):
                 candidates.add(_norm(nn))
 
+        # Filter by weight budget *after* the BFS, so intermediate
+        # neighbors with too many weights can still lead us to
+        # smaller-but-different final candidates at depth 2.
+        candidates = {c for c in candidates if c.num_weights <= max_weights}
+        if not candidates:
+            return None
+
         # Predict per-step time for each and adjust steps.
         confs_in = list(candidates)
         per_steps = self.timing_model.predict_batch(system, confs_in)
@@ -479,7 +487,7 @@ class Search(object):
         candidate_data.sort(key=lambda r: r[0])
 
         logging.info(_predicted_best_report(
-            seed_conf, candidate_data, system, max_weights, t))
+            seed, candidate_data, system, max_weights, t))
 
         # Run-limit sequences (cap at iteration 3 / top 9 confs).
         sequences = [[1], [2, 1, 1], [3, 2, 2, 1, 1, 1, 1, 1, 1]]

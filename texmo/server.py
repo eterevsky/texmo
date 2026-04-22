@@ -28,10 +28,10 @@ from .configuration import (
     default_from_template,
 )
 from .latency import get_report, timer
+from .model_training_thread import ModelTrainingThread
 from .resultdb import ResultDB
 from .run import Run
 from .search2 import Search
-from .timing_thread import TimingThread
 from .tokens import set_tokens_dir
 
 # Threshold of new runs per (system, precision) pair that triggers a
@@ -179,8 +179,6 @@ class SearchThread(threading.Thread):
         self._run_counter: dict[tuple[str, Precision], int] = defaultdict(int)
         # Total-run counter for loss-model refits.
         self._total_run_counter = 0
-        # Latest loss-prediction model pushed by the timing thread.
-        self._loss_model = None
 
     def run(self):
         logging.info("Started search thread")
@@ -199,12 +197,14 @@ class SearchThread(threading.Thread):
                 self._maybe_trigger_refit(run.system, conf.precision)
                 self._maybe_trigger_loss_refit()
             elif command == "loss_weights":
-                self._loss_model = args
+                self.search.loss_model = args
                 logging.info(
                     f"Search thread: received new loss model "
-                    f"(max_layers={self._loss_model.max_layers}, "
-                    f"{len(self._loss_model.simple_types)} simple types)"
+                    f"(max_layers={args.max_layers}, "
+                    f"{len(args.simple_types)} simple types)"
                 )
+            elif command == "timing_weights":
+                self.search.timing_model = args
             elif command == "stop":
                 logging.info("Stopping search thread")
                 break
@@ -255,11 +255,15 @@ class SearchServer(object):
         self.confs_by_system_lock = threading.Lock()
 
         self.timing_queue: Queue = Queue()
-        self.timing_thread = TimingThread(
+        self.timing_thread = ModelTrainingThread(
             db.path, self.timing_queue,
             search_queue=self.requests_queue,
         )
         self.timing_thread.start()
+        # Train an initial loss model against whatever data is in the DB
+        # so the predicted-best search strategy has something to work
+        # with. Before this completes, the strategy falls through.
+        self.timing_queue.put(("loss_refit", None))
 
         self.search_thread = SearchThread(
             db,

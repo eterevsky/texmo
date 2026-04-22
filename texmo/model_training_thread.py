@@ -9,7 +9,9 @@ messages:
         Reload runs for that (system, precision), refit just that pair's
         timing model, then overwrite `conf_time_estimate` for every
         conf of that precision on that system with either the median
-        (if runs exist) or a prediction.
+        (if runs exist) or a prediction. After refitting, push a
+        snapshot of the current timing model to the search queue as
+        ("timing_weights", snapshot).
 
     ("loss_refit", None)
         Retrain the loss-prediction RNN on all labeled runs and push
@@ -115,15 +117,16 @@ def bootstrap(db: ResultDB):
             _refit_pair(db, model, system, precision)
 
 
-class TimingThread(threading.Thread):
+class ModelTrainingThread(threading.Thread):
     def __init__(
         self,
         db_path: str | None,
         queue: Queue,
         search_queue: Optional[Queue] = None,
     ):
-        """`search_queue` is used to send newly-trained loss models back
-        to the search thread as ('loss_weights', LossModel)."""
+        """`search_queue` is used to send trained model snapshots back
+        to the search thread as ('loss_weights', LossModel) and
+        ('timing_weights', TrainTimingModel snapshot)."""
         super().__init__(daemon=True)
         self._db_path = db_path
         self._queue = queue
@@ -132,22 +135,25 @@ class TimingThread(threading.Thread):
 
     def run(self):
         db = ResultDB(self._db_path)
-        logging.info("Started timing thread")
+        logging.info("Started model-training thread")
         try:
             while True:
                 command, args = self._queue.get()
                 if command == "refit":
                     system, precision = args
                     _refit_pair(db, self._model, system, precision)
+                    if self._search_queue:
+                        self._search_queue.put(
+                            ("timing_weights", self._model.snapshot()))
                 elif command == "loss_refit":
                     loss_model = loss_rnn.train_loss_model(db)
                     if loss_model is not None and self._search_queue:
                         self._search_queue.put(
                             ("loss_weights", loss_model))
                 elif command == "stop":
-                    logging.info("Stopping timing thread")
+                    logging.info("Stopping model-training thread")
                     break
                 else:
-                    assert False, f"Unknown timing command: {command}"
+                    assert False, f"Unknown command: {command}"
         finally:
             db.close()

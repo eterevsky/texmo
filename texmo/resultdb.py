@@ -919,6 +919,23 @@ class ResultDB(object):
         ])
         cur.execute('COMMIT')
 
+    def get_losses_by_conf_ids(
+        self, conf_ids: list[int],
+    ) -> dict[int, list[float]]:
+        """Return {conf_id: [loss, loss, ...]} across all systems."""
+        if not conf_ids:
+            return {}
+        placeholders = ','.join('?' for _ in conf_ids)
+        cur = self._db.execute(
+            f'SELECT conf_id, loss FROM run '
+            f'WHERE conf_id IN ({placeholders}) AND loss IS NOT NULL',
+            conf_ids,
+        )
+        out: dict[int, list[float]] = {cid: [] for cid in conf_ids}
+        for cid, loss in cur:
+            out[cid].append(loss)
+        return out
+
     def get_time_estimate(
         self, conf_id: int, system: str
     ) -> Optional[tuple[float, str]]:

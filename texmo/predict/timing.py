@@ -404,3 +404,15 @@ class TrainTimingModel:
 
     def loss(self, system: str, precision: Precision) -> float:
         return self._losses[(system, precision)]
+
+    def snapshot(self) -> 'TrainTimingModel':
+        """Return a new model sharing none of the caller's mutable state.
+
+        `_weights` values are fitted arrays we never mutate in place, so
+        a shallow dict copy suffices to insulate readers from future
+        refits.
+        """
+        s = TrainTimingModel()
+        s._weights = dict(self._weights)
+        s._losses = dict(self._losses)
+        return s

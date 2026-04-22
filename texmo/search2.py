@@ -1,13 +1,24 @@
 import logging
+import math
 import random
 from math import log2
 from typing import Optional
+
+import numpy as np
 
 from . import latency
 from .common import INF, itoa3, ttoa3
 from .configuration import Configuration, Template, conf_neighbors
 from .resultdb import ConfScore, ConfWithRuns, ResultDB
 from .run import Run
+
+# Probability of running the predicted-best strategy before falling
+# back to the others. Requires both loss and timing models to be ready.
+_PREDICTED_BEST_PROB = 0.15
+
+# Placeholder value for the `steps` field when deduplicating candidate
+# configurations — we replace it with a budget-fitting value later.
+_CANDIDATE_STEPS = 1024
 
 # Probability of choosing the time-budget strategy over the top-neighbor
 # one on each select_conf call. The fallback on None still kicks in.
@@ -24,6 +35,27 @@ def top_confs_report(
         t = '   ?    ' if c.median_time is None else f'{c.median_time:7.3f}s'
         score_runs = f'{c.median_score:.4f} ({c.num_runs})'
         lines.append(f'    {score_runs:<11} {t}  {c.conf.aligned_str()}')
+    return "\n".join(lines)
+
+
+def _predicted_best_report(
+    seed: Configuration,
+    candidate_data: list[tuple[float, int, Configuration]],
+    system: str,
+    max_weights: int,
+    max_time: float,
+) -> str:
+    """Log the seed and the top 9 candidates considered by the
+    predicted-best strategy (we only ever look at the top 9 during
+    the run-limit walk)."""
+    lines = [
+        f"Predicted-best confs W <= {itoa3(max_weights)} "
+        f"T <= {ttoa3(max_time)} ({system}):",
+        f"    seed: {seed}",
+    ]
+    for compound, total_runs, c in candidate_data[:9]:
+        score = f'{2.0 ** compound:.4f} ({total_runs})'
+        lines.append(f'    {score:<12}  {c.aligned_str()}')
     return "\n".join(lines)
 
 
@@ -143,6 +175,11 @@ class Search(object):
         assert isinstance(train_time[0], float)
         assert isinstance(train_time[1], float)
         self.train_time = train_time
+
+        # Models populated by ModelTrainingThread via the search queue.
+        # None until first training completes.
+        self.loss_model = None
+        self.timing_model = None
 
     def add_run(
         self,
@@ -348,16 +385,135 @@ class Search(object):
 
             return None
 
+    def _adjust_steps_to_budget(
+        self, conf: Configuration, per_step: float, t: float,
+    ) -> Optional[Configuration]:
+        """Return `conf` with steps = largest pow2 fitting budget, or None."""
+        # (S - 1) * per_step <= t -> S <= t/per_step + 1
+        max_steps = int(t / per_step) + 1
+        if max_steps < 2:
+            return None
+        adjusted = 1 << int(math.floor(math.log2(max_steps)))
+        if adjusted < 2:
+            return None
+        if adjusted == conf.steps:
+            return conf
+        return conf.replace(steps=adjusted)
+
+    def _select_predicted_best(
+        self, t: float, max_weights: int, system: str
+    ) -> Optional[Configuration]:
+        """Predictor-guided tournament.
+
+        Take the best-known conf for (system, template, max_weights,
+        max_time<=t) as a seed, expand its neighbors-of-neighbors,
+        adjust each candidate's steps to fit the time budget, score
+        them with a compound median(predicted_loss, run_losses...),
+        then walk the top 9 across the [1] / [2,1,1] / [3,2,2,1x6]
+        run-limit sequences.
+        """
+        if self.loss_model is None or self.timing_model is None:
+            return None
+        with latency.timer('Search._select_predicted_best'):
+            return self._select_predicted_best_impl(t, max_weights, system)
+
+    def _select_predicted_best_impl(
+        self, t: float, max_weights: int, system: str
+    ) -> Optional[Configuration]:
+        try:
+            seed = next(self._db.top_confs_for_system(
+                system=system, template=self.template,
+                max_weights=max_weights, max_time=t, limit=1,
+            ))
+        except StopIteration:
+            return None
+        seed_conf = seed.conf
+
+        # BFS-2 from the seed, including seed itself. Normalize steps
+        # to a constant before inserting into the set — otherwise
+        # confs that differ only in steps end up as different entries,
+        # then collapse to the same thing after _adjust_steps_to_budget.
+        def _norm(c: Configuration) -> Configuration:
+            return c if c.steps == _CANDIDATE_STEPS else c.replace(
+                steps=_CANDIDATE_STEPS)
+
+        candidates: set[Configuration] = {_norm(seed_conf)}
+        n1 = conf_neighbors(seed_conf, self.template)
+        candidates.update(_norm(n) for n in n1)
+        for n in n1:
+            for nn in conf_neighbors(n, self.template):
+                candidates.add(_norm(nn))
+
+        # Predict per-step time for each and adjust steps.
+        confs_in = list(candidates)
+        per_steps = self.timing_model.predict_batch(system, confs_in)
+        if per_steps is None:
+            return None  # no timing model for (system, precision)
+        adjusted = []
+        for c, ps in zip(confs_in, per_steps):
+            ac = self._adjust_steps_to_budget(c, float(ps), t)
+            if ac is not None:
+                adjusted.append(ac)
+        if not adjusted:
+            return None
+
+        # Predict loss for each adjusted conf (log2 space).
+        log_preds = self.loss_model.predict(adjusted)
+
+        # Look up any existing runs for these (adjusted) confs.
+        id_of = {c: self._db.get_conf_id(c) for c in adjusted}
+        ids = [cid for cid in id_of.values() if cid is not None]
+        losses_by_id = self._db.get_losses_by_conf_ids(ids)
+
+        # Compound score in log2-space.
+        candidate_data = []
+        for i, c in enumerate(adjusted):
+            cid = id_of[c]
+            raw_losses = losses_by_id.get(cid, []) if cid else []
+            log_losses = [
+                np.log2(np.clip(l, 0.1, 10)) for l in raw_losses
+            ]
+            compound = float(np.median([float(log_preds[i])] + log_losses))
+            candidate_data.append(
+                (compound, len(raw_losses), c))
+        candidate_data.sort(key=lambda r: r[0])
+
+        logging.info(_predicted_best_report(
+            seed_conf, candidate_data, system, max_weights, t))
+
+        # Run-limit sequences (cap at iteration 3 / top 9 confs).
+        sequences = [[1], [2, 1, 1], [3, 2, 2, 1, 1, 1, 1, 1, 1]]
+        for limits in sequences:
+            for i, limit in enumerate(limits):
+                if i >= len(candidate_data):
+                    break
+                compound, total_runs, c = candidate_data[i]
+                if total_runs < limit:
+                    logging.info(
+                        f'Predicted-best conf for {system} at pos {i}: '
+                        f'{c} (runs={total_runs} < limit={limit}, '
+                        f'compound={compound:.4f})'
+                    )
+                    return c
+        return None
+
     def select_conf(self, system: str) -> Optional[Configuration]:
         """Select a configuration to run, or None if nothing matches.
 
-        Most of the time uses the neighbor-walk strategy on top confs;
-        _TIME_BUDGET_PROB of the time tries the time-budget strategy
-        first and falls back to neighbor-walk if it finds nothing.
+        Three strategies, tried in order of preference with fallback:
+        * predicted-best (needs both loss and timing models) —
+          _PREDICTED_BEST_PROB of the time;
+        * time-budget — _TIME_BUDGET_PROB of the time;
+        * neighbor-walk — the always-available fallback.
         """
         with latency.timer("Search.select_conf"):
             t = self._select_time()
             max_weights = self._select_max_weights(t, system)
+
+            if random.random() < _PREDICTED_BEST_PROB:
+                conf = self._select_predicted_best(t, max_weights, system)
+                if conf is not None:
+                    return conf
 
             if random.random() < _TIME_BUDGET_PROB:
                 conf = self._select_time_budget(t, max_weights, system)

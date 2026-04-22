@@ -1,8 +1,8 @@
 import argparse
 import logging
 
+from .model_training_thread import bootstrap as bootstrap_timing
 from .resultdb import ResultDB
-from .timing_thread import bootstrap as bootstrap_timing
 
 
 def updatedb(args: argparse.Namespace):

@@ -28,7 +28,8 @@ from .configuration import (
     default_from_template,
 )
 from .latency import get_report, timer
-from .model_training_thread import ModelTrainingThread
+from .model_training_thread import ModelTrainingThread, bootstrap
+from .predict import loss_rnn
 from .resultdb import ResultDB
 from .run import Run
 from .search2 import Search
@@ -243,6 +244,7 @@ class SearchServer(object):
         template: Template,
         train_time: tuple[float, float],
         default_spec: str,
+        bootstrap_models: bool = False,
     ):
         self.db: ResultDB = db
         self.template: Template = template
@@ -254,16 +256,30 @@ class SearchServer(object):
         self.confs_by_system: dict[str, Queue] = {}
         self.confs_by_system_lock = threading.Lock()
 
+        # If bootstrap_models is set, synchronously fit both models
+        # before serving any requests so the predicted-best strategy
+        # is immediately usable. Otherwise the models arrive async
+        # via the search queue and the strategy falls through until
+        # they do.
+        initial_timing_model = None
+        initial_loss_model = None
+        if bootstrap_models:
+            logging.info("Bootstrap: fitting timing model synchronously")
+            initial_timing_model = bootstrap(db)
+            logging.info("Bootstrap: training loss model synchronously")
+            initial_loss_model = loss_rnn.train_loss_model(db)
+
         self.timing_queue: Queue = Queue()
         self.timing_thread = ModelTrainingThread(
             db.path, self.timing_queue,
             search_queue=self.requests_queue,
         )
         self.timing_thread.start()
-        # Train an initial loss model against whatever data is in the DB
-        # so the predicted-best search strategy has something to work
-        # with. Before this completes, the strategy falls through.
-        self.timing_queue.put(("loss_refit", None))
+        if not bootstrap_models:
+            # Train an initial loss model async against whatever data
+            # is in the DB. Before this completes, the predicted-best
+            # strategy falls through.
+            self.timing_queue.put(("loss_refit", None))
 
         self.search_thread = SearchThread(
             db,
@@ -275,6 +291,13 @@ class SearchServer(object):
             confs_by_system_lock=self.confs_by_system_lock,
             timing_queue=self.timing_queue,
         )
+        # Install pre-fitted models before the thread starts processing
+        # select requests so the predicted-best strategy is usable from
+        # the first call.
+        if initial_timing_model is not None:
+            self.search_thread.search.timing_model = initial_timing_model
+        if initial_loss_model is not None:
+            self.search_thread.search.loss_model = initial_loss_model
         self.search_thread.start()
 
     def __del__(self):
@@ -429,6 +452,7 @@ def main(args: argparse.Namespace):
     logging.info(f"T ∈ {train_time} s")
     server = SearchServer(
         db, template, train_time, args.default_spec,
+        bootstrap_models=args.bootstrap_models,
     )
 
     app = Flask("texmo")
@@ -549,5 +573,16 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="range for the training time in seconds",
     )
     parser.add_argument("--default-spec", type=str, default=None, help="default model")
+    parser.add_argument(
+        "--bootstrap-models",
+        action="store_true",
+        default=False,
+        help=(
+            "Before accepting requests, synchronously fit the timing "
+            "model (same as `db-bootstrap-estimates`) and train the "
+            "loss-prediction RNN. Lets the predicted-best strategy run "
+            "immediately. Takes minutes on a populated DB."
+        ),
+    )
 
     parser.set_defaults(func=main)

@@ -95,7 +95,7 @@ def _refit_pair(
     _refresh_estimates(db, model, system, precision)
 
 
-def bootstrap(db: ResultDB):
+def bootstrap(db: ResultDB) -> TrainTimingModel:
     """Bring the DB into a consistent state before starting the search.
 
     1. Backfill medians: recompute median_score and median_time (-> the
@@ -106,6 +106,9 @@ def bootstrap(db: ResultDB):
     2. Fit the timing model for every (system, precision) pair with
        enough runs.
     3. Write 'predicted' estimates for every conf without a median.
+
+    Returns the fitted timing model so callers can install it on a
+    live search without waiting for the first async refit to arrive.
     """
     logging.info("Bootstrap: backfilling medians")
     db.update_all_scores()
@@ -115,6 +118,7 @@ def bootstrap(db: ResultDB):
     for system in db.get_systems():
         for precision in Precision:
             _refit_pair(db, model, system, precision)
+    return model
 
 
 class ModelTrainingThread(threading.Thread):

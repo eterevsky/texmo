@@ -493,7 +493,11 @@ def main(args: argparse.Namespace):
         )
 
     try:
-        app.run(host="0.0.0.0", debug=True)
+        # use_reloader=False: the Flask auto-reloader spawns a second
+        # process that re-runs main() — which would re-bootstrap the
+        # models (minutes of wasted work) and create a second pair of
+        # search/timing threads.
+        app.run(host="0.0.0.0", debug=True, use_reloader=False)
     finally:
         server.join()
 

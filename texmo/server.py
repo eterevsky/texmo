@@ -27,7 +27,7 @@ from .configuration import (
     Template,
     default_from_template,
 )
-from .latency import get_report, timer
+from .latency import get_report, timer, report
 from .model_training_thread import ModelTrainingThread, bootstrap
 from .predict import loss_rnn
 from .resultdb import ResultDB
@@ -512,6 +512,7 @@ def main(args: argparse.Namespace):
         app.run(host="0.0.0.0", debug=True, use_reloader=False)
     finally:
         server.join()
+        report()
 
 
 def init_args(parser: argparse.ArgumentParser, config):

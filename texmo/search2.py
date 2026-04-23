@@ -32,8 +32,8 @@ _TIME_BUDGET_PROB = 0.3
 # Hill-climb tunables and hard limits.
 # Temperature is in log2(loss) units. A 0.05 gap gives a ~2.7x
 # probability ratio — sharp but not greedy.
-_HC_TEMPERATURE = 0.05
-_HC_MAX_ITER = 20
+_HC_TEMPERATURE = 0.03
+_HC_MAX_ITER = 40
 _HC_MAX_LAYERS = 8
 _HC_MAX_BATCH = 2 ** 16
 _HC_MAX_LENGTH = 2 ** 16
@@ -640,7 +640,10 @@ class Search(object):
             adjusted_n = []
             for n, ps in zip(valid, per_steps):
                 a = self._adjust_steps_to_budget(n, float(ps), t)
-                if a is not None:
+                # Skip neighbors that collapse onto `current` after the
+                # steps snap — otherwise the walk can stall stepping in
+                # place.
+                if a is not None and a != current:
                     adjusted_n.append(a)
             if not adjusted_n:
                 break

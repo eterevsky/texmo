@@ -158,8 +158,24 @@ VALUES (:spec, :weights, :lr, :length, :batch, :steps, :precision, :decay)
 """
 
 _INSERT_RUN = """
-INSERT INTO run(conf_id, system, train_time, timestamp, loss, step_loss, loss_model_v, loss_model)
-VALUES (:conf_id, :system, :train_time, :timestamp, :loss, :step_loss, :loss_model_v, :loss_model)
+INSERT INTO run(conf_id, system, train_time, timestamp, loss, step_loss,
+                loss_model_v, loss_model, strategy, changed_winner)
+VALUES (:conf_id, :system, :train_time, :timestamp, :loss, :step_loss,
+        :loss_model_v, :loss_model, :strategy, :changed_winner)
+"""
+
+# Best (lowest-median_score) conf under (system, max_weights, max_time).
+# Used by add_run to tell if a new run changed the winner at that point.
+_TOP_CONF_AT = """
+SELECT conf.id AS conf_id
+FROM conf
+JOIN conf_time_estimate cte
+    ON cte.conf_id = conf.id AND cte.system = :system
+WHERE conf.median_score IS NOT NULL
+  AND conf.weights <= :max_weights
+  AND cte.time_s <= :max_time
+ORDER BY conf.median_score ASC
+LIMIT 1
 """
 
 _GET_TRAIN_TIMES = """
@@ -252,6 +268,11 @@ class ResultDB(object):
                 self._db.executescript(schema.read())
                 self._db.commit()
 
+        # Idempotent migrations for columns added after the initial
+        # schema. Existing rows get NULL for the new columns.
+        if not readonly:
+            self._migrate_columns()
+
         # Enable WAL for file-backed DBs so the timing thread and search
         # thread can write concurrently without blocking readers.
         if not is_memory and not readonly:
@@ -265,6 +286,19 @@ class ResultDB(object):
 
         # Cache: Configuration -> conf_id (populated lazily)
         self._conf_id_cache: dict[Configuration, int | None] = {}
+
+    def _migrate_columns(self):
+        """Add any columns not present on `run`. Idempotent."""
+        cur = self._db.execute("PRAGMA table_info(run)")
+        existing = {row[1] for row in cur}
+        for col, decl in (
+            ('strategy', 'TEXT'),
+            ('changed_winner', 'INTEGER'),
+        ):
+            if col not in existing:
+                logging.info(f"Migrating: ALTER TABLE run ADD COLUMN {col}")
+                self._db.execute(f'ALTER TABLE run ADD COLUMN {col} {decl}')
+        self._db.commit()
 
     @property
     def path(self) -> str:
@@ -444,13 +478,27 @@ class ResultDB(object):
         cur.execute('COMMIT')
         return deleted
 
+    def _top_conf_at(
+        self, cur: sqlite3.Cursor,
+        system: str, max_weights: int, max_time: float,
+    ) -> Optional[int]:
+        cur.execute(_TOP_CONF_AT, {
+            'system': system,
+            'max_weights': max_weights,
+            'max_time': max_time,
+        })
+        row = cur.fetchone()
+        return row[0] if row is not None else None
+
     def _add_run(
         self,
         conf: Configuration,
         run: Run,
         conf_id: Optional[int],
         timestamp: Optional[datetime],
-    ):
+        strategy: Optional[str],
+        track_winner_change: bool,
+    ) -> Optional[bool]:
         cur = self._db.cursor()
         cur.execute('BEGIN IMMEDIATE')
 
@@ -467,6 +515,20 @@ class ResultDB(object):
         timestamp = timestamp.isoformat() if timestamp else None
         loss = INF if math.isnan(run.loss) or run.loss is None else run.loss
 
+        # Sample the winner at (system, run.train_time, conf.weights)
+        # before and after writing the run, using the same (T, W) both
+        # times. A flip means this run changed the winner for some
+        # (t, w).
+        do_track = (
+            track_winner_change
+            and run.train_time is not None
+            and run.train_time > 0.0001
+        )
+        before: Optional[int] = None
+        if do_track:
+            before = self._top_conf_at(
+                cur, run.system, conf.num_weights, run.train_time)
+
         run_dict = {
             'conf_id': conf_id,
             'system': run.system,
@@ -476,11 +538,26 @@ class ResultDB(object):
             'step_loss': _pack_ndarray(run.step_loss),
             'loss_model_v': loss_model_v,
             'loss_model': loss_model,
+            'strategy': strategy,
+            'changed_winner': None,  # filled in below if tracked
         }
 
         self._add_run_execute(cur, run_dict)
+        run_id = cur.lastrowid
         self._update_scores(cur, conf_id, run.system)
+
+        changed_winner: Optional[int] = None
+        if do_track:
+            after = self._top_conf_at(
+                cur, run.system, conf.num_weights, run.train_time)
+            changed_winner = 1 if before != after else 0
+            cur.execute(
+                'UPDATE run SET changed_winner = :cw WHERE id = :id',
+                {'cw': changed_winner, 'id': run_id},
+            )
+
         cur.execute('COMMIT')
+        return None if changed_winner is None else bool(changed_winner)
 
     def add_run(
         self,
@@ -488,10 +565,24 @@ class ResultDB(object):
         run: Run,
         conf_id: Optional[int] = None,
         timestamp: Optional[datetime] = None,
-    ):
+        strategy: Optional[str] = None,
+        track_winner_change: bool = False,
+    ) -> Optional[bool]:
+        """Insert a run, optionally flagging whether it changed the winner.
+
+        `strategy` is the label of the search strategy that picked the
+        conf. With `track_winner_change`, the run's `changed_winner`
+        column is set to 1/0 by sampling the winning conf at
+        (system, train_time, conf.num_weights) before and after the
+        insert, inside the same transaction. Returns the resulting
+        bool (or None if not tracked / train_time unusable).
+        """
         assert run.train_time is None or run.train_time > 0.0001
         with latency.timer('ResultDB.add_run'):
-            self._add_run(conf, run, conf_id, timestamp)
+            return self._add_run(
+                conf, run, conf_id, timestamp,
+                strategy, track_winner_change,
+            )
 
     def get_systems(self) -> list[str]:
         """Return a sorted list of all systems that have runs in the DB."""

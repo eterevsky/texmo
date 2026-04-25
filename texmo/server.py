@@ -189,13 +189,13 @@ class SearchThread(threading.Thread):
                 system = args
                 if system is None:
                     break
-                conf = self.search.select_conf(system)
+                result = self.search.select_conf(system)
                 with self.confs_by_system_lock:
-                    self.confs_by_system[system].put(conf)
+                    self.confs_by_system[system].put(result)
             elif command == "add":
-                conf, run = args
-                self.search.add_run(conf, run)
-                self._maybe_trigger_refit(run.system, conf.precision)
+                conf, run, strategy = args
+                self.search.add_run(conf, run, strategy=strategy)
+                self._maybe_trigger_time_refit(run.system, conf.precision)
                 self._maybe_trigger_loss_refit()
             elif command == "loss_weights":
                 self.search.loss_model = args
@@ -212,7 +212,7 @@ class SearchThread(threading.Thread):
             else:
                 assert False, f"Unknown command: {command}"
 
-    def _maybe_trigger_refit(self, system: str, precision: Precision):
+    def _maybe_trigger_time_refit(self, system: str, precision: Precision):
         if self._timing_queue is None:
             return
         key = (system, precision)
@@ -427,12 +427,14 @@ class SearchServer(object):
 
         self.requests_queue.put(("select", system))
 
-        conf = response_queue.get()
-        logging.info(f"Sending conf for system {system}: {conf}")
-        return {
-            "system": system,
-            "conf": conf.to_dict() if conf is not None else None,
-        }
+        result = response_queue.get()
+        if result is None:
+            logging.info(f"No conf for system {system}")
+            return {"system": system, "conf": None, "strategy": None}
+        logging.info(
+            f"Sending conf for system {result.system}: {result.conf} "
+            f"(strategy={result.strategy})")
+        return result.to_dict()
 
     def add_run(self, params):
         run = Run.from_dict(params["run"])
@@ -440,8 +442,9 @@ class SearchServer(object):
             logging.info('run.loss is None!')
             return
         conf = Configuration.from_dict(params["conf"])
-        logging.info(f"Adding run: {conf} - {run}")
-        self.requests_queue.put(("add", (conf, run)))
+        strategy = params.get("strategy")
+        logging.info(f"Adding run: {conf} - {run} (strategy={strategy})")
+        self.requests_queue.put(("add", (conf, run, strategy)))
 
     def join(self):
         self.requests_queue.put(("stop", None))

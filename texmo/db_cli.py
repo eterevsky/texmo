@@ -64,3 +64,45 @@ def bootstrap_estimates_init_args(
         help="path to the database",
     )
     parser.set_defaults(func=bootstrap_estimates)
+
+
+def strategy_stats(args: argparse.Namespace):
+    """Per-strategy effectiveness: runs, winner-changes, %."""
+    db = ResultDB(args.db, readonly=True)
+    try:
+        cur = db._db.execute(
+            """
+            SELECT COALESCE(strategy, '(none)') AS strategy,
+                   COUNT(*) AS runs,
+                   SUM(CASE WHEN changed_winner IS NULL THEN 1 ELSE 0 END)
+                       AS untracked,
+                   SUM(CASE WHEN changed_winner = 1 THEN 1 ELSE 0 END)
+                       AS changes
+            FROM run
+            GROUP BY COALESCE(strategy, '(none)')
+            ORDER BY runs DESC
+            """
+        )
+        rows = list(cur)
+    finally:
+        db.close()
+
+    print(f'{"strategy":<16} {"runs":>8} {"tracked":>8} {"changes":>8} '
+          f'{"pct":>6}')
+    for strategy, runs, untracked, changes in rows:
+        tracked = runs - untracked
+        pct = (100.0 * changes / tracked) if tracked > 0 else 0.0
+        print(f'{strategy:<16} {runs:>8} {tracked:>8} {changes:>8} '
+              f'{pct:>5.1f}%')
+
+
+def strategy_stats_init_args(
+    parser: argparse.ArgumentParser, config
+):
+    parser.add_argument(
+        "--db",
+        type=str,
+        default=config.DB,
+        help="path to the database",
+    )
+    parser.set_defaults(func=strategy_stats)

@@ -67,6 +67,17 @@ CREATE TABLE run (
     -- If non-empty, this contains the filename of the weights checkpoint.
     checkpoint TEXT,
 
+    -- Which search strategy picked the conf that produced this run.
+    -- One of: 'predicted_2nd_neighbor', 'hill_climb', 'time_budget', 'neighbor',
+    -- 'default'. NULL for runs added before the column existed or for
+    -- out-of-band inserts (bulk imports, tests).
+    strategy TEXT,
+
+    -- 1 if this run changed the conf winning at (system, train_time,
+    -- num_weights); 0 if not; NULL if the check was skipped (e.g. a
+    -- bulk import that didn't pass through the server).
+    changed_winner INTEGER,
+
     FOREIGN KEY (conf_id) REFERENCES conf(id) ON DELETE CASCADE,
     UNIQUE (conf_id, system, timestamp)
 );

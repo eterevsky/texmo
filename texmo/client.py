@@ -68,11 +68,12 @@ def sanitize_json(d: dict):
     sanitize_json_dict(d)
 
 
-def post_result(session, add_url: str, system, run, conf):
+def post_result(session, add_url: str, system, run, conf, strategy):
     result = {
         "system": system,
         "run": run.to_dict(),
         "conf": conf.replace(steps=run.steps).to_dict(),
+        "strategy": strategy,
     }
     sanitize_json(result)
     try:
@@ -118,6 +119,7 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, backend:
 
         logging.info(f'Got configuration in {ttoa3(t.value())}')
         conf = Configuration.from_dict(d["conf"])
+        strategy = d.get("strategy")
 
         manager = create_manager(
             backend, conf=conf, system=system, dataset=dataset, verbose=False)
@@ -128,13 +130,13 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, backend:
         )
 
         with timer("post(add)"):
-            post_result(s, add_url, system, run, out_conf)
+            post_result(s, add_url, system, run, out_conf, strategy)
 
         if conf.decay == 1:
             for checkpoint in run.checkpoints.values():
                 with timer("post(add)"):
                     post_result(s, add_url, system,
-                                checkpoint.make_run(run), out_conf)
+                                checkpoint.make_run(run), out_conf, strategy)
 
         if once:
             break

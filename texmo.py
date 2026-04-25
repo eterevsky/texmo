@@ -70,6 +70,12 @@ def parse_args():
     )
     db_cli.bootstrap_estimates_init_args(parser_bootstrap_estimates, config)
 
+    parser_strategy_stats = subparsers.add_parser(
+        "strategy-stats",
+        help="Per-strategy run counts and %% of runs that changed the winner",
+    )
+    db_cli.strategy_stats_init_args(parser_strategy_stats, config)
+
     parser_report = subparsers.add_parser(
         "report", help="Print a report of the results in the database"
     )

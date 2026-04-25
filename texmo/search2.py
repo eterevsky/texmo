@@ -1,6 +1,7 @@
 import logging
 import math
 import random
+from dataclasses import dataclass
 from math import log2
 from typing import Optional
 
@@ -12,6 +13,22 @@ from .configuration import Configuration, Template, conf_neighbors
 from .model import build_model_def
 from .resultdb import ConfScore, ConfWithRuns, ResultDB
 from .run import Run
+
+
+@dataclass
+class SearchResult:
+    """A configuration paired with the system it's for and the strategy
+    label that picked it."""
+    conf: Configuration
+    strategy: str
+    system: str
+
+    def to_dict(self) -> dict:
+        return {
+            "system": self.system,
+            "conf": self.conf.to_dict(),
+            "strategy": self.strategy,
+        }
 
 # Probability of running the predicted-best strategy before falling
 # back to the others. Requires both loss and timing models to be ready.
@@ -231,11 +248,13 @@ class Search(object):
         self,
         conf: Configuration,
         run: Run,
-    ):
+        strategy: Optional[str] = None,
+    ) -> Optional[bool]:
         assert isinstance(conf, Configuration)
         assert isinstance(run, Run)
 
-        self._db.add_run(conf, run)
+        return self._db.add_run(
+            conf, run, strategy=strategy, track_winner_change=True)
 
     def _select_time(self) -> float:
         tmin, tmax = self.train_time
@@ -663,8 +682,8 @@ class Search(object):
         logging.info(_hill_climb_report(path, system, max_weights, t))
         return current
 
-    def select_conf(self, system: str) -> Optional[Configuration]:
-        """Select a configuration to run, or None if nothing matches.
+    def select_conf(self, system: str) -> Optional[SearchResult]:
+        """Select a SearchResult, or None if nothing matches.
 
         Four strategies, tried in order of preference with fallback:
         * predicted-best (needs both loss and timing models) —
@@ -681,22 +700,22 @@ class Search(object):
             if random.random() < _PREDICTED_BEST_PROB:
                 conf = self._select_predicted_best(t, max_weights, system)
                 if conf is not None:
-                    return conf
+                    return SearchResult(conf, 'predicted_2nd_neighbor', system)
 
             if random.random() < _HILL_CLIMB_PROB:
                 conf = self._select_hill_climb(t, max_weights, system)
                 if conf is not None:
-                    return conf
+                    return SearchResult(conf, 'hill_climb', system)
 
             if random.random() < _TIME_BUDGET_PROB:
                 conf = self._select_time_budget(t, max_weights, system)
                 if conf is not None:
-                    return conf
+                    return SearchResult(conf, 'time_budget', system)
 
             conf = self._select_top_neighbor(t, max_weights, system)
             if conf is not None:
                 logging.info(f'Conf for {system}: {conf}')
-                return conf
+                return SearchResult(conf, 'neighbor', system)
 
             # Template can change on the fly — re-check init_conf still
             # matches before falling back to it.
@@ -718,4 +737,4 @@ class Search(object):
 
             logging.info(
                 f'Conf for {system}: {self._init_conf} (default)')
-            return self._init_conf
+            return SearchResult(self._init_conf, 'default', system)

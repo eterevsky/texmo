@@ -19,6 +19,8 @@ Detailed docs live in [`docs/`](docs/):
   connections (`skip.X.add` / `skip.X.cat`).
 - [`timing.md`](docs/timing.md) — training-step time prediction
   model (features, fit, and use).
+- [`loss_prediction.md`](docs/loss_prediction.md) — RNN loss
+  predictor (architecture, training, current accuracy, use in search).
 - [`loss_rnn_experiments.md`](docs/loss_rnn_experiments.md) — RNN
   loss-predictor sweep results (best config, null results, open ideas).
 - [`backends.md`](docs/backends.md) — PyTorch vs JAX trade-offs and why

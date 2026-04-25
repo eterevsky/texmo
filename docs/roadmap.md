@@ -14,20 +14,7 @@ Given a parameter budget N and compute budget T, answer:
   `nn.MultiheadAttention` or `nn.TransformerEncoderLayer`. Key decisions:
   causal masking, position encoding (RoPE?), head count as a search axis.
 
-* **Loss prediction model** taking architecture + metaparameters as input.
-  Predict expected loss for a configuration without running it. Could use
-  an RNN over the layer sequence, or something like a recurrent random
-  forest.
-
-* **Use the loss predictor in search** to skip small mutations whose
-  predicted loss is unlikely to improve on the current best. This cuts
-  most of the search cost.
-
 * **Incremental model training** — port the `add_layers` feature from the
   old manager (freezes existing weights, trains only the new ones).
   Integrate into search as a strategy: instead of training a deep model
   from scratch, build it up layer by layer.
-
-* **Search strategies beyond random walk** — find a local optimum starting
-  from a winning configuration. Improve `train` CLI to automatically
-  optimize metaparameters and architecture within given constraints.

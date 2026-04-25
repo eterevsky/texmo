@@ -21,18 +21,85 @@ configurations to train and post results back.
 - **Client** (`client.py`) — worker loop that pulls from `/select`, runs
   the training with `Manager`, posts back via `/add`.
 
-## Search strategy
+## Search strategies
 
-`Search.select_conf(system)` tries, in order:
+`Search.select_conf(system)` first picks a time budget `t` (log-uniform
+within the configured range) and a weight budget `max_weights`
+(log-uniform between the template's min weights and
+`min(8 × top_conf.weights, template max weights)`), then tries the
+strategies below in order. Each gated strategy succeeds with a fixed
+probability **conditional on having reached it**; on miss it falls
+through to the next.
 
-1. **`_select_top_neighbor`** — iterate top configs (from
-   `top_confs_for_system(system, ...)`) and their neighbors, looking for
-   a candidate that needs more runs. Expansion depth and required run counts
-   come from `_generate_limits()`. For each neighbor, we pick it if:
-   - `system_runs == 0` (needs a run on this system for cross-system
-     visibility), OR
-   - `total_runs < min_neighbor` (confidence building)
-2. **Fallback** — return the initial/default configuration from the template.
+For every selected configuration we record which strategy picked it
+(stored in `run.strategy`) and whether the resulting run changed the
+winning conf at `(system, train_time, num_weights)` (stored in
+`run.changed_winner`). `uv run texmo.py strategy-stats` reports
+runs-per-strategy and the % that changed the winner — the live signal
+for whether each strategy is earning its slot.
+
+### 1. `predicted_2nd_neighbor`
+
+Picked ~15% of the time (tunable). Requires both the loss model and
+the timing model to be fitted.
+
+Take the top conf (lowest median loss) for `(system, max_weights,
+max_time≤t)` as a seed. BFS to depth 2 (~100 candidates), filter by `weights ≤
+max_weights`, predict per-step time and adjust `steps` to the budget,
+predict log-loss for each adjusted candidate, then score each by the
+**compound** median of `(predicted_log_loss, observed_log_losses...)`.
+Walk the top 9 across run-limit sequences `[1] / [2,1,1] / [3,2,2,1×6]`,
+returning the first candidate whose total run count is below the
+position's limit.
+
+### 2. `predicted_3rd_neighbor`
+
+Picked ~20% of the remaining 85% (tunable). Same machinery as the
+2nd-neighbor strategy but BFS depth 3 (~1000 candidates). Larger jump
+from the seed into less-explored territory; predictor noise is
+correspondingly higher.
+
+### 3. `time_budget`
+
+Picked ~30% of the time, conditional on the two predictor strategies
+not firing (tunable). Score-ordered scan of confs with `time_estimate
+≤ t AND weights ≤ max_weights` (using either median or predicted time
+estimates). For each iteration of an expanding run-limit sequence
+(`[1] / [2,1,1] / [3,2,2,1×6] / ...`), pick the first position whose
+total run count is below the limit at that position, or whose
+`system_runs == 0`.
+
+### 4. `neighbor`
+
+The always-available fallback. Iterate top confs and their direct
+neighbors looking for a candidate that needs more runs, with
+expansion depth and per-position run thresholds defined by an
+expanding sequence. For each neighbor, pick it if:
+
+- `system_runs == 0` (needs a run on this system for cross-system
+  visibility), OR
+- `total_runs < min_neighbor` (confidence building).
+
+### 5. `default`
+
+Final fallback: return the initial/default configuration from the
+template (skipped if the init conf doesn't match the current template
+or has already been explored enough).
+
+## Loss prediction model
+
+The two `predicted_*` strategies depend on a tiny RNN that predicts
+log-loss from the configuration's globals + per-layer feature
+sequence. See [`loss_prediction.md`](loss_prediction.md) for
+architecture, training, and current accuracy (~3.6% typical error).
+
+## Time prediction model
+
+Per-step training time is predicted by an additive linear-in-features
+model fit per `(system, precision)` pair. See
+[`timing.md`](timing.md). The estimate per conf+system is stored in
+`conf_time_estimate` (either as a `'median'` of observed runs or as
+a `'predicted'` value).
 
 ## Neighbor generation
 
@@ -68,18 +135,31 @@ run locally gets picked once, even if its total run count is already high.
 
 ## ResultDB
 
-- **Main writer connection** — SearchThread only, `check_same_thread=False`.
+- **Main writer connections** — SearchThread and ModelTrainingThread
+  each hold their own connection (both `check_same_thread=False`),
+  serialized via SQLite's WAL + `BEGIN IMMEDIATE` + a 30 s
+  `busy_timeout`.
 - **Read-only connections** — `db.open_readonly()` returns a new URI
   `file:...?mode=ro` connection used by Flask request handlers. Context
   manager: `with self.db.open_readonly() as ro_db: ...`
 - **Score computation** — `median_score` is the median loss across all
   runs of a conf (across all systems, since runs are equivalent by dtype).
-  `median_time` is per-system, stored in the `conf_time` table.
+  Per-system time estimates live in `conf_time_estimate` with
+  `source IN ('median', 'predicted')`; the median estimate is written
+  on every `add_run` and supersedes any predicted value for the same
+  `(conf, system)`.
+- **Persisted models** — the fitted timing model and loss model are
+  pickled into the `model` table under keys `'timing'` and `'loss'`,
+  so the server doesn't re-fit on restart.
 
 CLI commands:
 - `db-update` — recompute all scores.
 - `db-clear-system <name>` — delete all runs from a given system and
   recompute scores.
+- `db-bootstrap-estimates` — backfill medians, fit per-`(system, precision)`
+  timing models, and write predicted estimates for confs without runs.
+- `strategy-stats` — per-strategy run count and `% of runs that
+  changed the (t, w)-winner`.
 
 ## Server UI
 
@@ -94,15 +174,3 @@ a graph (score vs. weights, Pareto frontier), and a table of top configs.
 - **Copy link** — each row has a "copy" link that copies a
   `uv run texmo.py train ...` command to the clipboard.
 
-## Future directions
-
-The current search strategy is a greedy walk — it looks at top confs
-and their neighbors, picking the one with the fewest runs. This is a
-reasonable baseline but doesn't use any information about what's likely
-to improve.
-
-Once we have a loss prediction model (predicting expected loss from
-architecture + hyperparameters), we can add smarter strategies: skip
-neighbor mutations that are unlikely to improve on the current best,
-prioritize mutations in high-uncertainty regions, or run simulated
-annealing / evolutionary search over the model space.

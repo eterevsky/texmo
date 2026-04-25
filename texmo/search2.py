@@ -36,7 +36,7 @@ _PREDICTED_2ND_NEIGHBOR_PROB = 0.15
 
 # Probability of running predicted-best at BFS depth 3 (~1000
 # candidates — bigger jump from the seed). Same model requirements.
-_PREDICTED_3RD_NEIGHBOR_PROB = 0.15
+_PREDICTED_3RD_NEIGHBOR_PROB = 0.2
 
 # Placeholder value for the `steps` field when deduplicating candidate
 # configurations — we replace it with a budget-fitting value later.
@@ -66,6 +66,7 @@ def _predicted_best_report(
     system: str,
     max_weights: int,
     max_time: float,
+    depth: int,
 ) -> str:
     """Log the seed (with its known median loss for comparison) and
     the top 9 candidates — we only look at the top 9 during the
@@ -73,7 +74,7 @@ def _predicted_best_report(
     seed_score = f'{seed.median_score:.4f} ({seed.num_runs})'
     lines = [
         f"Predicted-best confs W <= {itoa3(max_weights)} "
-        f"T <= {ttoa3(max_time)} ({system}):",
+        f"T <= {ttoa3(max_time)}, depth {depth} ({system}):",
         f'    {seed_score:<12}  {seed.conf.aligned_str()}  [seed]',
     ]
     for compound, total_runs, c in candidate_data[:9]:
@@ -524,7 +525,7 @@ class Search(object):
         candidate_data.sort(key=lambda r: r[0])
 
         logging.info(_predicted_best_report(
-            seed, candidate_data, system, max_weights, t))
+            seed, candidate_data, system, max_weights, t, bfs_depth))
 
         # Run-limit sequences (cap at iteration 3 / top 9 confs).
         sequences = [[1], [2, 1, 1], [3, 2, 2, 1, 1, 1, 1, 1, 1]]

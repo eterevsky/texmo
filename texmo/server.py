@@ -559,17 +559,17 @@ class SearchServer(object):
         types, precision, and per-template `max_time`.
         """
         defaults = _compare_defaults(self.template)
-        # Each form value to render: prefer submitted -> fall back to default.
-        def get(key: str) -> str:
-            return args.get(key, defaults.get(key, ''))
+        # If the form was submitted, unchecked checkboxes are absent
+        # from `args` — falling back to defaults would re-check them.
+        # So only inherit defaults when nothing was submitted.
+        submitted = bool(args)
 
-        form = {key: get(key) for key in defaults}
-        # Checkbox state needs explicit True/False not strings.
-        for prefix in ('t1', 't2'):
-            for p in Precision:
-                form[f'{prefix}_{p}'] = bool(args.get(f'{prefix}_{p}', defaults.get(f'{prefix}_{p}')))
-            for d in DecayType:
-                form[f'{prefix}_decay_{d}'] = bool(args.get(f'{prefix}_decay_{d}', defaults.get(f'{prefix}_decay_{d}')))
+        form: dict = {}
+        for key, default in defaults.items():
+            if isinstance(default, bool):
+                form[key] = bool(args.get(key)) if submitted else default
+            else:
+                form[key] = args.get(key, default)
 
         graph = None
         top1: list[dict] = []

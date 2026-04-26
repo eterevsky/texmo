@@ -602,7 +602,9 @@ class ResultDB(object):
         return [row[0] for row in cur]
 
     def top_confs_global(
-        self, template: Template, system: Optional[str] = None
+        self, template: Template, system: Optional[str] = None,
+        max_weights: Optional[int] = None,
+        max_time: Optional[float] = None,
     ):
         """Yield top confs ordered by weights, one per weight count.
 
@@ -611,12 +613,28 @@ class ResultDB(object):
             system: if provided, only include configurations that have been
                 run on this system, and report median_time for this system
                 only. Score is still the global median across all systems.
+            max_weights: if provided, exclude confs with more weights.
+            max_time: if provided, exclude confs whose smallest
+                across-systems median_time is above this. Used by the
+                compare page; means "at least one system trains this in
+                under `max_time`".
         """
         assert type(template) is Template
 
         conditions, params = _make_template_conditions(template)
         conditions.append('median_score IS NOT NULL')
         conditions.append('num_runs > 1')
+
+        if max_weights is not None:
+            conditions.append('weights <= :max_weights')
+            params['max_weights'] = max_weights
+
+        if max_time is not None:
+            conditions.append(
+                "(SELECT MIN(time_s) FROM conf_time_estimate "
+                " WHERE conf_id=conf.id AND source='median')"
+                " <= :max_time")
+            params['max_time'] = max_time
 
         if system is not None:
             conditions.append(

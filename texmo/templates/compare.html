@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>TexMo &mdash; Compare</title>
+        <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='simple.css') }}">
+        <style>
+            input[type="text"] {
+                width: 14rem;
+            }
+            table.compare-form td {
+                vertical-align: top;
+            }
+            .copy-link {
+                cursor: pointer;
+                text-decoration: underline;
+                color: #06c;
+            }
+        </style>
+        <script>
+            function copyCmd(el) {
+                const cmd = el.dataset.cmd;
+                const flash = () => {
+                    const original = el.textContent;
+                    el.textContent = 'copied!';
+                    setTimeout(() => { el.textContent = original; }, 1000);
+                };
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(cmd).then(flash);
+                } else {
+                    const ta = document.createElement('textarea');
+                    ta.value = cmd;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try {
+                        document.execCommand('copy');
+                        flash();
+                    } finally {
+                        document.body.removeChild(ta);
+                    }
+                }
+            }
+        </script>
+    </head>
+    <body>
+        <main>
+        <p><a href="/">&larr; back to index</a></p>
+        <h1>Compare templates</h1>
+
+        <form action="/compare" method="get">
+            <table>
+                <caption>Shared</caption>
+                <tr>
+                    <td>Max weights:</td>
+                    <td><input type="text" name="weights" value="{{ form.weights }}"></td>
+                </tr>
+            </table>
+
+            <table class="compare-form">
+                <tr>
+                    <th>Field</th>
+                    <th>Template 1</th>
+                    <th>Template 2</th>
+                </tr>
+                <tr>
+                    <td>Spec regex:</td>
+                    <td><input type="text" name="t1_spec" value="{{ form.t1_spec }}"></td>
+                    <td><input type="text" name="t2_spec" value="{{ form.t2_spec }}"></td>
+                </tr>
+                <tr>
+                    <td>Sample length:</td>
+                    <td><input type="text" name="t1_length" value="{{ form.t1_length }}"></td>
+                    <td><input type="text" name="t2_length" value="{{ form.t2_length }}"></td>
+                </tr>
+                <tr>
+                    <td>Batch size:</td>
+                    <td><input type="text" name="t1_batch" value="{{ form.t1_batch }}"></td>
+                    <td><input type="text" name="t2_batch" value="{{ form.t2_batch }}"></td>
+                </tr>
+                <tr>
+                    <td>Learning rate:</td>
+                    <td><input type="text" name="t1_lr" value="{{ form.t1_lr }}"></td>
+                    <td><input type="text" name="t2_lr" value="{{ form.t2_lr }}"></td>
+                </tr>
+                <tr>
+                    <td>Steps:</td>
+                    <td><input type="text" name="t1_steps" value="{{ form.t1_steps }}"></td>
+                    <td><input type="text" name="t2_steps" value="{{ form.t2_steps }}"></td>
+                </tr>
+                <tr>
+                    <td>Max train time (s):</td>
+                    <td><input type="text" name="t1_time" value="{{ form.t1_time }}"></td>
+                    <td><input type="text" name="t2_time" value="{{ form.t2_time }}"></td>
+                </tr>
+                <tr>
+                    <td>Precision:</td>
+                    <td>
+                        <input type="checkbox" name="t1_bf16" {% if form.t1_bf16 %} checked {% endif %}>bf16
+                        <input type="checkbox" name="t1_fp16" {% if form.t1_fp16 %} checked {% endif %}>fp16
+                        <input type="checkbox" name="t1_fp32" {% if form.t1_fp32 %} checked {% endif %}>fp32
+                        <input type="checkbox" name="t1_fp64" {% if form.t1_fp64 %} checked {% endif %}>fp64
+                    </td>
+                    <td>
+                        <input type="checkbox" name="t2_bf16" {% if form.t2_bf16 %} checked {% endif %}>bf16
+                        <input type="checkbox" name="t2_fp16" {% if form.t2_fp16 %} checked {% endif %}>fp16
+                        <input type="checkbox" name="t2_fp32" {% if form.t2_fp32 %} checked {% endif %}>fp32
+                        <input type="checkbox" name="t2_fp64" {% if form.t2_fp64 %} checked {% endif %}>fp64
+                    </td>
+                </tr>
+                <tr>
+                    <td>LR schedule:</td>
+                    <td>
+                        <input type="checkbox" name="t1_decay_none" {% if form.t1_decay_none %} checked {% endif %}>none
+                        <input type="checkbox" name="t1_decay_exp" {% if form.t1_decay_exp %} checked {% endif %}>exp
+                        <input type="checkbox" name="t1_decay_cosine" {% if form.t1_decay_cosine %} checked {% endif %}>cosine
+                    </td>
+                    <td>
+                        <input type="checkbox" name="t2_decay_none" {% if form.t2_decay_none %} checked {% endif %}>none
+                        <input type="checkbox" name="t2_decay_exp" {% if form.t2_decay_exp %} checked {% endif %}>exp
+                        <input type="checkbox" name="t2_decay_cosine" {% if form.t2_decay_cosine %} checked {% endif %}>cosine
+                    </td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td colspan="2"><input type="submit" value="Compare"></td>
+                </tr>
+            </table>
+        </form>
+
+        {% if graph %}
+        <h2>(L<sub>2</sub> &minus; L<sub>1</sub>) / min(L<sub>1</sub>, L<sub>2</sub>) &times; 100&percnt;</h2>
+        <p>Positive &Rarr; template 1 is better at that weight count.</p>
+        <img src="data:image/png;base64,{{ graph }}">
+        {% endif %}
+
+        {% if top1 or top2 %}
+        <table>
+            <tr><th colspan="8">Template 1 &mdash; top configurations</th></tr>
+            <tr>
+                <th>Model</th>
+                <th>P</th>
+                <th>Data</th>
+                <th>LR</th>
+                <th>Steps</th>
+                <th>Score</th>
+                <th>Time</th>
+                <th></th>
+            </tr>
+            {% for item in top1 %}
+            <tr>
+                <td><code>{{ item.spec }}</code> ({{ item.weights }})</td>
+                <td>{{ item.precision }}</td>
+                <td>{{ item.data }}</td>
+                <td>{{ item.lr }}</td>
+                <td>{{ item.steps }}</td>
+                <td>{{ item.score }}</td>
+                <td>{{ item.time }}</td>
+                <td><span class="copy-link" data-cmd="{{ item.cmd }}" onclick="copyCmd(this)">copy</span></td>
+            </tr>
+            {% endfor %}
+        </table>
+
+        <table>
+            <tr><th colspan="8">Template 2 &mdash; top configurations</th></tr>
+            <tr>
+                <th>Model</th>
+                <th>P</th>
+                <th>Data</th>
+                <th>LR</th>
+                <th>Steps</th>
+                <th>Score</th>
+                <th>Time</th>
+                <th></th>
+            </tr>
+            {% for item in top2 %}
+            <tr>
+                <td><code>{{ item.spec }}</code> ({{ item.weights }})</td>
+                <td>{{ item.precision }}</td>
+                <td>{{ item.data }}</td>
+                <td>{{ item.lr }}</td>
+                <td>{{ item.steps }}</td>
+                <td>{{ item.score }}</td>
+                <td>{{ item.time }}</td>
+                <td><span class="copy-link" data-cmd="{{ item.cmd }}" onclick="copyCmd(this)">copy</span></td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% endif %}
+        </main>
+    </body>
+</html>

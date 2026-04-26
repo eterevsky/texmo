@@ -19,7 +19,7 @@ from flask import (
     send_from_directory,
 )
 
-from .common import ttoa3
+from .common import INF, ttoa3
 from .configuration import (
     Bounds,
     Configuration,
@@ -123,6 +123,130 @@ def build_scaling_graph(
     f = io.BytesIO()
     plt.savefig(f, format='png')
     return f.getvalue()
+
+
+def _envelope(confs) -> list[tuple[int, float]]:
+    """Loss envelope for a list of ConfScore: a list of (weights, score)
+    points with strictly decreasing score in weights ascending. Same as
+    what `top_confs_global` already yields, but explicitly typed."""
+    pts = sorted(
+        ((c.conf.num_weights, c.median_score) for c in confs),
+        key=lambda p: p[0],
+    )
+    out: list[tuple[int, float]] = []
+    best = float('inf')
+    for w, s in pts:
+        if s < best:
+            best = s
+            out.append((w, best))
+    return out
+
+
+def _eval_envelope(env: list[tuple[int, float]], w: int) -> Optional[float]:
+    """Step-function value at `w`: the most recent envelope score for
+    a Pareto point with weights <= w. None if `w` precedes the envelope."""
+    last: Optional[float] = None
+    for w_i, s_i in env:
+        if w_i > w:
+            break
+        last = s_i
+    return last
+
+
+def build_diff_graph(
+    env1: list[tuple[int, float]],
+    env2: list[tuple[int, float]],
+    max_weights: int,
+) -> bytes:
+    """Step plot of (L2 - L1) / min(L1, L2) * 100 over the union of
+    weight points in both envelopes. Positive means template 1 is
+    better at that weight count."""
+    plt.ioff()
+    plt.clf()
+    _fig, ax = plt.subplots()
+    ax.set_xscale('log')
+    ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+
+    # x-grid is the union of weight points from both envelopes that are
+    # within the budget; both envelopes must have a value at x for the
+    # diff to be defined, so we start at max(min_w1, min_w2).
+    ws = sorted({w for w, _ in env1} | {w for w, _ in env2})
+    ws = [w for w in ws if w <= max_weights]
+    xs: list[float] = []
+    ys: list[float] = []
+    prev_y: Optional[float] = None
+    for w in ws:
+        l1 = _eval_envelope(env1, w)
+        l2 = _eval_envelope(env2, w)
+        if l1 is None or l2 is None:
+            continue
+        y = (l2 - l1) / min(l1, l2) * 100.0
+        if prev_y is not None:
+            xs.append(w - 0.1)
+            ys.append(prev_y)
+        xs.append(w)
+        ys.append(y)
+        prev_y = y
+    if prev_y is not None:
+        xs.append(max_weights)
+        ys.append(prev_y)
+
+    ax.axhline(0.0, color='gray', linewidth=0.8)
+    if xs:
+        ax.plot(xs, ys)
+    ax.set_xlabel('weights')
+    ax.set_ylabel('(L2 - L1) / min(L1, L2), %  '
+                  '(positive = T1 better)')
+
+    f = io.BytesIO()
+    plt.savefig(f, format='png')
+    return f.getvalue()
+
+
+def _maybe_float(s: Optional[str]) -> Optional[float]:
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _strip_prefix(form: dict, prefix: str) -> dict:
+    """Return a sub-dict with `prefix_` stripped from matching keys."""
+    head = prefix + '_'
+    return {k[len(head):]: v for k, v in form.items() if k.startswith(head)}
+
+
+def _template_from_compare_form(form: dict, prefix: str) -> Template:
+    """Build a Template from prefixed compare-form fields, plumbing the
+    shared `weights` value through unchanged."""
+    sub = _strip_prefix(form, prefix)
+    sub['weights'] = form.get('weights', '')
+    return Template.from_form(sub)
+
+
+def _compare_defaults(live: Template) -> dict:
+    """Initial values for the compare form. Both templates start as an
+    unfiltered match; weights inherits the live template's upper bound
+    so the comparison covers the same range the search is sweeping."""
+    weights_default = (
+        '' if live.max_weights.max == INF else str(int(live.max_weights.max))
+    )
+    out = {'weights': weights_default}
+    for prefix in ('t1', 't2'):
+        out[f'{prefix}_spec'] = ''
+        out[f'{prefix}_lr'] = ''
+        out[f'{prefix}_length'] = ''
+        out[f'{prefix}_batch'] = ''
+        out[f'{prefix}_steps'] = ''
+        out[f'{prefix}_time'] = ''
+        for p in (Precision.FP32, Precision.FP16, Precision.BF16):
+            out[f'{prefix}_{p}'] = True
+        out[f'{prefix}_{Precision.FP64}'] = False
+        for d in DecayType:
+            out[f'{prefix}_decay_{d}'] = True
+    return out
 
 
 def _conf_row(conf_score) -> dict:
@@ -423,6 +547,66 @@ class SearchServer(object):
         logging.info(f'New train time: {self.train_time}')
         return redirect("/")
 
+    def compare(self, args):
+        """Render the template-comparison page.
+
+        With no params -> just the form (plus reasonable defaults).
+        With params -> form + diff curve graph + per-template top
+        tables.
+
+        Form layout: shared `weights`, then two namespaced columns
+        (`t1_*` / `t2_*`) for spec, lr, length, batch, steps, decay
+        types, precision, and per-template `max_time`.
+        """
+        defaults = _compare_defaults(self.template)
+        # Each form value to render: prefer submitted -> fall back to default.
+        def get(key: str) -> str:
+            return args.get(key, defaults.get(key, ''))
+
+        form = {key: get(key) for key in defaults}
+        # Checkbox state needs explicit True/False not strings.
+        for prefix in ('t1', 't2'):
+            for p in Precision:
+                form[f'{prefix}_{p}'] = bool(args.get(f'{prefix}_{p}', defaults.get(f'{prefix}_{p}')))
+            for d in DecayType:
+                form[f'{prefix}_decay_{d}'] = bool(args.get(f'{prefix}_decay_{d}', defaults.get(f'{prefix}_decay_{d}')))
+
+        graph = None
+        top1: list[dict] = []
+        top2: list[dict] = []
+        max_weights: Optional[int] = None
+
+        if args:
+            try:
+                max_weights = int(form['weights'])
+            except (TypeError, ValueError):
+                max_weights = None
+            if max_weights is not None and max_weights > 0:
+                t1 = _template_from_compare_form(form, 't1')
+                t2 = _template_from_compare_form(form, 't2')
+                t1_max_time = _maybe_float(form.get('t1_time'))
+                t2_max_time = _maybe_float(form.get('t2_time'))
+                with self.db.open_readonly() as ro_db:
+                    confs1 = list(ro_db.top_confs_global(
+                        t1, max_weights=max_weights, max_time=t1_max_time))
+                    confs2 = list(ro_db.top_confs_global(
+                        t2, max_weights=max_weights, max_time=t2_max_time))
+                env1 = _envelope(confs1)
+                env2 = _envelope(confs2)
+                graph = base64.b64encode(
+                    build_diff_graph(env1, env2, max_weights)
+                ).decode('ascii')
+                top1 = [_conf_row(c) for c in confs1]
+                top2 = [_conf_row(c) for c in confs2]
+
+        return render_template(
+            "compare.html",
+            form=form,
+            graph=graph,
+            top1=top1,
+            top2=top2,
+        )
+
     def select(self, args):
         system = args["system"]
 
@@ -488,6 +672,11 @@ def main(args: argparse.Namespace):
     def _update():
         with timer("SearchServer.update"):
             return server.update(request.form)
+
+    @app.route("/compare", methods=["GET"])
+    def _compare():
+        with timer("SearchServer.compare"):
+            return server.compare(request.args)
 
     @app.route("/select", methods=["GET"])
     def _select():

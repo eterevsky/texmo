@@ -79,3 +79,78 @@ mini-batch=1024, optax adamw, 5 seeds.
   Should matter more for longer models.
 - **Iterative HistGBR** (option 3 from the earlier discussion) —
   still a fallback if RNN progress stalls.
+
+## Round 2 — 2026-04 (276k labeled runs)
+
+Re-tune at ~2.5× the data and broader architecture coverage from
+the predicted-2nd/3rd-neighbor and (retired) hill-climb strategies.
+Three knobs revisited: an extra dense head before the output, the
+already-existing `feat_proj` (was a null result before), and the
+mini-batch size (was a hardcoded module constant).
+
+90/10 conf-id split as before; 5 seeds per RNN config, median +
+range across seeds; HistGBR is deterministic so a single run.
+
+### Reference points (this dataset)
+
+| Predictor | val L1 | ~typical |
+|---|---|---|
+| HistGBR (big)             | 0.0527 | 3.7% |
+| HistGBR (big + 2nd layer) | 0.0525 | 3.7% |
+| RNN baseline (h=32 lr=0.02 cos 8k bs=1024) | 0.0511 | 3.6% |
+| **RNN best (head=32.gelu + feat_proj=32 + bs=2048)** | **0.0493** | **3.5%** |
+
+### Stage 1 — single-knob sweep
+
+| # | Config (added on top of baseline) | val L1 | Δ | range |
+|---|---|---|---|---|
+| 1 | head=16.gelu | 0.0504 | -0.0007 | 0.0010 |
+| 2 | head=16.tanh | 0.0509 | -0.0002 | 0.0004 |
+| 3 | **head=32.gelu** | **0.0499** | **-0.0012** | 0.0003 |
+| 4 | head=32.tanh | 0.0500 | -0.0011 | 0.0005 |
+| 5 | feat_proj=16 | 0.0509 | -0.0002 | 0.0014 |
+| 6 | feat_proj=32 | 0.0503 | -0.0008 | 0.0015 |
+| 7 | feat_proj=64 | 0.0502 | -0.0009 | 0.0009 |
+| 8 | bs=256 | 0.0521 | +0.0010 | 0.0009 |
+| 9 | bs=512 | 0.0513 | +0.0002 | 0.0013 |
+| 10 | bs=2048 | 0.0508 | -0.0003 | 0.0005 |
+| 11 | bs=4096 | 0.0505 | -0.0006 | 0.0006 |
+
+Take-aways:
+- Output head with hidden width 32 is the biggest single win
+  (Δ-0.0012, tight range). gelu vs tanh is a wash; activation
+  picked gelu for symmetry with the existing global-init layer.
+- `feat_proj` (a null result in Round 1) is now mildly useful at
+  width 32–64 (Δ-0.0008/-0.0009). The bigger, more diverse
+  dataset must have made the projection earn its keep.
+- Small batches hurt (256 → +0.0010); larger batches help slightly,
+  with diminishing returns past 2048.
+
+### Stage 2 — combine the wins
+
+| # | Config | val L1 | Δ from baseline | range |
+|---|---|---|---|---|
+| 12 | head=32.gelu | 0.0500 | -0.0007 | 0.0004 |
+| 13 | + bs=2048 | 0.0497 | -0.0010 | 0.0004 |
+| 14 | + feat_proj=32 | 0.0495 | -0.0012 | 0.0005 |
+| 15 | + feat_proj=64 | 0.0498 | -0.0009 | 0.0016 |
+| 16 | **+ feat_proj=32 + bs=2048** | **0.0494** | **-0.0013** | 0.0005 |
+| 17 | + feat_proj=64 + bs=2048 | 0.0493 | -0.0014 | 0.0005 |
+
+The three improvements stack roughly additively. feat_proj=32 vs 64
+is within seed noise; picked 32 to match the head width and the
+hidden state — keeping all dimensions the same makes the model
+slightly easier to reason about.
+
+### Production config
+
+```
+hidden=32, cell_activation='tanh',
+lr=0.02, lr_schedule='cosine', steps=8000,
+feat_proj=32, out_hidden=32, out_activation='gelu',
+batch_size=2048,
+```
+
+Wired into `train_loss_model`. Persisted models from the previous
+config still load — `out_hidden=0` is the dataclass default and
+disables the new head.

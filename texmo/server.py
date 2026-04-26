@@ -42,7 +42,7 @@ _REFIT_EVERY = 100
 
 # Threshold of total new runs (any system/precision) that triggers a
 # retrain of the loss-prediction model.
-_LOSS_REFIT_EVERY = 1000
+_LOSS_REFIT_EVERY = 200
 
 
 def build_graph(confs: list[Configuration]) -> bytes:

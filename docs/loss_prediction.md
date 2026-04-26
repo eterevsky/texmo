@@ -23,7 +23,9 @@ the typical prediction is off by a factor of `2^0.05 ≈ 1.035`, i.e.
 ## Architecture
 
 A tiny RNN whose hidden state is initialized from the configuration's
-globals, then updated once per hidden layer.
+globals, then updated once per hidden layer. A pre-RNN projection
+adapts the per-layer features and a two-layer head reads off the
+final hidden state.
 
 ```
        globals = [log2(out_size), log2(batch), log2(length),
@@ -32,12 +34,18 @@ globals, then updated once per hidden layer.
        h_0 = gelu(W_glob · globals + b_glob)                  (h dims)
 
        for each hidden layer i:
-           h_i = tanh(W_h · h_{i-1} + W_x · feat_i + b_rnn)
+           x_i = gelu(W_proj · feat_i + b_proj)               (proj dims)
+           h_i = tanh(W_h · h_{i-1} + W_x · x_i + b_rnn)
 
-       y = W_out · h_final + b_out                            (1 dim, log2-loss)
+       o   = gelu(W_pre_out · h_final + b_pre_out)            (out_h dims)
+       y   = W_out · o + b_out                                (1 dim, log2-loss)
 ```
 
 - **Hidden width** `h = 32`. Bigger sizes saturated in the sweep.
+- **Pre-RNN feature projection** `feat_proj = 32`. A null result in
+  Round 1; useful at the larger Round 2 dataset.
+- **Output head** an extra `gelu`-activated dense `h → 32 → 1`
+  (Round 2 win, ~Δ-0.001 on its own).
 - **Cell** Elman-style with tanh activation. GRU added no signal.
 - **Pooling** last (use `h_final`); mean pooling diluted the late-layer
   signal.
@@ -66,33 +74,34 @@ skip distances are always small (1–4), so they go in raw.
 ## Training
 
 - **Loss** mean L1 between predicted and target log2 loss.
-- **Mini-batch** 1024 (configs sampled with replacement per step).
+- **Mini-batch** 2048 (configs sampled with replacement per step).
 - **Optimizer** `optax.adamw`, **lr=0.02 with cosine decay**, **8000 steps**.
 - **Init** Glorot-ish for dense weights; biases zero.
 - **Data** every labeled run in the DB (one example per run; the same
   conf appears multiple times if it has multiple runs, weighting it
   proportionally).
 
-Cosine LR decay was the single biggest win in the sweep — see
+Cosine LR decay was the single biggest win in the original sweep;
+the output head was the biggest win on retune. See
 [`loss_rnn_experiments.md`](loss_rnn_experiments.md) for the full
 experiment log.
 
 ## Performance
 
-On a recent snapshot (~250k labeled runs):
+On a recent snapshot (~276k labeled runs):
 
 | Predictor                          | val L1 | ~typical |
 |------------------------------------|--------|----------|
 | constant (train median)            | 0.133  | 9.7%     |
 | RandomForest (log_weights, log_data) | 0.070  | 5.0%     |
 | HistGradientBoosting (big features)| 0.053  | 3.7%     |
-| **RNN (tanh, h=32, lr=0.02 cos, 8k)** | **0.051** | **3.6%** |
+| **RNN (tanh, h=32, proj=32, head=32.gelu, lr=0.02 cos, 8k, bs=2048)** | **0.0494** | **3.5%** |
 | oracle (per-conf val median)       | 0.030  | 2.1%     |
 
 The oracle predicts each conf's val median from its own runs — its
 2.1% is the typical run-to-run deviation around the per-conf median,
 i.e. the irreducible noise floor for any predictor that doesn't see
-training-time randomness. The remaining ~1.5pp gap is what
+training-time randomness. The remaining ~1.4pp gap is what
 generalization across architectures buys us.
 
 ## Use in search
@@ -115,7 +124,7 @@ The fitted `LossModel` (a small dataclass holding params, simple-type
 list, and max_layers) is pickled into the `model` table of the DB
 under the key `'loss'` so the server doesn't have to retrain on
 restart. The model-training thread refits it whenever the total run
-count crosses `_LOSS_REFIT_EVERY = 1000`.
+count crosses `_LOSS_REFIT_EVERY = 200`.
 
 The training takes ~30 s on a modern CPU and ~6 min on a Raspberry Pi 4.
 

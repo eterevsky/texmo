@@ -47,6 +47,8 @@ class LossModel:
     rnn_sub_steps: int = 1
     cell_type: str = 'elman'
     pooling: str = 'last'
+    out_hidden: int = 0
+    out_activation: str = 'gelu'
 
     def predict(self, confs: list['Configuration']) -> np.ndarray:
         return predict(
@@ -56,6 +58,8 @@ class LossModel:
             rnn_sub_steps=self.rnn_sub_steps,
             cell_type=self.cell_type,
             pooling=self.pooling,
+            out_hidden=self.out_hidden,
+            out_activation=self.out_activation,
         )
 
 
@@ -175,21 +179,27 @@ def _build_targets(
 def _init_params(
     rng, n_layer_feat: int, hidden: int,
     feat_proj: int, rnn_sub_steps: int, cell_type: str,
+    out_hidden: int,
 ) -> dict:
     """Glorot-ish initialization for the dense blocks."""
     gate_mul = 3 if cell_type == 'gru' else 1  # reset, update, candidate
+    # Slots 0..3: W_glob, W_out, W_proj, W_pre_out. 4+: per-RNN-step.
     keys = jax.random.split(rng, 4 + gate_mul * 3 * rnn_sub_steps)
 
     def init(key, fan_in: int, fan_out: int):
         scale = jnp.sqrt(1.0 / fan_in)
         return jax.random.normal(key, (fan_in, fan_out)) * scale
 
+    out_in_dim = out_hidden if out_hidden > 0 else hidden
     params = {
         'W_glob': init(keys[0], N_INIT_GLOBAL, hidden),
         'b_glob': jnp.zeros(hidden),
-        'W_out': init(keys[1], hidden, 1),
+        'W_out': init(keys[1], out_in_dim, 1),
         'b_out': jnp.zeros(1),
     }
+    if out_hidden > 0:
+        params['W_pre_out'] = init(keys[3], hidden, out_hidden)
+        params['b_pre_out'] = jnp.zeros(out_hidden)
     if feat_proj > 0:
         params['W_proj'] = init(keys[2], n_layer_feat, feat_proj)
         params['b_proj'] = jnp.zeros(feat_proj)
@@ -223,7 +233,7 @@ _ACTIVATIONS = {
 
 def _forward(params, init_globals, layer_feats, masks, cell_activation,
              feat_proj: int, rnn_sub_steps: int, cell_type: str,
-             pooling: str):
+             pooling: str, out_hidden: int, out_activation: str):
     """Predict log-loss for each sample in the batch.
 
     init_globals: [B, N_INIT_GLOBAL]  (output_size + batch/len/steps/lr/decay)
@@ -280,16 +290,23 @@ def _forward(params, init_globals, layer_feats, masks, cell_activation,
     else:  # 'last'
         h_used = h_final
 
+    if out_hidden > 0:
+        out_act = _ACTIVATIONS[out_activation]
+        h_used = out_act(
+            h_used @ params['W_pre_out'] + params['b_pre_out'])
+
     out = h_used @ params['W_out'] + params['b_out']
     return out.squeeze(-1)
 
 
 def _loss_fn(params, init_globals, layer_feats, masks, targets,
              cell_activation, feat_proj: int, rnn_sub_steps: int,
-             cell_type: str, pooling: str):
+             cell_type: str, pooling: str,
+             out_hidden: int, out_activation: str):
     preds = _forward(
         params, init_globals, layer_feats, masks, cell_activation,
-        feat_proj, rnn_sub_steps, cell_type, pooling)
+        feat_proj, rnn_sub_steps, cell_type, pooling,
+        out_hidden, out_activation)
     return jnp.mean(jnp.abs(preds - targets))
 
 
@@ -306,6 +323,9 @@ def fit(
     rnn_sub_steps: int = 1,
     cell_type: str = 'elman',  # 'elman' | 'gru'
     pooling: str = 'last',  # 'last' | 'mean'
+    out_hidden: int = 0,  # 0 = single dense head; >0 = hidden -> X -> 1
+    out_activation: str = 'gelu',
+    batch_size: int = BATCH_SIZE,
 ) -> tuple[dict, int, np.ndarray]:
     """Fit RNN params on (conf, loss) pairs.
 
@@ -331,7 +351,9 @@ def fit(
     rng = jax.random.PRNGKey(seed)
     rng, init_key = jax.random.split(rng)
     params = _init_params(
-        init_key, n_layer_feat, hidden, feat_proj, rnn_sub_steps, cell_type)
+        init_key, n_layer_feat, hidden, feat_proj, rnn_sub_steps, cell_type,
+        out_hidden,
+    )
     if lr_schedule == 'cosine':
         schedule = optax.cosine_decay_schedule(
             init_value=lr, decay_steps=steps, alpha=0.01,
@@ -344,7 +366,7 @@ def fit(
     # Pre-sample mini-batch indices for every training step.
     n_train = init_globals.shape[0]
     batch_idx = jax.random.randint(
-        rng, (steps, BATCH_SIZE), 0, n_train)
+        rng, (steps, batch_size), 0, n_train)
 
     def step(carry, idx):
         params, opt_state = carry
@@ -359,6 +381,8 @@ def fit(
             rnn_sub_steps,
             cell_type,
             pooling,
+            out_hidden,
+            out_activation,
         )
         updates, opt_state = optimizer.update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
@@ -390,6 +414,8 @@ def train_loss_model(
             train_data, simple_types,
             hidden=32, lr=0.02, steps=8000, lr_schedule='cosine',
             cell_activation='tanh',
+            feat_proj=32, out_hidden=32, out_activation='gelu',
+            batch_size=2048,
         )
     logging.info(f"Trained loss model on {len(train_data)} labeled runs")
     return LossModel(
@@ -397,6 +423,9 @@ def train_loss_model(
         simple_types=simple_types,
         max_layers=max_layers,
         cell_activation='tanh',
+        feat_proj=32,
+        out_hidden=32,
+        out_activation='gelu',
     )
 
 
@@ -410,11 +439,14 @@ def predict(
     rnn_sub_steps: int = 1,
     cell_type: str = 'elman',
     pooling: str = 'last',
+    out_hidden: int = 0,
+    out_activation: str = 'gelu',
 ) -> np.ndarray:
     type_idx = {t: i for i, t in enumerate(simple_types)}
     ig_np, lf_np, m_np = _build_input_arrays(
         confs, type_idx, max_layers)
     preds = _forward(
         params, jnp.asarray(ig_np), jnp.asarray(lf_np), jnp.asarray(m_np),
-        cell_activation, feat_proj, rnn_sub_steps, cell_type, pooling)
+        cell_activation, feat_proj, rnn_sub_steps, cell_type, pooling,
+        out_hidden, out_activation)
     return np.asarray(preds)

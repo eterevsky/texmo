@@ -17,6 +17,11 @@ CREATE TABLE conf (
 
     decay REAL NOT NULL DEFAULT 1,
 
+    -- Use a cosine LR schedule that decays to 0 over `steps` (no
+    -- warmup, no floor). Stored as 0/1; mutually exclusive with
+    -- exponential `decay`: when cosine=1, decay must be 1.
+    cosine INTEGER NOT NULL DEFAULT 0,
+
     length INTEGER NOT NULL,
     batch INTEGER NOT NULL,
     steps INTEGER NOT NULL,
@@ -24,7 +29,7 @@ CREATE TABLE conf (
     -- Scores based on the runs.
     median_score REAL,
 
-    UNIQUE (spec, precision, lr, decay, length, batch, steps)
+    UNIQUE (spec, precision, lr, decay, cosine, length, batch, steps)
 );
 
 CREATE INDEX conf_spec ON conf(spec);

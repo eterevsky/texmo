@@ -150,11 +150,14 @@ WHERE spec = :spec
     AND steps = :steps
     AND precision = :precision
     AND decay = :decay
+    AND cosine = :cosine
 """
 
 _INSERT_CONF = """
-INSERT INTO conf (spec, weights, lr, length, batch, steps, precision, decay)
-VALUES (:spec, :weights, :lr, :length, :batch, :steps, :precision, :decay)
+INSERT INTO conf (spec, weights, lr, length, batch, steps, precision,
+                  decay, cosine)
+VALUES (:spec, :weights, :lr, :length, :batch, :steps, :precision,
+        :decay, :cosine)
 """
 
 _INSERT_RUN = """
@@ -204,6 +207,7 @@ SELECT conf.id AS conf_id,
         batch,
         steps,
         decay,
+        cosine,
         run.id AS run_id,
         system,
         train_time,
@@ -268,11 +272,6 @@ class ResultDB(object):
                 self._db.executescript(schema.read())
                 self._db.commit()
 
-        # Idempotent migrations for columns added after the initial
-        # schema. Existing rows get NULL for the new columns.
-        if not readonly:
-            self._migrate_columns()
-
         # Enable WAL for file-backed DBs so the timing thread and search
         # thread can write concurrently without blocking readers.
         if not is_memory and not readonly:
@@ -286,19 +285,6 @@ class ResultDB(object):
 
         # Cache: Configuration -> conf_id (populated lazily)
         self._conf_id_cache: dict[Configuration, int | None] = {}
-
-    def _migrate_columns(self):
-        """Add any columns not present on `run`. Idempotent."""
-        cur = self._db.execute("PRAGMA table_info(run)")
-        existing = {row[1] for row in cur}
-        for col, decl in (
-            ('strategy', 'TEXT'),
-            ('changed_winner', 'INTEGER'),
-        ):
-            if col not in existing:
-                logging.info(f"Migrating: ALTER TABLE run ADD COLUMN {col}")
-                self._db.execute(f'ALTER TABLE run ADD COLUMN {col} {decl}')
-        self._db.commit()
 
     @property
     def path(self) -> str:
@@ -615,7 +601,7 @@ class ResultDB(object):
 
         conf_fields = ', '.join([
             'spec', 'precision', 'lr',
-            'decay', 'length', 'batch', 'steps'])
+            'decay', 'cosine', 'length', 'batch', 'steps'])
 
         where = 'WHERE ' + ' AND '.join(conditions)
 
@@ -717,7 +703,7 @@ class ResultDB(object):
 
         conf_fields = ', '.join([
             'spec', 'precision', 'lr',
-            'decay', 'length', 'batch', 'steps'])
+            'decay', 'cosine', 'length', 'batch', 'steps'])
 
         segments: list[tuple[int, Optional[int], ConfScore]] = []
 
@@ -826,7 +812,7 @@ class ResultDB(object):
 
         query = f"""
             SELECT conf.id AS conf_id, spec, precision, lr, length, batch,
-                decay, steps, median_score,
+                decay, cosine, steps, median_score,
                 (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs,
                 (SELECT time_s FROM conf_time_estimate
                  WHERE conf_id = conf.id AND system = :system
@@ -864,7 +850,7 @@ class ResultDB(object):
 
         query = f"""
             SELECT conf.id AS conf_id,
-                   spec, precision, lr, decay, length, batch, steps,
+                   spec, precision, lr, decay, cosine, length, batch, steps,
                    median_score,
                    cte.time_s AS time_estimate,
                    (SELECT COUNT(*) FROM run
@@ -944,6 +930,7 @@ class ResultDB(object):
             SELECT conf.spec AS spec, conf.precision AS precision,
                    conf.lr AS lr, conf.length AS length, conf.batch AS batch,
                    conf.steps AS steps, conf.decay AS decay,
+                   conf.cosine AS cosine,
                    run.train_time AS train_time
             FROM conf JOIN run ON conf.id = run.conf_id
             WHERE run.system = :system AND conf.precision = :precision
@@ -966,7 +953,7 @@ class ResultDB(object):
         cur = self._db.execute(
             """
             SELECT conf.id AS conf_id,
-                   spec, precision, lr, length, batch, steps, decay,
+                   spec, precision, lr, length, batch, steps, decay, cosine,
                    run.loss AS loss
             FROM conf JOIN run ON run.conf_id = conf.id
             WHERE run.loss IS NOT NULL
@@ -981,7 +968,7 @@ class ResultDB(object):
         """Yield (conf_id, Configuration) for every conf of the given precision."""
         cur = self._db.execute(
             """
-            SELECT id, spec, precision, lr, length, batch, steps, decay
+            SELECT id, spec, precision, lr, length, batch, steps, decay, cosine
             FROM conf WHERE precision = :precision
             """,
             {'precision': str(precision)},

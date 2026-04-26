@@ -16,7 +16,7 @@ def is_valid_int(x: int) -> bool:
 
 class Configuration(object):
     __slots__ = ('model', 'lr', 'length',
-                 'batch', 'steps', 'decay')
+                 'batch', 'steps', 'decay', 'cosine')
 
     def __init__(
         self,
@@ -26,6 +26,7 @@ class Configuration(object):
         batch: int,
         steps: int,
         decay: float,
+        cosine: bool = False,
     ):
         object.__setattr__(self, 'model', model)
         object.__setattr__(self, 'lr', lr)
@@ -34,6 +35,7 @@ class Configuration(object):
         object.__setattr__(self, 'steps', steps)
         assert decay is not None
         object.__setattr__(self, 'decay', decay)
+        object.__setattr__(self, 'cosine', bool(cosine))
 
     @property
     def precision(self) -> Precision:
@@ -43,8 +45,14 @@ class Configuration(object):
         raise AttributeError('Configuration is immutable')
 
     @staticmethod
-    def from_dict(d: dict) -> Configuration:
+    def from_dict(d) -> Configuration:
         model = build_model_def(d['spec'], precision=Precision(d['precision']))
+        # `d` may be a plain dict (from JSON) or a sqlite3.Row. Row
+        # raises IndexError on a missing column; dict raises KeyError.
+        try:
+            cosine = bool(d['cosine'])
+        except (KeyError, IndexError):
+            cosine = False
         return Configuration(
             model=model,
             lr=d['lr'],
@@ -52,6 +60,7 @@ class Configuration(object):
             batch=d['batch'],
             steps=d['steps'],
             decay=d['decay'],
+            cosine=cosine,
         )
 
     def __eq__(self, other: Configuration) -> bool:
@@ -62,13 +71,14 @@ class Configuration(object):
             and self.batch == other.batch
             and self.steps == other.steps
             and self.decay == other.decay
+            and self.cosine == other.cosine
             and self.model == other.model
         )
 
     def __hash__(self) -> int:
         return hash(
             (str(self.model), self.lr, self.length, self.batch,
-             self.steps, self.precision, self.decay)
+             self.steps, self.precision, self.decay, self.cosine)
         )
 
     def replace(
@@ -79,6 +89,7 @@ class Configuration(object):
         batch: Optional[int] = None,
         steps: Optional[int] = None,
         decay: Optional[float] = None,
+        cosine: Optional[bool] = None,
     ) -> Configuration:
         model = model or self.model
         lr = lr or self.lr
@@ -86,9 +97,10 @@ class Configuration(object):
         batch = batch or self.batch
         steps = steps or self.steps
         decay = decay or self.decay
+        cosine = self.cosine if cosine is None else cosine
         return Configuration(
             model=model, lr=lr, length=length, batch=batch, steps=steps,
-            decay=decay,
+            decay=decay, cosine=cosine,
         )
 
     def to_dict(self) -> dict:
@@ -100,10 +112,15 @@ class Configuration(object):
             'batch': self.batch,
             'steps': self.steps,
             'decay': self.decay,
+            'cosine': self.cosine,
         }
 
     def __repr__(self) -> str:
-        return f"Configuration('{self.model}', '{self.precision}', {self.lr}, {self.length}, {self.batch}, {self.steps}, {self.decay})"
+        return (
+            f"Configuration('{self.model}', '{self.precision}', "
+            f"{self.lr}, {self.length}, {self.batch}, {self.steps}, "
+            f"{self.decay}, cosine={self.cosine})"
+        )
 
     @property
     def num_weights(self) -> int:
@@ -128,6 +145,10 @@ class Configuration(object):
         )
 
     def is_valid(self) -> bool:
+        if self.cosine and self.decay != 1:
+            # Cosine schedule already decays LR to 0 over `steps`; combining
+            # it with exponential decay would multiply two decay curves.
+            return False
         return (
             self.model.is_valid()
             and self.lr > 0
@@ -141,6 +162,8 @@ class Configuration(object):
     def learning_str(self) -> str:
         render_lr = lambda lr: str(int(lr)) if lr >= 1 else f'1/{str(int(1/lr))}'
         lr = render_lr(self.lr)
+        if self.cosine:
+            return f'{lr}↘0'
         if self.decay == 1:
             final = ''
         else:
@@ -353,8 +376,20 @@ class Template(object):
             yield conf.replace(batch=batch)
         for length in self.length.neighbors(conf.length):
             yield conf.replace(length=length)
-        for decay in self.decay.neighbors(conf.decay):
-            yield conf.replace(decay=decay)
+        if not conf.cosine:
+            # Skip exp-decay neighbors when cosine is on — cosine
+            # implies decay==1, and the toggle below handles the swap.
+            for decay in self.decay.neighbors(conf.decay):
+                yield conf.replace(decay=decay)
+        # Cosine schedule toggle. Note the asymmetry: from any
+        # exp-decay conf you reach (cosine=True, decay=1) directly,
+        # but going back from cosine you only get (cosine=False,
+        # decay=1) — exp-decay variants are then reachable via the
+        # normal decay neighbor walk.
+        if conf.cosine:
+            yield conf.replace(cosine=False)
+        else:
+            yield conf.replace(cosine=True, decay=1.0)
 
 
 def conf_neighbors(

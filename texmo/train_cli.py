@@ -60,6 +60,10 @@ def train(args: argparse.Namespace):
     if args.model_path is not None:
         raise NotImplementedError("Loading pre-trained models not yet supported in PyTorch manager")
     else:
+        if args.cosine and decay != 1.0:
+            raise SystemExit(
+                "--cosine requires --decay 1 (cosine schedule already "
+                "decays LR to 0 over `steps`)")
         conf = Configuration(
             build_model_def(args.spec, precision=Precision(args.precision)),
             lr=lr,
@@ -67,6 +71,7 @@ def train(args: argparse.Namespace):
             batch=args.batch,
             steps=args.steps,
             decay=decay,
+            cosine=args.cosine,
         )
         manager = create_manager(
             args.backend,
@@ -180,6 +185,13 @@ def init_args(parser: argparse.ArgumentParser, config):
         type=str,
         default="1.0",
         help="decay of the learning rate over the course of training, i.e. (LR at the last step) / (LR at the first step)  (default: 1)",
+    )
+    parser.add_argument(
+        '--cosine',
+        default=False,
+        action="store_true",
+        help="use a cosine LR schedule that decays to 0 over `steps` "
+             "(no warmup); requires --decay 1",
     )
     parser.add_argument(
         "-l",

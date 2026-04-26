@@ -49,6 +49,10 @@ class LossModel:
     pooling: str = 'last'
     out_hidden: int = 0
     out_activation: str = 'gelu'
+    # False on pickles trained before the cosine schedule was added —
+    # `_init_global_features` then emits 6 globals to match the old
+    # `W_glob` shape. New fits set this True.
+    has_cosine: bool = False
 
     def predict(self, confs: list['Configuration']) -> np.ndarray:
         return predict(
@@ -60,6 +64,7 @@ class LossModel:
             pooling=self.pooling,
             out_hidden=self.out_hidden,
             out_activation=self.out_activation,
+            has_cosine=self.has_cosine,
         )
 
 
@@ -84,20 +89,29 @@ def _layer_output_size(layer) -> int:
     return layer.size
 
 
-# init_globals: output_size + the 5 training knobs. The last 5 (indices
-# 1..5) are re-used at every RNN step and at the output dense.
-def _init_global_features(conf: Configuration) -> np.ndarray:
-    return np.array([
+# init_globals: output_size + 5 training knobs + cosine flag. The
+# cosine flag is the only non-log feature (binary). Old pickles
+# trained without the cosine slot still load and predict via
+# `LossModel.has_cosine=False`, which falls back to a 6-element
+# init_globals.
+def _init_global_features(
+    conf: Configuration, has_cosine: bool,
+) -> np.ndarray:
+    base = [
         np.log2(conf.model.output.size),
         np.log2(conf.batch),
         np.log2(conf.length),
         np.log2(conf.steps),
         np.log2(conf.lr),
         np.log2(conf.decay),
-    ], dtype=np.float32)
+    ]
+    if has_cosine:
+        base.append(1.0 if conf.cosine else 0.0)
+    return np.array(base, dtype=np.float32)
 
 
-N_INIT_GLOBAL = 6
+N_INIT_GLOBAL = 7
+N_INIT_GLOBAL_LEGACY = 6
 
 
 def discover_simple_types(
@@ -150,15 +164,17 @@ def _build_input_arrays(
     confs: list[Configuration],
     simple_type_idx: dict[str, int],
     max_layers: int,
+    has_cosine: bool,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     n = len(confs)
     n_simple = len(simple_type_idx)
     feat_dim = _layer_feature_dim(n_simple)
-    init_globals = np.zeros((n, N_INIT_GLOBAL), dtype=np.float32)
+    n_global = N_INIT_GLOBAL if has_cosine else N_INIT_GLOBAL_LEGACY
+    init_globals = np.zeros((n, n_global), dtype=np.float32)
     layer_feats = np.zeros((n, max_layers, feat_dim), dtype=np.float32)
     masks = np.zeros((n, max_layers), dtype=np.float32)
     for i, conf in enumerate(confs):
-        init_globals[i] = _init_global_features(conf)
+        init_globals[i] = _init_global_features(conf, has_cosine)
         for j, layer in enumerate(conf.model.layers[:max_layers]):
             layer_feats[i, j] = _layer_features(
                 layer, simple_type_idx, n_simple)
@@ -339,8 +355,9 @@ def fit(
     confs = [c for c, _ in train_data]
     max_layers = max((len(c.model.layers) for c in confs), default=1)
     max_layers = max(max_layers, 1)
+    # Always emit the cosine slot when fitting from current code.
     init_globals_np, layer_feats_np, masks_np = _build_input_arrays(
-        confs, type_idx, max_layers)
+        confs, type_idx, max_layers, has_cosine=True)
     targets_np = _build_targets(train_data)
     init_globals = jnp.asarray(init_globals_np)
     layer_feats = jnp.asarray(layer_feats_np)
@@ -426,6 +443,7 @@ def train_loss_model(
         feat_proj=32,
         out_hidden=32,
         out_activation='gelu',
+        has_cosine=True,
     )
 
 
@@ -441,10 +459,11 @@ def predict(
     pooling: str = 'last',
     out_hidden: int = 0,
     out_activation: str = 'gelu',
+    has_cosine: bool = False,
 ) -> np.ndarray:
     type_idx = {t: i for i, t in enumerate(simple_types)}
     ig_np, lf_np, m_np = _build_input_arrays(
-        confs, type_idx, max_layers)
+        confs, type_idx, max_layers, has_cosine=has_cosine)
     preds = _forward(
         params, jnp.asarray(ig_np), jnp.asarray(lf_np), jnp.asarray(m_np),
         cell_activation, feat_proj, rnn_sub_steps, cell_type, pooling,

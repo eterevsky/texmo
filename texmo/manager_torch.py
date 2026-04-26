@@ -45,16 +45,19 @@ class ManagerTorch(Manager):
             {'params': decay_params, 'weight_decay': 0.01},
             {'params': no_decay_params, 'weight_decay': 0.0},
         ]
-        if self.conf.decay != 1:
+        self.optimizer = torch.optim.AdamW(param_groups, lr=lr)
+        if self.conf.cosine:
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer, T_max=self.conf.steps, eta_min=0.0,
+            )
+        elif self.conf.decay != 1:
             decay = self.conf.decay
             steps = self.conf.steps
-            self.optimizer = torch.optim.AdamW(param_groups, lr=lr)
             self.scheduler = torch.optim.lr_scheduler.LambdaLR(
                 self.optimizer,
                 lr_lambda=lambda step: decay ** (step / steps),
             )
         else:
-            self.optimizer = torch.optim.AdamW(param_groups, lr=lr)
             self.scheduler = None
 
     def _get_batch(self) -> torch.Tensor:

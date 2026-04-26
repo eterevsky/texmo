@@ -36,7 +36,13 @@ class ManagerJax(Manager):
 
     def _build_optimizer(self):
         lr = self.conf.lr
-        if self.conf.decay != 1:
+        if self.conf.cosine:
+            lr = optax.cosine_decay_schedule(
+                init_value=self.conf.lr,
+                decay_steps=self.conf.steps,
+                alpha=0.0,
+            )
+        elif self.conf.decay != 1:
             initial_lr = self.conf.lr
             decay = self.conf.decay
             steps = self.conf.steps

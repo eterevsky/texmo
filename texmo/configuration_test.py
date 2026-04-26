@@ -42,6 +42,8 @@ def test_conf_neighbors():
         conf.replace(decay=1 / 16),
         conf.replace(decay=1 / 64),
         conf.replace(batch=128),
+        # Toggle to cosine snaps decay to 1.
+        conf.replace(cosine=True, decay=1.0),
     }
 
 
@@ -62,6 +64,7 @@ def test_dense_layer_neighbor():
     assert neighbors == {
         conf.replace(model=_md("bytes|dense.2.relu")),
         conf.replace(model=_md("bytes|rnn.1.relu")),
+        conf.replace(cosine=True),
     }
 
 
@@ -85,6 +88,7 @@ def test_conf_neighbors_suffix():
         conf.replace(lr=0.5),
         conf.replace(batch=128),
         conf.replace(decay=1 / 2),
+        conf.replace(cosine=True),
     }
 
 
@@ -107,6 +111,7 @@ def test_conf_neighbors_suffix_exact():
         conf.replace(lr=0.5),
         conf.replace(batch=128),
         conf.replace(decay=1 / 2),
+        conf.replace(cosine=True),
     }
 
 
@@ -192,3 +197,50 @@ def test_conf_is_valid():
 def test_conf_not_valid_no_activation():
     conf = _conf("bytes|dense.32", decay=1 / 32)
     assert not conf.is_valid()
+
+
+def test_cosine_requires_decay_one():
+    conf_ok = _conf("bytes|dense.32.gelu", decay=1.0).replace(cosine=True)
+    assert conf_ok.is_valid()
+    conf_bad = _conf("bytes|dense.32.gelu", decay=0.5).replace(cosine=True)
+    assert not conf_bad.is_valid()
+
+
+def test_cosine_neighbor_toggle_from_exp_decay():
+    """Toggling cosine on snaps decay to 1, regardless of current decay."""
+    template = Template(
+        spec="bytes|dense.32.gelu",
+        lr=(0.25, 0.25),
+        length=(128, 128),
+        batch=(128, 128),
+        steps=(256, 256),
+        max_weights=(32, INF),
+        precision=[Precision.FP32],
+        decay=(0, 1),
+    )
+    conf = _conf("bytes|dense.32.gelu", batch=128, decay=0.5)
+    neighbors = set(conf_neighbors(conf, template))
+    assert conf.replace(cosine=True, decay=1.0) in neighbors
+    # Direct (cosine=True, decay=0.5) is invalid and must NOT be a neighbor.
+    assert conf.replace(cosine=True) not in neighbors
+
+
+def test_cosine_neighbor_toggle_back_to_exp_decay():
+    """From cosine=True the toggle goes to (cosine=False, decay=1)."""
+    template = Template(
+        spec="bytes|dense.32.gelu",
+        lr=(0.25, 0.25),
+        length=(128, 128),
+        batch=(128, 128),
+        steps=(256, 256),
+        max_weights=(32, INF),
+        precision=[Precision.FP32],
+        decay=(0, 1),
+    )
+    conf = _conf("bytes|dense.32.gelu", batch=128, decay=1.0).replace(
+        cosine=True)
+    neighbors = set(conf_neighbors(conf, template))
+    assert conf.replace(cosine=False) in neighbors
+    # exp-decay walk from cosine=True is suppressed; the off-toggle
+    # gets us to decay=1, and the regular walk takes over from there.
+    assert conf.replace(cosine=False, decay=0.5) not in neighbors

@@ -127,6 +127,7 @@ def build_scaling_graph(
 def _conf_row(conf_score) -> dict:
     """Build a template row dict for a ConfScore."""
     conf = conf_score.conf
+    cosine_flag = ' --cosine' if conf.cosine else ''
     cmd = (
         f'uv run texmo.py train'
         f" -s '{conf.model}'"
@@ -134,6 +135,7 @@ def _conf_row(conf_score) -> dict:
         f' -b {conf.batch}'
         f' --lr {conf.lr}'
         f' --decay {conf.decay}'
+        f'{cosine_flag}'
         f' -l {conf.length}'
         f' --steps {conf.steps}'
     )

@@ -78,8 +78,12 @@
                     <td><input type="text" name="lr" value="{{ lr }}"></td>
                 </tr>
                 <tr>
-                    <td>Decay:</td>
-                    <td><input type="text" name="decay" value="{{ decay }}"></td>
+                    <td>LR schedule:</td>
+                    <td>
+                        <input type="checkbox" name="decay_none" {% if decay_types.none %} checked {% endif %}> <label for="decay_none">none</label>
+                        <input type="checkbox" name="decay_exp" {% if decay_types.exp %} checked {% endif %}> <label for="decay_exp">exp</label>
+                        <input type="checkbox" name="decay_cosine" {% if decay_types.cosine %} checked {% endif %}> <label for="decay_cosine">cosine</label>
+                    </td>
                 </tr>
                 <tr>
                     <td>Steps:</td>

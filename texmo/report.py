@@ -75,10 +75,11 @@ def init_args(parser: argparse.ArgumentParser, config):
         help='range of acceptable batch sizes, for example "1-256"',
     )
     parser.add_argument(
-        '--decay',
+        '--decay-types',
         type=str,
-        default="0.0-1.0",
-        help="decay of the learning rate over training",
+        default="none,exp,cosine",
+        help="comma-separated subset of LR-schedule types: "
+             "none, exp, cosine (default: all)",
     )
     parser.add_argument(
         '-l',

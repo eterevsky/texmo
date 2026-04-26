@@ -29,7 +29,7 @@ def _render(**overrides):
         batch="32-256",
         precision={p: (p == Precision.FP32) for p in Precision},
         lr="0.001-0.1",
-        decay="0.5-1",
+        decay_types={'none': True, 'exp': True, 'cosine': True},
         steps="256-1024",
         time="1-16",
         top=[
@@ -123,7 +123,7 @@ def _make_template():
         spec="bytes|dense.32.gelu",
         lr=None, length=None, batch=None,
         steps=None, max_weights=(2, INF),
-        precision=list(Precision), decay=None,
+        precision=list(Precision),
     )
 
 

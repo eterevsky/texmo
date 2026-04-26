@@ -1,4 +1,5 @@
 import argparse
+import enum
 import math
 import re
 from typing import Iterable, Optional
@@ -8,6 +9,14 @@ from .common import INF, itoa3
 from .model import ModelDef, build_model_def
 from .precision import Precision
 from .tokens.tokenizer import Tokenizer
+
+
+class DecayType(enum.StrEnum):
+    """The kind of LR schedule a Configuration uses, derived from
+    (decay, cosine) — see `Configuration.decay_type`."""
+    NONE = 'none'
+    EXP = 'exp'
+    COSINE = 'cosine'
 
 
 def is_valid_int(x: int) -> bool:
@@ -159,6 +168,14 @@ class Configuration(object):
         )
 
     @property
+    def decay_type(self) -> 'DecayType':
+        if self.cosine:
+            return DecayType.COSINE
+        if self.decay == 1.0:
+            return DecayType.NONE
+        return DecayType.EXP
+
+    @property
     def learning_str(self) -> str:
         render_lr = lambda lr: str(int(lr)) if lr >= 1 else f'1/{str(int(1/lr))}'
         lr = render_lr(self.lr)
@@ -234,6 +251,14 @@ IntLimits = Optional[int | tuple[int, int]]
 FloatLimits = Optional[float | tuple[float, float]]
 
 
+# Used internally by Template._conf_neighbors for the exp-decay walk.
+# Independent of the template — a conf at decay=0.5 has decay neighbors
+# (1.0, 0.25), and the matching pass against `decay_types` decides
+# whether each survives. Lower bound is 0 so the walk can halve
+# indefinitely; in practice the search doesn't chase decay to zero.
+_DECAY_NEIGHBOR_BOUNDS = Bounds(None, 0, max_value=1)
+
+
 def _parse_number(arg: str, num_type: type) -> int|float:
     if arg == 'inf':
         return INF
@@ -262,7 +287,7 @@ class Template(object):
         steps: IntLimits,
         max_weights: IntLimits,
         precision: list[Precision],
-        decay: FloatLimits
+        decay_types: Optional[Iterable[DecayType | str]] = None,
     ):
         if not spec:
             self.regex = None
@@ -281,8 +306,12 @@ class Template(object):
         self.batch = Bounds(batch, 1)
         self.precision = precision
         self.lr = Bounds(lr, 0)
-        self.decay = Bounds(decay, 0, max_value=1)
         self.steps = Bounds(steps, 2)
+        if decay_types is None:
+            decay_types = list(DecayType)
+        # Coerce strings (CLI / form) into enum members; explicit list
+        # of DecayType passes through.
+        self.decay_types = [DecayType(t) for t in decay_types]
 
         self._conf_neighbors_cache = {}
 
@@ -296,6 +325,10 @@ class Template(object):
         else:
             precision = list(map(Precision, args.precision.split(',')))
 
+        decay_types = [
+            t.strip() for t in args.decay_types.split(',') if t.strip()
+        ]
+
         return Template(
             spec=args.spec,
             lr=_parse_interval(args.lr, float),
@@ -304,7 +337,7 @@ class Template(object):
             steps=_parse_interval(args.steps, int),
             max_weights=_parse_interval(args.weights, int),
             precision=precision,
-            decay=_parse_interval(args.decay, float)
+            decay_types=decay_types,
         )
 
     @staticmethod
@@ -315,6 +348,10 @@ class Template(object):
             if params.get(str(p)):
                 precision.append(p)
 
+        decay_types = [
+            t for t in DecayType if params.get(f'decay_{t}')
+        ]
+
         return Template(
             spec=params["spec"],
             lr=_parse_interval(params['lr'], float),
@@ -323,11 +360,12 @@ class Template(object):
             steps=_parse_interval(params['steps'], int),
             max_weights=_parse_interval(params['weights'], int),
             precision=precision,
-            decay=_parse_interval(params['decay'], float),
+            decay_types=decay_types,
         )
 
     def __str__(self):
         precision = ','.join(map(str, self.precision))
+        decay_types = ','.join(self.decay_types)
         spec = self.spec if self.spec is not None else self.regex
         return (
             f'Template(spec={repr(spec)}, '
@@ -336,7 +374,7 @@ class Template(object):
             + f'batch={self.batch}, '
             + f'steps={self.steps}, '
             + f'max_weights={self.max_weights}, '
-            + f'decay={self.decay})'
+            + f'decay_types=\'{decay_types}\')'
         )
 
     def match_model(self, model: ModelDef) -> bool:
@@ -356,7 +394,7 @@ class Template(object):
             and self.length.match(conf.length)
             and self.batch.match(conf.batch)
             and self.steps.match(conf.steps)
-            and self.decay.match(conf.decay)
+            and conf.decay_type in self.decay_types
         )
 
     def _conf_neighbors(
@@ -377,19 +415,24 @@ class Template(object):
         for length in self.length.neighbors(conf.length):
             yield conf.replace(length=length)
         if not conf.cosine:
-            # Skip exp-decay neighbors when cosine is on — cosine
-            # implies decay==1, and the toggle below handles the swap.
-            for decay in self.decay.neighbors(conf.decay):
-                yield conf.replace(decay=decay)
-        # Cosine schedule toggle. Note the asymmetry: from any
-        # exp-decay conf you reach (cosine=True, decay=1) directly,
-        # but going back from cosine you only get (cosine=False,
-        # decay=1) — exp-decay variants are then reachable via the
-        # normal decay neighbor walk.
+            # Exp-decay neighbor walk. The destination is filtered by
+            # decay_types: decay=1 lands as 'none', decay<1 as 'exp'.
+            for decay in _DECAY_NEIGHBOR_BOUNDS.neighbors(conf.decay):
+                cand = conf.replace(decay=decay)
+                if cand.decay_type in self.decay_types:
+                    yield cand
+        # Cosine schedule toggle. Asymmetric: from any exp-decay conf
+        # you reach (cosine=True, decay=1) directly; going back from
+        # cosine only gets you (cosine=False, decay=1) — exp variants
+        # are then reachable via the regular decay walk.
         if conf.cosine:
-            yield conf.replace(cosine=False)
+            cand = conf.replace(cosine=False)  # type=none
+            if cand.decay_type in self.decay_types:
+                yield cand
         else:
-            yield conf.replace(cosine=True, decay=1.0)
+            cand = conf.replace(cosine=True, decay=1.0)  # type=cosine
+            if cand.decay_type in self.decay_types:
+                yield cand
 
 
 def conf_neighbors(
@@ -415,7 +458,15 @@ def default_from_template(
     length = template.length.pick_default(8)
     batch = template.batch.pick_default(1)
     steps = template.steps.pick_default(2)
-    decay = template.decay.pick_default(1.0)
+    # Pick a decay/cosine pair compatible with the allowed decay_types.
+    if 'none' in template.decay_types:
+        decay, cosine = 1.0, False
+    elif 'exp' in template.decay_types:
+        decay, cosine = 0.5, False
+    elif 'cosine' in template.decay_types:
+        decay, cosine = 1.0, True
+    else:
+        raise RuntimeError("Template has empty decay_types")
 
     if spec is None:
         if template.spec is not None:
@@ -453,6 +504,7 @@ def default_from_template(
                         batch=batch,
                         steps=steps,
                         decay=decay,
+                        cosine=cosine,
                     )
 
 

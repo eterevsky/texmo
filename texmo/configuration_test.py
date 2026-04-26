@@ -1,8 +1,10 @@
 from texmo.common import INF
 from texmo.configuration import (
     Configuration,
+    DecayType,
     Template,
     conf_neighbors,
+    default_from_template,
 )
 from texmo.model import build_model_def
 from texmo.precision import Precision
@@ -28,7 +30,6 @@ def test_conf_neighbors():
         steps=(256, 256),
         max_weights=(32, INF),
         precision=[Precision.FP32],
-        decay=None,
     )
 
     conf = _conf("bytes|dense.1.relu", decay=1 / 32)
@@ -56,7 +57,7 @@ def test_dense_layer_neighbor():
         steps=(256, 256),
         max_weights=(32, INF),
         precision=[Precision.FP32],
-        decay=1,
+        decay_types=['none', 'cosine'],
     )
 
     conf = _conf("bytes|dense.1.relu", batch=128, decay=1)
@@ -77,7 +78,6 @@ def test_conf_neighbors_suffix():
         steps=(256, 256),
         max_weights=(32, INF),
         precision=[Precision.FP32],
-        decay=(0, 1),
     )
 
     conf = _conf("bytes|suffix.2")
@@ -101,7 +101,6 @@ def test_conf_neighbors_suffix_exact():
         steps=(256, 256),
         max_weights=(32, INF),
         precision=[Precision.FP32],
-        decay=(0, 1),
     )
 
     conf = _conf("bytes|suffix.2")
@@ -124,7 +123,7 @@ def test_conf_neighbors_precision():
         steps=(256, 256),
         max_weights=(32, INF),
         precision=[Precision.FP32, Precision.FP16],
-        decay=1,
+        decay_types=['none', 'cosine'],
     )
 
     conf = _conf("bytes|dense.1.relu", batch=128, decay=1)
@@ -148,7 +147,7 @@ def test_conf_neighbors_input():
         steps=(256, 256),
         max_weights=None,
         precision=[Precision.FP32],
-        decay=1,
+        decay_types=['none', 'cosine'],
     )
 
     conf = _conf("bytes|dense.1.relu", batch=128, decay=1)
@@ -172,7 +171,6 @@ def test_template_exact_spec_match():
         steps=None,
         max_weights=None,
         precision=[Precision.FP32],
-        decay=None,
     )
 
     assert template.spec == "bits.1+bp|dense.1.relu"
@@ -216,7 +214,6 @@ def test_cosine_neighbor_toggle_from_exp_decay():
         steps=(256, 256),
         max_weights=(32, INF),
         precision=[Precision.FP32],
-        decay=(0, 1),
     )
     conf = _conf("bytes|dense.32.gelu", batch=128, decay=0.5)
     neighbors = set(conf_neighbors(conf, template))
@@ -235,7 +232,6 @@ def test_cosine_neighbor_toggle_back_to_exp_decay():
         steps=(256, 256),
         max_weights=(32, INF),
         precision=[Precision.FP32],
-        decay=(0, 1),
     )
     conf = _conf("bytes|dense.32.gelu", batch=128, decay=1.0).replace(
         cosine=True)
@@ -244,3 +240,116 @@ def test_cosine_neighbor_toggle_back_to_exp_decay():
     # exp-decay walk from cosine=True is suppressed; the off-toggle
     # gets us to decay=1, and the regular walk takes over from there.
     assert conf.replace(cosine=False, decay=0.5) not in neighbors
+
+
+def test_decay_type_property():
+    none = _conf("bytes|dense.32.gelu", decay=1.0)
+    assert none.decay_type == DecayType.NONE
+    exp = _conf("bytes|dense.32.gelu", decay=0.5)
+    assert exp.decay_type == DecayType.EXP
+    cosine = none.replace(cosine=True)
+    assert cosine.decay_type == DecayType.COSINE
+
+
+def _meta_template(decay_types=None) -> Template:
+    return Template(
+        spec="bytes|dense.32.gelu",
+        lr=(0.25, 0.25),
+        length=(128, 128),
+        batch=(128, 128),
+        steps=(256, 256),
+        max_weights=(32, INF),
+        precision=[Precision.FP32],
+        decay_types=decay_types,
+    )
+
+
+def test_template_match_filters_by_decay_type():
+    none = _conf("bytes|dense.32.gelu", batch=128, decay=1.0)
+    exp = _conf("bytes|dense.32.gelu", batch=128, decay=0.5)
+    cosine = none.replace(cosine=True)
+
+    t_all = _meta_template()
+    assert t_all.match(none) and t_all.match(exp) and t_all.match(cosine)
+
+    assert _meta_template([DecayType.NONE]).match(none)
+    assert not _meta_template([DecayType.NONE]).match(exp)
+    assert not _meta_template([DecayType.NONE]).match(cosine)
+
+    assert not _meta_template([DecayType.EXP]).match(none)
+    assert _meta_template([DecayType.EXP]).match(exp)
+    assert not _meta_template([DecayType.EXP]).match(cosine)
+
+    assert not _meta_template([DecayType.COSINE]).match(none)
+    assert not _meta_template([DecayType.COSINE]).match(exp)
+    assert _meta_template([DecayType.COSINE]).match(cosine)
+
+
+def test_template_match_empty_decay_types_matches_nothing():
+    t_empty = _meta_template([])
+    none = _conf("bytes|dense.32.gelu", batch=128, decay=1.0)
+    exp = _conf("bytes|dense.32.gelu", batch=128, decay=0.5)
+    cosine = none.replace(cosine=True)
+    assert not t_empty.match(none)
+    assert not t_empty.match(exp)
+    assert not t_empty.match(cosine)
+
+
+def test_neighbor_walk_excludes_cosine_when_not_in_decay_types():
+    """With cosine disabled, the toggle on cosine should not yield."""
+    t = _meta_template([DecayType.NONE, DecayType.EXP])
+    none = _conf("bytes|dense.32.gelu", batch=128, decay=1.0)
+    neighbors = set(conf_neighbors(none, t))
+    assert none.replace(cosine=True) not in neighbors
+
+
+def test_neighbor_walk_excludes_no_decay_when_not_in_decay_types():
+    """With 'none' disabled, walking exp decay UP to decay=1.0 stops short."""
+    t = _meta_template([DecayType.EXP, DecayType.COSINE])
+    exp = _conf("bytes|dense.32.gelu", batch=128, decay=0.5)
+    neighbors = set(conf_neighbors(exp, t))
+    # decay/2 is still exp -> yielded.
+    assert exp.replace(decay=0.25) in neighbors
+    # decay*2 = 1.0 is type NONE -> filtered out.
+    assert exp.replace(decay=1.0) not in neighbors
+    # Cosine toggle still yields (cosine=True, decay=1.0).
+    assert exp.replace(cosine=True, decay=1.0) in neighbors
+
+
+def test_neighbor_walk_excludes_exp_when_not_in_decay_types():
+    """With 'exp' disabled, the decay walk from a no-decay conf yields nothing."""
+    t = _meta_template([DecayType.NONE, DecayType.COSINE])
+    none = _conf("bytes|dense.32.gelu", batch=128, decay=1.0)
+    neighbors = set(conf_neighbors(none, t))
+    # decay/2 = 0.5 would be exp -> filtered.
+    assert none.replace(decay=0.5) not in neighbors
+    # Cosine toggle still works.
+    assert none.replace(cosine=True) in neighbors
+
+
+def test_default_from_template_decay_types():
+    spec = "bytes|dense.32.gelu"
+    none_conf = default_from_template(_meta_template([DecayType.NONE]), spec)
+    assert none_conf.decay_type == DecayType.NONE
+
+    exp_conf = default_from_template(_meta_template([DecayType.EXP]), spec)
+    assert exp_conf.decay_type == DecayType.EXP
+
+    cosine_conf = default_from_template(
+        _meta_template([DecayType.COSINE]), spec)
+    assert cosine_conf.decay_type == DecayType.COSINE
+
+
+def test_template_from_form_decay_types_checkboxes():
+    """Empty form values mean unchecked; only checked types show up."""
+    params = {
+        'spec': '',
+        'lr': '', 'length': '', 'batch': '', 'steps': '',
+        'weights': '',
+        'fp32': 'on',
+        'decay_none': 'on',
+        'decay_cosine': 'on',
+        # decay_exp absent → unchecked
+    }
+    t = Template.from_form(params)
+    assert t.decay_types == [DecayType.NONE, DecayType.COSINE]

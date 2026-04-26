@@ -14,7 +14,7 @@ import numpy as np
 
 from . import latency
 from .common import INF
-from .configuration import Configuration, Template
+from .configuration import Configuration, DecayType, Template
 from .precision import Precision
 from .run import Run
 
@@ -76,15 +76,40 @@ def _make_template_conditions(template: Template) -> tuple[list[str], dict]:
     if len(template.precision) != len(Precision):
         precisions_list = ', '.join(f'"{p}"' for p in template.precision)
         conditions.append(f'precision IN ({precisions_list})')
-    if template.decay.min > 0:
-        conditions.append('decay >= :decay_min')
-        params['decay_min'] = template.decay.min
-    if template.decay.max < 1:
-        # decay is bounded at 1 by the Template; when max == 1, the
-        # condition is tautologically true for well-formed data.
-        conditions.append('decay <= :decay_max')
-        params['decay_max'] = template.decay.max
+    clause = _decay_type_clause(template.decay_types)
+    if clause is not None:
+        conditions.append(clause)
     return conditions, params
+
+
+def _decay_type_clause(decay_types: Iterable[DecayType]) -> Optional[str]:
+    """Minimal SQL clause selecting confs matching `decay_types`, or
+    None when the clause is tautological (all three types). Simplified
+    per case using the validity invariant `cosine=1 ⇒ decay=1`.
+    """
+    s = set(decay_types)
+    if s == set(DecayType):
+        return None  # tautological — skip the clause
+    if not s:
+        return '0'  # match nothing
+    # Singletons.
+    if s == {DecayType.NONE}:
+        return '(cosine = 0 AND decay = 1)'
+    if s == {DecayType.EXP}:
+        return '(cosine = 0 AND decay < 1)'
+    if s == {DecayType.COSINE}:
+        return '(cosine = 1)'
+    # Pairs.
+    if s == {DecayType.NONE, DecayType.EXP}:
+        # cosine=1 implies decay=1, so cosine=0 ⇔ NONE ∪ EXP.
+        return '(cosine = 0)'
+    if s == {DecayType.NONE, DecayType.COSINE}:
+        # NONE has decay=1, COSINE implies decay=1.
+        return '(decay = 1)'
+    if s == {DecayType.EXP, DecayType.COSINE}:
+        # Excludes only NONE = (cosine=0 AND decay=1).
+        return '(cosine = 1 OR decay < 1)'
+    raise ValueError(f"unhandled decay_types subset: {s!r}")
 
 
 class ConfScore(object):

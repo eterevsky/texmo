@@ -232,7 +232,7 @@ def _make_template():
     return Template(
         spec=None, lr=None, length=None, batch=None,
         steps=None, max_weights=(2, INF),
-        precision=list(Precision), decay=None,
+        precision=list(Precision),
     )
 
 

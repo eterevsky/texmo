@@ -23,6 +23,7 @@ from .common import ttoa3
 from .configuration import (
     Bounds,
     Configuration,
+    DecayType,
     Precision,
     Template,
     default_from_template,
@@ -330,6 +331,10 @@ class SearchServer(object):
         for p in Precision:
             precision[p] = p in self.template.precision
 
+        decay_types = {
+            t.value: t in self.template.decay_types for t in DecayType
+        }
+
         # Use a dedicated read-only connection to avoid contending with
         # the writer thread for the main connection.
         scaling_graph = None
@@ -394,7 +399,7 @@ class SearchServer(object):
             batch=_render_bounds(self.template.batch),
             precision=precision,
             lr=_render_bounds(self.template.lr),
-            decay=_render_bounds(self.template.decay),
+            decay_types=decay_types,
             steps=_render_bounds(self.template.steps),
             time=train_time,
             top=top,
@@ -564,10 +569,11 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="range of acceptable learning rates",
     )
     parser.add_argument(
-        '--decay',
+        '--decay-types',
         type=str,
-        default="0-1",
-        help="decay of the learning rate over the course of training, i.e. (LR at the last step) / (LR at the first step). Incompatible with saving intermediate results. (default: 1)",
+        default="none,exp,cosine",
+        help="comma-separated subset of LR-schedule types: "
+             "none, exp, cosine (default: all)",
     )
     parser.add_argument(
         "--length",

@@ -101,9 +101,9 @@ def build_scaling_graph(
     ax.set_yscale('log')
     ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
 
-    y_ticks = [0.003, 0.01, 0.03, 0.1, 0.3, 1, 3, 10]
+    y_ticks = [0.003, 0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 60, 180, 600]
     y_labels = [
-        '3 ms', '10 ms', '30 ms', '100 ms', '300 ms', '1 s', '3 s', '10 s']
+        '3 ms', '10 ms', '30 ms', '100 ms', '300 ms', '1 s', '3 s', '10 s', '30 s', '1 m', '3 m', '10 m']
     ax.set_yticks(y_ticks)
     ax.set_yticklabels(y_labels)
     ax.set_yticks([], minor=True)

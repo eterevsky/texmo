@@ -538,7 +538,7 @@ class Search(object):
                     logging.info(
                         f'Predicted-best conf for {system} at pos {i}: '
                         f'{c} (runs={total_runs} < limit={limit}, '
-                        f'compound={compound:.4f})'
+                        f'compound={2.0 ** compound:.4f} b/B)'
                     )
                     return c
         return None

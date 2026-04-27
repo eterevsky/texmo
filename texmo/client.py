@@ -154,7 +154,7 @@ def main(args: argparse.Namespace):
                 backend=args.backend, once=args.once,
             )
         except KeyboardInterrupt as e:
-            logging.warning("Interrupted at:\n%s", e)
+            logging.info("Interrupted")
     finally:
         dataset_wrapper.join()
 

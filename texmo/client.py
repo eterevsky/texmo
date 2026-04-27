@@ -153,8 +153,8 @@ def main(args: argparse.Namespace):
                 server_host=args.server, system=args.system, dataset=dataset_wrapper,
                 backend=args.backend, once=args.once,
             )
-        except KeyboardInterrupt:
-            logging.warning("Interrupted\n")
+        except KeyboardInterrupt as e:
+            logging.warning("Interrupted at:\n%s", e)
     finally:
         dataset_wrapper.join()
 

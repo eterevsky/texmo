@@ -333,6 +333,13 @@ class SearchThread(threading.Thread):
                 )
             elif command == "timing_weights":
                 self.search.timing_model = args
+            elif command == "set_template":
+                template, init_conf, train_time = args
+                self.search.template = template
+                self.search.init_conf = init_conf
+                self.search.train_time = train_time
+                self.max_time = train_time[1]
+                logging.info(f'Search thread: new template {template}')
             elif command == "stop":
                 logging.info("Stopping search thread")
                 break
@@ -376,6 +383,9 @@ class SearchServer(object):
         self.db: ResultDB = db
         self.template: Template = template
         self.train_time: tuple[float, float] = train_time
+        # Stored for `update()` so a template change with no literal
+        # spec can still fall back to the CLI default.
+        self._default_spec = default_spec
         self.default = default_from_template(template, spec=default_spec)
         logging.info(f"Default configuration: {self.default}")
 
@@ -535,16 +545,34 @@ class SearchServer(object):
         )
 
     def update(self, params):
-        self.template = Template.from_form(params)
-        self.search_thread.search.template = self.template
+        new_template = Template.from_form(params)
+        # Rebuild init_conf for the new template. If the user typed a
+        # literal spec, that becomes the seed; otherwise fall back to
+        # the CLI --default-spec; otherwise default_from_template's
+        # auto-finder picks something matching.
+        spec = new_template.spec or self._default_spec
+        new_default = default_from_template(new_template, spec=spec)
         time_str = params.get("time", "")
         if time_str:
             tmin, tmax = map(float, time_str.split("-"))
-            self.train_time = (tmin, tmax)
-            self.search_thread.search.train_time = (tmin, tmax)
-            self.search_thread.max_time = tmax
-        logging.info(f'New template: {self.template}')
-        logging.info(f'New train time: {self.train_time}')
+            new_train_time = (tmin, tmax)
+        else:
+            new_train_time = self.train_time
+        # Mutate the search thread's state via a queue message so the
+        # update applies atomically between two select_conf calls
+        # rather than racing the loop.
+        self.requests_queue.put(
+            ("set_template", (new_template, new_default, new_train_time))
+        )
+        # SearchServer-side copies are read by Flask handlers (index
+        # form rendering, /compare); the search thread's copies may
+        # lag by one queue step but converge on the next select.
+        self.template = new_template
+        self.default = new_default
+        self.train_time = new_train_time
+        logging.info(f'New default configuration: {new_default}')
+        logging.info(f'New template: {new_template}')
+        logging.info(f'New train time: {new_train_time}')
         return redirect("/")
 
     def compare(self, args):

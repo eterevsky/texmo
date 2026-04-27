@@ -194,7 +194,7 @@ class Search(object):
         self.template = template
 
         assert isinstance(init_conf, Configuration)
-        self._init_conf = init_conf
+        self.init_conf = init_conf
 
         assert isinstance(train_time[0], float)
         assert isinstance(train_time[1], float)
@@ -583,13 +583,13 @@ class Search(object):
 
             # Template can change on the fly — re-check init_conf still
             # matches before falling back to it.
-            if not self.template.match(self._init_conf):
+            if not self.template.match(self.init_conf):
                 logging.info(
                     f'No conf for {system}: init_conf does not match template')
                 return None
 
             # Skip init_conf if it's already been explored enough.
-            conf_id = self._db.get_conf_id(self._init_conf)
+            conf_id = self._db.get_conf_id(self.init_conf)
             if conf_id is not None:
                 counts = self._db.get_run_counts([conf_id], system=system)
                 total_runs, system_runs = counts.get(conf_id, (0, 0))
@@ -600,5 +600,5 @@ class Search(object):
                     return None
 
             logging.info(
-                f'Conf for {system}: {self._init_conf} (default)')
-            return SearchResult(self._init_conf, 'default', system)
+                f'Conf for {system}: {self.init_conf} (default)')
+            return SearchResult(self.init_conf, 'default', system)

@@ -92,9 +92,16 @@ def train(args: argparse.Namespace):
     # loss — the model is likely broken and the sampler may crash on
     # NaN probabilities.
     if args.prefix is not None and 0 < run.loss < 10:
-        s = manager.continue_prefix(args.prefix, 256, temperature=args.temperature)
-        print()
-        print(s)
+        temperatures = [
+            float(t) for t in args.temperature.split(',') if t.strip()
+        ]
+        for t in temperatures:
+            s = manager.continue_prefix(args.prefix, 256, temperature=t)
+            print(f'--- T = {t} ---')
+            try:
+                print(s.decode('utf-8'))
+            except UnicodeDecodeError:
+                print(s)
         print()
 
     if not args.no_graph:
@@ -237,9 +244,11 @@ def init_args(parser: argparse.ArgumentParser, config):
     )
     parser.add_argument(
         "--temperature",
-        type=float,
-        default=0.1,
-        help="temperature for sampling (default: 0.1)",
+        type=str,
+        default='0.03,0.1,0.3,1.0',
+        help="comma-separated list of sampling temperatures; one "
+             "continuation is generated for each "
+             "(default: '0.03,0.1,0.3,1.0')",
     )
     parser.add_argument(
         "--system",

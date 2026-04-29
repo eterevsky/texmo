@@ -7,7 +7,7 @@ from ..model import build_model_def
 from ..precision import Precision
 from ..resultdb import ResultDB
 from ..tokens import set_tokens_dir
-from .timing import TrainTimingModel
+from ..predict.timing import TrainTimingModel
 
 
 def _matching_runs(db_runs, system, precision_str, spec, batch, length):

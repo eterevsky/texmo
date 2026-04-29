@@ -1,10 +1,10 @@
 import argparse
 import time
 
-from . import latency
-from .common import itoa3
-from .dataset import DataSet
-from .tokens import get_tokenizer, set_tokens_dir
+from .. import latency
+from ..common import itoa3
+from ..dataset import DataSet
+from ..tokens import get_tokenizer, set_tokens_dir
 
 
 def sample(args: argparse.Namespace):

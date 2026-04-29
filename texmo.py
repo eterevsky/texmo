@@ -10,10 +10,10 @@ import config
 jax.config.update('jax_enable_x64', True)
 jax.config.update('jax_platforms', config.JAX_PLATFORMS)
 
-from texmo import client, db_cli, latency, report, sample_cli, server, train_cli
+from texmo import client, latency, server
+from texmo.cli import db, loss, report, sample, train
+from texmo.cli import time as predict_time
 from texmo.common import console
-from texmo.predict import loss_cli, time_cli
-from texmo.tokens import small_tokens
 
 
 def help(parser):
@@ -34,32 +34,27 @@ def parse_args():
     parser_sample = subparsers.add_parser(
         "sample", help="generate a typical sample of training data"
     )
-    sample_cli.sample_init_args(parser_sample, config)
-
-    parser_count_bytes = subparsers.add_parser(
-        "small-tokens", help="generate a set of sub-byte tokens"
-    )
-    small_tokens.init_args(parser_count_bytes)
+    sample.sample_init_args(parser_sample, config)
 
     parser_train = subparsers.add_parser("train", help="train a model")
-    train_cli.init_args(parser_train, config)
+    train.init_args(parser_train, config)
 
     parser_benchmark_dataset = subparsers.add_parser(
         "benchmark-dataset", help="benchmark sampling the training data"
     )
-    sample_cli.benchmark_init_args(parser_benchmark_dataset, config)
+    sample.benchmark_init_args(parser_benchmark_dataset, config)
 
     parser_updatedb = subparsers.add_parser(
         "db-update",
         help="Recompute scores for all configurations in the database",
     )
-    db_cli.updatedb_init_args(parser_updatedb, config)
+    db.updatedb_init_args(parser_updatedb, config)
 
     parser_clear_system = subparsers.add_parser(
         "db-clear-system",
         help="Delete all runs from a given system",
     )
-    db_cli.clear_system_init_args(parser_clear_system, config)
+    db.clear_system_init_args(parser_clear_system, config)
 
     parser_bootstrap_estimates = subparsers.add_parser(
         "db-bootstrap-estimates",
@@ -68,13 +63,13 @@ def parse_args():
             "write predicted estimates for all confs without runs"
         ),
     )
-    db_cli.bootstrap_estimates_init_args(parser_bootstrap_estimates, config)
+    db.bootstrap_estimates_init_args(parser_bootstrap_estimates, config)
 
     parser_strategy_stats = subparsers.add_parser(
         "strategy-stats",
         help="Per-strategy run counts and %% of runs that changed the winner",
     )
-    db_cli.strategy_stats_init_args(parser_strategy_stats, config)
+    db.strategy_stats_init_args(parser_strategy_stats, config)
 
     parser_report = subparsers.add_parser(
         "report", help="Print a report of the results in the database"
@@ -93,13 +88,13 @@ def parse_args():
     parser_predict_time = subparsers.add_parser(
         "time", help="Predict the time that it will take to train a configuration"
     )
-    time_cli.init_args(parser_predict_time, config)
+    predict_time.init_args(parser_predict_time, config)
 
     parser_predict_loss = subparsers.add_parser(
         "loss",
         help="Train and evaluate a loss-prediction model",
     )
-    loss_cli.init_args(parser_predict_loss, config)
+    loss.init_args(parser_predict_loss, config)
 
     parser_help = subparsers.add_parser("help")
     parser_help.set_defaults(func=lambda _: help(parser), parser=parser)

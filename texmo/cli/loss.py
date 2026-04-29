@@ -18,8 +18,8 @@ from ..configuration import Configuration
 from ..layers.skip import SkipDef
 from ..resultdb import ResultDB
 from ..tokens import set_tokens_dir
-from . import loss_rnn
-from .predict_common import (
+from ..predict import loss_rnn
+from ..predict.predict_common import (
     MAX_LOSS,
     MIN_LOSS,
     discover_type_ids,

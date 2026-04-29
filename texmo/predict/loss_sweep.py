@@ -18,7 +18,7 @@ import config
 from ..common import console  # noqa: F401  -- enables rich logging
 from ..resultdb import ResultDB
 from ..tokens import set_tokens_dir
-from . import loss_cli
+from ..cli import loss as loss_cli
 
 
 @dataclasses.dataclass

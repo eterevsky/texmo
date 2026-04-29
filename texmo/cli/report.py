@@ -2,10 +2,10 @@ import argparse
 
 from rich.table import Table
 
-from .common import console, itoa3, ttoa3
-from .configuration import Template
-from .resultdb import ResultDB
-from .tokens import set_tokens_dir
+from ..common import console, itoa3, ttoa3
+from ..configuration import Template
+from ..resultdb import ResultDB
+from ..tokens import set_tokens_dir
 
 
 def main(args: argparse.Namespace):

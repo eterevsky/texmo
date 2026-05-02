@@ -33,6 +33,11 @@ class ManagerJax(Manager):
 
         # JIT-compile combined loss+gradient computation (single fwd+bwd pass).
         self._loss_grad = jax.jit(jax.value_and_grad(self.model.loss_batch))
+        # JIT-compile the per-token inference step. Without this,
+        # continue_prefix and byte_distribution pay JAX's dispatch
+        # overhead (~10 ms) on every model.step call, which dominates
+        # for any reasonable continuation length.
+        self._step_jit = jax.jit(self.model.step)
 
     def _build_optimizer(self):
         lr = self.conf.lr
@@ -105,13 +110,13 @@ class ManagerJax(Manager):
 
         states, _ = self.model.initial_step(self.weights)
         for c in prefix_tokens[:-1]:
-            states, _ = self.model.step(self.weights, states, c)
+            states, _ = self._step_jit(self.weights, states, int(c))
 
-        c = prefix_tokens[-1]
+        c = int(prefix_tokens[-1])
         rng = jax.random.PRNGKey(random.randrange(2**32))
         out = []
         for _ in range(length):
-            states, logits = self.model.step(self.weights, states, c)
+            states, logits = self._step_jit(self.weights, states, c)
             probs = jax.nn.softmax(logits / temperature)
             rng, sub = jax.random.split(rng)
             c = int(jax.random.choice(sub, self.model.ntokens, p=probs))

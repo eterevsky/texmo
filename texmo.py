@@ -2,7 +2,6 @@ import argparse
 
 import jax
 import numpy as np
-from rich.logging import RichHandler
 
 import config
 
@@ -13,7 +12,6 @@ jax.config.update('jax_platforms', config.JAX_PLATFORMS)
 from texmo import latency, server
 from texmo.cli import client, db, loss, report, sample, train
 from texmo.cli import time as predict_time
-from texmo.common import console
 
 
 def help(parser):
@@ -108,12 +106,6 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    # logging.basicConfig(
-    #     level=logging.INFO,
-    #     format="%(message)s",
-    #     handlers=[RichHandler(console=console, show_level=False)]
-    # )
-
     np.set_printoptions(linewidth=100, edgeitems=6, precision=3)
     args = parse_args()
     args.func(args)

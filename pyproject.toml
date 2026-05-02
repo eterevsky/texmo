@@ -10,7 +10,6 @@ dependencies = [
     "numpy>=2.3.4",
     "regex>=2025.9.18",
     "requests>=2.32.5",
-    "rich",
     "scikit-learn>=1.5",
     "scipy>=1.17.1",
     "torch",

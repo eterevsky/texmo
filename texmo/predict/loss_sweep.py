@@ -15,7 +15,6 @@ from typing import Any
 import numpy as np
 
 import config
-from ..common import console  # noqa: F401  -- enables rich logging
 from ..resultdb import ResultDB
 from ..tokens import set_tokens_dir
 from ..cli import loss as loss_cli

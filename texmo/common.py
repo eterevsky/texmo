@@ -3,29 +3,19 @@ import math
 import sys
 from collections.abc import Iterable
 
-from rich.console import Console
-
 # Windows Python defaults stdout/stderr to cp1252, which can't encode
 # characters like U+2192 '→' used in Configuration.learning_str. Force
-# UTF-8 so rich and plain prints both work.
+# UTF-8 so prints work regardless of console codepage.
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
-
-console = Console()
 
 
 logging.basicConfig(
         format='%(levelname).1s [%(asctime)s.%(msecs)03d %(filename)s:%(lineno)d] %(message)s',
         level=logging.INFO,
         datefmt='%H:%M:%S')
-# logging.basicConfig(
-#         level=logging.INFO,
-#         format="%(message)s",
-#         datefmt="[%X]",
-#         handlers=[RichHandler(console=console, show_level=False)]
-#     )
 
 
 INF = float("inf")

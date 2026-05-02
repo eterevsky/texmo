@@ -1,4 +1,3 @@
-import argparse
 import logging
 import math
 import time
@@ -8,10 +7,9 @@ import requests
 
 from .common import ttoa3
 from .configuration import Configuration
-from .dataset import DataSet, DataSetWrapper
-from .latency import report, timer
+from .dataset import DataSetWrapper
+from .latency import timer
 from .manager import create_manager
-from .tokens import set_tokens_dir
 
 
 def retry(callable, min_delay=1, exp=1.5, max_delay=120):
@@ -89,7 +87,13 @@ def post_result(session, add_url: str, system, run, conf, strategy):
         raise
 
 
-def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, backend: str, once: bool):
+def worker_loop(
+    server_host: str,
+    system: str,
+    dataset: DataSetWrapper,
+    backend: str,
+    once: bool,
+):
     select_url = f"http://{server_host}/select"
     add_url = f"http://{server_host}/add"
     s = requests.Session()
@@ -140,67 +144,3 @@ def worker_loop(server_host: str, system: str, dataset: DataSetWrapper, backend:
 
         if once:
             break
-
-
-def main(args: argparse.Namespace):
-    set_tokens_dir(args.tokens_dir)
-    dataset = DataSet(path=args.data, path_processed=args.data_processed)
-    dataset_wrapper = DataSetWrapper(dataset)
-
-    try:
-        try:
-            worker_loop(
-                server_host=args.server, system=args.system, dataset=dataset_wrapper,
-                backend=args.backend, once=args.once,
-            )
-        except KeyboardInterrupt as e:
-            logging.info("Interrupted")
-    finally:
-        dataset_wrapper.join()
-
-    report()
-
-
-def init_args(parser: argparse.ArgumentParser, config):
-    parser.add_argument(
-        "-d",
-        "--data",
-        type=str,
-        default=config.DATA,
-        help="a file with training data",
-    )
-    parser.add_argument(
-        "--data-processed",
-        type=str,
-        help=f"training data that has been already processed with capswords filter (default: '{config.DATA_CAPS_WORDS}')",
-        default=config.DATA_CAPS_WORDS,
-    )
-    parser.add_argument(
-        "--tokens-dir",
-        type=str,
-        default=config.TOKENS_DIR,
-        help="directory with token sets",
-    )
-    parser.add_argument(
-        "--server",
-        default=config.SERVER_HOST,
-        help="Host and port for the texmo server",
-    )
-    parser.add_argument(
-        "--system",
-        type=str,
-        default=config.SYSTEM_NAME,
-        help="the name of the system that will be used to identify runs in the DB",
-    )
-    parser.add_argument(
-        '--once',
-        action='store_true',
-    )
-    parser.add_argument(
-        "--backend",
-        type=str,
-        choices=["torch", "jax"],
-        default=config.BACKEND,
-        help=f"training backend (default: '{config.BACKEND}')",
-    )
-    parser.set_defaults(func=main)

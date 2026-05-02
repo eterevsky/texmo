@@ -10,8 +10,8 @@ import config
 jax.config.update('jax_enable_x64', True)
 jax.config.update('jax_platforms', config.JAX_PLATFORMS)
 
-from texmo import client, latency, server
-from texmo.cli import db, loss, report, sample, train
+from texmo import latency, server
+from texmo.cli import client, db, loss, report, sample, train
 from texmo.cli import time as predict_time
 from texmo.common import console
 

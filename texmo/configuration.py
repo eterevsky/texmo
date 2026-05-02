@@ -147,7 +147,9 @@ class Configuration(object):
 
     def aligned_str(self) -> str:
         model = str(self.model)
-        steps = f'{self.steps:>5d}'
+        # 6 digits fit step counts up to 999999 — search has produced
+        # configs at 131072 steps, so 5 was too narrow.
+        steps = f'{self.steps:>6d}'
         return (
             f'{self.batch:>5d}×{self.length:<5d}  {self.learning_str:<10} S{steps}  '
             + f'{self.precision}  {model} ({self.num_weights})'

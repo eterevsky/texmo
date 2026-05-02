@@ -10,6 +10,7 @@ import numpy as np
 from . import latency
 from .common import INF, itoa3, ttoa3
 from .configuration import Configuration, Template, conf_neighbors
+from .report import format_top_conf_row
 from .resultdb import ConfScore, ConfWithRuns, ResultDB
 from .run import Run
 
@@ -54,9 +55,7 @@ def top_confs_report(
     t = "" if max_time is None else f" T ≤ {ttoa3(max_time)}"
     lines = [f"Top confs W ≤ {itoa3(max_weights)}{t}{sys}:"]
     for c in confs:
-        t = '   ?    ' if c.median_time is None else f'{c.median_time:7.3f}s'
-        score_runs = f'{c.median_score:.4f} ({c.num_runs})'
-        lines.append(f'    {score_runs:<11} {t}  {c.conf.aligned_str()}')
+        lines.append(format_top_conf_row(c))
     return "\n".join(lines)
 
 

@@ -1,9 +1,7 @@
 import argparse
 
-from rich.table import Table
-
-from ..common import console, itoa3, ttoa3
 from ..configuration import Template
+from ..report import format_top_conf_row
 from ..resultdb import ResultDB
 from ..tokens import set_tokens_dir
 
@@ -11,32 +9,12 @@ from ..tokens import set_tokens_dir
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
     template = Template.from_args(args)
-    console.log('Template:', template)
+    print(f'Template: {template}')
 
     db = ResultDB.from_args(args.db)
-    table = Table(title="Top configurations")
-    table.add_column("Model", overflow='fold')
-    table.add_column("P")
-    table.add_column("Data", justify='right')
-    table.add_column("LR")
-    table.add_column("Steps", justify='right')
-    table.add_column("Score")
-    table.add_column("Time", justify='right')
-
+    print('Top configurations:')
     for c in db.top_confs_global(template):
-        conf = c.conf
-        spec = f'{conf.model} ({itoa3(conf.model.num_weights)})'
-        score = f'{c.median_score:.3f} ({c.num_runs})'
-        time = (
-            f'{ttoa3(c.median_time)} on {c.system}'
-            if c.median_time is not None else '?'
-        )
-        table.add_row(
-            spec, str(conf.precision), f'{conf.batch}×{conf.length}',
-            conf.learning_str, str(conf.steps), score, time,
-        )
-
-    console.print(table)
+        print(format_top_conf_row(c, with_system=True))
 
 
 def init_args(parser: argparse.ArgumentParser, config):

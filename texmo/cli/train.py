@@ -82,6 +82,10 @@ def train(args: argparse.Namespace):
             test_sample_len=args.test_sample_len,
             test_batch=args.test_batch,
         )
+        # JAX backend defaults to the chunked-scan trainer; --no-scan
+        # forces the per-step path for benchmarking.
+        if args.no_scan and hasattr(manager, 'scan_train'):
+            manager.scan_train = False
 
     run, final_conf = manager.train_and_eval(
         args.steps,
@@ -241,6 +245,14 @@ def init_args(parser: argparse.ArgumentParser, config):
         default=False,
         action="store_true",
         help="Don't show trianing loss graph",
+    )
+    parser.add_argument(
+        "--no-scan",
+        default=False,
+        action="store_true",
+        help="JAX backend only: disable the chunked lax.scan trainer "
+             "and use the per-step loop instead. For A/B benchmarking "
+             "and time-limit support.",
     )
     parser.add_argument(
         "--temperature",

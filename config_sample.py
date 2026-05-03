@@ -23,7 +23,7 @@ SERVER_HOST = "localhost:5000"
 # via the authenticated endpoint. Clients send it as
 # `Authorization: Bearer <key>`. Empty disables the authenticated port
 # (every request returns 401), which is fine for LAN-only setups.
-API_KEY = "UcKCF4DMaFMpjNuSceeAMQ"
+API_KEY = ""
 
 # PyTorch device: 'cuda', 'cpu', or 'auto' (auto picks cuda if available)
 TORCH_DEVICE = 'auto'

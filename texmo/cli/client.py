@@ -18,6 +18,7 @@ def main(args: argparse.Namespace):
                 server_host=args.server, system=args.system,
                 dataset=dataset_wrapper,
                 backend=args.backend, once=args.once,
+                api_key=args.api_key or '',
             )
         except KeyboardInterrupt:
             logging.info("Interrupted")
@@ -50,7 +51,17 @@ def init_args(parser: argparse.ArgumentParser, config):
     parser.add_argument(
         "--server",
         default=config.SERVER_HOST,
-        help="Host and port for the texmo server",
+        help="Server URL or host:port. Bare host:port is treated as "
+             "http; pass an explicit https://... for an authenticated "
+             "remote endpoint.",
+    )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=getattr(config, 'API_KEY', '') or '',
+        help="Bearer token sent in the Authorization header on every "
+             "request. Defaults to config.API_KEY. Empty for LAN "
+             "clients on port 5000.",
     )
     parser.add_argument(
         "--system",

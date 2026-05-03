@@ -93,10 +93,20 @@ def worker_loop(
     dataset: DataSetWrapper,
     backend: str,
     once: bool,
+    api_key: str = '',
 ):
-    select_url = f"http://{server_host}/select"
-    add_url = f"http://{server_host}/add"
+    # Treat bare "host:port" as http; an explicit scheme (https://...)
+    # is preserved -- used when talking to an authenticated remote
+    # endpoint that fronts the server with TLS.
+    if '://' in server_host:
+        base = server_host.rstrip('/')
+    else:
+        base = f"http://{server_host}"
+    select_url = f"{base}/select"
+    add_url = f"{base}/add"
     s = requests.Session()
+    if api_key:
+        s.headers.update({'Authorization': f'Bearer {api_key}'})
 
     delay = 1.0
     max_delay = 120.0

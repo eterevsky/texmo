@@ -1,5 +1,6 @@
 import argparse
 import base64
+import hmac
 import io
 import logging
 import os
@@ -18,6 +19,7 @@ from flask import (
     request,
     send_from_directory,
 )
+from werkzeug.serving import make_server
 
 from .common import INF, ttoa3
 from .configuration import (
@@ -674,6 +676,17 @@ class SearchServer(object):
         logging.info("Timing thread joined")
 
 
+# Paths that are reachable on the external (auth-required) port.
+# Anything else 404s -- in particular the index page, which is heavy
+# to render and a DDoS target.
+_EXTERNAL_PATHS = frozenset({'/select', '/add'})
+
+# Internal port (LAN-trusted, no auth required).
+_INTERNAL_PORT = 5000
+# External port (requires Bearer auth).
+_EXTERNAL_PORT = 5001
+
+
 def main(args: argparse.Namespace):
     # Server renders graphs to bytes for the web UI, never to a display.
     matplotlib.use('Agg')
@@ -689,7 +702,32 @@ def main(args: argparse.Namespace):
         bootstrap_models=args.bootstrap_models,
     )
 
+    api_key = args.api_key or ''
+
     app = Flask("texmo")
+
+    @app.before_request
+    def _gate():
+        # We bind two sockets: one on the internal port (LAN, no auth),
+        # one on the external port (auth required, restricted path
+        # set). The handler can tell which socket received the request
+        # from SERVER_PORT.
+        port = int(request.environ.get('SERVER_PORT', 0))
+        if port != _EXTERNAL_PORT:
+            return  # internal: no gating
+        # 404 first -- gives less info to unauthenticated probes than
+        # leaking which paths exist.
+        if request.path not in _EXTERNAL_PATHS:
+            return ('', 404)
+        if not api_key:
+            # External port is enabled but no key configured -- refuse
+            # rather than serve unauthenticated externally.
+            return ('', 401)
+        provided = request.headers.get('Authorization', '')
+        if not provided.startswith('Bearer '):
+            return ('', 401)
+        if not hmac.compare_digest(provided[7:], api_key):
+            return ('', 401)
 
     @app.route("/", methods=["GET"])
     def _index():
@@ -731,13 +769,30 @@ def main(args: argparse.Namespace):
             mimetype='image/vnd.microsoft.icon'
         )
 
+    # Bind two listeners on the same WSGI app:
+    #   internal: 0.0.0.0:5000 -- LAN-accessible, no auth.
+    #   external: 127.0.0.1:5001 -- bound to loopback so only a local
+    #     reverse proxy (terminating TLS) can reach it; auth required.
+    internal_srv = make_server(
+        '0.0.0.0', _INTERNAL_PORT, app, threaded=True)
+    external_srv = make_server(
+        '127.0.0.1', _EXTERNAL_PORT, app, threaded=True)
+    logging.info(
+        f"Serving internal (no auth) on 0.0.0.0:{_INTERNAL_PORT}, "
+        f"external (auth) on 127.0.0.1:{_EXTERNAL_PORT}")
+    threads = [
+        threading.Thread(target=s.serve_forever, daemon=True)
+        for s in (internal_srv, external_srv)
+    ]
+    for t in threads:
+        t.start()
     try:
-        # use_reloader=False: the Flask auto-reloader spawns a second
-        # process that re-runs main() — which would re-bootstrap the
-        # models (minutes of wasted work) and create a second pair of
-        # search/timing threads.
-        app.run(host="0.0.0.0", debug=True, use_reloader=False)
+        # Block forever; KeyboardInterrupt falls through to cleanup.
+        for t in threads:
+            t.join()
     finally:
+        internal_srv.shutdown()
+        external_srv.shutdown()
         server.join()
         report()
 
@@ -828,6 +883,14 @@ def init_args(parser: argparse.ArgumentParser, config):
             "loss-prediction RNN. Lets the predicted-best strategy run "
             "immediately. Takes minutes on a populated DB."
         ),
+    )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=getattr(config, 'API_KEY', '') or '',
+        help="Bearer token required on the authenticated (5001) port. "
+             "Defaults to config.API_KEY. Empty disables that port "
+             "(it returns 401 to everything).",
     )
 
     parser.set_defaults(func=main)

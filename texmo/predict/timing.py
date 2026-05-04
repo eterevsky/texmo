@@ -1,33 +1,42 @@
-"""Training-step time prediction model.
+"""Training-run time prediction model for the JAX chunked-scan trainer.
 
-For a given (system, precision) pair, predicts the time of a single
-training step after warm-up, based on the model spec, sample length,
-and batch size. See docs for the design.
+For a given (system, precision) pair, predicts total wall-clock time
+of a training run, decomposed into four positive linear blocks:
 
-The model is an additive sum of per-component terms:
+    T_total = T_init  +  N_full * T_scan_full
+              +  has_short * T_scan_short
+              +  total_steps * T_step
 
-    T_pred = sum_c <exp(θ_c), f_c>
+with
 
-where `c` ranges over the components of the model (input, each hidden
-layer, output), `θ_c` is a per-component-type weight vector, and
-`f_c` is a feature vector computed from the component's dimensions.
+    T_init       = sum_c <w_init[t_c],       f_c>      # per-layer features
+    T_step       = sum_c <w_step[t_c],       f_c>      # per-layer features
+    T_scan_full  = <w_scan_full[t_in],       g_full>   # input-only features
+    T_scan_short = <w_scan_short[t_in],      g_short>  # input-only + N_short
 
-Feature vector depends on the layer type. A base set (length, batch,
-input size, output size and a few products) applies to most types; layers
-with a dense matmul get three extra features (in*os products);
-suffix gets an extra `suffix_length` feature; skip is minimal.
+The chunk structure mirrors `ManagerJax.train`: training is batched
+into `lax.scan` calls of size `CHUNK_SIZE`. A run with `S` total steps
+runs `S // CHUNK_SIZE` full-size scans plus, if `S % CHUNK_SIZE > 0`,
+a final short scan of `S % CHUNK_SIZE` steps. JIT cost paid once
+per unique scan shape becomes the `T_init`/`T_scan_short` constants;
+the per-step cost inside a scan becomes `T_step`.
 
-Positivity is enforced via `exp(θ)`. Fitting minimizes mean squared
-log-relative error.
+`T_scan_full` / `T_scan_short` are keyed by the input-layer type
+because the scan only carries the int8 token tensor through it; the
+hidden layers contribute to `T_step`/`T_init` via per-layer features.
+
+Fit is a single joint NNLS solve over all four blocks of weights. We
+prefer absolute MSE in seconds over log-space relative error: search
+makes time-budget decisions where a 10× miss on a 1000s run is a much
+bigger problem than a 10× miss on a 1s run.
 """
 
 import functools
+import math
 from dataclasses import dataclass
 
-import jax
-import jax.numpy as jnp
 import numpy as np
-import optax
+from scipy.optimize import nnls
 
 from ..configuration import Configuration
 from ..layers.dense import DenseDef
@@ -41,13 +50,16 @@ from ..layers.suffix import SuffixDef
 from ..precision import Precision
 from .predict_common import layer_type_id
 
-# -- Feature extractors. Each returns a numpy array of features for
-#    one component. Different component types have different feature
-#    sets (and thus different weight-vector sizes).
+# Must match `_CHUNK_SIZE` in manager_jax.py. Defined here too so that
+# importing the timing model doesn't pull in JAX (search runs in a
+# CPU-only thread and shouldn't drag the accelerator runtime in).
+CHUNK_SIZE = 256
+
+
+# -- Per-layer feature extractors ----------------------------------------
 
 
 def _features_base(isize: int, osize: int, batch: int, length: int) -> list[float]:
-    """Main features covering length/batch/in/oout interactions (no matmul)."""
     return [
         1.0,
         length,
@@ -62,9 +74,6 @@ def _features_base(isize: int, osize: int, batch: int, length: int) -> list[floa
 
 
 def _features_dense(isize: int, osize: int, batch: int, length: int) -> list[float]:
-    """Base features + features for input size × output size.
-
-    For layers with in→out dense projection."""
     return _features_base(isize, osize, batch, length) + [
         isize * osize,
         isize * osize * length,
@@ -84,15 +93,29 @@ def _features_skip(isize: int, batch: int, length: int) -> list[float]:
 
 
 def _features_input(batch: int, length: int) -> list[float]:
-    """Features for input-encoding layers.
-
-    Since every input layer has fixed output size, no output size features are
-    included.
-    """
     return [1.0, length, length * batch]
 
 
-# -- Per-type wiring: map a layer / component to (type_id, features).
+# -- Scan dispatch features (input-only). Cost is dominated by JAX
+#    bookkeeping over the scan tensor, which scales with (batch,
+#    length); the model architecture inside the scan is captured by
+#    `T_step`/`T_init`, not here.
+
+_SCAN_FULL_FEATURES = 3   # [1, batch, batch*length]
+_SCAN_SHORT_FEATURES = 4  # full features + N_short
+
+
+def _features_scan_full(batch: int, length: int) -> list[float]:
+    return [1.0, float(batch), float(batch * length)]
+
+
+def _features_scan_short(
+    batch: int, length: int, short_steps: int
+) -> list[float]:
+    return [1.0, float(batch), float(batch * length), float(short_steps)]
+
+
+# -- Layer-type wiring ----------------------------------------------------
 
 
 _MATMUL_LAYER_TYPES = (
@@ -109,7 +132,7 @@ _MATMUL_LAYER_TYPES = (
 
 @dataclass
 class Component:
-    """One component contributing to training-step time."""
+    """One component contributing to per-layer features."""
 
     type_id: str  # e.g. "dense.gelu", "rnn.tanh", "bits.1+bp", "output"
     features: np.ndarray
@@ -136,14 +159,10 @@ def _layer_component(layer, batch: int, length: int) -> Component:
     else:
         raise ValueError(f"unknown layer type for timing model: {layer}")
 
-    features = np.array(features)
-
-    return Component(type_id=type_id, features=features)
+    return Component(type_id=type_id, features=np.array(features))
 
 
 def _output_component(output_def, batch: int, length: int) -> Component:
-    # Output is a dense projection (no activation) — same shape as a
-    # dense-matmul layer. Use a dedicated type so it gets its own fit.
     return Component(
         type_id="output",
         features=np.array(
@@ -154,250 +173,408 @@ def _output_component(output_def, batch: int, length: int) -> Component:
 
 @functools.cache
 def featurize(conf: Configuration) -> list[Component]:
-    """Turn a configuration into a list of components.
+    """Per-layer feature components. components[0] is the input layer.
 
     Cached because Configuration is immutable and the same confs get
-    re-featurized on every bootstrap / refit.
+    re-featurized on every refit / batched prediction.
     """
     model_def = conf.model
     batch = conf.batch
     length = conf.length
-    components: list[Component] = []
-    components.append(_input_component(model_def.input, batch, length))
+    components: list[Component] = [
+        _input_component(model_def.input, batch, length)
+    ]
     for layer in model_def.layers:
         components.append(_layer_component(layer, batch, length))
     components.append(_output_component(model_def.output, batch, length))
     return components
 
 
-# -- Prediction -----------------------------------------------------------
+def chunk_structure(steps: int) -> tuple[int, int]:
+    """Return (num_full_scans, short_steps) for a chunked-scan run."""
+    return steps // CHUNK_SIZE, steps % CHUNK_SIZE
 
 
-def predict_time(
-    weights: dict[str, np.ndarray],
-    components: list[Component],
-) -> float:
-    """Predict step time from weights and component features.
+# -- Weights container ----------------------------------------------------
 
-    Components whose type wasn't in the training data contribute 0 —
-    we have no information about them. The fit's inherent
-    self-regularization also tends to push weights for uninformative
-    features very negative, so unseen or uncorrelated features
-    naturally predict near-zero.
+
+@dataclass
+class Weights:
+    """Fitted weights for one (system, precision) pair.
+
+    All four dicts hold non-negative arrays; missing keys are silently
+    treated as zero contributions (so configs containing a layer type
+    unseen in training underestimate but don't blow up).
     """
-    total = 0.0
-    for c in components:
-        theta = weights.get(c.type_id)
-        if theta is None:
-            continue
-        total += float(np.dot(np.exp(theta), c.features))
-    return total
+
+    init: dict[str, np.ndarray]
+    step: dict[str, np.ndarray]
+    scan_full: dict[str, np.ndarray]
+    scan_short: dict[str, np.ndarray]
 
 
-def predict_time_batch(
-    weights: dict[str, np.ndarray],
-    confs: list[Configuration],
+def _dot(weights: dict[str, np.ndarray], type_id: str, features) -> float:
+    w = weights.get(type_id)
+    if w is None:
+        return 0.0
+    return float(np.dot(w, features))
+
+
+def _predict_init(weights: Weights, components: list[Component]) -> float:
+    return sum(_dot(weights.init, c.type_id, c.features) for c in components)
+
+
+def _predict_step(weights: Weights, components: list[Component]) -> float:
+    return sum(_dot(weights.step, c.type_id, c.features) for c in components)
+
+
+def _predict_scan_full(
+    weights: Weights, input_type_id: str, batch: int, length: int
+) -> float:
+    return _dot(
+        weights.scan_full,
+        input_type_id,
+        _features_scan_full(batch, length),
+    )
+
+
+def _predict_scan_short(
+    weights: Weights,
+    input_type_id: str,
+    batch: int,
+    length: int,
+    short_steps: int,
+) -> float:
+    return _dot(
+        weights.scan_short,
+        input_type_id,
+        _features_scan_short(batch, length, short_steps),
+    )
+
+
+def predict_total_time(weights: Weights, conf: Configuration) -> float:
+    """Predict total run time for `conf`."""
+    components = featurize(conf)
+    input_type_id = components[0].type_id
+    num_full, short_steps = chunk_structure(conf.steps)
+
+    init = _predict_init(weights, components)
+    step = _predict_step(weights, components)
+    scan_full = _predict_scan_full(
+        weights, input_type_id, conf.batch, conf.length)
+    scan_short = (
+        _predict_scan_short(
+            weights, input_type_id, conf.batch, conf.length, short_steps)
+        if short_steps > 0 else 0.0
+    )
+    return (
+        init
+        + num_full * scan_full
+        + scan_short
+        + conf.steps * step
+    )
+
+
+def predict_step_time(weights: Weights, conf: Configuration) -> float:
+    """Predict steady-state per-step cost (T_step component only)."""
+    return _predict_step(weights, featurize(conf))
+
+
+def _predict_total_time_batch(
+    weights: Weights, confs: list[Configuration]
 ) -> np.ndarray:
-    """Batched version of predict_time. Unseen types contribute 0.
+    """Vectorized total-time prediction for many confs.
 
-    Groups features by type into (n_confs, feat_size) matrices and does
-    one `features @ exp(theta)` per type, so the per-conf Python
-    overhead disappears into a handful of numpy matmuls.
+    Groups per-layer features by type into (n_confs, feat_size)
+    matrices and runs one matmul per type for each of the init/step
+    blocks, so per-conf Python overhead disappears.
     """
     n = len(confs)
     if n == 0:
         return np.zeros(0)
-    feat_per_type: dict[str, np.ndarray] = {}
+
+    n_full = np.zeros(n)
+    n_short = np.zeros(n)
+    steps_arr = np.zeros(n)
+    batches = np.zeros(n, dtype=np.int64)
+    lengths = np.zeros(n, dtype=np.int64)
+    input_types: list[str] = []
+
+    feats_per_type: dict[str, np.ndarray] = {}
     for i, conf in enumerate(confs):
-        for c in featurize(conf):
-            if c.type_id not in weights:
-                continue
-            if c.type_id not in feat_per_type:
-                feat_per_type[c.type_id] = np.zeros((n, len(c.features)))
-            feat_per_type[c.type_id][i] += c.features
-    total = np.zeros(n)
-    for type_id, feats in feat_per_type.items():
-        total += feats @ np.exp(weights[type_id])
-    return total
+        nf, ns = chunk_structure(conf.steps)
+        n_full[i] = nf
+        n_short[i] = ns
+        steps_arr[i] = conf.steps
+        batches[i] = conf.batch
+        lengths[i] = conf.length
+        comps = featurize(conf)
+        input_types.append(comps[0].type_id)
+        for c in comps:
+            arr = feats_per_type.get(c.type_id)
+            if arr is None:
+                arr = np.zeros((n, len(c.features)))
+                feats_per_type[c.type_id] = arr
+            arr[i] += c.features
+
+    init = np.zeros(n)
+    step = np.zeros(n)
+    for t, feats in feats_per_type.items():
+        wi = weights.init.get(t)
+        if wi is not None:
+            init += feats @ wi
+        ws = weights.step.get(t)
+        if ws is not None:
+            step += feats @ ws
+
+    scan_full = np.zeros(n)
+    scan_short = np.zeros(n)
+    for i, t in enumerate(input_types):
+        b, ll = int(batches[i]), int(lengths[i])
+        wsf = weights.scan_full.get(t)
+        if wsf is not None:
+            scan_full[i] = float(np.dot(wsf, _features_scan_full(b, ll)))
+        if n_short[i] > 0:
+            wss = weights.scan_short.get(t)
+            if wss is not None:
+                scan_short[i] = float(np.dot(
+                    wss,
+                    _features_scan_short(b, ll, int(n_short[i])),
+                ))
+
+    return init + n_full * scan_full + scan_short + steps_arr * step
 
 
 # -- Fitting --------------------------------------------------------------
 
 
-def _prepare_training_arrays(
-    samples: list[tuple[list[Component], float]],
-) -> tuple[dict[str, int], dict[str, jnp.ndarray], jnp.ndarray]:
-    """Pack samples into per-type feature arrays.
+def _build_design_matrix(
+    samples: list[tuple[Configuration, float]],
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Pack samples into the (X, y) matrix for joint NNLS.
 
-    Returns:
-        type_sizes: dict from type_id to feature-vector length.
-        feat_per_type: dict from type_id to (n_samples, feat_size) array.
-            Rows are zero for samples that don't contain that type.
-        times: (n_samples,) array of per-step times.
+    Each row corresponds to one (conf, total_time) sample. Columns are
+    the concatenation of four blocks (`init`, `step`, `scan_full`,
+    `scan_short`), with each block split per type. Returns (X, y, layout)
+    where `layout` maps each block/type to its (offset, size) so the
+    fitted theta can be unflattened.
     """
-    # Determine feature size for each type from first appearance.
-    type_sizes: dict[str, int] = {}
-    for comps, _ in samples:
+    # First pass: discover per-type feature widths.
+    layer_sizes: dict[str, int] = {}
+    input_type_ids: set[str] = set()
+    for conf, _ in samples:
+        comps = featurize(conf)
+        input_type_ids.add(comps[0].type_id)
         for c in comps:
-            if c.type_id not in type_sizes:
-                type_sizes[c.type_id] = len(c.features)
+            if c.type_id not in layer_sizes:
+                layer_sizes[c.type_id] = len(c.features)
+
+    layer_keys = sorted(layer_sizes.keys())
+    input_keys = sorted(input_type_ids)
+
+    layout = {
+        "init": {},        # type_id -> (offset, size)
+        "step": {},
+        "scan_full": {},
+        "scan_short": {},
+    }
+    pos = 0
+    for k in layer_keys:
+        layout["init"][k] = (pos, layer_sizes[k])
+        pos += layer_sizes[k]
+    for k in layer_keys:
+        layout["step"][k] = (pos, layer_sizes[k])
+        pos += layer_sizes[k]
+    for k in input_keys:
+        layout["scan_full"][k] = (pos, _SCAN_FULL_FEATURES)
+        pos += _SCAN_FULL_FEATURES
+    for k in input_keys:
+        layout["scan_short"][k] = (pos, _SCAN_SHORT_FEATURES)
+        pos += _SCAN_SHORT_FEATURES
 
     n = len(samples)
-    feat_per_type = {
-        t: np.zeros((n, sz), dtype=np.float64) for t, sz in type_sizes.items()
-    }
-    times = np.zeros(n, dtype=np.float64)
-    for i, (comps, t) in enumerate(samples):
-        times[i] = t
+    X = np.zeros((n, pos), dtype=np.float64)
+    y = np.zeros(n, dtype=np.float64)
+
+    for i, (conf, total_time) in enumerate(samples):
+        y[i] = total_time
+        comps = featurize(conf)
+        in_t = comps[0].type_id
+        nf, ns = chunk_structure(conf.steps)
+
         for c in comps:
-            # Same-type components at the same sample sum their features.
-            feat_per_type[c.type_id][i] += c.features
+            io, isz = layout["init"][c.type_id]
+            X[i, io:io + isz] += c.features
+            so, ssz = layout["step"][c.type_id]
+            X[i, so:so + ssz] += conf.steps * c.features
 
-    return (
-        type_sizes,
-        {t: jnp.asarray(a) for t, a in feat_per_type.items()},
-        jnp.asarray(times),
-    )
+        if nf > 0:
+            off, sz = layout["scan_full"][in_t]
+            X[i, off:off + sz] += nf * np.array(
+                _features_scan_full(conf.batch, conf.length))
+        if ns > 0:
+            off, sz = layout["scan_short"][in_t]
+            X[i, off:off + sz] += np.array(
+                _features_scan_short(conf.batch, conf.length, ns))
 
-
-def _predicted_times(
-    theta: dict[str, jnp.ndarray], feats: dict[str, jnp.ndarray]
-) -> jnp.ndarray:
-    """Vectorized prediction for all samples."""
-    total = jnp.zeros(next(iter(feats.values())).shape[0])
-    for type_id, features in feats.items():
-        w = jnp.exp(theta[type_id])
-        total = total + features @ w
-    return total
-
-
-def _loss(
-    theta: dict[str, jnp.ndarray],
-    feats: dict[str, jnp.ndarray],
-    times: jnp.ndarray,
-) -> jnp.ndarray:
-    """Mean squared log-relative error.
-
-    The log-space loss is naturally self-regularizing: features that
-    don't correlate with the target get pushed to very-negative θ,
-    contributing ~0 at predict time. No explicit regularization needed
-    for typical datasets.
-    """
-    pred = _predicted_times(theta, feats)
-    pred = jnp.maximum(pred, 1e-6)
-    return jnp.mean((jnp.log(pred) - jnp.log(times)) ** 2)
+    return X, y, layout
 
 
 def _fit(
-    samples: list[tuple[list[Component], float]],
-    steps: int = 2000,
-    lr: float = 0.05,
-) -> tuple[dict[str, np.ndarray], float]:
-    """Fit θ to minimize log-MSE on `samples`. Returns (weights, final_loss).
+    samples: list[tuple[Configuration, float]],
+) -> tuple[Weights, float]:
+    """Fit weights to total-time samples via NNLS. Returns (weights, mse).
 
-    The `steps` iterations run inside `jax.lax.scan` so the whole loop
-    compiles and runs in XLA — much faster than a Python loop calling
-    into a jitted gradient step.
+    mse is the mean squared residual in seconds².
     """
-    type_sizes, feats, times = _prepare_training_arrays(samples)
+    X, y, layout = _build_design_matrix(samples)
+    # NNLS default is maxiter = 3*n_features, which can be too tight
+    # for the wide design matrices we build here. Bump it generously.
+    theta, _ = nnls(X, y, maxiter=10 * X.shape[1])
+    pred = X @ theta
+    mse = float(np.mean((pred - y) ** 2))
 
-    # Initialize θ small so that exp(θ) starts near zero.
-    theta = {t: -14.0 * jnp.ones(sz, dtype=jnp.float64) for t, sz in type_sizes.items()}
+    def _slice(block: str) -> dict[str, np.ndarray]:
+        return {
+            k: theta[off:off + sz]
+            for k, (off, sz) in layout[block].items()
+        }
 
-    optimizer = optax.adamw(lr, weight_decay=0.0)
-    opt_state = optimizer.init(theta)
-
-    def step(carry, _):
-        theta, opt_state = carry
-        loss, grads = jax.value_and_grad(_loss)(theta, feats, times)
-        updates, opt_state = optimizer.update(grads, opt_state, theta)
-        theta = optax.apply_updates(theta, updates)
-        return (theta, opt_state), loss
-
-    (theta, _), losses = jax.lax.scan(
-        step, (theta, opt_state), None, length=steps,
+    weights = Weights(
+        init=_slice("init"),
+        step=_slice("step"),
+        scan_full=_slice("scan_full"),
+        scan_short=_slice("scan_short"),
     )
-
-    return (
-        {t: np.asarray(theta[t]) for t in type_sizes},
-        float(losses[-1]),
-    )
+    return weights, mse
 
 
 # -- Model class ----------------------------------------------------------
 
 
 class TrainTimingModel:
-    """Per-(system, precision) training-step time predictor."""
+    """Per-(system, precision) total-time predictor for chunked-scan runs."""
 
-    MIN_TIME = 1e-3  # skip runs faster than 1ms (noise floor).
+    MIN_TIME = 0.1     # skip runs faster than 100ms total (noise floor).
     MIN_STEPS = 4
-    MIN_SAMPLES = 20  # don't fit pairs with fewer samples.
+    MIN_SAMPLES = 20
 
     def __init__(self):
-        self._weights: dict[tuple[str, Precision], dict[str, np.ndarray]] = {}
+        self._weights: dict[tuple[str, Precision], Weights] = {}
         self._losses: dict[tuple[str, Precision], float] = {}
 
     @staticmethod
-    def _run_per_step_time(run, steps: int) -> float | None:
-        """Extract per-step time from a Run, or None if unusable."""
+    def _run_total_time(run, steps: int) -> float | None:
+        """Extract usable total time from a Run, or None if it should be skipped."""
         if run.train_time is None or run.train_time <= 0:
             return None
         if steps < TrainTimingModel.MIN_STEPS:
             return None
-        per_step = run.train_time / (steps - 1)
-        if per_step < TrainTimingModel.MIN_TIME:
+        if run.train_time < TrainTimingModel.MIN_TIME:
             return None
-        return per_step
+        return run.train_time
 
     def fit(self, runs: list[tuple[Configuration, object]], verbose: bool = True):
-        buckets: dict[tuple[str, Precision], list[tuple[list[Component], float]]] = {}
+        buckets: dict[
+            tuple[str, Precision], list[tuple[Configuration, float]]
+        ] = {}
         for conf, run in runs:
-            per_step = self._run_per_step_time(run, conf.steps)
-            if per_step is None:
+            total_time = self._run_total_time(run, conf.steps)
+            if total_time is None:
                 continue
             key = (run.system, conf.precision)
-            comps = featurize(conf)
-            buckets.setdefault(key, []).append((comps, per_step))
+            buckets.setdefault(key, []).append((conf, total_time))
 
         for key, samples in buckets.items():
             if len(samples) < self.MIN_SAMPLES:
                 if verbose:
                     print(f"skipping {key}: only {len(samples)} samples")
                 continue
-            weights, loss = _fit(samples)
+            weights, mse = _fit(samples)
             self._weights[key] = weights
-            self._losses[key] = loss
+            self._losses[key] = mse
             if verbose:
-                pct = (np.exp(np.sqrt(loss)) - 1) * 100
+                rmse = math.sqrt(mse)
                 print(
                     f"fit {key}: {len(samples)} samples, "
-                    f"log-MSE={loss:.4f} (~{pct:.1f}% relative error)"
+                    f"RMSE={rmse:.3f}s"
                 )
 
     def predict(
         self, system: str, conf: Configuration
     ) -> float | None:
-        """Predict step time, or None if no model is fit for this pair."""
+        """Predict total run time, or None if no model is fit for this pair."""
         weights = self._weights.get((system, conf.precision))
         if weights is None:
             return None
-        return predict_time(weights, featurize(conf))
+        return predict_total_time(weights, conf)
 
     def predict_batch(
         self, system: str, confs: list[Configuration]
     ) -> np.ndarray | None:
-        """Predict step times for many confs of the same precision.
-
-        Returns None if no model is fit for this (system, precision).
-        Returns an empty array if `confs` is empty.
-        """
+        """Predict total run time for many confs of the same precision."""
         if not confs:
             return np.zeros(0)
         weights = self._weights.get((system, confs[0].precision))
         if weights is None:
             return None
-        return predict_time_batch(weights, confs)
+        return _predict_total_time_batch(weights, confs)
+
+    def predict_step_time(
+        self, system: str, conf: Configuration
+    ) -> float | None:
+        """Predict steady-state per-step cost only (no init/scan terms)."""
+        weights = self._weights.get((system, conf.precision))
+        if weights is None:
+            return None
+        return predict_step_time(weights, conf)
+
+    def predict_max_steps(
+        self, system: str, conf: Configuration, time_budget: float,
+    ) -> int | None:
+        """Largest power-of-2 `steps` whose predicted total time fits the budget.
+
+        Returns None if no model is fit for this (system, precision),
+        and 0 if even `steps=2` exceeds the budget.
+        """
+        weights = self._weights.get((system, conf.precision))
+        if weights is None:
+            return None
+        components = featurize(conf)
+        input_type_id = components[0].type_id
+        init = _predict_init(weights, components)
+        scan_full = _predict_scan_full(
+            weights, input_type_id, conf.batch, conf.length)
+        step = _predict_step(weights, components)
+
+        # Coarse upper bound from per-step + amortized full-scan dispatch.
+        per_step_amortized = step + scan_full / CHUNK_SIZE
+        if per_step_amortized <= 0:
+            # Degenerate fit (no signal at all): can't bound, skip.
+            return 0
+        upper = int((time_budget - init) / per_step_amortized) + 1
+        if upper < 2:
+            return 0
+        candidate = 1 << int(math.floor(math.log2(upper)))
+        while candidate >= 2:
+            num_full = candidate // CHUNK_SIZE
+            short = candidate % CHUNK_SIZE
+            scan_short = (
+                _predict_scan_short(
+                    weights, input_type_id,
+                    conf.batch, conf.length, short)
+                if short > 0 else 0.0
+            )
+            total = (
+                init
+                + num_full * scan_full
+                + scan_short
+                + candidate * step
+            )
+            if total <= time_budget:
+                return candidate
+            candidate >>= 1
+        return 0
 
     def keys(self) -> list[tuple[str, Precision]]:
         return list(self._weights.keys())
@@ -408,8 +585,8 @@ class TrainTimingModel:
     def snapshot(self) -> 'TrainTimingModel':
         """Return a new model sharing none of the caller's mutable state.
 
-        `_weights` values are fitted arrays we never mutate in place, so
-        a shallow dict copy suffices to insulate readers from future
+        `_weights` values are fitted dataclasses we never mutate in place,
+        so a shallow dict copy suffices to insulate readers from future
         refits.
         """
         s = TrainTimingModel()

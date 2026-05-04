@@ -40,18 +40,24 @@ def _conf(
 
 
 def _seed_runs(db: ResultDB, system: str, n: int, rng: np.random.Generator):
-    """Insert `n` runs on `system` with varied batch/length so fit succeeds."""
+    """Insert `n` runs on `system` with varied shape so fit succeeds.
+
+    Vary `steps` as well: the new timing model decomposes total time
+    into init + scan + per-step, and needs samples at multiple step
+    counts to disambiguate the components.
+    """
     base = datetime.datetime(2026, 4, 11, 12, 0, 0)
     for i in range(n):
         batch = int(rng.choice([8, 16, 32]))
         length = int(rng.choice([32, 64, 128]))
-        conf = _conf(batch=batch, length=length, steps=100)
+        steps = int(rng.choice([64, 128, 256, 512]))
+        conf = _conf(batch=batch, length=length, steps=steps)
         per_step = 0.01 + 1e-8 * batch * length
         run = Run(
             system=system,
             step_loss=[0.1],
             loss=3.0,
-            train_time=per_step * (conf.steps - 1),
+            train_time=per_step * conf.steps,
         )
         db.add_run(conf, run, timestamp=base + datetime.timedelta(seconds=i))
 

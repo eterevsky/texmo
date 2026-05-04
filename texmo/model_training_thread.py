@@ -65,11 +65,10 @@ def _refresh_estimates(
         # Below MIN_SAMPLES — no model yet, nothing to predict with.
         return
     with latency.timer('timing._refresh_estimates.build_rows'):
-        # The model predicts per-step time; `conf_time_estimate.time_s`
-        # stores total train_time to match the median side, so multiply
-        # by (steps - 1).
+        # `conf_time_estimate.time_s` stores total train_time, which is
+        # what the model predicts directly.
         rows = [
-            (conf_id, system, float(preds[i]) * (conf.steps - 1), 'predicted')
+            (conf_id, system, float(preds[i]), 'predicted')
             for i, (conf_id, conf) in enumerate(to_predict)
         ]
     with latency.timer('timing._refresh_estimates.upsert'):

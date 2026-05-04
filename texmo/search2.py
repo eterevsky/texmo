@@ -1,5 +1,4 @@
 import logging
-import math
 import random
 from dataclasses import dataclass
 from math import log2
@@ -410,21 +409,6 @@ class Search(object):
 
             return None
 
-    def _adjust_steps_to_budget(
-        self, conf: Configuration, per_step: float, t: float,
-    ) -> Optional[Configuration]:
-        """Return `conf` with steps = largest pow2 fitting budget, or None."""
-        # (S - 1) * per_step <= t -> S <= t/per_step + 1
-        max_steps = int(t / per_step) + 1
-        if max_steps < 2:
-            return None
-        adjusted = 1 << int(math.floor(math.log2(max_steps)))
-        if adjusted < 2:
-            return None
-        if adjusted == conf.steps:
-            return conf
-        return conf.replace(steps=adjusted)
-
     def _select_predicted_best(
         self, t: float, max_weights: int, system: str, bfs_depth: int,
     ) -> Optional[Configuration]:
@@ -460,8 +444,8 @@ class Search(object):
         # BFS to `bfs_depth` from the seed, including the seed itself.
         # Normalize steps to a constant before inserting into the set
         # — otherwise confs differing only in steps end up as separate
-        # entries, then collapse to the same thing after
-        # _adjust_steps_to_budget. Expand from unnormalized (= seed's
+        # entries, then collapse to the same thing after the
+        # budget-fitting step. Expand from unnormalized (= seed's
         # actual steps) so neighbor generation matches the seed's
         # parameter grid.
         def _norm(c: Configuration) -> Configuration:
@@ -489,16 +473,24 @@ class Search(object):
         if not candidates:
             return None
 
-        # Predict per-step time for each and adjust steps.
+        # Pick the largest pow2 step count that fits the budget for each.
+        # The timing model owns the inversion (init / scan / step
+        # decomposition lives inside it). `predict_max_steps` returns
+        # None iff no model is fit for (system, precision); since
+        # precision is the same across `confs_in`, the first None means
+        # the whole strategy is unavailable.
         confs_in = list(candidates)
-        per_steps = self.timing_model.predict_batch(system, confs_in)
-        if per_steps is None:
-            return None  # no timing model for (system, precision)
         adjusted = []
-        for c, ps in zip(confs_in, per_steps):
-            ac = self._adjust_steps_to_budget(c, float(ps), t)
-            if ac is not None:
-                adjusted.append(ac)
+        for c in confs_in:
+            max_steps = self.timing_model.predict_max_steps(system, c, t)
+            if max_steps is None:
+                return None
+            if max_steps < 2:
+                continue
+            if max_steps == c.steps:
+                adjusted.append(c)
+            else:
+                adjusted.append(c.replace(steps=max_steps))
         if not adjusted:
             return None
 

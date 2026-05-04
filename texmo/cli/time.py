@@ -5,9 +5,9 @@ from ..common import ttoa3
 from ..configuration import Configuration
 from ..model import build_model_def
 from ..precision import Precision
+from ..predict.timing import TrainTimingModel
 from ..resultdb import ResultDB
 from ..tokens import set_tokens_dir
-from ..predict.timing import TrainTimingModel
 
 
 def _matching_runs(db_runs, system, precision_str, spec, batch, length):
@@ -55,15 +55,15 @@ def main(args: argparse.Namespace):
         steps=args.steps or 100,
         decay=1.0,
     )
-    per_step = model.predict(args.system, conf)
-    if per_step is None:
+    per_step = model.predict_step_time(args.system, conf)
+    total = model.predict(args.system, conf)
+    if per_step is None or total is None:
         logging.warning(
             f"No timing model for ({args.system!r}, {args.precision}). "
             f"Need at least {TrainTimingModel.MIN_SAMPLES} runs to fit."
         )
         return
-    steps = args.steps or conf.steps
-    total = per_step * (steps - 1)
+    steps = conf.steps
 
     print()
     print(f"system:    {args.system}")

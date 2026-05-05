@@ -323,6 +323,37 @@ def test_predicted_estimate_replaced_by_median_on_add_run(db):
     assert source == "median"
 
 
+def test_upsert_predicted_does_not_clobber_median(db):
+    """Once a 'median' row exists, a later 'predicted' bulk write must
+    leave it alone -- the timing thread's stale-snapshot upsert would
+    otherwise erase the truth a concurrent _add_run just wrote."""
+    conf, run = _make_conf_run(system="rpi")
+    run.train_time = 7.0
+    db.add_run(conf, run)
+    conf_id = db.get_conf_id(conf)
+    assert db.get_time_estimate(conf_id, "rpi") == (pytest.approx(7.0), "median")
+
+    db.upsert_predicted_time_estimates([(conf_id, "rpi", 2.0)])
+    # Median row preserved, prediction discarded.
+    assert db.get_time_estimate(conf_id, "rpi") == (pytest.approx(7.0), "median")
+
+
+def test_upsert_predicted_overwrites_predicted(db):
+    """A second 'predicted' write should refresh the value."""
+    conf, _ = _make_conf_run()
+    conf_id = db.find_or_add_conf(conf)
+    db.upsert_predicted_time_estimates([(conf_id, "rpi", 2.0)])
+    db.upsert_predicted_time_estimates([(conf_id, "rpi", 3.5)])
+    assert db.get_time_estimate(conf_id, "rpi") == (pytest.approx(3.5), "predicted")
+
+
+def test_upsert_predicted_inserts_when_missing(db):
+    conf, _ = _make_conf_run()
+    conf_id = db.find_or_add_conf(conf)
+    db.upsert_predicted_time_estimates([(conf_id, "rpi", 4.2)])
+    assert db.get_time_estimate(conf_id, "rpi") == (pytest.approx(4.2), "predicted")
+
+
 def test_iter_confs_by_precision(db):
     conf_fp32, run_fp32 = _make_conf_run(system="rpi")
     model_fp16 = build_model_def("bytes|dense.64.gelu", precision=Precision.FP16)

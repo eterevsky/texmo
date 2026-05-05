@@ -218,6 +218,18 @@ INSERT OR REPLACE INTO conf_time_estimate(conf_id, system, time_s, source)
 VALUES (:conf_id, :system, :time_s, :source)
 """
 
+# Bulk-write 'predicted' estimates without clobbering existing 'median'
+# rows. A 'median' is the source of truth when it exists; an
+# unguarded REPLACE racing against a concurrent _update_median_time
+# write would erase it, leaving the conf timeless on the UI.
+_UPSERT_PREDICTED_ESTIMATE = """
+INSERT INTO conf_time_estimate(conf_id, system, time_s, source)
+VALUES (:conf_id, :system, :time_s, 'predicted')
+ON CONFLICT(conf_id, system) DO UPDATE
+  SET time_s = excluded.time_s
+  WHERE conf_time_estimate.source = 'predicted'
+"""
+
 _UPSERT_MODEL = """
 INSERT OR REPLACE INTO model(name, data, updated_at)
 VALUES (:name, :data, :updated_at)
@@ -1043,6 +1055,23 @@ class ResultDB(object):
         cur.executemany(_UPSERT_TIME_ESTIMATE, [
             {'conf_id': cid, 'system': s, 'time_s': t, 'source': src}
             for (cid, s, t, src) in rows
+        ])
+        cur.execute('COMMIT')
+
+    def upsert_predicted_time_estimates(
+        self, rows: Iterable[tuple[int, str, float]]
+    ):
+        """Bulk-write 'predicted' estimates without overwriting 'median' rows.
+
+        `rows` is (conf_id, system, time_s). Use this from the timing
+        thread; an unguarded `upsert_time_estimates` would race with
+        `_add_run`'s median write and erase the truth.
+        """
+        cur = self._db.cursor()
+        cur.execute('BEGIN IMMEDIATE')
+        cur.executemany(_UPSERT_PREDICTED_ESTIMATE, [
+            {'conf_id': cid, 'system': s, 'time_s': t}
+            for (cid, s, t) in rows
         ])
         cur.execute('COMMIT')
 

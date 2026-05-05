@@ -68,11 +68,14 @@ def _refresh_estimates(
         # `conf_time_estimate.time_s` stores total train_time, which is
         # what the model predicts directly.
         rows = [
-            (conf_id, system, float(preds[i]), 'predicted')
+            (conf_id, system, float(preds[i]))
             for i, (conf_id, conf) in enumerate(to_predict)
         ]
     with latency.timer('timing._refresh_estimates.upsert'):
-        db.upsert_time_estimates(rows)
+        # Predicted-only upsert: a 'median' row written between our
+        # `get_conf_ids_with_median_time` snapshot and now would
+        # otherwise be silently overwritten by REPLACE.
+        db.upsert_predicted_time_estimates(rows)
     logging.info(
         f"refreshed {len(rows)} predicted estimates "
         f"for ({system!r}, {precision})"

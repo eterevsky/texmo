@@ -275,6 +275,14 @@ class LatentDef(LayerDef):
         # Linear(input, size) + bias + Linear(size, size, bias=False)
         return self.size * self.input_size + self.size + self.size * self.size
 
+    @property
+    def num_mults(self) -> int:
+        # The inner w_r matmul fires `reps` times per token; treat the
+        # whole layer as a weight-count×reps workload. Slightly
+        # overcounts the input projection (which only fires once), but
+        # that's a small term once size >= input_size.
+        return self.num_weights * self.reps
+
     def build_module(
         self, state_dict: dict[str, Tensor] | None = None
     ) -> LatentModule:
@@ -311,6 +319,12 @@ class LrnnDef(LayerDef):
             self.size * self.input_size + self.size
             + self.size * self.size + self.size * self.size
         )
+
+    @property
+    def num_mults(self) -> int:
+        # Same approximation as LatentDef: w_r fires `reps` times per
+        # token, so scale the whole weight count by `reps`.
+        return self.num_weights * self.reps
 
     def build_module(
         self, state_dict: dict[str, Tensor] | None = None

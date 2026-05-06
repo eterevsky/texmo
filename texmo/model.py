@@ -406,6 +406,17 @@ class ModelDef(object):
             + self.output.num_weights
         )
 
+    @property
+    def num_mults(self) -> int:
+        """Multiplications per (batch=1, length=1) token. Sum of
+        `num_mults` across input, hidden layers, and output. Used as
+        a workload proxy for cross-system throughput comparisons."""
+        return (
+            self.input.num_mults
+            + sum(l.num_mults for l in self.layers)
+            + self.output.num_mults
+        )
+
     def is_valid(self) -> bool:
         if not self.input.is_valid():
             return False

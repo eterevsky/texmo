@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>TexMo throughput</title>
+        <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='simple.css') }}">
+    </head>
+    <body>
+        <main>
+        <p><a href="/">&larr; Back</a></p>
+        <h1>Per-system compute throughput</h1>
+        <p>
+            For each weight bucket on the global Pareto front, the model
+            architecture is held fixed and each system picks its own
+            best <code>(batch, length, lr, steps)</code> for that spec.
+            Y axis is
+            <code>num_mults &times; batch &times; length &times; steps / median_time</code>
+            in mults/s, capped at <code>median_time &le; {{ '%.0f' % max_time }}s</code>.
+        </p>
+
+        <form action="/throughput" method="get">
+            {% for s in systems %}
+            <label>
+                <input type="checkbox" name="system_{{ s }}"
+                    {% if s in selected_systems %} checked {% endif %}>
+                {{ s }}
+            </label>
+            {% endfor %}
+            <input type="submit" value="Update">
+        </form>
+
+        {% if num_systems == 0 %}
+        <p><em>No system has runs matching the current template within
+        the time budget.</em></p>
+        {% else %}
+        <img src="data:image/png;base64,{{ graph }}">
+        {% endif %}
+        </main>
+    </body>
+</html>

@@ -30,9 +30,10 @@ from .configuration import (
     Template,
     default_from_template,
 )
-from .latency import get_report, timer, report
+from .latency import get_report, report, timer
 from .model_training_thread import ModelTrainingThread, bootstrap
 from .predict import loss_rnn
+from .report import build_throughput_graph, per_system_throughput
 from .resultdb import ResultDB
 from .run import Run
 from .search2 import Search
@@ -577,6 +578,43 @@ class SearchServer(object):
         logging.info(f'New train time: {new_train_time}')
         return redirect("/")
 
+    def throughput(self, args):
+        """Render the per-system throughput chart for the live template.
+
+        For each weight bucket on the global Pareto front, fixes the
+        model spec and finds each system's best (batch, length, lr,
+        steps) for that spec. Plots `mults * batch * length * steps /
+        median_time` per system.
+
+        `args` carries the `system_<name>` checkboxes; on the first
+        visit (no args) every system is selected.
+        """
+        max_time = self.train_time[1]
+        with self.db.open_readonly() as ro_db:
+            all_systems = ro_db.get_systems()
+            if args:
+                # Submitted form: unchecked boxes are absent. Treat
+                # each system as opt-in by `system_<name>` membership.
+                selected = [
+                    s for s in all_systems if f'system_{s}' in args
+                ]
+            else:
+                selected = list(all_systems)
+            per_system = per_system_throughput(
+                ro_db, self.template, max_time, systems=selected)
+        graph = base64.b64encode(
+            build_throughput_graph(per_system)
+        ).decode('ascii')
+        selected_set = set(selected)
+        return render_template(
+            "throughput.html",
+            graph=graph,
+            max_time=max_time,
+            num_systems=len(per_system),
+            systems=all_systems,
+            selected_systems=selected_set,
+        )
+
     def compare(self, args):
         """Render the template-comparison page.
 
@@ -743,6 +781,11 @@ def main(args: argparse.Namespace):
     def _compare():
         with timer("SearchServer.compare"):
             return server.compare(request.args)
+
+    @app.route("/throughput", methods=["GET"])
+    def _throughput():
+        with timer("SearchServer.throughput"):
+            return server.throughput(request.args)
 
     @app.route("/select", methods=["GET"])
     def _select():

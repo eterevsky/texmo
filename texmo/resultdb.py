@@ -881,6 +881,43 @@ class ResultDB(object):
         for row in cur:
             yield ConfScore._from_row(row, system)
 
+    def best_conf_for_spec_on_system(
+        self,
+        spec: str,
+        system: str,
+        max_time: float,
+    ) -> Optional[ConfScore]:
+        """Lowest-`median_score` conf matching `spec` exactly that has a
+        `median` time row on `system` no greater than `max_time`.
+
+        Used for the per-system throughput report: with the model
+        architecture pinned, we still let each system pick its own
+        optimal (batch, length, lr, steps).
+        """
+        query = """
+            SELECT conf.id AS conf_id, spec, precision, lr, length, batch,
+                   decay, cosine, steps, median_score,
+                   (SELECT COUNT(*) FROM run
+                    WHERE conf_id = conf.id) AS num_runs,
+                   ct.time_s AS median_time
+            FROM conf
+            JOIN conf_time_estimate ct
+                ON ct.conf_id = conf.id AND ct.system = :system
+                   AND ct.source = 'median'
+            WHERE conf.spec = :spec
+              AND conf.median_score IS NOT NULL
+              AND ct.time_s <= :max_time
+            ORDER BY conf.median_score ASC, ct.time_s ASC
+            LIMIT 1
+        """
+        cur = self._db.execute(query, {
+            'spec': spec, 'system': system, 'max_time': max_time,
+        })
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return ConfScore._from_row(row, system)
+
     def confs_under_time(
         self,
         template: Template,

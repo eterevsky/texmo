@@ -241,6 +241,7 @@ class InputBitsDef:
         self.precision = precision
         self.tokens_name = f'bits.{nbits}'
         self.num_weights = 0
+        self.num_mults = 0
 
         if one_hot:
             self.size = self.ntokens

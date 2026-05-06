@@ -72,6 +72,16 @@ class LayerDef(object):
     def num_weights(self) -> int:
         raise NotImplementedError
 
+    @property
+    def num_mults(self) -> int:
+        """Multiplications per (batch=1, length=1) token through one
+        forward pass. Used as a workload proxy — `num_weights` is a
+        good first approximation (each non-bias weight does one mult
+        per token; the bias adds count as 'honorary' mults). Layers
+        that reuse the same weight matrix multiple times per token
+        (latent, lrnn) override this."""
+        return self.num_weights
+
     def is_valid(self) -> bool:
         raise NotImplementedError
 

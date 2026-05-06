@@ -66,6 +66,7 @@ class InputBytesDef(object):
         self.size = 256
         self.tokens_name = 'bytes'
         self.num_weights = 0
+        self.num_mults = 0
         self.precision = precision
 
     def __str__(self):

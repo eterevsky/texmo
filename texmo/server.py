@@ -820,6 +820,21 @@ def main(args: argparse.Namespace):
         '0.0.0.0', _INTERNAL_PORT, app, threaded=True)
     external_srv = make_server(
         '127.0.0.1', _EXTERNAL_PORT, app, threaded=True)
+
+    @app.route("/stop", methods=["POST"])
+    def _stop():
+        # `serve_forever` returns when `shutdown()` is called. Doing
+        # that from inside a request thread would deadlock, so spawn
+        # a one-shot thread that runs after the response is delivered.
+        # The external port `before_request` gate already 404s /stop,
+        # so this only fires from the internal (LAN-trusted) listener.
+        logging.info("Stop requested via web UI")
+        def _do_shutdown():
+            internal_srv.shutdown()
+            external_srv.shutdown()
+        threading.Thread(target=_do_shutdown, daemon=True).start()
+        return ("Stopping. Search threads will join and the process "
+                "will exit shortly.", 200)
     logging.info(
         f"Serving internal (no auth) on 0.0.0.0:{_INTERNAL_PORT}, "
         f"external (auth) on 127.0.0.1:{_EXTERNAL_PORT}")

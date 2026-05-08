@@ -115,7 +115,23 @@
             <a href="/compare">Compare two templates &rarr;</a>
             &nbsp;|&nbsp;
             <a href="/throughput">Per-system throughput &rarr;</a>
+            &nbsp;|&nbsp;
+            <button type="button" onclick="stopServer()">Stop server</button>
+            <span id="stop-status"></span>
         </p>
+        <script>
+            function stopServer() {
+                if (!confirm('Stop the texmo server? Any in-flight runs will be lost.')) {
+                    return;
+                }
+                const status = document.getElementById('stop-status');
+                status.textContent = ' (stopping...)';
+                fetch('/stop', { method: 'POST' })
+                    .then(r => r.text())
+                    .then(t => { status.textContent = ' ' + t; })
+                    .catch(e => { status.textContent = ' (server gone)'; });
+            }
+        </script>
 
         <img src="data:image/png;base64,{{ graph }}">
 

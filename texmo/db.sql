@@ -45,7 +45,11 @@ CREATE TABLE run (
     system TEXT NOT NULL,
 
     -- Time in seconds from the end of the first optimization step till the
-    -- end of the optimization.
+    -- end of the optimization. Stored as 0 if the run diverged before a
+    -- usable time could be measured (the column is NOT NULL, so 0 is the
+    -- in-band sentinel for "no signal"). Read paths in resultdb.py should
+    -- translate 0 back to None so downstream consumers don't mistake it
+    -- for an instant-fast run.
     train_time REAL NOT NULL,
 
     -- Timestamp in ISO8601 when the run occured.

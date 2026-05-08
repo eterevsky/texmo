@@ -370,6 +370,40 @@ def test_iter_confs_by_precision(db):
     assert fp16_confs[0][1] == conf_fp16
 
 
+def test_diverged_run_stored_and_read_as_none(db):
+    """train_time=None on the way in (diverged training) becomes the
+    schema's 0 sentinel in storage, then translates back to None on
+    every read so consumers can rely on `is None` checks."""
+    conf, run = _make_conf_run(system="rpi")
+    run.train_time = None
+    run.loss = float('inf')
+    db.add_run(conf, run)
+
+    # No 'median' row should exist (no usable timing signal).
+    conf_id = db.get_conf_id(conf)
+    assert db.get_time_estimate(conf_id, "rpi") is None
+
+    # get_runs_for_timing translates the 0 sentinel back to None.
+    runs = list(db.get_runs_for_timing("rpi", Precision.FP32))
+    assert len(runs) == 1
+    assert runs[0][1].train_time is None
+
+    # get_confs_runs does too.
+    all_runs = list(db.get_confs_runs())
+    assert len(all_runs) == 1
+    assert all_runs[0][2].train_time is None
+
+
+def test_zero_train_time_rejected(db):
+    """0 is reserved as the 'no usable time' sentinel in storage; a
+    caller passing literal 0 should be caught by the assert rather
+    than silently producing an instantaneous-run row."""
+    conf, run = _make_conf_run(system="rpi")
+    run.train_time = 0
+    with pytest.raises(AssertionError):
+        db.add_run(conf, run)
+
+
 def test_get_runs_for_timing_filters_by_system_and_precision(db):
     conf, run_rpi = _make_conf_run(system="rpi")
     run_rpi.train_time = 3.0

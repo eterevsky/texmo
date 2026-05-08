@@ -247,7 +247,9 @@ SELECT conf.id AS conf_id,
         cosine,
         run.id AS run_id,
         system,
-        train_time,
+        -- 0 is the schema's "no usable time" sentinel; surface it as
+        -- NULL so downstream code can use the standard `is None` check.
+        NULLIF(train_time, 0) AS train_time,
         timestamp,
         loss,
         step_loss,
@@ -441,12 +443,31 @@ class ResultDB(object):
             if median_time is not None and median_time > 0.0001:
                 # The median-based estimate supersedes any prediction
                 # previously stored for this (conf, system).
+                assert median_time > 0, (
+                    f"_update_median_time about to write non-positive "
+                    f"time_s={median_time} for conf={conf_id} on {system}"
+                )
                 cur.execute(_UPSERT_TIME_ESTIMATE, {
                     'conf_id': conf_id,
                     'system': system,
                     'time_s': median_time,
                     'source': 'median',
                 })
+                # Same-transaction read-back: if we just wrote a 'median'
+                # row, it must be visible here. A read failure here means
+                # an earlier statement on this cursor has been silently
+                # rolled back, or someone else's REPLACE clobbered it
+                # mid-transaction (which shouldn't be possible).
+                cur.execute(
+                    "SELECT source FROM conf_time_estimate "
+                    "WHERE conf_id = :conf_id AND system = :system",
+                    {'conf_id': conf_id, 'system': system},
+                )
+                row = cur.fetchone()
+                assert row is not None and row[0] == 'median', (
+                    f"_update_median_time wrote 'median' for conf={conf_id} "
+                    f"on {system} but read-back returned {row!r}"
+                )
 
     def _update_scores(self, cur: sqlite3.Cursor, conf_id: int, system: str):
         self._update_median_score(cur, conf_id)
@@ -541,7 +562,8 @@ class ResultDB(object):
         # Sample the winner at (system, run.train_time, conf.weights)
         # before and after writing the run, using the same (T, W) both
         # times. A flip means this run changed the winner for some
-        # (t, w).
+        # (t, w). Diverged runs (train_time None) carry no usable
+        # time, so skip tracking for those.
         do_track = (
             track_winner_change
             and run.train_time is not None
@@ -555,6 +577,8 @@ class ResultDB(object):
         run_dict = {
             'conf_id': conf_id,
             'system': run.system,
+            # 0 is the schema's "no usable time" sentinel; reads should
+            # convert back to None. See db.sql for details.
             'train_time': run.train_time or 0,
             'timestamp': timestamp,
             'loss': loss,
@@ -600,7 +624,15 @@ class ResultDB(object):
         insert, inside the same transaction. Returns the resulting
         bool (or None if not tracked / train_time unusable).
         """
-        assert run.train_time is None or run.train_time > 0.0001
+        # Diverged training produces `run.train_time = None`; we
+        # translate that to the schema's 0 sentinel below. Anything
+        # else must be a real, positive measurement -- catching
+        # accidental near-zero values that would otherwise pollute
+        # the medians.
+        assert run.train_time is None or run.train_time > 0.0001, (
+            f"add_run got run.train_time={run.train_time!r} "
+            f"(system={run.system!r}, conf={conf})"
+        )
         with latency.timer('ResultDB.add_run'):
             return self._add_run(
                 conf, run, conf_id, timestamp,
@@ -1023,7 +1055,8 @@ class ResultDB(object):
                    conf.lr AS lr, conf.length AS length, conf.batch AS batch,
                    conf.steps AS steps, conf.decay AS decay,
                    conf.cosine AS cosine,
-                   run.train_time AS train_time
+                   -- See _GET_CONFS_RUNS: surface the 0 sentinel as NULL.
+                   NULLIF(run.train_time, 0) AS train_time
             FROM conf JOIN run ON conf.id = run.conf_id
             WHERE run.system = :system AND conf.precision = :precision
             """,

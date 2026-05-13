@@ -315,8 +315,6 @@ class Template(object):
         # of DecayType passes through.
         self.decay_types = [DecayType(t) for t in decay_types]
 
-        self._conf_neighbors_cache = {}
-
     @staticmethod
     def from_args(args: argparse.Namespace):
         if not args.precision:
@@ -441,15 +439,7 @@ def conf_neighbors(
     conf: Configuration, template: Template
 ) -> list[Configuration]:
     with latency.timer('conf_neighbors'):
-        neighbors = template._conf_neighbors_cache.get(conf)
-
-        if neighbors is not None:
-            return neighbors
-
-        neighbors = list(template._conf_neighbors(conf))
-        template._conf_neighbors_cache[conf] = neighbors
-
-        return neighbors
+        return list(template._conf_neighbors(conf))
 
 
 def default_from_template(

@@ -689,13 +689,5 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
     raise ValueError(f"Unknown layer type: {name}")
 
 
-_cache: dict[tuple[str, Precision], ModelDef] = {}
-
-
 def build_model_def(spec: str, precision: Precision) -> ModelDef:
-    key = (spec, precision)
-    model_def = _cache.get(key)
-    if model_def is None:
-        model_def = ModelDef(spec, precision)
-        _cache[key] = model_def
-    return model_def
+    return ModelDef(spec, precision)

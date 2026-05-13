@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import torch
 
-from texmo.model import ModelDef, build_model_def
+from texmo.model import ModelDef
 from texmo.precision import Precision
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
@@ -156,15 +156,6 @@ def test_dtype_fp64():
     batch = torch.randint(0, 256, (2, 8))
     logits = model(batch)
     assert logits.dtype == torch.float64
-
-
-def test_build_model_def_cache():
-    md1 = build_model_def("bytes|dense.32.gelu", Precision.FP32)
-    md2 = build_model_def("bytes|dense.32.gelu", Precision.FP32)
-    assert md1 is md2
-
-    md3 = build_model_def("bytes|dense.32.gelu", Precision.FP16)
-    assert md1 is not md3
 
 
 def test_multi_layer():

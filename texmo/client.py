@@ -113,7 +113,7 @@ def worker_loop(
 
     while True:
         try:
-            with timer("get(select)") as t:
+            with timer("client.get(select)") as t:
                 r = s.get(select_url, params={"system": system})
         except requests.exceptions.RequestException as e:
             logging.warning(f'Request failed: {e}, retrying in {ttoa3(delay)}')
@@ -121,36 +121,32 @@ def worker_loop(
             delay = min(delay * 1.5, max_delay)
             continue
 
-        d = r.json()
-        assert d["system"] == system
+        with timer("client.prepare"):
+            d = r.json()
+            assert d["system"] == system
 
-        if d["conf"] is None:
-            logging.info(f'Server has no conf, sleeping {ttoa3(delay)}')
-            time.sleep(delay)
-            delay = min(delay * 1.5, max_delay)
-            continue
-        delay = 1.0
+            if d["conf"] is None:
+                logging.info(f'Server has no conf, sleeping {ttoa3(delay)}')
+                time.sleep(delay)
+                delay = min(delay * 1.5, max_delay)
+                continue
+            delay = 1.0
 
-        logging.info(f'Got configuration in {ttoa3(t.value())}')
-        conf = Configuration.from_dict(d["conf"])
-        strategy = d.get("strategy")
+            logging.info(f'Got configuration in {ttoa3(t.value())}')
+            conf = Configuration.from_dict(d["conf"])
+            strategy = d.get("strategy")
 
-        manager = create_manager(
-            backend, conf=conf, system=system, dataset=dataset, verbose=False)
+            manager = create_manager(
+                backend, conf=conf, system=system, dataset=dataset, verbose=False)
 
-        run, out_conf = manager.train_and_eval(
-            steps=conf.steps,
-            time_limit=None,
-        )
+        with timer("client.train_and_eval"):
+            run, out_conf = manager.train_and_eval(
+                steps=conf.steps,
+                time_limit=None,
+            )
 
-        with timer("post(add)"):
+        with timer("client.post(add)"):
             post_result(s, add_url, system, run, out_conf, strategy)
-
-        if conf.decay == 1:
-            for checkpoint in run.checkpoints.values():
-                with timer("post(add)"):
-                    post_result(s, add_url, system,
-                                checkpoint.make_run(run), out_conf, strategy)
 
         if once:
             break

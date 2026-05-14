@@ -2,11 +2,44 @@ import numpy as np
 import pytest
 
 from texmo.configuration import Configuration
+from texmo.db import DbReader, DbWriter
 from texmo.model import build_model_def
 from texmo.precision import Precision
 from texmo.predict import build_loss_trend
-from texmo.resultdb import ResultDB
 from texmo.run import Run
+
+
+class _RW:
+    """Test helper: a `DbWriter` plus a separate `DbReader` over the
+    same file-backed DB, exposed as a single object so the existing
+    `db.add_run(...)` plus `db.get_systems()` style of test calls
+    keeps working.
+
+    Writer methods are checked first; only names exclusive to the
+    read side (`get_*`, `iter_*`, `top_*`, ...) fall through to the
+    reader. Tests poking the raw connection via `db._db` get the
+    writer's connection.
+    """
+
+    def __init__(self, path: str):
+        # Open writer first so it creates the schema; reader then opens
+        # the same file in mode=ro.
+        self.writer = DbWriter(path)
+        self.reader = DbReader(path)
+
+    def close(self):
+        self.reader.close()
+        self.writer.close()
+
+    @property
+    def _db(self):
+        return self.writer._db
+
+    def __getattr__(self, name):
+        attr = getattr(self.writer, name, None)
+        if attr is not None:
+            return attr
+        return getattr(self.reader, name)
 
 
 def _make_conf_run(
@@ -33,8 +66,10 @@ def _make_conf_run(
 
 
 @pytest.fixture
-def db():
-    return ResultDB()
+def db(tmp_path):
+    bundle = _RW(str(tmp_path / "test.db"))
+    yield bundle
+    bundle.close()
 
 
 def test_empty_db(db):

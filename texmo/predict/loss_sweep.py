@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 
 import config
-from ..resultdb import ResultDB
+from ..db import DbReader
 from ..tokens import set_tokens_dir
 from ..cli import loss as loss_cli
 
@@ -106,7 +106,7 @@ def _eval_variant(
 def main(args):
     set_tokens_dir(args.tokens_dir)
     logging.info(f"Loading labeled runs from {args.db}")
-    db = ResultDB(args.db, readonly=True)
+    db = DbReader(args.db)
     labeled = list(db.iter_labeled_runs())
     logging.info(f"Loaded {len(labeled)} labeled runs")
 

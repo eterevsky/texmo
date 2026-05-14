@@ -13,7 +13,8 @@ configurations to train and post results back.
 - **Template** (`configuration.py`) — an immutable descriptor of the region
   of configuration space being explored. Has bounds on each hyperparameter,
   plus a model spec (either exact or regex).
-- **ResultDB** (`resultdb.py`) — SQLite database of confs and runs.
+- **DbReader / DbWriter** (`db/`) — SQLite database of confs and runs,
+  split by read/write boundary.
 - **Search** (`search.py`) — the `select_conf(system)` strategy that
   decides what to run next.
 - **Server** (`server.py`) — Flask app that hosts search, serves `/select`
@@ -113,7 +114,7 @@ Two layers:
   layer, insert/remove suffix.2, insert/remove norm.
 
 Neighbors are generated **at runtime** (in-memory). No neighbor table in
-the DB. `ResultDB.get_conf_id()` is cached (Configuration → id) so
+the DB. `DbReader.get_conf_id()` is cached (Configuration → id) so
 neighbor lookups are cheap.
 
 Validity constraints (`ModelDef.is_valid`):
@@ -133,15 +134,16 @@ The `system_runs == 0` rule in `_select_top_neighbor` is the current
 mechanism for bootstrapping new systems: a top neighbor that's never been
 run locally gets picked once, even if its total run count is already high.
 
-## ResultDB
+## Database access (`texmo/db/`)
 
-- **Main writer connections** — SearchThread and ModelTrainingThread
-  each hold their own connection (both `check_same_thread=False`),
-  serialized via SQLite's WAL + `BEGIN IMMEDIATE` + a 30 s
-  `busy_timeout`.
-- **Read-only connections** — `db.open_readonly()` returns a new URI
-  `file:...?mode=ro` connection used by Flask request handlers. Context
-  manager: `with self.db.open_readonly() as ro_db: ...`
+- **`DbWriter`** — opens the SQLite file read-write. SearchThread and
+  ModelThread each hold their own writer (both `check_same_thread=False`),
+  serialized via SQLite's WAL + `BEGIN IMMEDIATE` + a 30 s `busy_timeout`.
+  Step 6 of the threading refactor will collapse them to a single
+  writer on a dedicated DBWriter thread.
+- **`DbReader`** — opens the SQLite file with `mode=ro` (URI form).
+  Flask request handlers open a fresh `DbReader(self.path)` per
+  request; Search holds a persistent reader for its `select` loop.
 - **Score computation** — `median_score` is the median loss across all
   runs of a conf (across all systems, since runs are equivalent by dtype).
   Per-system time estimates live in `conf_time_estimate` with

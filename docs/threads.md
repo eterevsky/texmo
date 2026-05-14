@@ -223,34 +223,42 @@ built once at frontend startup and are immutable thereafter, so they
 are plain read-only references handed to the Search threads — not
 shared mutable state.
 
-## ResultDB split
+## Database access (`texmo/db/`)
 
-`ResultDB` becomes two classes with disjoint method sets so the type
-system enforces the read/write boundary. Code layout:
+`ResultDB` is split into two classes with disjoint method sets so the
+type system enforces the read/write boundary. Code layout:
 
-- `texmo/db_common.py` — shared helpers: SQL constant strings, row
-  factories, connection plumbing, `Configuration.from_dict`-style
-  serialisation, the small `_train_time_from_row` family.
-- `texmo/db_reader.py` — `DbReader` class.
-- `texmo/db_writer.py` — `DbWriter` class.
+- `texmo/db/common.py` — shared helpers: regex bridge, ndarray
+  packing, template->SQL conditions, the one shared SQL constant
+  (`FIND_CONF`), and the connection bootstrap.
+- `texmo/db/reader.py` — `DbReader` class, plus `ConfScore` /
+  `ConfWithRuns` (only produced by reads) and read-only SQL
+  constants.
+- `texmo/db/writer.py` — `DbWriter` class plus write-side SQL
+  constants.
+- `texmo/db/schema.sql` — the schema (used to bootstrap the writer
+  connection on a fresh DB).
 
 - **`DbReader`**
   - Constructor opens the SQLite file with `mode=ro` (URI form).
   - Each thread that needs DB reads instantiates one — per-request
     for report handlers, persistent for Search and Model threads.
-  - Methods (read-only):
-    - `get_systems`, `get_conf_id`, `get_run_counts`,
-      `top_confs_global`, `top_confs_for_system`,
-      `fastest_near_best_segments`, `confs_under_time`,
-      `best_conf_for_spec_on_system`, `iter_confs_by_precision`,
-      `get_conf_ids_with_median_time`, `get_losses_by_conf_ids`,
-      `get_time_estimate`, `get_runs_for_timing`,
-      `get_confs_runs`, `iter_labeled_runs`, `get_run_count`,
-      `load_model`.
+  - Methods (read-only): `get_systems`, `get_conf_id`,
+    `get_run_counts`, `top_confs_global`, `top_confs_for_system`,
+    `fastest_near_best_segments`, `confs_under_time`,
+    `best_conf_for_spec_on_system`, `iter_confs_by_precision`,
+    `get_conf_ids_with_median_time`, `get_losses_by_conf_ids`,
+    `get_time_estimate`, `get_runs_for_timing`, `get_confs_runs`,
+    `iter_labeled_runs`, `total_runs`, `load_model`.
+  - Internal state: positive-only `_conf_id_cache` (Configuration ->
+    conf_id), populated lazily on disk hits.
 
 - **`DbWriter`**
-  - Constructor opens the SQLite file read-write. Exactly one
-    instance per process, lives on the DBWriter thread.
+  - Constructor opens the SQLite file read-write. Until migration
+    step 6 multiple `DbWriter` instances coexist (one in
+    `SearchServer`, one in `ModelThread`); WAL + the 30s
+    `busy_timeout` serialize them. Step 6 collapses them to a single
+    instance on the DBWriter thread.
   - Methods (write-only, but may read as part of a write):
     - `add_run` (still runs `track_winner_change` inline — owns the
       transaction; just doesn't return the bool to the caller),
@@ -286,9 +294,10 @@ Land in this order so each step is independently verifiable:
    `train_queue` is already on the new format (done as part of step
    2); the remaining queues — `requests_queue`, `confs_by_system`,
    and the future `write_queue` / `latency_queue` — still need it.
-5. **Split `ResultDB` into `DbReader` / `DbWriter`** under the
-   three new modules. Nothing changes semantically, but it pins
-   down the read/write boundary before the next step.
+5. ~~**Split `ResultDB` into `DbReader` / `DbWriter`**~~ **done**:
+   live under `texmo/db/{common,reader,writer}.py` with the schema
+   at `texmo/db/schema.sql`. Semantics unchanged; the boundary is
+   now type-enforced.
 6. **Introduce DBWriter thread and `write_queue`.** The `DbWriter`
    instance moves onto that thread. All other threads queue write
    requests. Drop the SQL-level `_UPSERT_PREDICTED_ESTIMATE`
@@ -307,3 +316,11 @@ Land in this order so each step is independently verifiable:
   sampling is atomic with the run insert. The result is recorded
   in the `changed_winner` column; the caller doesn't see it. No
   user-facing change.
+
+## Migration follow-ups
+
+- Drop `check_same_thread=False` in `db/common.py:open_connection`
+  once the writer lives entirely on the DBWriter thread (step 6) and
+  each Search thread owns its own reader (step 8). At that point
+  every connection is single-threaded again and the safety check
+  should be re-enabled, especially for the writer.

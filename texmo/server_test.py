@@ -1,14 +1,13 @@
 import os
-import uuid
 
 import pytest
 from flask import Flask, render_template
 
 from texmo.common import INF
 from texmo.configuration import Configuration, Template
+from texmo.db import DbReader, DbWriter
 from texmo.model import build_model_def
 from texmo.precision import Precision
-from texmo.resultdb import ResultDB
 from texmo.run import Run
 from texmo.server import SearchServer
 
@@ -113,11 +112,6 @@ def test_index_fastest_table_hidden_without_system():
     assert 'near-best loss' not in html
 
 
-def _shared_memory_path() -> str:
-    """Shared in-memory DB URI with a unique name per test."""
-    return f"file:texmo_test_{uuid.uuid4().hex}?mode=memory&cache=shared"
-
-
 def _make_template():
     return Template(
         spec="bytes|dense.32.gelu",
@@ -127,74 +121,70 @@ def _make_template():
     )
 
 
-def test_search_server_add_run_writes_median_estimate():
-    path = _shared_memory_path()
-    # Holds the shared in-memory DB alive across server teardown.
-    keepalive = ResultDB(path)
-    try:
-        db = ResultDB(path)
-        server = SearchServer(
-            db, _make_template(),
-            train_time=(1.0, 16.0), default_spec=None,
-        )
+def test_search_server_add_run_writes_median_estimate(tmp_path):
+    path = str(tmp_path / "test.db")
+    db_writer = DbWriter(path)
+    server = SearchServer(
+        db_writer, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
 
-        model = build_model_def(
-            "bytes|dense.32.gelu", precision=Precision.FP32)
-        conf = Configuration(
-            model=model, lr=0.1, length=128, batch=32, steps=256, decay=1.0,
-        )
-        run = Run(
-            system="testbench", step_loss=[0.1, 0.2],
-            loss=3.0, train_time=12.5,
-        )
+    model = build_model_def(
+        "bytes|dense.32.gelu", precision=Precision.FP32)
+    conf = Configuration(
+        model=model, lr=0.1, length=128, batch=32, steps=256, decay=1.0,
+    )
+    run = Run(
+        system="testbench", step_loss=[0.1, 0.2],
+        loss=3.0, train_time=12.5,
+    )
 
-        server.add_run({"conf": conf.to_dict(), "run": run.to_dict()})
-        server.join()
+    server.add_run({"conf": conf.to_dict(), "run": run.to_dict()})
+    server.join()
 
-        conf_id = keepalive.get_conf_id(conf)
+    with DbReader(path) as reader:
+        conf_id = reader.get_conf_id(conf)
         assert conf_id is not None
-        est = keepalive.get_time_estimate(conf_id, "testbench")
-        assert est is not None
-        time_s, source = est
-        assert source == "median"
-        assert time_s == pytest.approx(12.5)
-    finally:
-        keepalive.close()
+        est = reader.get_time_estimate(conf_id, "testbench")
+    assert est is not None
+    time_s, source = est
+    assert source == "median"
+    assert time_s == pytest.approx(12.5)
 
 
-def test_search_server_add_run_does_not_overwrite_median_with_prediction():
+def test_search_server_add_run_does_not_overwrite_median_with_prediction(tmp_path):
     """A predicted estimate must not later replace a median estimate."""
-    path = _shared_memory_path()
-    keepalive = ResultDB(path)
-    try:
-        # Pre-seed a 'predicted' estimate for the conf we're about to run.
-        model = build_model_def(
-            "bytes|dense.32.gelu", precision=Precision.FP32)
-        conf = Configuration(
-            model=model, lr=0.1, length=128, batch=32, steps=256, decay=1.0,
-        )
-        conf_id = keepalive.find_or_add_conf(conf)
-        keepalive.upsert_time_estimates(
-            [(conf_id, "testbench", 99.0, "predicted")])
+    path = str(tmp_path / "test.db")
 
-        db = ResultDB(path)
-        server = SearchServer(
-            db, _make_template(),
-            train_time=(1.0, 16.0), default_spec=None,
-        )
+    # Pre-seed a 'predicted' estimate for the conf we're about to run.
+    model = build_model_def(
+        "bytes|dense.32.gelu", precision=Precision.FP32)
+    conf = Configuration(
+        model=model, lr=0.1, length=128, batch=32, steps=256, decay=1.0,
+    )
+    pre_writer = DbWriter(path)
+    conf_id = pre_writer.find_or_add_conf(conf)
+    pre_writer.upsert_time_estimates(
+        [(conf_id, "testbench", 99.0, "predicted")])
+    pre_writer.close()
 
-        run = Run(
-            system="testbench", step_loss=[0.1, 0.2],
-            loss=3.0, train_time=4.5,
-        )
-        server.add_run({"conf": conf.to_dict(), "run": run.to_dict()})
-        server.join()
+    db_writer = DbWriter(path)
+    server = SearchServer(
+        db_writer, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
 
-        time_s, source = keepalive.get_time_estimate(conf_id, "testbench")
-        assert source == "median"
-        assert time_s == pytest.approx(4.5)
-    finally:
-        keepalive.close()
+    run = Run(
+        system="testbench", step_loss=[0.1, 0.2],
+        loss=3.0, train_time=4.5,
+    )
+    server.add_run({"conf": conf.to_dict(), "run": run.to_dict()})
+    server.join()
+
+    with DbReader(path) as reader:
+        time_s, source = reader.get_time_estimate(conf_id, "testbench")
+    assert source == "median"
+    assert time_s == pytest.approx(4.5)
 
 
 def test_index_fastest_table_shown_with_system():

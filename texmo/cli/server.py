@@ -10,7 +10,7 @@ import logging
 import matplotlib
 
 from ..configuration import Template
-from ..resultdb import ResultDB
+from ..db import DbWriter
 from ..server import SearchServer
 from ..tokens import set_tokens_dir
 
@@ -22,11 +22,11 @@ def main(args: argparse.Namespace):
     template = Template.from_args(args)
     logging.info(f"Template: {template}")
 
-    db = ResultDB.from_args(args.db)
+    db_writer = DbWriter.from_args(args.db)
     train_time = tuple(map(float, args.train_time.split("-")))
     logging.info(f"T ∈ {train_time} s")
     server = SearchServer(
-        db, template, train_time, args.default_spec,
+        db_writer, template, train_time, args.default_spec,
         bootstrap_models=args.bootstrap_models,
     )
 

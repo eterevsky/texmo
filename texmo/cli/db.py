@@ -1,13 +1,14 @@
 import argparse
 import logging
 
+from ..db import DbReader, DbWriter
 from ..predict.model_thread import bootstrap as bootstrap_timing
-from ..resultdb import ResultDB
+from ..predict.timing import TrainTimingModel
 
 
 def updatedb(args: argparse.Namespace):
-    db = ResultDB.from_args(args.db)
-    db.update_all_scores()
+    writer = DbWriter.from_args(args.db)
+    writer.update_all_scores()
 
 
 def updatedb_init_args(parser: argparse.ArgumentParser, config):
@@ -22,14 +23,15 @@ def updatedb_init_args(parser: argparse.ArgumentParser, config):
 
 
 def clear_system(args: argparse.Namespace):
-    db = ResultDB.from_args(args.db)
-    systems = db.get_systems()
+    writer = DbWriter.from_args(args.db)
+    with DbReader.from_args(args.db) as reader:
+        systems = reader.get_systems()
     if args.system not in systems:
         logging.warning(
             f"System {args.system!r} not found in the database. "
             f"Known systems: {systems}")
         return
-    deleted = db.clear_system(args.system)
+    deleted = writer.clear_system(args.system)
     logging.info(f"Deleted {deleted} runs from system {args.system!r}")
 
 
@@ -50,8 +52,9 @@ def clear_system_init_args(parser: argparse.ArgumentParser, config):
 
 
 def bootstrap_estimates(args: argparse.Namespace):
-    db = ResultDB.from_args(args.db)
-    bootstrap_timing(db)
+    writer = DbWriter.from_args(args.db)
+    with DbReader.from_args(args.db) as reader:
+        bootstrap_timing(reader, writer, TrainTimingModel())
 
 
 def bootstrap_estimates_init_args(
@@ -68,8 +71,7 @@ def bootstrap_estimates_init_args(
 
 def strategy_stats(args: argparse.Namespace):
     """Per-strategy effectiveness: runs, winner-changes, %."""
-    db = ResultDB(args.db, readonly=True)
-    try:
+    with DbReader.from_args(args.db) as db:
         cur = db._db.execute(
             """
             SELECT COALESCE(strategy, '(none)') AS strategy,
@@ -84,8 +86,6 @@ def strategy_stats(args: argparse.Namespace):
             """
         )
         rows = list(cur)
-    finally:
-        db.close()
 
     print(f'{"strategy":<16} {"runs":>8} {"tracked":>8} {"changes":>8} '
           f'{"pct":>6}')

@@ -1,6 +1,6 @@
 """Integration tests for ModelThread.
 
-Uses a file-backed ResultDB because the thread opens its own connection
+Uses a file-backed DB because the thread opens its own connections
 and an in-memory DB would give it a fresh, empty database. The thread
 is told to stop after the work messages are enqueued; ordering of a
 single-consumer Queue guarantees the work messages are processed before
@@ -14,10 +14,11 @@ import numpy as np
 import pytest
 
 from texmo.configuration import Configuration
+from texmo.db import DbReader, DbWriter
 from texmo.model import build_model_def
 from texmo.precision import Precision
-from texmo.predict.loss_rnn import LossModelHolder
 from texmo.predict import model_thread
+from texmo.predict.loss_rnn import LossModelHolder
 from texmo.predict.model_thread import (
     ModelThread,
     RunAdded,
@@ -25,7 +26,6 @@ from texmo.predict.model_thread import (
     bootstrap,
 )
 from texmo.predict.timing import TrainTimingModel
-from texmo.resultdb import ResultDB
 from texmo.run import Run
 
 
@@ -43,7 +43,9 @@ def _conf(
     )
 
 
-def _seed_runs(db: ResultDB, system: str, n: int, rng: np.random.Generator):
+def _seed_runs(
+    writer: DbWriter, system: str, n: int, rng: np.random.Generator,
+):
     """Insert `n` runs on `system` with varied shape so fit succeeds.
 
     Vary `steps` as well: the new timing model decomposes total time
@@ -63,7 +65,8 @@ def _seed_runs(db: ResultDB, system: str, n: int, rng: np.random.Generator):
             loss=3.0,
             train_time=per_step * conf.steps,
         )
-        db.add_run(conf, run, timestamp=base + datetime.timedelta(seconds=i))
+        writer.add_run(
+            conf, run, timestamp=base + datetime.timedelta(seconds=i))
 
 
 def _run_thread(db_path: str, messages: list):
@@ -93,43 +96,43 @@ def _lower_min_samples(monkeypatch):
 def test_refit_writes_predicted_estimates(tmp_path):
     db_path = str(tmp_path / "test.db")
     rng = np.random.default_rng(0)
-    with ResultDB(db_path) as db:
-        _seed_runs(db, "rpi", 10, rng)
+    with DbWriter(db_path) as writer:
+        _seed_runs(writer, "rpi", 10, rng)
         unrun_conf = _conf(batch=4, length=64)
-        unrun_id = db.find_or_add_conf(unrun_conf)
+        unrun_id = writer.find_or_add_conf(unrun_conf)
 
     _run_thread(db_path, [RunAdded(system="rpi", precision=Precision.FP32)])
 
-    with ResultDB(db_path, readonly=True) as db:
-        est = db.get_time_estimate(unrun_id, "rpi")
-        assert est is not None
-        time_s, source = est
-        assert source == "predicted"
-        # Predicted estimate stores total train_time (≈ (steps-1) *
-        # per_step), not per-step. For our seeded runs (steps=100,
-        # per_step ≈ 0.01) that's ≈ 1 s; a per-step value would be ≈
-        # 0.01 s. Guard against the units regression.
-        assert time_s > 0.1, f"time_s={time_s} looks like per-step, not total"
+    with DbReader(db_path) as reader:
+        est = reader.get_time_estimate(unrun_id, "rpi")
+    assert est is not None
+    time_s, source = est
+    assert source == "predicted"
+    # Predicted estimate stores total train_time (≈ (steps-1) *
+    # per_step), not per-step. For our seeded runs (steps=100,
+    # per_step ≈ 0.01) that's ≈ 1 s; a per-step value would be ≈
+    # 0.01 s. Guard against the units regression.
+    assert time_s > 0.1, f"time_s={time_s} looks like per-step, not total"
 
 
 def test_refit_keeps_median_estimates(tmp_path):
     db_path = str(tmp_path / "test.db")
     rng = np.random.default_rng(0)
-    with ResultDB(db_path) as db:
-        _seed_runs(db, "rpi", 10, rng)
+    with DbWriter(db_path) as writer, DbReader(db_path) as reader:
+        _seed_runs(writer, "rpi", 10, rng)
         # The first-seeded conf has an observed run, so its estimate is
         # 'median'. It should stay 'median' after refit.
-        run_conf = next(iter(db.iter_confs_by_precision(Precision.FP32)))[1]
-        run_id = db.get_conf_id(run_conf)
-        before = db.get_time_estimate(run_id, "rpi")
+        run_conf = next(iter(reader.iter_confs_by_precision(Precision.FP32)))[1]
+        run_id = reader.get_conf_id(run_conf)
+        before = reader.get_time_estimate(run_id, "rpi")
         assert before[1] == "median"
 
     _run_thread(db_path, [RunAdded(system="rpi", precision=Precision.FP32)])
 
-    with ResultDB(db_path, readonly=True) as db:
-        after = db.get_time_estimate(run_id, "rpi")
-        assert after[1] == "median"
-        assert after[0] == pytest.approx(before[0])
+    with DbReader(db_path) as reader:
+        after = reader.get_time_estimate(run_id, "rpi")
+    assert after[1] == "median"
+    assert after[0] == pytest.approx(before[0])
 
 
 def test_refit_skips_when_below_min_samples(tmp_path, monkeypatch):
@@ -137,54 +140,63 @@ def test_refit_skips_when_below_min_samples(tmp_path, monkeypatch):
     monkeypatch.setattr(TrainTimingModel, "MIN_SAMPLES", 100)
     db_path = str(tmp_path / "test.db")
     rng = np.random.default_rng(0)
-    with ResultDB(db_path) as db:
-        _seed_runs(db, "rpi", 10, rng)
+    with DbWriter(db_path) as writer:
+        _seed_runs(writer, "rpi", 10, rng)
         unrun_conf = _conf(batch=4, length=64)
-        unrun_id = db.find_or_add_conf(unrun_conf)
+        unrun_id = writer.find_or_add_conf(unrun_conf)
 
     _run_thread(db_path, [RunAdded(system="rpi", precision=Precision.FP32)])
 
-    with ResultDB(db_path, readonly=True) as db:
+    with DbReader(db_path) as reader:
         # No model was fit, so no predicted estimates should appear.
-        assert db.get_time_estimate(unrun_id, "rpi") is None
+        assert reader.get_time_estimate(unrun_id, "rpi") is None
 
 
-def test_bootstrap_fits_all_pairs():
+def test_bootstrap_fits_all_pairs(tmp_path):
+    db_path = str(tmp_path / "test.db")
     rng = np.random.default_rng(0)
-    db = ResultDB()
-    _seed_runs(db, "rpi", 8, rng)
-    _seed_runs(db, "whitebox", 8, rng)
+    writer = DbWriter(db_path)
+    reader = DbReader(db_path)
+    _seed_runs(writer, "rpi", 8, rng)
+    _seed_runs(writer, "whitebox", 8, rng)
     unrun_conf = _conf(batch=4, length=64)
-    unrun_id = db.find_or_add_conf(unrun_conf)
+    unrun_id = writer.find_or_add_conf(unrun_conf)
 
-    bootstrap(db, TrainTimingModel())
+    bootstrap(reader, writer, TrainTimingModel())
 
     for system in ("rpi", "whitebox"):
-        est = db.get_time_estimate(unrun_id, system)
+        est = reader.get_time_estimate(unrun_id, system)
         assert est is not None, f"missing estimate for {system}"
         assert est[1] == "predicted"
         assert est[0] > 0.1, (
             f"time_s={est[0]} on {system} looks like per-step, not total"
         )
+    reader.close()
+    writer.close()
 
 
-def test_bootstrap_backfills_medians():
+def test_bootstrap_backfills_medians(tmp_path):
     """Bootstrap should populate medians for confs that have runs but
     no conf_time_estimate row (i.e. just after a schema migration)."""
+    db_path = str(tmp_path / "test.db")
     rng = np.random.default_rng(0)
-    db = ResultDB()
-    _seed_runs(db, "rpi", 8, rng)
+    writer = DbWriter(db_path)
+    reader = DbReader(db_path)
+    _seed_runs(writer, "rpi", 8, rng)
 
     # Simulate the post-migration state: wipe the estimate table so the
     # 'median' rows are absent even though runs exist.
-    db._db.execute("DELETE FROM conf_time_estimate")
-    db._db.commit()
+    writer._db.execute("DELETE FROM conf_time_estimate")
+    writer._db.commit()
 
-    bootstrap(db, TrainTimingModel())
+    bootstrap(reader, writer, TrainTimingModel())
 
     # Every conf with a run on rpi should now have a median estimate.
-    run_conf = next(iter(db.iter_confs_by_precision(Precision.FP32)))[1]
-    run_id = db.get_conf_id(run_conf)
-    time_s, source = db.get_time_estimate(run_id, "rpi")
+    run_conf = next(iter(reader.iter_confs_by_precision(Precision.FP32)))[1]
+    run_id = reader.get_conf_id(run_conf)
+    time_s, source = reader.get_time_estimate(run_id, "rpi")
     assert source == "median"
     assert time_s > 0
+
+    reader.close()
+    writer.close()

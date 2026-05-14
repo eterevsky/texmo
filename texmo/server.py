@@ -29,12 +29,12 @@ from .configuration import (
     default_from_template,
 )
 from .latency import get_report, report, timer
+from .db import DbReader, DbWriter
 from .predict import loss_rnn
 from .predict.loss_rnn import LossModelHolder
 from .predict.model_thread import LossRefit, ModelThread, Stop as ModelStop, bootstrap
 from .predict.timing import TrainTimingModel
 from .report import build_throughput_graph, per_system_throughput
-from .resultdb import ResultDB
 from .run import Run
 from .search import SearchThread
 
@@ -291,13 +291,17 @@ def _render_bounds(b: Bounds):
 class SearchServer(object):
     def __init__(
         self,
-        db: ResultDB,
+        db_writer: DbWriter,
         template: Template,
         train_time: tuple[float, float],
         default_spec: str,
         bootstrap_models: bool = False,
     ):
-        self.db: ResultDB = db
+        self.db_writer: DbWriter = db_writer
+        # The path is the read-only handle factory for per-request reads
+        # in `index` / `compare` / `throughput`; opening a fresh DbReader
+        # per request avoids contending with the writer's connection.
+        self.path: str = db_writer.path
         self.template: Template = template
         self.train_time: tuple[float, float] = train_time
         # Stored for `update()` so a template change with no literal
@@ -322,34 +326,35 @@ class SearchServer(object):
         # Otherwise we use whatever was saved; if nothing is there we
         # fall through to the async refit at the end of init.
         loaded_loss_model = None
-        if bootstrap_models:
-            logging.info("Bootstrap: fitting timing model synchronously")
-            bootstrap(db, self.timing_model)
-            logging.info("Bootstrap: training loss model synchronously")
-            loaded_loss_model = loss_rnn.train_loss_model(db)
-            if loaded_loss_model is not None:
-                db.save_model('loss', loaded_loss_model)
-        else:
-            loaded_timing = db.load_model('timing')
-            if loaded_timing is not None:
-                # Adopt the persisted instance as the shared one. Safe to
-                # swap here: no threads have been started yet.
-                self.timing_model = loaded_timing
-                logging.info(
-                    "Loaded persisted timing model from DB "
-                    f"({len(loaded_timing.keys())} pairs)")
-            loaded_loss_model = db.load_model('loss')
-            if loaded_loss_model is not None:
-                logging.info(
-                    "Loaded persisted loss model from DB "
-                    f"(max_layers={loaded_loss_model.max_layers})")
+        with DbReader(self.path) as reader:
+            if bootstrap_models:
+                logging.info("Bootstrap: fitting timing model synchronously")
+                bootstrap(reader, db_writer, self.timing_model)
+                logging.info("Bootstrap: training loss model synchronously")
+                loaded_loss_model = loss_rnn.train_loss_model(reader)
+                if loaded_loss_model is not None:
+                    db_writer.save_model('loss', loaded_loss_model)
+            else:
+                loaded_timing = reader.load_model('timing')
+                if loaded_timing is not None:
+                    # Adopt the persisted instance as the shared one.
+                    # Safe to swap here: no threads have been started yet.
+                    self.timing_model = loaded_timing
+                    logging.info(
+                        "Loaded persisted timing model from DB "
+                        f"({len(loaded_timing.keys())} pairs)")
+                loaded_loss_model = reader.load_model('loss')
+                if loaded_loss_model is not None:
+                    logging.info(
+                        "Loaded persisted loss model from DB "
+                        f"(max_layers={loaded_loss_model.max_layers})")
 
         if loaded_loss_model is not None:
             self.loss_model.set_model(loaded_loss_model)
 
         self.train_queue: Queue = Queue()
         self.model_thread = ModelThread(
-            db.path, self.train_queue,
+            self.path, self.train_queue,
             timing_model=self.timing_model,
             loss_model=self.loss_model,
         )
@@ -360,9 +365,14 @@ class SearchServer(object):
             # predicted-best strategy falls through.
             self.train_queue.put(LossRefit())
 
+        # SearchThread keeps its own persistent DbReader (long-lived,
+        # used by every `select` call) and shares the writer with this
+        # server for the `add` path.
+        self._search_reader = DbReader(self.path)
         self.search_thread = SearchThread(
-            db,
-            template,
+            reader=self._search_reader,
+            writer=db_writer,
+            template=template,
             train_time=train_time,
             default=self.default,
             requests_queue=self.requests_queue,
@@ -398,7 +408,7 @@ class SearchServer(object):
         # the writer thread for the main connection.
         scaling_graph = None
         fastest = []
-        with self.db.open_readonly() as ro_db:
+        with DbReader(self.path) as ro_db:
             systems = ro_db.get_systems()
             top_confs = list(
                 ro_db.top_confs_global(
@@ -512,7 +522,7 @@ class SearchServer(object):
         visit (no args) every system is selected.
         """
         max_time = self.train_time[1]
-        with self.db.open_readonly() as ro_db:
+        with DbReader(self.path) as ro_db:
             all_systems = ro_db.get_systems()
             if args:
                 # Submitted form: unchecked boxes are absent. Treat
@@ -576,7 +586,7 @@ class SearchServer(object):
                 t2 = _template_from_compare_form(form, 't2')
                 t1_max_time = _maybe_float(form.get('t1_time'))
                 t2_max_time = _maybe_float(form.get('t2_time'))
-                with self.db.open_readonly() as ro_db:
+                with DbReader(self.path) as ro_db:
                     confs1 = list(ro_db.top_confs_global(
                         t1, max_weights=max_weights, max_time=t1_max_time))
                     confs2 = list(ro_db.top_confs_global(
@@ -631,6 +641,7 @@ class SearchServer(object):
         self.requests_queue.put(("stop", None))
         self.search_thread.join()
         logging.info("Search thread joined")
+        self._search_reader.close()
         self.train_queue.put(ModelStop())
         self.model_thread.join()
         logging.info("Model thread joined")

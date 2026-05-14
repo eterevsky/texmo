@@ -3,10 +3,10 @@ import logging
 
 from ..common import ttoa3
 from ..configuration import Configuration
+from ..db import DbReader
 from ..model import build_model_def
 from ..precision import Precision
 from ..predict.timing import TrainTimingModel
-from ..resultdb import ResultDB
 from ..tokens import set_tokens_dir
 
 
@@ -33,7 +33,7 @@ def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
 
     logging.info(f"Loading runs from {args.db}")
-    db = ResultDB(args.db, readonly=True)
+    db = DbReader(args.db)
     db_runs = [(conf, run) for _, conf, run in db.get_confs_runs()]
     logging.info(f"Loaded {len(db_runs)} runs")
 

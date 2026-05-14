@@ -1,8 +1,8 @@
 import argparse
 
 from ..configuration import Template
+from ..db import DbReader
 from ..report import format_top_conf_row
-from ..resultdb import ResultDB
 from ..tokens import set_tokens_dir
 
 
@@ -11,7 +11,7 @@ def main(args: argparse.Namespace):
     template = Template.from_args(args)
     print(f'Template: {template}')
 
-    db = ResultDB.from_args(args.db)
+    db = DbReader.from_args(args.db)
     print('Top configurations:')
     for c in db.top_confs_global(template):
         print(format_top_conf_row(c, with_system=True))

@@ -30,7 +30,7 @@ from ..layers.suffix import SuffixDef
 from .predict_common import MAX_LOSS, MIN_LOSS, layer_type_id
 
 if TYPE_CHECKING:
-    from ..resultdb import ResultDB
+    from ..db import DbReader
 
 HIDDEN = 8
 BATCH_SIZE = 1024
@@ -436,7 +436,7 @@ def fit(
 
 
 def train_loss_model(
-    db: 'ResultDB',
+    db: 'DbReader',
 ) -> LossModel | None:
     """Retrain the loss-prediction model on all labeled runs in `db`.
 

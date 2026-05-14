@@ -8,7 +8,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 from .configuration import Template
-from .resultdb import ConfScore, ResultDB
+from .db import ConfScore, DbReader
 
 
 def format_top_conf_row(c: ConfScore, with_system: bool = False) -> str:
@@ -31,7 +31,7 @@ def format_top_conf_row(c: ConfScore, with_system: bool = False) -> str:
 
 
 def per_system_throughput(
-    db: ResultDB,
+    db: DbReader,
     template: Template,
     max_time: float,
     systems: list[str] | None = None,

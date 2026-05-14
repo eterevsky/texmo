@@ -157,7 +157,7 @@ exact total-time prediction at each.
 
 ## Data source
 
-Runs from `ResultDB`. Old per-step (PyTorch / `--no-scan` JAX) data
+Runs from `DbReader`. Old per-step (PyTorch / `--no-scan` JAX) data
 is not compatible with the chunked-scan decomposition; before fitting
 the model on a system that previously ran in per-step mode, the
 caller should rename the system in the DB so the old runs land in a

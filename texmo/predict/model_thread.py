@@ -1,10 +1,10 @@
 """Background thread that fits timing & loss models and writes estimates.
 
-Opens its own `ResultDB` connection (separate from the SearchThread's)
-so transactions on the two threads don't interleave on a shared SQLite
-connection. Owns the writer side of the shared `TrainTimingModel` and
-`LossModelHolder` references (passed in at construction) and consumes
-`TrainMessage`s from its input queue:
+Opens its own `DbReader` and `DbWriter` connections (separate from
+SearchThread's) so transactions on the two threads don't interleave
+on a shared SQLite connection. Owns the writer side of the shared
+`TrainTimingModel` and `LossModelHolder` references (passed in at
+construction) and consumes `TrainMessage`s from its input queue:
 
     RunAdded(system, precision)
         Notification that a new run has been written to the DB. The
@@ -18,7 +18,7 @@ connection. Owns the writer side of the shared `TrainTimingModel` and
     Stop()
         Exit the loop.
 
-Median-backed estimates are also maintained by `ResultDB._add_run`, so
+Median-backed estimates are also maintained by `DbWriter._add_run`, so
 the thread can skip over confs with medians without touching their
 estimate rows.
 
@@ -35,8 +35,8 @@ from queue import Queue
 
 from .. import latency
 from ..configuration import Configuration
+from ..db import DbReader, DbWriter
 from ..precision import Precision
-from ..resultdb import ResultDB
 from . import loss_rnn
 from .loss_rnn import LossModelHolder
 from .timing import TrainTimingModel
@@ -74,17 +74,18 @@ TrainMessage = RunAdded | LossRefit | Stop
 
 
 def _refresh_estimates(
-    db: ResultDB,
+    reader: DbReader,
+    writer: DbWriter,
     model: TrainTimingModel,
     system: str,
     precision: Precision,
 ):
     with latency.timer('timing._refresh_estimates.median_ids'):
-        median_ids = db.get_conf_ids_with_median_time(system, precision)
+        median_ids = reader.get_conf_ids_with_median_time(system, precision)
     with latency.timer('timing._refresh_estimates.iter_confs'):
         to_predict: list[tuple[int, Configuration]] = [
             (conf_id, conf)
-            for conf_id, conf in db.iter_confs_by_precision(precision)
+            for conf_id, conf in reader.iter_confs_by_precision(precision)
             if conf_id not in median_ids
         ]
     if not to_predict:
@@ -105,7 +106,7 @@ def _refresh_estimates(
         # Predicted-only upsert: a 'median' row written between our
         # `get_conf_ids_with_median_time` snapshot and now would
         # otherwise be silently overwritten by REPLACE.
-        db.upsert_predicted_time_estimates(rows)
+        writer.upsert_predicted_time_estimates(rows)
     logging.info(
         f"refreshed {len(rows)} predicted estimates "
         f"for ({system!r}, {precision})"
@@ -113,21 +114,24 @@ def _refresh_estimates(
 
 
 def _refit_pair(
-    db: ResultDB,
+    reader: DbReader,
+    writer: DbWriter,
     model: TrainTimingModel,
     system: str,
     precision: Precision,
 ):
     with latency.timer('timing._refit_pair.get_runs'):
-        runs = list(db.get_runs_for_timing(system, precision))
+        runs = list(reader.get_runs_for_timing(system, precision))
     if not runs:
         return
     with latency.timer('timing._refit_pair.fit'):
         model.fit(runs, verbose=False)
-    _refresh_estimates(db, model, system, precision)
+    _refresh_estimates(reader, writer, model, system, precision)
 
 
-def bootstrap(db: ResultDB, timing_model: TrainTimingModel) -> None:
+def bootstrap(
+    reader: DbReader, writer: DbWriter, timing_model: TrainTimingModel,
+) -> None:
     """Bring the DB into a consistent state before starting the search.
 
     1. Backfill medians: recompute median_score and median_time (-> the
@@ -140,13 +144,13 @@ def bootstrap(db: ResultDB, timing_model: TrainTimingModel) -> None:
     3. Write 'predicted' estimates for every conf without a median.
     """
     logging.info("Bootstrap: backfilling medians")
-    db.update_all_scores()
+    writer.update_all_scores()
 
     logging.info("Bootstrap: fitting timing models")
-    for system in db.get_systems():
+    for system in reader.get_systems():
         for precision in Precision:
-            _refit_pair(db, timing_model, system, precision)
-    db.save_model('timing', timing_model.snapshot())
+            _refit_pair(reader, writer, timing_model, system, precision)
+    writer.save_model('timing', timing_model.snapshot())
 
 
 class ModelThread(threading.Thread):
@@ -171,40 +175,45 @@ class ModelThread(threading.Thread):
         self._total_run_counter = 0
 
     def run(self):
-        db = ResultDB(self._db_path)
+        reader = DbReader(self._db_path)
+        writer = DbWriter(self._db_path)
         logging.info("Started model thread")
         try:
             while True:
                 m = self._queue.get()
                 match m:
                     case RunAdded(system=s, precision=p):
-                        self._on_run_added(db, s, p)
+                        self._on_run_added(reader, writer, s, p)
                     case LossRefit():
-                        self._refit_loss(db)
+                        self._refit_loss(reader, writer)
                     case Stop():
                         logging.info("Stopping model thread")
                         break
                     case _:
                         assert False, f"Unknown message: {m!r}"
         finally:
-            db.close()
+            reader.close()
+            writer.close()
 
-    def _on_run_added(self, db: ResultDB, system: str, precision: Precision):
+    def _on_run_added(
+        self, reader: DbReader, writer: DbWriter,
+        system: str, precision: Precision,
+    ):
         key = (system, precision)
         self._run_counter[key] += 1
         if self._run_counter[key] >= _REFIT_EVERY:
             self._run_counter[key] = 0
-            _refit_pair(db, self._timing_model, system, precision)
-            db.save_model('timing', self._timing_model.snapshot())
+            _refit_pair(reader, writer, self._timing_model, system, precision)
+            writer.save_model('timing', self._timing_model.snapshot())
         self._total_run_counter += 1
         if self._total_run_counter >= _LOSS_REFIT_EVERY:
             self._total_run_counter = 0
-            self._refit_loss(db)
+            self._refit_loss(reader, writer)
 
-    def _refit_loss(self, db: ResultDB):
-        loss_model = loss_rnn.train_loss_model(db)
+    def _refit_loss(self, reader: DbReader, writer: DbWriter):
+        loss_model = loss_rnn.train_loss_model(reader)
         if loss_model is not None:
-            db.save_model('loss', loss_model)
+            writer.save_model('loss', loss_model)
             self._loss_model.set_model(loss_model)
             logging.info(
                 f"Published new loss model "

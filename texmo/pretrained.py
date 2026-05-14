@@ -4,8 +4,8 @@ import pickle
 from copy import copy
 
 from .configuration import Configuration, conf_to_dict
+from .db import DbReader
 from .model2 import Weights
-from .resultdb import ResultDB
 from .run import Run
 
 
@@ -62,5 +62,5 @@ class Checkpoint(object):
 
 
 class Checkpoints(object):
-    def __init__(self, db: ResultDB):
+    def __init__(self, db: DbReader):
         self._db = db

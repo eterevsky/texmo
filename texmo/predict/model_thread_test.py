@@ -1,4 +1,4 @@
-"""Integration tests for ModelTrainingThread.
+"""Integration tests for ModelThread.
 
 Uses a file-backed ResultDB because the thread opens its own connection
 and an in-memory DB would give it a fresh, empty database. The thread
@@ -15,12 +15,12 @@ import pytest
 
 from texmo.configuration import Configuration
 from texmo.model import build_model_def
-from texmo.model_training_thread import (
-    ModelTrainingThread,
-    bootstrap,
-)
 from texmo.precision import Precision
 from texmo.predict.loss_rnn import LossModelHolder
+from texmo.predict.model_thread import (
+    ModelThread,
+    bootstrap,
+)
 from texmo.predict.timing import TrainTimingModel
 from texmo.resultdb import ResultDB
 from texmo.run import Run
@@ -64,9 +64,9 @@ def _seed_runs(db: ResultDB, system: str, n: int, rng: np.random.Generator):
 
 
 def _run_thread(db_path: str, messages: list):
-    """Run ModelTrainingThread with messages + stop; block until done."""
+    """Run ModelThread with messages + stop; block until done."""
     q = Queue()
-    thread = ModelTrainingThread(
+    thread = ModelThread(
         db_path, q,
         timing_model=TrainTimingModel(),
         loss_model=LossModelHolder(),
@@ -76,7 +76,7 @@ def _run_thread(db_path: str, messages: list):
         q.put(m)
     q.put(("stop", None))
     thread.join(timeout=60)
-    assert not thread.is_alive(), "model-training thread did not stop"
+    assert not thread.is_alive(), "model thread did not stop"
 
 
 @pytest.fixture(autouse=True)

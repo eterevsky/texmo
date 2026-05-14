@@ -1,7 +1,7 @@
 import argparse
 import logging
 
-from ..model_training_thread import bootstrap as bootstrap_timing
+from ..predict.model_thread import bootstrap as bootstrap_timing
 from ..resultdb import ResultDB
 
 

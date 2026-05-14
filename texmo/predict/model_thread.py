@@ -33,13 +33,13 @@ import logging
 import threading
 from queue import Queue
 
-from . import latency
-from .configuration import Configuration
-from .precision import Precision
-from .predict import loss_rnn
-from .predict.loss_rnn import LossModelHolder
-from .predict.timing import TrainTimingModel
-from .resultdb import ResultDB
+from .. import latency
+from ..configuration import Configuration
+from ..precision import Precision
+from ..resultdb import ResultDB
+from . import loss_rnn
+from .loss_rnn import LossModelHolder
+from .timing import TrainTimingModel
 
 
 def _refresh_estimates(
@@ -118,7 +118,7 @@ def bootstrap(db: ResultDB, timing_model: TrainTimingModel) -> None:
     db.save_model('timing', timing_model.snapshot())
 
 
-class ModelTrainingThread(threading.Thread):
+class ModelThread(threading.Thread):
     def __init__(
         self,
         db_path: str | None,
@@ -137,7 +137,7 @@ class ModelTrainingThread(threading.Thread):
 
     def run(self):
         db = ResultDB(self._db_path)
-        logging.info("Started model-training thread")
+        logging.info("Started model thread")
         try:
             while True:
                 command, args = self._queue.get()
@@ -156,7 +156,7 @@ class ModelTrainingThread(threading.Thread):
                             f"{len(loss_model.simple_types)} simple types)"
                         )
                 elif command == "stop":
-                    logging.info("Stopping model-training thread")
+                    logging.info("Stopping model thread")
                     break
                 else:
                     assert False, f"Unknown command: {command}"

@@ -31,9 +31,9 @@ from .configuration import (
     default_from_template,
 )
 from .latency import get_report, report, timer
-from .model_training_thread import ModelTrainingThread, bootstrap
 from .predict import loss_rnn
 from .predict.loss_rnn import LossModelHolder
+from .predict.model_thread import ModelThread, bootstrap
 from .predict.timing import TrainTimingModel
 from .report import build_throughput_graph, per_system_throughput
 from .resultdb import ResultDB
@@ -431,7 +431,7 @@ class SearchServer(object):
             self.loss_model.set_model(loaded_loss_model)
 
         self.timing_queue: Queue = Queue()
-        self.timing_thread = ModelTrainingThread(
+        self.timing_thread = ModelThread(
             db.path, self.timing_queue,
             timing_model=self.timing_model,
             loss_model=self.loss_model,

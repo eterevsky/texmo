@@ -33,6 +33,8 @@ from .configuration import (
 from .latency import get_report, report, timer
 from .model_training_thread import ModelTrainingThread, bootstrap
 from .predict import loss_rnn
+from .predict.loss_rnn import LossModelHolder
+from .predict.timing import TrainTimingModel
 from .report import build_throughput_graph, per_system_throughput
 from .resultdb import ResultDB
 from .run import Run
@@ -290,6 +292,8 @@ class SearchThread(threading.Thread):
         requests_queue: Queue,
         confs_by_system: dict,
         confs_by_system_lock: threading.Lock,
+        timing_model: TrainTimingModel,
+        loss_model: LossModelHolder,
         timing_queue: Optional[Queue] = None,
     ):
         super().__init__()
@@ -300,6 +304,8 @@ class SearchThread(threading.Thread):
             template=template,
             init_conf=default,
             train_time=train_time,
+            timing_model=timing_model,
+            loss_model=loss_model,
         )
         self.requests_queue = requests_queue
         self.confs_by_system = confs_by_system
@@ -327,15 +333,6 @@ class SearchThread(threading.Thread):
                 self.search.add_run(conf, run, strategy=strategy)
                 self._maybe_trigger_time_refit(run.system, conf.precision)
                 self._maybe_trigger_loss_refit()
-            elif command == "loss_weights":
-                self.search.loss_model = args
-                logging.info(
-                    f"Search thread: received new loss model "
-                    f"(max_layers={args.max_layers}, "
-                    f"{len(args.simple_types)} simple types)"
-                )
-            elif command == "timing_weights":
-                self.search.timing_model = args
             elif command == "set_template":
                 template, init_conf, train_time = args
                 self.search.template = template
@@ -396,38 +393,51 @@ class SearchServer(object):
         self.confs_by_system: dict[str, Queue] = {}
         self.confs_by_system_lock = threading.Lock()
 
+        # Single shared instances. The Model thread mutates them
+        # (per-(system, precision) writes on the timing model are atomic
+        # in CPython; the loss holder swaps its underlying model with a
+        # single attribute write); the Search thread only reads.
+        self.timing_model = TrainTimingModel()
+        self.loss_model = LossModelHolder()
+
         # Load any persisted models from the DB. With --bootstrap-models
         # we retrain from scratch (overwriting what's persisted).
         # Otherwise we use whatever was saved; if nothing is there we
         # fall through to the async refit at the end of init.
-        initial_timing_model = None
-        initial_loss_model = None
+        loaded_loss_model = None
         if bootstrap_models:
             logging.info("Bootstrap: fitting timing model synchronously")
-            initial_timing_model = bootstrap(db)
+            bootstrap(db, self.timing_model)
             logging.info("Bootstrap: training loss model synchronously")
-            initial_loss_model = loss_rnn.train_loss_model(db)
-            if initial_loss_model is not None:
-                db.save_model('loss', initial_loss_model)
+            loaded_loss_model = loss_rnn.train_loss_model(db)
+            if loaded_loss_model is not None:
+                db.save_model('loss', loaded_loss_model)
         else:
-            initial_timing_model = db.load_model('timing')
-            if initial_timing_model is not None:
+            loaded_timing = db.load_model('timing')
+            if loaded_timing is not None:
+                # Adopt the persisted instance as the shared one. Safe to
+                # swap here: no threads have been started yet.
+                self.timing_model = loaded_timing
                 logging.info(
                     "Loaded persisted timing model from DB "
-                    f"({len(initial_timing_model.keys())} pairs)")
-            initial_loss_model = db.load_model('loss')
-            if initial_loss_model is not None:
+                    f"({len(loaded_timing.keys())} pairs)")
+            loaded_loss_model = db.load_model('loss')
+            if loaded_loss_model is not None:
                 logging.info(
                     "Loaded persisted loss model from DB "
-                    f"(max_layers={initial_loss_model.max_layers})")
+                    f"(max_layers={loaded_loss_model.max_layers})")
+
+        if loaded_loss_model is not None:
+            self.loss_model.set_model(loaded_loss_model)
 
         self.timing_queue: Queue = Queue()
         self.timing_thread = ModelTrainingThread(
             db.path, self.timing_queue,
-            search_queue=self.requests_queue,
+            timing_model=self.timing_model,
+            loss_model=self.loss_model,
         )
         self.timing_thread.start()
-        if initial_loss_model is None and not bootstrap_models:
+        if loaded_loss_model is None and not bootstrap_models:
             # No persisted loss model — train one async against
             # whatever data is in the DB. Before this completes the
             # predicted-best strategy falls through.
@@ -441,15 +451,10 @@ class SearchServer(object):
             requests_queue=self.requests_queue,
             confs_by_system=self.confs_by_system,
             confs_by_system_lock=self.confs_by_system_lock,
+            timing_model=self.timing_model,
+            loss_model=self.loss_model,
             timing_queue=self.timing_queue,
         )
-        # Install pre-fitted models before the thread starts processing
-        # select requests so the predicted-best strategy is usable from
-        # the first call.
-        if initial_timing_model is not None:
-            self.search_thread.search.timing_model = initial_timing_model
-        if initial_loss_model is not None:
-            self.search_thread.search.loss_model = initial_loss_model
         self.search_thread.start()
 
     def __del__(self):

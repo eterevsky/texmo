@@ -54,7 +54,7 @@ class LossModel:
     # `W_glob` shape. New fits set this True.
     has_cosine: bool = False
 
-    def predict(self, confs: list['Configuration']) -> np.ndarray:
+    def predict(self, confs: list[Configuration]) -> np.ndarray:
         return predict(
             self.params, confs, self.simple_types, self.max_layers,
             cell_activation=self.cell_activation,
@@ -66,6 +66,31 @@ class LossModel:
             out_activation=self.out_activation,
             has_cosine=self.has_cosine,
         )
+
+
+class LossModelHolder:
+    """Atomically-swappable holder for the current `LossModel`.
+
+    The Model thread is the sole writer; it publishes new fits via
+    `set_model`. Readers (Search threads) call `predict` directly.
+    The reference swap is atomic in CPython, so no lock is needed.
+    Holders start empty; `is_ready` reports whether any model has been
+    published yet.
+    """
+
+    def __init__(self, model: LossModel | None = None):
+        self._model = model
+
+    def set_model(self, model: LossModel) -> None:
+        self._model = model
+
+    def is_ready(self) -> bool:
+        return self._model is not None
+
+    def predict(self, confs: list[Configuration]) -> np.ndarray:
+        m = self._model
+        assert m is not None, "predict called before any model was set"
+        return m.predict(confs)
 
 
 # A layer is "simple" if it's fully described by its input/output sizes

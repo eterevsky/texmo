@@ -9,9 +9,9 @@ This file describes the *target* shape; the code is mid-transition.
 > Threads share only **read-only** objects. Anything that needs to be
 > mutated by another thread is sent through a **Queue**.
 
-The few legitimately shared-mutable objects (`ModelProvider`,
-`latency` measures) are encapsulated behind narrow interfaces with
-clearly identified writer threads.
+The few legitimately shared-mutable objects (`TrainTimingModel`,
+`LossModelHolder`, `latency` measures) are encapsulated behind narrow
+interfaces with clearly identified writer threads.
 
 ## Message format
 
@@ -64,7 +64,8 @@ wrapper.
   - Owns: its own persistent `DbReader`.
   - Reads from:
     - `DbReader` for query work.
-    - `ModelProvider` for the current loss / timing model snapshots.
+    - The shared `TrainTimingModel` and `LossModelHolder` instances
+      (writer is the Model thread; see "Shared mutable objects").
     - `select_queue` for incoming requests.
   - Sends to:
     - The matching per-system queue in `confs_by_system`, dropping
@@ -76,15 +77,17 @@ wrapper.
 
 - **Model**
   - Count: 1.
-  - Owns: the in-memory `TrainTimingModel`, per-(system, precision)
-    refit counters, the loss-refit counter, and the `featurize()`
-    `@functools.cache` (purely local to this thread by construction).
+  - Owns (mutates): the shared `TrainTimingModel` (per-(system,
+    precision) weight inserts; one shared instance is reused across
+    threads), and the underlying `LossModel` slot inside the shared
+    `LossModelHolder` (replaced wholesale on refit).
+  - Owns (private): per-(system, precision) refit counters, the
+    loss-refit counter, and the `featurize()` `@functools.cache`
+    (purely local to this thread by construction).
   - Reads from: its own `DbReader` for fitting runs, plus
     `train_queue` for incoming "run added" notifications.
-  - Sends to:
-    - `DBWriter` via `write_queue` to persist predicted-time
-      estimates and model snapshots.
-    - `ModelProvider` to publish new snapshots for Search.
+  - Sends to: `DBWriter` via `write_queue` to persist predicted-time
+    estimates and model snapshots.
 
 - **Latency** (new dedicated thread; see "Shared mutable objects")
   - Count: 1.
@@ -154,17 +157,27 @@ threads — they dispatch into the request-handler thread pool.
 A small number of objects are necessarily shared across threads. Each
 is encapsulated behind a narrow interface with one designated writer.
 
-- **`ModelProvider`**
-  - Holds the current `loss_model` and `timing_model` snapshots.
-  - R/W interface (writer side, Model only): `set_loss(model)`,
-    `set_timing(model)`.
-  - R/O interface (everyone else, Search): `loss()`, `timing()`.
-  - Implementation: attribute writes in CPython are atomic, so no
-    explicit lock is required for pointer swaps. Readers may see a
-    stale-but-consistent snapshot.
-  - Lives as a module-level singleton in `texmo/model_provider.py`;
-    the writer is implicit (only the Model thread ever calls the
-    setters).
+- **`TrainTimingModel`** (single shared instance)
+  - Already keyed by `(system, precision) -> Weights` internally; each
+    refit just does a dict insert for one key. Dict inserts are atomic
+    in CPython, so readers never see a partially-written entry.
+  - Writer (Model thread only): `fit(...)` / `_refit_pair(...)`.
+  - Readers (Search): `predict`, `predict_batch`, `predict_step_time`,
+    `predict_max_steps` — each returns `None` if the requested
+    `(system, precision)` pair has no weights yet.
+  - The instance is created in `server.py` at startup and passed by
+    reference to the Model thread and to every Search thread.
+
+- **`LossModelHolder`** (lives next to `LossModel` in `predict/loss_rnn.py`)
+  - Atomically-swappable holder for a `LossModel`. Refits replace the
+    whole model wholesale, so the holder just owns one pointer and
+    exposes `predict` that delegates to the current model.
+  - Writer (Model thread only): `set_model(loss_model)`.
+  - Readers (Search): `is_ready()` for the gate, `predict(confs)` for
+    the actual call.
+  - Implementation: one attribute write swaps the pointer; atomic in
+    CPython, no lock needed. Readers may briefly see a stale-but-
+    consistent snapshot.
 
 - **Latency** (the dedicated thread above)
   - `_measures` is owned by the thread; never touched directly.
@@ -221,10 +234,12 @@ system enforces the read/write boundary. Code layout:
 
 Land in this order so each step is independently verifiable:
 
-1. **Introduce `ModelProvider`.** Replace
-   `Search.loss_model` / `Search.timing_model` with reads off a
-   shared `ModelProvider`. Model publishes via setters instead of
-   via search-thread queue messages.
+1. ~~**Introduce shared model instances.**~~ **done**: Search and the
+   Model thread now share one `TrainTimingModel` (mutated in place via
+   atomic per-key dict inserts) and one `LossModelHolder` (a tiny
+   pointer-swap wrapper around `LossModel`). The Model thread no
+   longer pushes `loss_weights` / `timing_weights` messages through
+   the search queue.
 2. **Move the refit counters off Search.** `_run_counter` and
    `_total_run_counter` move into the Model thread. Add a
    `train_queue` and let request handlers notify the Model thread
@@ -246,7 +261,8 @@ Land in this order so each step is independently verifiable:
    request/response queue protocol described above.
 8. **Optional: spawn N Search threads.** Created explicitly in
    `server.main()`, each with its own persistent `DbReader` and
-   references to `ModelProvider` / `select_queue` / `confs_by_system`.
+   references to the shared `TrainTimingModel` / `LossModelHolder` /
+   `select_queue` / `confs_by_system`.
 
 ## Open questions
 

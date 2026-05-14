@@ -20,6 +20,7 @@ from texmo.model_training_thread import (
     bootstrap,
 )
 from texmo.precision import Precision
+from texmo.predict.loss_rnn import LossModelHolder
 from texmo.predict.timing import TrainTimingModel
 from texmo.resultdb import ResultDB
 from texmo.run import Run
@@ -65,7 +66,11 @@ def _seed_runs(db: ResultDB, system: str, n: int, rng: np.random.Generator):
 def _run_thread(db_path: str, messages: list):
     """Run ModelTrainingThread with messages + stop; block until done."""
     q = Queue()
-    thread = ModelTrainingThread(db_path, q)
+    thread = ModelTrainingThread(
+        db_path, q,
+        timing_model=TrainTimingModel(),
+        loss_model=LossModelHolder(),
+    )
     thread.start()
     for m in messages:
         q.put(m)
@@ -147,7 +152,7 @@ def test_bootstrap_fits_all_pairs():
     unrun_conf = _conf(batch=4, length=64)
     unrun_id = db.find_or_add_conf(unrun_conf)
 
-    bootstrap(db)
+    bootstrap(db, TrainTimingModel())
 
     for system in ("rpi", "whitebox"):
         est = db.get_time_estimate(unrun_id, system)
@@ -170,7 +175,7 @@ def test_bootstrap_backfills_medians():
     db._db.execute("DELETE FROM conf_time_estimate")
     db._db.commit()
 
-    bootstrap(db)
+    bootstrap(db, TrainTimingModel())
 
     # Every conf with a run on rpi should now have a median estimate.
     run_conf = next(iter(db.iter_confs_by_precision(Precision.FP32)))[1]

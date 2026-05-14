@@ -2,21 +2,20 @@
 
 Opens its own `ResultDB` connection (separate from the SearchThread's)
 so transactions on the two threads don't interleave on a shared SQLite
-connection. Owns an in-memory `TrainTimingModel` and handles these
-messages:
+connection. Owns the writer side of the shared `TrainTimingModel` and
+`LossModelHolder` references (passed in at construction) and handles
+these messages:
 
     ("refit", (system, precision))
         Reload runs for that (system, precision), refit just that pair's
-        timing model, then overwrite `conf_time_estimate` for every
-        conf of that precision on that system with either the median
-        (if runs exist) or a prediction. After refitting, push a
-        snapshot of the current timing model to the search queue as
-        ("timing_weights", snapshot).
+        timing weights in place on the shared `TrainTimingModel`, then
+        overwrite `conf_time_estimate` for every conf of that precision
+        on that system with either the median (if runs exist) or a
+        prediction.
 
     ("loss_refit", None)
-        Retrain the loss-prediction RNN on all labeled runs and push
-        the new LossModel back to the search thread's queue as
-        ("loss_weights", loss_model).
+        Retrain the loss-prediction RNN on all labeled runs and swap
+        the new `LossModel` into the shared `LossModelHolder`.
 
     ("stop", None)
         Exit the loop.
@@ -33,12 +32,12 @@ so startup can block on it before serving requests.
 import logging
 import threading
 from queue import Queue
-from typing import Optional
 
 from . import latency
 from .configuration import Configuration
 from .precision import Precision
 from .predict import loss_rnn
+from .predict.loss_rnn import LossModelHolder
 from .predict.timing import TrainTimingModel
 from .resultdb import ResultDB
 
@@ -97,7 +96,7 @@ def _refit_pair(
     _refresh_estimates(db, model, system, precision)
 
 
-def bootstrap(db: ResultDB) -> TrainTimingModel:
+def bootstrap(db: ResultDB, timing_model: TrainTimingModel) -> None:
     """Bring the DB into a consistent state before starting the search.
 
     1. Backfill medians: recompute median_score and median_time (-> the
@@ -106,22 +105,17 @@ def bootstrap(db: ResultDB) -> TrainTimingModel:
        rows are written per-run by `add_run`, but pre-existing data only
        shows up here.
     2. Fit the timing model for every (system, precision) pair with
-       enough runs.
+       enough runs (mutates `timing_model` in place).
     3. Write 'predicted' estimates for every conf without a median.
-
-    Returns the fitted timing model so callers can install it on a
-    live search without waiting for the first async refit to arrive.
     """
     logging.info("Bootstrap: backfilling medians")
     db.update_all_scores()
 
     logging.info("Bootstrap: fitting timing models")
-    model = TrainTimingModel()
     for system in db.get_systems():
         for precision in Precision:
-            _refit_pair(db, model, system, precision)
-    db.save_model('timing', model.snapshot())
-    return model
+            _refit_pair(db, timing_model, system, precision)
+    db.save_model('timing', timing_model.snapshot())
 
 
 class ModelTrainingThread(threading.Thread):
@@ -129,16 +123,17 @@ class ModelTrainingThread(threading.Thread):
         self,
         db_path: str | None,
         queue: Queue,
-        search_queue: Optional[Queue] = None,
+        timing_model: TrainTimingModel,
+        loss_model: LossModelHolder,
     ):
-        """`search_queue` is used to send trained model snapshots back
-        to the search thread as ('loss_weights', LossModel) and
-        ('timing_weights', TrainTimingModel snapshot)."""
         super().__init__(daemon=True)
         self._db_path = db_path
         self._queue = queue
-        self._search_queue = search_queue
-        self._model = TrainTimingModel()
+        # Shared references with the Search threads. Per-(system,
+        # precision) weight inserts on `timing_model` are atomic;
+        # `loss_model.set_model(...)` is a single pointer swap.
+        self._timing_model = timing_model
+        self._loss_model = loss_model
 
     def run(self):
         db = ResultDB(self._db_path)
@@ -148,18 +143,18 @@ class ModelTrainingThread(threading.Thread):
                 command, args = self._queue.get()
                 if command == "refit":
                     system, precision = args
-                    _refit_pair(db, self._model, system, precision)
-                    snap = self._model.snapshot()
-                    db.save_model('timing', snap)
-                    if self._search_queue:
-                        self._search_queue.put(("timing_weights", snap))
+                    _refit_pair(db, self._timing_model, system, precision)
+                    db.save_model('timing', self._timing_model.snapshot())
                 elif command == "loss_refit":
                     loss_model = loss_rnn.train_loss_model(db)
                     if loss_model is not None:
                         db.save_model('loss', loss_model)
-                        if self._search_queue:
-                            self._search_queue.put(
-                                ("loss_weights", loss_model))
+                        self._loss_model.set_model(loss_model)
+                        logging.info(
+                            f"Published new loss model "
+                            f"(max_layers={loss_model.max_layers}, "
+                            f"{len(loss_model.simple_types)} simple types)"
+                        )
                 elif command == "stop":
                     logging.info("Stopping model-training thread")
                     break

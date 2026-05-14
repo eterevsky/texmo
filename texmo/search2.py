@@ -9,6 +9,8 @@ import numpy as np
 from . import latency
 from .common import INF, itoa3, ttoa3
 from .configuration import Configuration, Template, conf_neighbors
+from .predict.loss_rnn import LossModelHolder
+from .predict.timing import TrainTimingModel
 from .report import format_top_conf_row
 from .resultdb import ConfScore, ConfWithRuns, ResultDB
 from .run import Run
@@ -184,6 +186,8 @@ class Search(object):
         template: Template,
         init_conf: Configuration,
         train_time: tuple[float, float],
+        timing_model: TrainTimingModel,
+        loss_model: LossModelHolder,
     ):
         assert isinstance(db, ResultDB)
         self._db = db
@@ -198,10 +202,12 @@ class Search(object):
         assert isinstance(train_time[1], float)
         self.train_time = train_time
 
-        # Models populated by ModelTrainingThread via the search queue.
-        # None until first training completes.
-        self.loss_model = None
-        self.timing_model = None
+        # Shared references with the Model thread. `timing_model` is
+        # mutated in place (per-(system, precision) dict inserts are
+        # atomic in CPython); `loss_model` is a holder whose underlying
+        # `LossModel` gets swapped atomically on refit.
+        self.timing_model = timing_model
+        self.loss_model = loss_model
 
     def add_run(
         self,
@@ -421,7 +427,7 @@ class Search(object):
         then walk the top 9 across the [1] / [2,1,1] / [3,2,2,1x6]
         run-limit sequences.
         """
-        if self.loss_model is None or self.timing_model is None:
+        if not self.loss_model.is_ready():
             return None
         with latency.timer(
             f'Search._select_predicted_best.depth{bfs_depth}'

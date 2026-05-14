@@ -1,11 +1,9 @@
-import argparse
 import base64
 import hmac
 import io
 import logging
 import os
 import threading
-from collections import defaultdict
 from queue import Queue
 from typing import Optional
 
@@ -38,17 +36,18 @@ from .predict.timing import TrainTimingModel
 from .report import build_throughput_graph, per_system_throughput
 from .resultdb import ResultDB
 from .run import Run
-from .search2 import Search
-from .tokens import set_tokens_dir
+from .search import SearchThread
 
-# Threshold of new runs per (system, precision) pair that triggers a
-# timing-model refit. Picked so refits are frequent enough to absorb
-# genuinely new points but not so frequent that fit cost dominates.
-_REFIT_EVERY = 100
 
-# Threshold of total new runs (any system/precision) that triggers a
-# retrain of the loss-prediction model.
-_LOSS_REFIT_EVERY = 200
+# Paths reachable on the external (auth-required) port. Anything else
+# 404s — in particular the index page, which is heavy to render and a
+# DDoS target.
+_EXTERNAL_PATHS = frozenset({'/select', '/add'})
+
+# Internal port (LAN-trusted, no auth required).
+_INTERNAL_PORT = 5000
+# External port (requires Bearer auth).
+_EXTERNAL_PORT = 5001
 
 
 def build_graph(confs: list[Configuration]) -> bytes:
@@ -280,88 +279,6 @@ def _conf_row(conf_score) -> dict:
         'time': f'{ttoa3(conf_score.median_time)} on {conf_score.system}',
         'cmd': cmd,
     }
-
-
-class SearchThread(threading.Thread):
-    def __init__(
-        self,
-        db: ResultDB,
-        template: Template,
-        train_time: tuple[float, float],
-        default: Configuration,
-        requests_queue: Queue,
-        confs_by_system: dict,
-        confs_by_system_lock: threading.Lock,
-        timing_model: TrainTimingModel,
-        loss_model: LossModelHolder,
-        timing_queue: Optional[Queue] = None,
-    ):
-        super().__init__()
-        self.db = db
-        self.template = template
-        self.search = Search(
-            db=db,
-            template=template,
-            init_conf=default,
-            train_time=train_time,
-            timing_model=timing_model,
-            loss_model=loss_model,
-        )
-        self.requests_queue = requests_queue
-        self.confs_by_system = confs_by_system
-        self.confs_by_system_lock = confs_by_system_lock
-        _, self.max_time = train_time
-        self._timing_queue = timing_queue
-        # Per-(system, precision) counter used to throttle timing-model refits.
-        self._run_counter: dict[tuple[str, Precision], int] = defaultdict(int)
-        # Total-run counter for loss-model refits.
-        self._total_run_counter = 0
-
-    def run(self):
-        logging.info("Started search thread")
-        while True:
-            command, args = self.requests_queue.get()
-            if command == "select":
-                system = args
-                if system is None:
-                    break
-                result = self.search.select_conf(system)
-                with self.confs_by_system_lock:
-                    self.confs_by_system[system].put(result)
-            elif command == "add":
-                conf, run, strategy = args
-                self.search.add_run(conf, run, strategy=strategy)
-                self._maybe_trigger_time_refit(run.system, conf.precision)
-                self._maybe_trigger_loss_refit()
-            elif command == "set_template":
-                template, init_conf, train_time = args
-                self.search.template = template
-                self.search.init_conf = init_conf
-                self.search.train_time = train_time
-                self.max_time = train_time[1]
-                logging.info(f'Search thread: new template {template}')
-            elif command == "stop":
-                logging.info("Stopping search thread")
-                break
-            else:
-                assert False, f"Unknown command: {command}"
-
-    def _maybe_trigger_time_refit(self, system: str, precision: Precision):
-        if self._timing_queue is None:
-            return
-        key = (system, precision)
-        self._run_counter[key] += 1
-        if self._run_counter[key] >= _REFIT_EVERY:
-            self._run_counter[key] = 0
-            self._timing_queue.put(("refit", (system, precision)))
-
-    def _maybe_trigger_loss_refit(self):
-        if self._timing_queue is None:
-            return
-        self._total_run_counter += 1
-        if self._total_run_counter >= _LOSS_REFIT_EVERY:
-            self._total_run_counter = 0
-            self._timing_queue.put(("loss_refit", None))
 
 
 def _render_bounds(b: Bounds):
@@ -718,242 +635,123 @@ class SearchServer(object):
         self.timing_thread.join()
         logging.info("Timing thread joined")
 
+    def serve(self, api_key: str):
+        """Run the Flask app on the LAN-internal and external ports.
 
-# Paths that are reachable on the external (auth-required) port.
-# Anything else 404s -- in particular the index page, which is heavy
-# to render and a DDoS target.
-_EXTERNAL_PATHS = frozenset({'/select', '/add'})
+        Blocks until both werkzeug listeners shut down (either via
+        SIGINT or the `/stop` route), then joins the search/model
+        threads and prints the latency report.
+        """
+        app = Flask("texmo")
 
-# Internal port (LAN-trusted, no auth required).
-_INTERNAL_PORT = 5000
-# External port (requires Bearer auth).
-_EXTERNAL_PORT = 5001
+        @app.before_request
+        def _gate():
+            # We bind two sockets: one on the internal port (LAN, no auth),
+            # one on the external port (auth required, restricted path
+            # set). The handler can tell which socket received the request
+            # from SERVER_PORT.
+            port = int(request.environ.get('SERVER_PORT', 0))
+            if port != _EXTERNAL_PORT:
+                return  # internal: no gating
+            # 404 first -- gives less info to unauthenticated probes than
+            # leaking which paths exist.
+            if request.path not in _EXTERNAL_PATHS:
+                return ('', 404)
+            if not api_key:
+                # External port is enabled but no key configured -- refuse
+                # rather than serve unauthenticated externally.
+                return ('', 401)
+            provided = request.headers.get('Authorization', '')
+            if not provided.startswith('Bearer '):
+                return ('', 401)
+            if not hmac.compare_digest(provided[7:], api_key):
+                return ('', 401)
 
+        @app.route("/", methods=["GET"])
+        def _index():
+            selected_system = request.args.get("system") or None
+            return self.index(selected_system=selected_system)
 
-def main(args: argparse.Namespace):
-    # Server renders graphs to bytes for the web UI, never to a display.
-    matplotlib.use('Agg')
-    set_tokens_dir(args.tokens_dir)
-    template = Template.from_args(args)
-    logging.info(f"Template: {template}")
+        @app.route("/update", methods=["POST"])
+        def _update():
+            with timer("SearchServer.update"):
+                return self.update(request.form)
 
-    db = ResultDB.from_args(args.db)
-    train_time = tuple(map(float, args.train_time.split("-")))
-    logging.info(f"T ∈ {train_time} s")
-    server = SearchServer(
-        db, template, train_time, args.default_spec,
-        bootstrap_models=args.bootstrap_models,
-    )
+        @app.route("/compare", methods=["GET"])
+        def _compare():
+            with timer("SearchServer.compare"):
+                return self.compare(request.args)
 
-    api_key = args.api_key or ''
+        @app.route("/throughput", methods=["GET"])
+        def _throughput():
+            with timer("SearchServer.throughput"):
+                return self.throughput(request.args)
 
-    app = Flask("texmo")
+        @app.route("/select", methods=["GET"])
+        def _select():
+            with timer("SearchServer.select"):
+                return self.select(request.args)
 
-    @app.before_request
-    def _gate():
-        # We bind two sockets: one on the internal port (LAN, no auth),
-        # one on the external port (auth required, restricted path
-        # set). The handler can tell which socket received the request
-        # from SERVER_PORT.
-        port = int(request.environ.get('SERVER_PORT', 0))
-        if port != _EXTERNAL_PORT:
-            return  # internal: no gating
-        # 404 first -- gives less info to unauthenticated probes than
-        # leaking which paths exist.
-        if request.path not in _EXTERNAL_PATHS:
-            return ('', 404)
-        if not api_key:
-            # External port is enabled but no key configured -- refuse
-            # rather than serve unauthenticated externally.
-            return ('', 401)
-        provided = request.headers.get('Authorization', '')
-        if not provided.startswith('Bearer '):
-            return ('', 401)
-        if not hmac.compare_digest(provided[7:], api_key):
-            return ('', 401)
+        @app.route("/add", methods=["POST"])
+        def _add():
+            with timer("SearchServer.add_run"):
+                self.add_run(request.json)
+                return "", 200
 
-    @app.route("/", methods=["GET"])
-    def _index():
-        selected_system = request.args.get("system") or None
-        return server.index(selected_system=selected_system)
+        @app.route("/latency", methods=["GET"])
+        def _latency():
+            response = make_response(get_report(), 200)
+            response.mimetype = "text/plain"
+            return response
 
-    @app.route("/update", methods=["POST"])
-    def _update():
-        with timer("SearchServer.update"):
-            return server.update(request.form)
+        @app.route('/favicon.ico')
+        def _favicon():
+            return send_from_directory(
+                os.path.join(app.root_path, 'static'),
+                'favicon.ico',
+                mimetype='image/vnd.microsoft.icon'
+            )
 
-    @app.route("/compare", methods=["GET"])
-    def _compare():
-        with timer("SearchServer.compare"):
-            return server.compare(request.args)
+        # Bind two listeners on the same WSGI app:
+        #   internal: 0.0.0.0:5000 -- LAN-accessible, no auth.
+        #   external: 127.0.0.1:5001 -- bound to loopback so only a
+        #     local reverse proxy (terminating TLS) can reach it;
+        #     auth required.
+        internal_srv = make_server(
+            '0.0.0.0', _INTERNAL_PORT, app, threaded=True)
+        external_srv = make_server(
+            '127.0.0.1', _EXTERNAL_PORT, app, threaded=True)
 
-    @app.route("/throughput", methods=["GET"])
-    def _throughput():
-        with timer("SearchServer.throughput"):
-            return server.throughput(request.args)
-
-    @app.route("/select", methods=["GET"])
-    def _select():
-        with timer("SearchServer.select"):
-            return server.select(request.args)
-
-    @app.route("/add", methods=["POST"])
-    def _add():
-        with timer("SearchServer.add_run"):
-            server.add_run(request.json)
-            return "", 200
-
-    @app.route("/latency", methods=["GET"])
-    def _latency():
-        response = make_response(get_report(), 200)
-        response.mimetype = "text/plain"
-        return response
-
-    @app.route('/favicon.ico')
-    def _favicon():
-        return send_from_directory(
-            os.path.join(app.root_path, 'static'),
-            'favicon.ico',
-            mimetype='image/vnd.microsoft.icon'
-        )
-
-    # Bind two listeners on the same WSGI app:
-    #   internal: 0.0.0.0:5000 -- LAN-accessible, no auth.
-    #   external: 127.0.0.1:5001 -- bound to loopback so only a local
-    #     reverse proxy (terminating TLS) can reach it; auth required.
-    internal_srv = make_server(
-        '0.0.0.0', _INTERNAL_PORT, app, threaded=True)
-    external_srv = make_server(
-        '127.0.0.1', _EXTERNAL_PORT, app, threaded=True)
-
-    @app.route("/stop", methods=["POST"])
-    def _stop():
-        # `serve_forever` returns when `shutdown()` is called. Doing
-        # that from inside a request thread would deadlock, so spawn
-        # a one-shot thread that runs after the response is delivered.
-        # The external port `before_request` gate already 404s /stop,
-        # so this only fires from the internal (LAN-trusted) listener.
-        logging.info("Stop requested via web UI")
-        def _do_shutdown():
+        @app.route("/stop", methods=["POST"])
+        def _stop():
+            # `serve_forever` returns when `shutdown()` is called. Doing
+            # that from inside a request thread would deadlock, so spawn
+            # a one-shot thread that runs after the response is delivered.
+            # The external port `before_request` gate already 404s /stop,
+            # so this only fires from the internal (LAN-trusted) listener.
+            logging.info("Stop requested via web UI")
+            def _do_shutdown():
+                internal_srv.shutdown()
+                external_srv.shutdown()
+            threading.Thread(target=_do_shutdown, daemon=True).start()
+            return ("Stopping. Search threads will join and the process "
+                    "will exit shortly.", 200)
+        logging.info(
+            f"Serving internal (no auth) on 0.0.0.0:{_INTERNAL_PORT}, "
+            f"external (auth) on 127.0.0.1:{_EXTERNAL_PORT}")
+        threads = [
+            threading.Thread(target=s.serve_forever, daemon=True)
+            for s in (internal_srv, external_srv)
+        ]
+        for t in threads:
+            t.start()
+        try:
+            # Block forever; KeyboardInterrupt falls through to cleanup.
+            for t in threads:
+                t.join()
+        finally:
             internal_srv.shutdown()
             external_srv.shutdown()
-        threading.Thread(target=_do_shutdown, daemon=True).start()
-        return ("Stopping. Search threads will join and the process "
-                "will exit shortly.", 200)
-    logging.info(
-        f"Serving internal (no auth) on 0.0.0.0:{_INTERNAL_PORT}, "
-        f"external (auth) on 127.0.0.1:{_EXTERNAL_PORT}")
-    threads = [
-        threading.Thread(target=s.serve_forever, daemon=True)
-        for s in (internal_srv, external_srv)
-    ]
-    for t in threads:
-        t.start()
-    try:
-        # Block forever; KeyboardInterrupt falls through to cleanup.
-        for t in threads:
-            t.join()
-    finally:
-        internal_srv.shutdown()
-        external_srv.shutdown()
-        server.join()
-        report()
+            self.join()
+            report()
 
-
-def init_args(parser: argparse.ArgumentParser, config):
-    parser.add_argument(
-        "--db",
-        type=str,
-        default=config.DB,
-        help="path to the SQLite database with the results, or a URL for a PostgreSQL database",
-    )
-    parser.add_argument(
-        "--tokens-dir",
-        type=str,
-        default=config.TOKENS_DIR,
-        help="directory with token sets",
-    )
-
-    # Template args
-    parser.add_argument(
-        "-s",
-        "--spec",
-        type=str,
-        default=None,
-        help="regex covering the acceptable specs or an exact spec",
-    )
-    parser.add_argument(
-        "-p",
-        "--precision",
-        type=str,
-        default="fp32,fp16,bf16",
-        help="precision"
-    )
-    parser.add_argument(
-        "-b",
-        "--batch",
-        type=str,
-        default=None,
-        help='range of acceptable batch sizes, for example "1-256"',
-    )
-    parser.add_argument(
-        "-l",
-        "--lr",
-        type=str,
-        default=None,
-        help="range of acceptable learning rates",
-    )
-    parser.add_argument(
-        '--decay-types',
-        type=str,
-        default="none,exp,cosine",
-        help="comma-separated subset of LR-schedule types: "
-             "none, exp, cosine (default: all)",
-    )
-    parser.add_argument(
-        "--length",
-        type=str,
-        default=None,
-        help="range of acceptable training sample lengths",
-    )
-    parser.add_argument(
-        "--steps",
-        type=str,
-        default=None,
-        help="range for the number of training steps; lower bound >= 2",
-    )
-    parser.add_argument(
-        "-w",
-        "--weights",
-        type=str,
-        default="1024-4294967296",
-        help="range for the _maximal_ number of weights in the model",
-    )
-    parser.add_argument(
-        "-t",
-        "--train-time",
-        default="1-16",
-        help="range for the training time in seconds",
-    )
-    parser.add_argument("--default-spec", type=str, default=None, help="default model")
-    parser.add_argument(
-        "--bootstrap-models",
-        action="store_true",
-        default=False,
-        help=(
-            "Before accepting requests, synchronously fit the timing "
-            "model (same as `db-bootstrap-estimates`) and train the "
-            "loss-prediction RNN. Lets the predicted-best strategy run "
-            "immediately. Takes minutes on a populated DB."
-        ),
-    )
-    parser.add_argument(
-        "--api-key",
-        type=str,
-        default=getattr(config, 'API_KEY', '') or '',
-        help="Bearer token required on the authenticated (5001) port. "
-             "Defaults to config.API_KEY. Empty disables that port "
-             "(it returns 401 to everything).",
-    )
-
-    parser.set_defaults(func=main)

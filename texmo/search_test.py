@@ -1,6 +1,6 @@
 from copy import deepcopy
 
-from .search2 import _generate_limits, _run_limit_sequences
+from .search import _generate_limits, _run_limit_sequences
 
 
 def test_run_limit_sequences():

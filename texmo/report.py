@@ -1,5 +1,5 @@
 """Plain-text formatting helpers shared by `texmo/cli/report.py` and
-the per-strategy reports logged in `texmo/search2.py`, plus the
+the per-strategy reports logged in `texmo/search.py`, plus the
 data-and-rendering helpers for the report charts."""
 
 import io

@@ -14,7 +14,7 @@ configurations to train and post results back.
   of configuration space being explored. Has bounds on each hyperparameter,
   plus a model spec (either exact or regex).
 - **ResultDB** (`resultdb.py`) — SQLite database of confs and runs.
-- **Search** (`search2.py`) — the `select_conf(system)` strategy that
+- **Search** (`search.py`) — the `select_conf(system)` strategy that
   decides what to run next.
 - **Server** (`server.py`) — Flask app that hosts search, serves `/select`
   and `/add` to clients, and `/` (index) to humans.

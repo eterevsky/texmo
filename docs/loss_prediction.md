@@ -106,7 +106,7 @@ generalization across architectures buys us.
 
 ## Use in search
 
-Two strategies in [`texmo/search2.py`](../texmo/search2.py) call the
+Two strategies in [`texmo/search.py`](../texmo/search.py) call the
 predictor:
 
 - **`predicted_2nd_neighbor`** — BFS depth 2 (~100 candidates) from

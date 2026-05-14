@@ -15,17 +15,44 @@ interfaces with clearly identified writer threads.
 
 ## Message format
 
-Every queue that carries more than one kind of payload uses a single
-`Message` dataclass so consumers can `match m.command:` without
-worrying about tuple unpacking shapes:
+Each queue that carries more than one kind of payload defines a small
+set of per-command dataclasses (one class per command) and a union
+type alias for the queue. Consumers dispatch with `match` class
+patterns, which do `isinstance` + named-field destructure in one
+step. Fields are flat and typed; the consumer doesn't pay for
+tuple/dict-unpacking and the type checker can catch shape mismatches.
 
 ```python
 @dataclass
-class Message:
-    command: str
-    response_queue: Optional[Queue] = None  # set for RPC-style replies
-    # everything else: additional named fields per command
+class RunAdded:
+    system: str
+    precision: Precision
+
+@dataclass
+class LossRefit:
+    pass
+
+@dataclass
+class Stop:
+    pass
+
+TrainMessage = RunAdded | LossRefit | Stop
+
+
+# In the consumer:
+match m:
+    case RunAdded(system=s, precision=p):
+        ...
+    case LossRefit():
+        ...
+    case Stop():
+        break
+    case _:
+        assert False, f"unknown: {m!r}"
 ```
+
+RPC-style messages add a `response_queue: Queue` field on just the
+classes that need it (e.g. `latency.Report`), not on every message.
 
 The simple object-only queues (`confs_by_system[system]`, which just
 carries a `SearchResult | None`) are exempt — they don't need the
@@ -134,13 +161,19 @@ threads — they dispatch into the request-handler thread pool.
     queue + initial N-seed (the first time a new system appears).
 
 - `train_queue`
-  - Producers: request handlers (`/add`), after they enqueue the
-    write.
-  - Consumer: Model.
-  - Commands:
-    - `run_added` (fields: `system`, `precision`) — Model owns its
-      own counters and decides when to fit.
-  - DBWriter does **not** know about training. The handler that
+  - Producers:
+    - SearchThread (currently); will become request handlers (`/add`)
+      directly once DBWriter owns the write. Either way, the post is
+      ordered after the run has landed in the DB.
+    - `SearchServer.__init__` posts a one-shot `LossRefit` at startup
+      when no persisted loss model is on disk.
+  - Consumer: ModelThread.
+  - Messages (`TrainMessage = RunAdded | LossRefit | Stop`):
+    - `RunAdded(system, precision)` — Model owns the per-pair and
+      total run counters and decides when to fit.
+    - `LossRefit()` — force a loss-model refit now.
+    - `Stop()` — exit the loop.
+  - DBWriter does **not** know about training. The producer that
     posted the write is the same one that notifies the Model
     thread; the business logic stays out of the writer.
 
@@ -240,15 +273,19 @@ Land in this order so each step is independently verifiable:
    pointer-swap wrapper around `LossModel`). The Model thread no
    longer pushes `loss_weights` / `timing_weights` messages through
    the search queue.
-2. **Move the refit counters off Search.** `_run_counter` and
-   `_total_run_counter` move into the Model thread. Add a
-   `train_queue` and let request handlers notify the Model thread
-   on each `/add`. Model decides on its own when to refit.
+2. ~~**Move the refit counters off Search.**~~ **done**: `_run_counter`
+   and `_total_run_counter` now live on `ModelThread`. The
+   `train_queue` (renamed from `timing_queue`) carries `RunAdded` /
+   `LossRefit` / `Stop`. SearchThread posts `RunAdded` after persisting
+   each run; Model decides on its own when to refit.
 3. ~~Cache decisions~~ **done**: `model._cache` and
    `Template._conf_neighbors_cache` were removed once measurement
    showed `conf_neighbors` averages ~1 ms/call without them.
-4. **Standardise queue messages on the `Message` dataclass.** Touch
-   every existing producer/consumer pair. Mechanical refactor.
+4. **Standardise queue messages on per-command dataclasses.** Touch
+   every existing producer/consumer pair (mechanical refactor). The
+   `train_queue` is already on the new format (done as part of step
+   2); the remaining queues — `requests_queue`, `confs_by_system`,
+   and the future `write_queue` / `latency_queue` — still need it.
 5. **Split `ResultDB` into `DbReader` / `DbWriter`** under the
    three new modules. Nothing changes semantically, but it pins
    down the read/write boundary before the next step.
@@ -266,10 +303,6 @@ Land in this order so each step is independently verifiable:
 
 ## Open questions
 
-- The `Message` dataclass uses `command` as the field name; it's
-  what the current `command, args = queue.get()` loops use. If a
-  better name surfaces during the refactor, swap it then — it's
-  one find-and-replace.
 - `track_winner_change` stays inside DBWriter so the (before, after)
   sampling is atomic with the run insert. The result is recorded
   in the `changed_winner` column; the caller doesn't see it. No

@@ -3,21 +3,19 @@
 Opens its own `ResultDB` connection (separate from the SearchThread's)
 so transactions on the two threads don't interleave on a shared SQLite
 connection. Owns the writer side of the shared `TrainTimingModel` and
-`LossModelHolder` references (passed in at construction) and handles
-these messages:
+`LossModelHolder` references (passed in at construction) and consumes
+`TrainMessage`s from its input queue:
 
-    ("refit", (system, precision))
-        Reload runs for that (system, precision), refit just that pair's
-        timing weights in place on the shared `TrainTimingModel`, then
-        overwrite `conf_time_estimate` for every conf of that precision
-        on that system with either the median (if runs exist) or a
-        prediction.
+    RunAdded(system, precision)
+        Notification that a new run has been written to the DB. The
+        thread tracks per-(system, precision) and global run counts and
+        triggers refits when the corresponding threshold is crossed.
 
-    ("loss_refit", None)
-        Retrain the loss-prediction RNN on all labeled runs and swap
-        the new `LossModel` into the shared `LossModelHolder`.
+    LossRefit()
+        Force a loss-model refit now (used at server startup when no
+        persisted loss model is on disk).
 
-    ("stop", None)
+    Stop()
         Exit the loop.
 
 Median-backed estimates are also maintained by `ResultDB._add_run`, so
@@ -31,6 +29,8 @@ so startup can block on it before serving requests.
 
 import logging
 import threading
+from collections import defaultdict
+from dataclasses import dataclass
 from queue import Queue
 
 from .. import latency
@@ -40,6 +40,37 @@ from ..resultdb import ResultDB
 from . import loss_rnn
 from .loss_rnn import LossModelHolder
 from .timing import TrainTimingModel
+
+
+# Threshold of new runs per (system, precision) pair that triggers a
+# timing-model refit. Picked so refits are frequent enough to absorb
+# genuinely new points but not so frequent that fit cost dominates.
+_REFIT_EVERY = 100
+
+# Threshold of total new runs (any system/precision) that triggers a
+# retrain of the loss-prediction model.
+_LOSS_REFIT_EVERY = 200
+
+
+@dataclass
+class RunAdded:
+    """A new run was written to the DB. Producer: request handlers via
+    SearchThread; consumer: ModelThread (counter bump + maybe refit)."""
+    system: str
+    precision: Precision
+
+
+@dataclass
+class LossRefit:
+    """Force a loss-model refit now (used at startup)."""
+
+
+@dataclass
+class Stop:
+    """Stop the model thread."""
+
+
+TrainMessage = RunAdded | LossRefit | Stop
 
 
 def _refresh_estimates(
@@ -134,31 +165,49 @@ class ModelThread(threading.Thread):
         # `loss_model.set_model(...)` is a single pointer swap.
         self._timing_model = timing_model
         self._loss_model = loss_model
+        # Per-(system, precision) and total run counters. Private to
+        # this thread, so no locking needed.
+        self._run_counter: dict[tuple[str, Precision], int] = defaultdict(int)
+        self._total_run_counter = 0
 
     def run(self):
         db = ResultDB(self._db_path)
         logging.info("Started model thread")
         try:
             while True:
-                command, args = self._queue.get()
-                if command == "refit":
-                    system, precision = args
-                    _refit_pair(db, self._timing_model, system, precision)
-                    db.save_model('timing', self._timing_model.snapshot())
-                elif command == "loss_refit":
-                    loss_model = loss_rnn.train_loss_model(db)
-                    if loss_model is not None:
-                        db.save_model('loss', loss_model)
-                        self._loss_model.set_model(loss_model)
-                        logging.info(
-                            f"Published new loss model "
-                            f"(max_layers={loss_model.max_layers}, "
-                            f"{len(loss_model.simple_types)} simple types)"
-                        )
-                elif command == "stop":
-                    logging.info("Stopping model thread")
-                    break
-                else:
-                    assert False, f"Unknown command: {command}"
+                m = self._queue.get()
+                match m:
+                    case RunAdded(system=s, precision=p):
+                        self._on_run_added(db, s, p)
+                    case LossRefit():
+                        self._refit_loss(db)
+                    case Stop():
+                        logging.info("Stopping model thread")
+                        break
+                    case _:
+                        assert False, f"Unknown message: {m!r}"
         finally:
             db.close()
+
+    def _on_run_added(self, db: ResultDB, system: str, precision: Precision):
+        key = (system, precision)
+        self._run_counter[key] += 1
+        if self._run_counter[key] >= _REFIT_EVERY:
+            self._run_counter[key] = 0
+            _refit_pair(db, self._timing_model, system, precision)
+            db.save_model('timing', self._timing_model.snapshot())
+        self._total_run_counter += 1
+        if self._total_run_counter >= _LOSS_REFIT_EVERY:
+            self._total_run_counter = 0
+            self._refit_loss(db)
+
+    def _refit_loss(self, db: ResultDB):
+        loss_model = loss_rnn.train_loss_model(db)
+        if loss_model is not None:
+            db.save_model('loss', loss_model)
+            self._loss_model.set_model(loss_model)
+            logging.info(
+                f"Published new loss model "
+                f"(max_layers={loss_model.max_layers}, "
+                f"{len(loss_model.simple_types)} simple types)"
+            )

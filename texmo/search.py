@@ -1,7 +1,6 @@
 import logging
 import random
 import threading
-from collections import defaultdict
 from dataclasses import dataclass
 from math import log2
 from queue import Queue
@@ -11,8 +10,9 @@ import numpy as np
 
 from . import latency
 from .common import INF, itoa3, ttoa3
-from .configuration import Configuration, Precision, Template, conf_neighbors
+from .configuration import Configuration, Template, conf_neighbors
 from .predict.loss_rnn import LossModelHolder
+from .predict.model_thread import RunAdded
 from .predict.timing import TrainTimingModel
 from .report import format_top_conf_row
 from .resultdb import ConfScore, ConfWithRuns, ResultDB
@@ -604,25 +604,15 @@ class Search(object):
             return SearchResult(self.init_conf, 'default', system)
 
 
-# Threshold of new runs per (system, precision) pair that triggers a
-# timing-model refit. Picked so refits are frequent enough to absorb
-# genuinely new points but not so frequent that fit cost dominates.
-_REFIT_EVERY = 100
-
-# Threshold of total new runs (any system/precision) that triggers a
-# retrain of the loss-prediction model.
-_LOSS_REFIT_EVERY = 200
-
-
 class SearchThread(threading.Thread):
-    """Drives the search loop and forwards refit triggers.
+    """Drives the search loop and notifies the Model thread of new runs.
 
     Reads `select` / `add` / `set_template` / `stop` commands off the
     requests queue. For `select` it asks `Search` for a candidate and
     drops the result onto the per-system response queue. For `add` it
     persists the run through `Search.add_run` (i.e. via the DB-writing
-    path) and counts new runs to decide when to enqueue refits on the
-    Model thread.
+    path) and then posts a `RunAdded` message to the Model thread,
+    which owns the refit-trigger counters.
     """
 
     def __init__(
@@ -636,7 +626,7 @@ class SearchThread(threading.Thread):
         confs_by_system_lock: threading.Lock,
         timing_model: TrainTimingModel,
         loss_model: LossModelHolder,
-        timing_queue: Optional[Queue] = None,
+        train_queue: Optional[Queue] = None,
     ):
         super().__init__()
         self.db = db
@@ -653,11 +643,7 @@ class SearchThread(threading.Thread):
         self.confs_by_system = confs_by_system
         self.confs_by_system_lock = confs_by_system_lock
         _, self.max_time = train_time
-        self._timing_queue = timing_queue
-        # Per-(system, precision) counter used to throttle timing-model refits.
-        self._run_counter: dict[tuple[str, Precision], int] = defaultdict(int)
-        # Total-run counter for loss-model refits.
-        self._total_run_counter = 0
+        self._train_queue = train_queue
 
     def run(self):
         logging.info("Started search thread")
@@ -671,10 +657,16 @@ class SearchThread(threading.Thread):
                 with self.confs_by_system_lock:
                     self.confs_by_system[system].put(result)
             elif command == "add":
+                # TODO: move this whole branch out of SearchThread once
+                # DbWriter is split out (migration step 6). The request
+                # handler should post directly to write_queue + train_queue
+                # with no Search detour — Search has no business knowing
+                # about new runs synchronously.
                 conf, run, strategy = args
                 self.search.add_run(conf, run, strategy=strategy)
-                self._maybe_trigger_time_refit(run.system, conf.precision)
-                self._maybe_trigger_loss_refit()
+                if self._train_queue is not None:
+                    self._train_queue.put(
+                        RunAdded(system=run.system, precision=conf.precision))
             elif command == "set_template":
                 template, init_conf, train_time = args
                 self.search.template = template
@@ -687,20 +679,3 @@ class SearchThread(threading.Thread):
                 break
             else:
                 assert False, f"Unknown command: {command}"
-
-    def _maybe_trigger_time_refit(self, system: str, precision: Precision):
-        if self._timing_queue is None:
-            return
-        key = (system, precision)
-        self._run_counter[key] += 1
-        if self._run_counter[key] >= _REFIT_EVERY:
-            self._run_counter[key] = 0
-            self._timing_queue.put(("refit", (system, precision)))
-
-    def _maybe_trigger_loss_refit(self):
-        if self._timing_queue is None:
-            return
-        self._total_run_counter += 1
-        if self._total_run_counter >= _LOSS_REFIT_EVERY:
-            self._total_run_counter = 0
-            self._timing_queue.put(("loss_refit", None))

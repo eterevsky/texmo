@@ -31,7 +31,7 @@ from .configuration import (
 from .latency import get_report, report, timer
 from .predict import loss_rnn
 from .predict.loss_rnn import LossModelHolder
-from .predict.model_thread import ModelThread, bootstrap
+from .predict.model_thread import LossRefit, ModelThread, Stop as ModelStop, bootstrap
 from .predict.timing import TrainTimingModel
 from .report import build_throughput_graph, per_system_throughput
 from .resultdb import ResultDB
@@ -347,18 +347,18 @@ class SearchServer(object):
         if loaded_loss_model is not None:
             self.loss_model.set_model(loaded_loss_model)
 
-        self.timing_queue: Queue = Queue()
-        self.timing_thread = ModelThread(
-            db.path, self.timing_queue,
+        self.train_queue: Queue = Queue()
+        self.model_thread = ModelThread(
+            db.path, self.train_queue,
             timing_model=self.timing_model,
             loss_model=self.loss_model,
         )
-        self.timing_thread.start()
+        self.model_thread.start()
         if loaded_loss_model is None and not bootstrap_models:
             # No persisted loss model — train one async against
             # whatever data is in the DB. Before this completes the
             # predicted-best strategy falls through.
-            self.timing_queue.put(("loss_refit", None))
+            self.train_queue.put(LossRefit())
 
         self.search_thread = SearchThread(
             db,
@@ -370,13 +370,13 @@ class SearchServer(object):
             confs_by_system_lock=self.confs_by_system_lock,
             timing_model=self.timing_model,
             loss_model=self.loss_model,
-            timing_queue=self.timing_queue,
+            train_queue=self.train_queue,
         )
         self.search_thread.start()
 
     def __del__(self):
         self.requests_queue.put(("stop", None))
-        self.timing_queue.put(("stop", None))
+        self.train_queue.put(ModelStop())
 
     def index(self, selected_system: Optional[str] = None):
         if self.template.spec:
@@ -631,9 +631,9 @@ class SearchServer(object):
         self.requests_queue.put(("stop", None))
         self.search_thread.join()
         logging.info("Search thread joined")
-        self.timing_queue.put(("stop", None))
-        self.timing_thread.join()
-        logging.info("Timing thread joined")
+        self.train_queue.put(ModelStop())
+        self.model_thread.join()
+        logging.info("Model thread joined")
 
     def serve(self, api_key: str):
         """Run the Flask app on the LAN-internal and external ports.

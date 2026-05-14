@@ -17,8 +17,11 @@ from texmo.configuration import Configuration
 from texmo.model import build_model_def
 from texmo.precision import Precision
 from texmo.predict.loss_rnn import LossModelHolder
+from texmo.predict import model_thread
 from texmo.predict.model_thread import (
     ModelThread,
+    RunAdded,
+    Stop,
     bootstrap,
 )
 from texmo.predict.timing import TrainTimingModel
@@ -64,7 +67,7 @@ def _seed_runs(db: ResultDB, system: str, n: int, rng: np.random.Generator):
 
 
 def _run_thread(db_path: str, messages: list):
-    """Run ModelThread with messages + stop; block until done."""
+    """Run ModelThread with messages + Stop; block until done."""
     q = Queue()
     thread = ModelThread(
         db_path, q,
@@ -74,7 +77,7 @@ def _run_thread(db_path: str, messages: list):
     thread.start()
     for m in messages:
         q.put(m)
-    q.put(("stop", None))
+    q.put(Stop())
     thread.join(timeout=60)
     assert not thread.is_alive(), "model thread did not stop"
 
@@ -83,6 +86,8 @@ def _run_thread(db_path: str, messages: list):
 def _lower_min_samples(monkeypatch):
     # Fit is expensive with MIN_SAMPLES=20; lower for fast tests.
     monkeypatch.setattr(TrainTimingModel, "MIN_SAMPLES", 5)
+    # A single RunAdded should drive a refit in tests.
+    monkeypatch.setattr(model_thread, "_REFIT_EVERY", 1)
 
 
 def test_refit_writes_predicted_estimates(tmp_path):
@@ -93,7 +98,7 @@ def test_refit_writes_predicted_estimates(tmp_path):
         unrun_conf = _conf(batch=4, length=64)
         unrun_id = db.find_or_add_conf(unrun_conf)
 
-    _run_thread(db_path, [("refit", ("rpi", Precision.FP32))])
+    _run_thread(db_path, [RunAdded(system="rpi", precision=Precision.FP32)])
 
     with ResultDB(db_path, readonly=True) as db:
         est = db.get_time_estimate(unrun_id, "rpi")
@@ -119,7 +124,7 @@ def test_refit_keeps_median_estimates(tmp_path):
         before = db.get_time_estimate(run_id, "rpi")
         assert before[1] == "median"
 
-    _run_thread(db_path, [("refit", ("rpi", Precision.FP32))])
+    _run_thread(db_path, [RunAdded(system="rpi", precision=Precision.FP32)])
 
     with ResultDB(db_path, readonly=True) as db:
         after = db.get_time_estimate(run_id, "rpi")
@@ -137,7 +142,7 @@ def test_refit_skips_when_below_min_samples(tmp_path, monkeypatch):
         unrun_conf = _conf(batch=4, length=64)
         unrun_id = db.find_or_add_conf(unrun_conf)
 
-    _run_thread(db_path, [("refit", ("rpi", Precision.FP32))])
+    _run_thread(db_path, [RunAdded(system="rpi", precision=Precision.FP32)])
 
     with ResultDB(db_path, readonly=True) as db:
         # No model was fit, so no predicted estimates should appear.

@@ -10,6 +10,11 @@ from .run import Run
 from .tokens import get_tokenizer
 
 
+# Minimum wall-clock seconds between progress logs in quiet mode.
+# Verbose mode still uses its own (more frequent) schedule.
+_QUIET_PROGRESS_INTERVAL = 30.0
+
+
 class Manager:
     """Base class defining the manager interface.
 
@@ -105,11 +110,17 @@ class Manager:
                 start_time = None
                 break
 
-            if self.verbose and (
-                self.step < 10
-                or (self.step % 10 == 0 and step_end - last_report > 3)
-                or step_end - last_report > 10
-            ):
+            if self.verbose:
+                should_log = (
+                    self.step < 10
+                    or (self.step % 10 == 0 and step_end - last_report > 3)
+                    or step_end - last_report > 10
+                )
+            else:
+                should_log = (
+                    step_end - last_report >= _QUIET_PROGRESS_INTERVAL
+                )
+            if should_log:
                 last_report = step_end
                 logging.info(f'{self.step}  {loss:.4f} b/B')
 

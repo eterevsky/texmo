@@ -26,6 +26,10 @@ from .tokens import get_tokenizer
 # ~128 MB of int8).
 _CHUNK_SIZE = 256
 
+# Minimum wall-clock seconds between progress logs in quiet mode.
+# Verbose mode still prints every chunk.
+_QUIET_PROGRESS_INTERVAL = 30.0
+
 
 class ManagerJax(Manager):
     """JAX training backend."""
@@ -158,6 +162,7 @@ class ManagerJax(Manager):
         tokens_name = self.model_def.input.tokens_name
 
         start_time = perf_counter()
+        last_progress_log = start_time
         while self.step < steps:
             n = min(_CHUNK_SIZE, steps - self.step)
             # One big sample of (n*batch, length), reshaped to
@@ -174,9 +179,14 @@ class ManagerJax(Manager):
             losses_host = np.asarray(losses)
             for loss_val in losses_host:
                 self.run.add_step(float(loss_val) / self.bytes_per_token)
-            if self.verbose:
+            now = perf_counter()
+            if (
+                self.verbose
+                or now - last_progress_log >= _QUIET_PROGRESS_INTERVAL
+            ):
                 last = float(losses_host[-1]) / self.bytes_per_token
                 logging.info(f'{self.step}  {last:.4f} b/B')
+                last_progress_log = now
 
         total_time = perf_counter() - start_time
         logging.info(f'Trained for {self.step} steps in {ttoa3(total_time)}')

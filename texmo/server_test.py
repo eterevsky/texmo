@@ -123,9 +123,8 @@ def _make_template():
 
 def test_search_server_add_run_writes_median_estimate(tmp_path):
     path = str(tmp_path / "test.db")
-    db_writer = DbWriter(path)
     server = SearchServer(
-        db_writer, _make_template(),
+        path, _make_template(),
         train_time=(1.0, 16.0), default_spec=None,
     )
 
@@ -168,9 +167,8 @@ def test_search_server_add_run_does_not_overwrite_median_with_prediction(tmp_pat
         [(conf_id, "testbench", 99.0, "predicted")])
     pre_writer.close()
 
-    db_writer = DbWriter(path)
     server = SearchServer(
-        db_writer, _make_template(),
+        path, _make_template(),
         train_time=(1.0, 16.0), default_spec=None,
     )
 

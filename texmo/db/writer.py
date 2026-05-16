@@ -6,19 +6,29 @@ part of a write transaction (e.g. `_top_conf_at` for the
 `changed_winner` sample, or `_find_or_add_conf` to dedupe before
 inserting); the public surface is write-only.
 
-Until migration step 6, multiple `DbWriter` instances may coexist
-(one in `SearchServer`, one in the Model thread). WAL + the 30s
-busy_timeout from `open_connection` serialize them at the SQLite
-level. Step 6 collapses them to a single instance on the DBWriter
-thread.
+In the running server `WriterThread` (defined below) is the sole
+owner of the post-init `DbWriter`. It opens the connection on its
+own thread (so `check_same_thread=True` works) and consumes write
+requests from a `Queue` populated by SearchThread, ModelThread, and
+SearchServer's startup bootstrap. Background producers post via
+`DbWriterProxy`, a tiny wrapper that has the same write methods as
+`DbWriter` but turns each call into a `WriteMessage` on the queue.
+
+Single-process / single-thread callers (the `cli/db.py` admin
+commands, the bootstrap-on-init path on the main thread, tests)
+construct `DbWriter` directly; they're already single-threaded so
+they don't need the queue indirection.
 """
 
 import logging
 import math
 import pickle
 import sqlite3
+import threading
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from queue import Queue
 from statistics import StatisticsError, median
 from typing import Optional
 
@@ -105,7 +115,10 @@ class DbWriter(object):
         if path is None:
             path = ':memory:'
         self._path = path
-        self._db = open_connection(path, readonly=False)
+        # Always single-thread: WriterThread opens its instance on its
+        # own thread, the CLI / bootstrap / tests are main-thread only.
+        # No caller crosses a thread boundary with this connection.
+        self._db = open_connection(path, readonly=False, same_thread=True)
         # Configuration -> conf_id, populated by `find_or_add_conf`.
         # Positive lookups only (None never cached).
         self._conf_id_cache: dict[Configuration, int] = {}
@@ -426,3 +439,137 @@ class DbWriter(object):
         })
         cur.execute('COMMIT')
         logging.info(f"Saved model '{name}' ({len(data)} bytes)")
+
+
+# --- WriterThread + queued writes -------------------------------------------
+
+
+@dataclass
+class AddRun:
+    conf: Configuration
+    run: Run
+    strategy: Optional[str] = None
+    track_winner_change: bool = False
+
+
+@dataclass
+class PredictedTimeRow:
+    conf_id: int
+    system: str
+    time_s: float
+
+
+@dataclass
+class UpsertPredictedTimeEstimates:
+    rows: list[PredictedTimeRow]
+
+
+@dataclass
+class SaveModel:
+    name: str
+    obj: object
+
+
+@dataclass
+class UpdateAllScores:
+    pass
+
+
+@dataclass
+class Stop:
+    pass
+
+
+WriteMessage = (
+    AddRun
+    | UpsertPredictedTimeEstimates
+    | SaveModel
+    | UpdateAllScores
+    | Stop
+)
+
+
+class DbWriterProxy:
+    """Drop-in for `DbWriter` that posts each call as a `WriteMessage`.
+
+    Background producers (Search/Model threads) hold one of these and
+    call the same write methods they used to call on `DbWriter`; the
+    actual SQL runs on `WriterThread`. Writes are fire-and-forget —
+    `add_run`'s `changed_winner` return value is dropped.
+    """
+
+    def __init__(self, queue: Queue):
+        self._queue = queue
+
+    def add_run(
+        self,
+        conf: Configuration,
+        run: Run,
+        strategy: Optional[str] = None,
+        track_winner_change: bool = False,
+    ) -> None:
+        self._queue.put(AddRun(
+            conf=conf, run=run,
+            strategy=strategy,
+            track_winner_change=track_winner_change,
+        ))
+
+    def upsert_predicted_time_estimates(
+        self, rows: Iterable[tuple[int, str, float]]
+    ) -> None:
+        # Materialize before queueing — the producer's iterator may
+        # close before the WriterThread gets to it.
+        self._queue.put(UpsertPredictedTimeEstimates([
+            PredictedTimeRow(conf_id=cid, system=s, time_s=t)
+            for (cid, s, t) in rows
+        ]))
+
+    def save_model(self, name: str, obj) -> None:
+        self._queue.put(SaveModel(name=name, obj=obj))
+
+    def update_all_scores(self) -> None:
+        self._queue.put(UpdateAllScores())
+
+
+class WriterThread(threading.Thread):
+    """Owns the only post-init writable connection in the server.
+
+    Opens its `DbWriter` on this thread (so `check_same_thread=True`
+    holds) and serializes all writes from background producers.
+    """
+
+    def __init__(self, db_path: Optional[str], queue: Queue):
+        super().__init__(daemon=True)
+        self._db_path = db_path
+        self._queue = queue
+
+    def run(self):
+        writer = DbWriter(self._db_path)
+        logging.info("Started writer thread")
+        try:
+            while True:
+                m = self._queue.get()
+                match m:
+                    case AddRun(
+                        conf=conf, run=run, strategy=strategy,
+                        track_winner_change=track,
+                    ):
+                        writer.add_run(
+                            conf, run,
+                            strategy=strategy,
+                            track_winner_change=track,
+                        )
+                    case UpsertPredictedTimeEstimates(rows=rows):
+                        writer.upsert_predicted_time_estimates(
+                            (r.conf_id, r.system, r.time_s) for r in rows)
+                    case SaveModel(name=name, obj=obj):
+                        writer.save_model(name, obj)
+                    case UpdateAllScores():
+                        writer.update_all_scores()
+                    case Stop():
+                        logging.info("Stopping writer thread")
+                        break
+                    case _:
+                        assert False, f"Unknown write message: {m!r}"
+        finally:
+            writer.close()

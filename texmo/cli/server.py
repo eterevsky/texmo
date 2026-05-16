@@ -10,7 +10,6 @@ import logging
 import matplotlib
 
 from ..configuration import Template
-from ..db import DbWriter
 from ..server import SearchServer
 from ..tokens import set_tokens_dir
 
@@ -22,12 +21,10 @@ def main(args: argparse.Namespace):
     template = Template.from_args(args)
     logging.info(f"Template: {template}")
 
-    db_writer = DbWriter.from_args(args.db)
     train_time = tuple(map(float, args.train_time.split("-")))
     logging.info(f"T ∈ {train_time} s")
     server = SearchServer(
-        db_writer, template, train_time, args.default_spec,
-        bootstrap_models=args.bootstrap_models,
+        args.db, template, train_time, args.default_spec,
     )
 
     server.serve(api_key=args.api_key or '')
@@ -109,17 +106,6 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="range for the training time in seconds",
     )
     parser.add_argument("--default-spec", type=str, default=None, help="default model")
-    parser.add_argument(
-        "--bootstrap-models",
-        action="store_true",
-        default=False,
-        help=(
-            "Before accepting requests, synchronously fit the timing "
-            "model (same as `db-bootstrap-estimates`) and train the "
-            "loss-prediction RNN. Lets the predicted-best strategy run "
-            "immediately. Takes minutes on a populated DB."
-        ),
-    )
     parser.add_argument(
         "--api-key",
         type=str,

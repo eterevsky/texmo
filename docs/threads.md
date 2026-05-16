@@ -128,16 +128,23 @@ threads — they dispatch into the request-handler thread pool.
 ## Queues
 
 - `write_queue`
-  - Producers: request handlers (`/add`), Model (predicted-time
-    bulk upserts, snapshot persistence).
-  - Consumer: DBWriter.
-  - Commands:
-    - `add_run` (fields: `conf`, `run`, `strategy`)
-    - `upsert_predicted_estimates` (fields: `system`, `rows`)
-    - `save_model` (fields: `name`, `blob`)
+  - Producers: SearchThread (`AddRun` on the `/add` path) and
+    ModelThread (predicted-time bulk upserts, timing/loss snapshot
+    persistence). Both go through `DbWriterProxy`, which has the same
+    method names as `DbWriter` and turns each call into a message.
+  - Consumer: WriterThread (`texmo.db.writer.WriterThread`).
+  - Messages (`WriteMessage = AddRun | UpsertPredictedTimeEstimates
+    | SaveModel | UpdateAllScores | Stop`):
+    - `AddRun(conf, run, strategy, track_winner_change)`
+    - `UpsertPredictedTimeEstimates(rows)`
+    - `SaveModel(name, obj)`
+    - `UpdateAllScores()` (queue-side wrapper exists; only the
+      bootstrap path uses it today, and that runs on the main thread
+      with a direct `DbWriter` rather than via the queue)
+    - `Stop()` — exit the loop.
   - Search does **not** write. Anything bookkeeping-adjacent that
     needs to land in the DB is either piggy-backed on `/add` by the
-    handler or routed via Model.
+    SearchThread or routed via Model.
 
 - `select_queue`
   - Producers:
@@ -291,18 +298,29 @@ Land in this order so each step is independently verifiable:
    showed `conf_neighbors` averages ~1 ms/call without them.
 4. **Standardise queue messages on per-command dataclasses.** Touch
    every existing producer/consumer pair (mechanical refactor). The
-   `train_queue` is already on the new format (done as part of step
-   2); the remaining queues — `requests_queue`, `confs_by_system`,
-   and the future `write_queue` / `latency_queue` — still need it.
+   `train_queue` and `write_queue` are already on the new format
+   (done as part of steps 2 and 6); the remaining queues —
+   `requests_queue`, `confs_by_system`, and the future
+   `latency_queue` — still need it.
 5. ~~**Split `ResultDB` into `DbReader` / `DbWriter`**~~ **done**:
    live under `texmo/db/{common,reader,writer}.py` with the schema
    at `texmo/db/schema.sql`. Semantics unchanged; the boundary is
    now type-enforced.
-6. **Introduce DBWriter thread and `write_queue`.** The `DbWriter`
-   instance moves onto that thread. All other threads queue write
-   requests. Drop the SQL-level `_UPSERT_PREDICTED_ESTIMATE`
-   ON CONFLICT guard once writes are serialized by construction.
-   Wire the I/O-error panic path to the existing `/stop` shutdown.
+6. ~~**Introduce DBWriter thread and `write_queue`.**~~ **done**:
+   `WriterThread` in `texmo/db/writer.py` owns the only post-init
+   `DbWriter`; producers (ModelThread, request handlers) hold a
+   `DbWriterProxy` and post `WriteMessage`s (`AddRun`,
+   `UpsertPredictedTimeEstimates`, `SaveModel`, `UpdateAllScores`,
+   `Stop`). `SearchThread` is read-only now: the `/add` HTTP
+   handler enqueues `AddRun` + `RunAdded` directly from the
+   request-handler thread. Bootstrap on `SearchServer.__init__`
+   runs on the main thread with a temporary `DbWriter` opened and
+   closed before `WriterThread` starts, so no writable connection
+   ever crosses a thread boundary; `DbWriter` defaults to
+   `check_same_thread=True`. The SQL-level
+   `_UPSERT_PREDICTED_ESTIMATE` `ON CONFLICT` guard and the
+   I/O-error panic path are still outstanding (carve-outs for a
+   later commit, not blockers for step 7).
 7. **Move `latency._measures` onto its own thread** with the
    request/response queue protocol described above.
 8. **Optional: spawn N Search threads.** Created explicitly in

@@ -28,11 +28,17 @@ from .configuration import (
     Template,
     default_from_template,
 )
-from .latency import get_report, report, timer
 from .db import DbReader, DbWriter
-from .predict import loss_rnn
+from .db.writer import DbWriterProxy, Stop as WriterStop, WriterThread
+from .latency import get_report, report, timer
 from .predict.loss_rnn import LossModelHolder
-from .predict.model_thread import LossRefit, ModelThread, Stop as ModelStop, bootstrap
+from .predict.model_thread import (
+    BootstrapTiming,
+    LossRefit,
+    ModelThread,
+    RunAdded,
+    Stop as ModelStop,
+)
 from .predict.timing import TrainTimingModel
 from .report import build_throughput_graph, per_system_throughput
 from .run import Run
@@ -291,17 +297,15 @@ def _render_bounds(b: Bounds):
 class SearchServer(object):
     def __init__(
         self,
-        db_writer: DbWriter,
+        path: str,
         template: Template,
         train_time: tuple[float, float],
         default_spec: str,
-        bootstrap_models: bool = False,
     ):
-        self.db_writer: DbWriter = db_writer
-        # The path is the read-only handle factory for per-request reads
-        # in `index` / `compare` / `throughput`; opening a fresh DbReader
-        # per request avoids contending with the writer's connection.
-        self.path: str = db_writer.path
+        # `path` is also the read-only handle factory for per-request
+        # reads in `index` / `compare` / `throughput`; opening a fresh
+        # `DbReader` per request avoids contending with the writer.
+        self.path: str = path
         self.template: Template = template
         self.train_time: tuple[float, float] = train_time
         # Stored for `update()` so a template change with no literal
@@ -321,57 +325,67 @@ class SearchServer(object):
         self.timing_model = TrainTimingModel()
         self.loss_model = LossModelHolder()
 
-        # Load any persisted models from the DB. With --bootstrap-models
-        # we retrain from scratch (overwriting what's persisted).
-        # Otherwise we use whatever was saved; if nothing is there we
-        # fall through to the async refit at the end of init.
-        loaded_loss_model = None
-        with DbReader(self.path) as reader:
-            if bootstrap_models:
-                logging.info("Bootstrap: fitting timing model synchronously")
-                bootstrap(reader, db_writer, self.timing_model)
-                logging.info("Bootstrap: training loss model synchronously")
-                loaded_loss_model = loss_rnn.train_loss_model(reader)
-                if loaded_loss_model is not None:
-                    db_writer.save_model('loss', loaded_loss_model)
-            else:
-                loaded_timing = reader.load_model('timing')
-                if loaded_timing is not None:
-                    # Adopt the persisted instance as the shared one.
-                    # Safe to swap here: no threads have been started yet.
-                    self.timing_model = loaded_timing
-                    logging.info(
-                        "Loaded persisted timing model from DB "
-                        f"({len(loaded_timing.keys())} pairs)")
-                loaded_loss_model = reader.load_model('loss')
-                if loaded_loss_model is not None:
-                    logging.info(
-                        "Loaded persisted loss model from DB "
-                        f"(max_layers={loaded_loss_model.max_layers})")
+        # Apply the schema if this is a fresh DB so the read below
+        # doesn't trip on a not-yet-created file — `open_connection`
+        # only runs the schema bootstrap on a read-write open. The
+        # temporary writer lives only on this thread.
+        with DbWriter(self.path):
+            pass
 
-        if loaded_loss_model is not None:
-            self.loss_model.set_model(loaded_loss_model)
+        # Whatever's missing here gets trained async on the Model
+        # thread once the queues are wired up below.
+        need_timing_bootstrap = True
+        need_loss_refit = True
+        with DbReader(self.path) as reader:
+            loaded_timing = reader.load_model('timing')
+            if loaded_timing is not None:
+                # Adopt the persisted instance as the shared one.
+                # Safe to swap here: no threads have been started yet.
+                self.timing_model = loaded_timing
+                need_timing_bootstrap = False
+                logging.info(
+                    "Loaded persisted timing model from DB "
+                    f"({len(loaded_timing.keys())} pairs)")
+            loaded_loss_model = reader.load_model('loss')
+            if loaded_loss_model is not None:
+                self.loss_model.set_model(loaded_loss_model)
+                need_loss_refit = False
+                logging.info(
+                    "Loaded persisted loss model from DB "
+                    f"(max_layers={loaded_loss_model.max_layers})")
+
+        # Writer thread first: producers below post to its queue and
+        # we want a consumer ready before that happens.
+        self.write_queue: Queue = Queue()
+        self.writer_thread = WriterThread(self.path, self.write_queue)
+        self.writer_thread.start()
+
+        # Server-side handle the request handlers and `add_run` use to
+        # enqueue writes without touching SearchThread.
+        self._writer = DbWriterProxy(self.write_queue)
 
         self.train_queue: Queue = Queue()
         self.model_thread = ModelThread(
             self.path, self.train_queue,
+            write_queue=self.write_queue,
             timing_model=self.timing_model,
             loss_model=self.loss_model,
         )
         self.model_thread.start()
-        if loaded_loss_model is None and not bootstrap_models:
-            # No persisted loss model — train one async against
-            # whatever data is in the DB. Before this completes the
-            # predicted-best strategy falls through.
+        # Whatever wasn't on disk: train it async. Each request gets a
+        # falls-through strategy until the Model thread publishes.
+        if need_timing_bootstrap:
+            self.train_queue.put(BootstrapTiming())
+        if need_loss_refit:
             self.train_queue.put(LossRefit())
 
         # SearchThread keeps its own persistent DbReader (long-lived,
-        # used by every `select` call) and shares the writer with this
-        # server for the `add` path.
+        # used by every `select` call). Writes happen on the request
+        # handler thread directly into `write_queue` — SearchThread is
+        # read-only now.
         self._search_reader = DbReader(self.path)
         self.search_thread = SearchThread(
             reader=self._search_reader,
-            writer=db_writer,
             template=template,
             train_time=train_time,
             default=self.default,
@@ -380,13 +394,13 @@ class SearchServer(object):
             confs_by_system_lock=self.confs_by_system_lock,
             timing_model=self.timing_model,
             loss_model=self.loss_model,
-            train_queue=self.train_queue,
         )
         self.search_thread.start()
 
     def __del__(self):
         self.requests_queue.put(("stop", None))
         self.train_queue.put(ModelStop())
+        self.write_queue.put(WriterStop())
 
     def index(self, selected_system: Optional[str] = None):
         if self.template.spec:
@@ -635,9 +649,17 @@ class SearchServer(object):
         conf = Configuration.from_dict(params["conf"])
         strategy = params.get("strategy")
         logging.info(f"Adding run: {conf} - {run} (strategy={strategy})")
-        self.requests_queue.put(("add", (conf, run, strategy)))
+        # Both queues are posted from this same request-handler thread
+        # in order; SQLite WAL guarantees that any subsequent refit on
+        # ModelThread reading after `AddRun` commits sees the new row.
+        self._writer.add_run(
+            conf, run, strategy=strategy, track_winner_change=True)
+        self.train_queue.put(
+            RunAdded(system=run.system, precision=conf.precision))
 
     def join(self):
+        # Producers first so no more writes / refits land on the
+        # writer queue, then the writer drains and exits.
         self.requests_queue.put(("stop", None))
         self.search_thread.join()
         logging.info("Search thread joined")
@@ -645,6 +667,9 @@ class SearchServer(object):
         self.train_queue.put(ModelStop())
         self.model_thread.join()
         logging.info("Model thread joined")
+        self.write_queue.put(WriterStop())
+        self.writer_thread.join()
+        logging.info("Writer thread joined")
 
     def serve(self, api_key: str):
         """Run the Flask app on the LAN-internal and external ports.

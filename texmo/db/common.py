@@ -150,7 +150,7 @@ _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'schema.sql')
 
 
 def open_connection(
-    path: Optional[str], readonly: bool
+    path: Optional[str], readonly: bool, same_thread: bool = False,
 ) -> sqlite3.Connection:
     """Open and configure a sqlite3 connection for results.db.
 
@@ -159,6 +159,13 @@ def open_connection(
     process can serialize cleanly. In-memory DBs skip WAL but keep the
     timeout. Read-only callers must point at a real (or shared-cache)
     file — sqlite refuses `mode=ro` on a plain `:memory:` DB.
+
+    `same_thread` controls sqlite's `check_same_thread` safety. The
+    `DbWriter` defaults to True now that `WriterThread` opens it on
+    its own thread; cross-thread `DbReader`s (the persistent one on
+    `SearchServer` for SearchThread) still pass False. Once step 8 of
+    the threading refactor lands and Search creates its reader on its
+    own thread, the DbReader default can flip too.
     """
     if path is None:
         path = ':memory:'
@@ -169,25 +176,14 @@ def open_connection(
     if not is_memory:
         logging.info(f'Connecting to results DB {path}')
 
-    # Connections may be created on one thread and used from another
-    # (SearchServer constructs the writer + a persistent reader on the
-    # main thread, then hands them to SearchThread). `check_same_thread
-    # =False` disables sqlite's safety check; concurrency is managed at
-    # the WAL / busy_timeout / cursor level instead.
-    #
-    # TODO: drop `check_same_thread=False` once the migration is done.
-    # After step 6 the DBWriter thread is the sole owner of the writer
-    # connection, and after step 8 each Search thread owns its own
-    # reader — at that point every connection is single-threaded again
-    # and the safety check should be re-enabled, especially for the
-    # writer, so a stray cross-thread call fails loudly instead of
-    # silently corrupting state.
     if readonly:
         assert not is_memory, "Can't open in-memory database read-only"
         db = sqlite3.connect(
-            f'file:{path}?mode=ro', uri=True, check_same_thread=False)
+            f'file:{path}?mode=ro', uri=True,
+            check_same_thread=same_thread)
     else:
-        db = sqlite3.connect(path, uri=is_uri, check_same_thread=False)
+        db = sqlite3.connect(
+            path, uri=is_uri, check_same_thread=same_thread)
     db.row_factory = sqlite3.Row
     db.create_function('REGEXP', 2, _regexp)
 

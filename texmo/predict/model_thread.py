@@ -1,10 +1,11 @@
 """Background thread that fits timing & loss models and writes estimates.
 
-Opens its own `DbReader` and `DbWriter` connections (separate from
-SearchThread's) so transactions on the two threads don't interleave
-on a shared SQLite connection. Owns the writer side of the shared
-`TrainTimingModel` and `LossModelHolder` references (passed in at
-construction) and consumes `TrainMessage`s from its input queue:
+Opens its own `DbReader` (separate from SearchThread's) so reads
+don't compete with the search loop. Posts every write through a
+shared `DbWriterProxy` that lands the request on the `WriterThread`'s
+queue. Owns the writer side of the shared `TrainTimingModel` and
+`LossModelHolder` references (passed in at construction) and
+consumes `TrainMessage`s from its input queue:
 
     RunAdded(system, precision)
         Notification that a new run has been written to the DB. The
@@ -24,7 +25,9 @@ estimate rows.
 
 A full bootstrap — median backfill + fit all pairs + predictions for
 confs without runs — is exposed as a synchronous `bootstrap()` function
-so startup can block on it before serving requests.
+so startup can block on it before serving requests. Bootstrap takes a
+plain `DbWriter` (called from the main thread before `WriterThread`
+starts) rather than a queue.
 """
 
 import logging
@@ -36,6 +39,7 @@ from queue import Queue
 from .. import latency
 from ..configuration import Configuration
 from ..db import DbReader, DbWriter
+from ..db.writer import DbWriterProxy
 from ..precision import Precision
 from . import loss_rnn
 from .loss_rnn import LossModelHolder
@@ -62,7 +66,16 @@ class RunAdded:
 
 @dataclass
 class LossRefit:
-    """Force a loss-model refit now (used at startup)."""
+    """Force a loss-model refit now (used at startup when there's no
+    persisted loss model on disk)."""
+
+
+@dataclass
+class BootstrapTiming:
+    """Run the full timing-model bootstrap on the Model thread: median
+    backfill, per-(system, precision) refits, predicted estimates for
+    every conf without a median. Used at startup when there's no
+    persisted timing model on disk."""
 
 
 @dataclass
@@ -70,12 +83,12 @@ class Stop:
     """Stop the model thread."""
 
 
-TrainMessage = RunAdded | LossRefit | Stop
+TrainMessage = RunAdded | LossRefit | BootstrapTiming | Stop
 
 
 def _refresh_estimates(
     reader: DbReader,
-    writer: DbWriter,
+    writer: DbWriter | DbWriterProxy,
     model: TrainTimingModel,
     system: str,
     precision: Precision,
@@ -115,7 +128,7 @@ def _refresh_estimates(
 
 def _refit_pair(
     reader: DbReader,
-    writer: DbWriter,
+    writer: DbWriter | DbWriterProxy,
     model: TrainTimingModel,
     system: str,
     precision: Precision,
@@ -158,12 +171,17 @@ class ModelThread(threading.Thread):
         self,
         db_path: str | None,
         queue: Queue,
+        write_queue: Queue,
         timing_model: TrainTimingModel,
         loss_model: LossModelHolder,
     ):
         super().__init__(daemon=True)
         self._db_path = db_path
         self._queue = queue
+        # Posts every write through `WriterThread`; constructed inside
+        # `run()` together with the reader so neither connection
+        # crosses a thread boundary.
+        self._write_queue = write_queue
         # Shared references with the Search threads. Per-(system,
         # precision) weight inserts on `timing_model` are atomic;
         # `loss_model.set_model(...)` is a single pointer swap.
@@ -176,7 +194,7 @@ class ModelThread(threading.Thread):
 
     def run(self):
         reader = DbReader(self._db_path)
-        writer = DbWriter(self._db_path)
+        writer = DbWriterProxy(self._write_queue)
         logging.info("Started model thread")
         try:
             while True:
@@ -186,6 +204,8 @@ class ModelThread(threading.Thread):
                         self._on_run_added(reader, writer, s, p)
                     case LossRefit():
                         self._refit_loss(reader, writer)
+                    case BootstrapTiming():
+                        bootstrap(reader, writer, self._timing_model)
                     case Stop():
                         logging.info("Stopping model thread")
                         break
@@ -193,10 +213,9 @@ class ModelThread(threading.Thread):
                         assert False, f"Unknown message: {m!r}"
         finally:
             reader.close()
-            writer.close()
 
     def _on_run_added(
-        self, reader: DbReader, writer: DbWriter,
+        self, reader: DbReader, writer: DbWriterProxy,
         system: str, precision: Precision,
     ):
         key = (system, precision)
@@ -210,7 +229,7 @@ class ModelThread(threading.Thread):
             self._total_run_counter = 0
             self._refit_loss(reader, writer)
 
-    def _refit_loss(self, reader: DbReader, writer: DbWriter):
+    def _refit_loss(self, reader: DbReader, writer: DbWriterProxy):
         loss_model = loss_rnn.train_loss_model(reader)
         if loss_model is not None:
             writer.save_model('loss', loss_model)

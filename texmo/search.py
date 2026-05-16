@@ -11,12 +11,10 @@ import numpy as np
 from . import latency
 from .common import INF, itoa3, ttoa3
 from .configuration import Configuration, Template, conf_neighbors
-from .db import ConfScore, ConfWithRuns, DbReader, DbWriter
+from .db import ConfScore, ConfWithRuns, DbReader
 from .predict.loss_rnn import LossModelHolder
-from .predict.model_thread import RunAdded
 from .predict.timing import TrainTimingModel
 from .report import format_top_conf_row
-from .run import Run
 
 
 @dataclass
@@ -186,7 +184,6 @@ class Search(object):
     def __init__(
         self,
         reader: DbReader,
-        writer: DbWriter,
         template: Template,
         init_conf: Configuration,
         train_time: tuple[float, float],
@@ -194,12 +191,10 @@ class Search(object):
         loss_model: LossModelHolder,
     ):
         assert isinstance(reader, DbReader)
-        assert isinstance(writer, DbWriter)
-        # `_db` is the read handle used by every strategy below.
-        # `_writer` is held only for `add_run`; it will go away once
-        # the DBWriter thread lands (migration step 6).
+        # `_db` is the read handle used by every strategy below. Search
+        # is read-only; `add_run` now goes straight to the writer queue
+        # from `SearchThread` without a Search detour.
         self._db = reader
-        self._writer = writer
 
         assert isinstance(template, Template)
         self.template = template
@@ -217,17 +212,6 @@ class Search(object):
         # `LossModel` gets swapped atomically on refit.
         self.timing_model = timing_model
         self.loss_model = loss_model
-
-    def add_run(
-        self,
-        conf: Configuration,
-        run: Run,
-        strategy: Optional[str] = None,
-    ) -> Optional[bool]:
-        assert isinstance(conf, Configuration)
-        assert isinstance(run, Run)
-        return self._writer.add_run(
-            conf, run, strategy=strategy, track_winner_change=True)
 
     def _select_time(self) -> float:
         tmin, tmax = self.train_time
@@ -610,20 +594,17 @@ class Search(object):
 
 
 class SearchThread(threading.Thread):
-    """Drives the search loop and notifies the Model thread of new runs.
+    """Drives the search loop. Read-only — writes go straight from the
+    request handler into `write_queue`, with no Search detour.
 
-    Reads `select` / `add` / `set_template` / `stop` commands off the
-    requests queue. For `select` it asks `Search` for a candidate and
-    drops the result onto the per-system response queue. For `add` it
-    persists the run through `Search.add_run` (i.e. via the DB-writing
-    path) and then posts a `RunAdded` message to the Model thread,
-    which owns the refit-trigger counters.
+    Reads `select` / `set_template` / `stop` commands off the requests
+    queue. For `select` it asks `Search` for a candidate and drops the
+    result onto the per-system response queue.
     """
 
     def __init__(
         self,
         reader: DbReader,
-        writer: DbWriter,
         template: Template,
         train_time: tuple[float, float],
         default: Configuration,
@@ -632,13 +613,11 @@ class SearchThread(threading.Thread):
         confs_by_system_lock: threading.Lock,
         timing_model: TrainTimingModel,
         loss_model: LossModelHolder,
-        train_queue: Optional[Queue] = None,
     ):
         super().__init__()
         self.template = template
         self.search = Search(
             reader=reader,
-            writer=writer,
             template=template,
             init_conf=default,
             train_time=train_time,
@@ -649,7 +628,6 @@ class SearchThread(threading.Thread):
         self.confs_by_system = confs_by_system
         self.confs_by_system_lock = confs_by_system_lock
         _, self.max_time = train_time
-        self._train_queue = train_queue
 
     def run(self):
         logging.info("Started search thread")
@@ -662,17 +640,6 @@ class SearchThread(threading.Thread):
                 result = self.search.select_conf(system)
                 with self.confs_by_system_lock:
                     self.confs_by_system[system].put(result)
-            elif command == "add":
-                # TODO: move this whole branch out of SearchThread once
-                # the DBWriter thread lands (migration step 6). The
-                # request handler should post directly to write_queue +
-                # train_queue with no Search detour — Search has no
-                # business knowing about new runs synchronously.
-                conf, run, strategy = args
-                self.search.add_run(conf, run, strategy=strategy)
-                if self._train_queue is not None:
-                    self._train_queue.put(
-                        RunAdded(system=run.system, precision=conf.precision))
             elif command == "set_template":
                 template, init_conf, train_time = args
                 self.search.template = template

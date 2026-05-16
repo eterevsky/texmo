@@ -15,6 +15,7 @@ import pytest
 
 from texmo.configuration import Configuration
 from texmo.db import DbReader, DbWriter
+from texmo.db.writer import Stop as WriterStop, WriterThread
 from texmo.model import build_model_def
 from texmo.precision import Precision
 from texmo.predict import model_thread
@@ -70,10 +71,19 @@ def _seed_runs(
 
 
 def _run_thread(db_path: str, messages: list):
-    """Run ModelThread with messages + Stop; block until done."""
+    """Run ModelThread with messages + Stop; block until done.
+
+    Spins up a real `WriterThread` so the writes ModelThread posts
+    actually land in the DB before assertions run.
+    """
+    write_queue = Queue()
+    writer_thread = WriterThread(db_path, write_queue)
+    writer_thread.start()
+
     q = Queue()
     thread = ModelThread(
         db_path, q,
+        write_queue=write_queue,
         timing_model=TrainTimingModel(),
         loss_model=LossModelHolder(),
     )
@@ -83,6 +93,10 @@ def _run_thread(db_path: str, messages: list):
     q.put(Stop())
     thread.join(timeout=60)
     assert not thread.is_alive(), "model thread did not stop"
+
+    write_queue.put(WriterStop())
+    writer_thread.join(timeout=60)
+    assert not writer_thread.is_alive(), "writer thread did not stop"
 
 
 @pytest.fixture(autouse=True)

@@ -32,6 +32,33 @@ class SearchResult:
             "strategy": self.strategy,
         }
 
+
+# --- requests_queue message types ------------------------------------------
+
+
+@dataclass
+class Select:
+    """Ask `SearchThread` to pick a candidate for `system` and push the
+    `SearchResult` onto `confs_by_system[system]`."""
+    system: str
+
+
+@dataclass
+class SetTemplate:
+    """Reconfigure `Search` between two `select_conf` calls. The trio
+    moves together so a partial update never lands on the search loop."""
+    template: Template
+    init_conf: Configuration
+    train_time: tuple[float, float]
+
+
+@dataclass
+class Stop:
+    """Stop the search thread."""
+
+
+SearchMessage = Select | SetTemplate | Stop
+
 # Probability of running the predicted-best strategy at BFS depth 2
 # (~100 candidates) before falling back to others. Requires both loss
 # and timing models to be ready.
@@ -644,25 +671,27 @@ class SearchThread(threading.Thread):
         logging.info("Started search thread")
         try:
             while True:
-                command, args = self.requests_queue.get()
-                if command == "select":
-                    system = args
-                    if system is None:
+                m = self.requests_queue.get()
+                match m:
+                    case Select(system=system):
+                        result = self.search.select_conf(system)
+                        with self.confs_by_system_lock:
+                            self.confs_by_system[system].put(result)
+                    case SetTemplate(
+                        template=template,
+                        init_conf=init_conf,
+                        train_time=train_time,
+                    ):
+                        self.search.template = template
+                        self.search.init_conf = init_conf
+                        self.search.train_time = train_time
+                        self.max_time = train_time[1]
+                        logging.info(
+                            f'Search thread: new template {template}')
+                    case Stop():
+                        logging.info("Stopping search thread")
                         break
-                    result = self.search.select_conf(system)
-                    with self.confs_by_system_lock:
-                        self.confs_by_system[system].put(result)
-                elif command == "set_template":
-                    template, init_conf, train_time = args
-                    self.search.template = template
-                    self.search.init_conf = init_conf
-                    self.search.train_time = train_time
-                    self.max_time = train_time[1]
-                    logging.info(f'Search thread: new template {template}')
-                elif command == "stop":
-                    logging.info("Stopping search thread")
-                    break
-                else:
-                    assert False, f"Unknown command: {command}"
+                    case _:
+                        assert False, f"Unknown message: {m!r}"
         finally:
             reader.close()

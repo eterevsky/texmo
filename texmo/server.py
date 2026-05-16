@@ -42,7 +42,12 @@ from .predict.model_thread import (
 from .predict.timing import TrainTimingModel
 from .report import build_throughput_graph, per_system_throughput
 from .run import Run
-from .search import SearchThread
+from .search import (
+    Select,
+    SearchThread,
+    SetTemplate,
+    Stop as SearchStop,
+)
 
 
 # Paths reachable on the external (auth-required) port. Anything else
@@ -397,7 +402,7 @@ class SearchServer(object):
         self.search_thread.start()
 
     def __del__(self):
-        self.requests_queue.put(("stop", None))
+        self.requests_queue.put(SearchStop())
         self.train_queue.put(ModelStop())
         self.write_queue.put(WriterStop())
 
@@ -509,9 +514,11 @@ class SearchServer(object):
         # Mutate the search thread's state via a queue message so the
         # update applies atomically between two select_conf calls
         # rather than racing the loop.
-        self.requests_queue.put(
-            ("set_template", (new_template, new_default, new_train_time))
-        )
+        self.requests_queue.put(SetTemplate(
+            template=new_template,
+            init_conf=new_default,
+            train_time=new_train_time,
+        ))
         # SearchServer-side copies are read by Flask handlers (index
         # form rendering, /compare); the search thread's copies may
         # lag by one queue step but converge on the next select.
@@ -626,10 +633,10 @@ class SearchServer(object):
         with self.confs_by_system_lock:
             if system not in self.confs_by_system:
                 self.confs_by_system[system] = Queue()
-                self.requests_queue.put(("select", system))
+                self.requests_queue.put(Select(system=system))
             response_queue = self.confs_by_system[system]
 
-        self.requests_queue.put(("select", system))
+        self.requests_queue.put(Select(system=system))
 
         result = response_queue.get()
         if result is None:
@@ -659,7 +666,7 @@ class SearchServer(object):
     def join(self):
         # Producers first so no more writes / refits land on the
         # writer queue, then the writer drains and exits.
-        self.requests_queue.put(("stop", None))
+        self.requests_queue.put(SearchStop())
         self.search_thread.join()
         logging.info("Search thread joined")
         self.train_queue.put(ModelStop())

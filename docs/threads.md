@@ -296,12 +296,14 @@ Land in this order so each step is independently verifiable:
 3. ~~Cache decisions~~ **done**: `model._cache` and
    `Template._conf_neighbors_cache` were removed once measurement
    showed `conf_neighbors` averages ~1 ms/call without them.
-4. **Standardise queue messages on per-command dataclasses.** Touch
-   every existing producer/consumer pair (mechanical refactor). The
-   `train_queue` and `write_queue` are already on the new format
-   (done as part of steps 2 and 6); the remaining queues —
-   `requests_queue`, `confs_by_system`, and the future
-   `latency_queue` — still need it.
+4. ~~**Standardise queue messages on per-command dataclasses.**~~
+   **done**: `requests_queue` carries `Select` / `SetTemplate` /
+   `Stop` from `texmo/search.py` (defined alongside `Search` and
+   `SearchThread`). `train_queue` and `write_queue` were already on
+   the new format from steps 2 and 6. `confs_by_system` is exempt
+   (single payload type — `SearchResult | None`). The future
+   `latency_queue` will adopt the same pattern when it lands in
+   step 7.
 5. ~~**Split `ResultDB` into `DbReader` / `DbWriter`**~~ **done**:
    live under `texmo/db/{common,reader,writer}.py` with the schema
    at `texmo/db/schema.sql`. Semantics unchanged; the boundary is

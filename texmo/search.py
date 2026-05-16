@@ -326,12 +326,11 @@ class Search(object):
             return None
 
         # Cap predicted train_time at maxt per-neighbor by halving steps.
-        # Applied before the run-count lookup so the "fewest runs" pick
-        # weighs the capped variant — otherwise (spec, 1024 steps) with
-        # 0 runs would silently beat (spec, 32 steps) with 10 runs. The
-        # set dedupes in case two original neighbors collapse onto the
-        # same capped conf.
+        # The set dedupes in case two original neighbors collapse onto
+        # the same capped conf, and we drop `conf` itself in case the
+        # cap brought a higher-steps neighbor back onto the seed.
         neighbors = {self._cap_steps(n, system) for n in neighbors}
+        neighbors.discard(conf)
 
         neighbor_ids = [
             cid for cid in (self._db.get_conf_id(n) for n in neighbors)
@@ -487,6 +486,38 @@ class Search(object):
 
             return None
 
+    def _select_global_top(
+        self, max_weights: int, system: str
+    ) -> Optional[Configuration]:
+        """Cross-system coverage: pick the global top conf at
+        `weights ≤ max_weights`, cap its steps to fit maxt on `system`,
+        and propose it if this system hasn't run it yet.
+
+        Without this, the throughput-comparison page is misleading —
+        we only know how a top conf performs on the system(s) that
+        happened to discover it. Falls through (returns None) once
+        every global top is covered, so the regular search strategies
+        keep running.
+        """
+        with latency.timer("Search._select_global_top"):
+            top_confs = list(
+                self._db.top_confs_global(
+                    self.template, max_weights=max_weights))
+            if not top_confs:
+                return None
+            # `top_confs_global` yields a strictly-improving Pareto
+            # front; the last one is the global best at this budget.
+            best = top_confs[-1]
+            capped = self._cap_steps(best.conf, system)
+            conf_id = self._db.get_conf_id(capped)
+            if conf_id is not None:
+                counts = self._db.get_run_counts(
+                    [conf_id], system=system)
+                _, system_runs = counts.get(conf_id, (0, 0))
+                if system_runs > 0:
+                    return None
+            return capped
+
     def _select_predicted_best(
         self, t: float, max_weights: int, system: str, bfs_depth: int,
     ) -> Optional[Configuration]:
@@ -615,7 +646,10 @@ class Search(object):
     def select_conf(self, system: str) -> Optional[SearchResult]:
         """Select a SearchResult, or None if nothing matches.
 
-        Four strategies, tried in order of preference with fallback:
+        Strategies, tried in order with fallback:
+        * global-top — always tried; cross-system coverage for the
+          global top conf at the current weight budget. Falls through
+          once every top is covered on this system.
         * predicted-best at BFS depth 2 (needs both loss and timing
           models) — _PREDICTED_2ND_NEIGHBOR_PROB of the time;
         * predicted-best at BFS depth 3 (bigger jump from the seed) —
@@ -627,6 +661,14 @@ class Search(object):
         with latency.timer("Search.select_conf"):
             t = self._select_time()
             max_weights = self._select_max_weights(t, system)
+
+            # Cross-system coverage first: if the global top conf at
+            # this weight budget hasn't been run on `system`, do that.
+            # Falls through once every global top is covered.
+            conf = self._select_global_top(max_weights, system)
+            if conf is not None:
+                logging.info(f'Conf for {system}: {conf} (global_top)')
+                return SearchResult(conf, 'global_top', system)
 
             if random.random() < _PREDICTED_2ND_NEIGHBOR_PROB:
                 conf = self._select_predicted_best(

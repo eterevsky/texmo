@@ -115,10 +115,7 @@ class DbWriter(object):
         if path is None:
             path = ':memory:'
         self._path = path
-        # Always single-thread: WriterThread opens its instance on its
-        # own thread, the CLI / bootstrap / tests are main-thread only.
-        # No caller crosses a thread boundary with this connection.
-        self._db = open_connection(path, readonly=False, same_thread=True)
+        self._db = open_connection(path, readonly=False)
         # Configuration -> conf_id, populated by `find_or_add_conf`.
         # Positive lookups only (None never cached).
         self._conf_id_cache: dict[Configuration, int] = {}

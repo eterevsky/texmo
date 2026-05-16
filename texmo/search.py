@@ -604,7 +604,7 @@ class SearchThread(threading.Thread):
 
     def __init__(
         self,
-        reader: DbReader,
+        path: str,
         template: Template,
         train_time: tuple[float, float],
         default: Configuration,
@@ -615,40 +615,54 @@ class SearchThread(threading.Thread):
         loss_model: LossModelHolder,
     ):
         super().__init__()
+        # Search and the DbReader are built lazily on `run()` so the
+        # reader is opened on the thread that uses it; that lets
+        # `DbReader` enforce `check_same_thread=True`.
+        self._path = path
+        self._template = template
+        self._train_time = train_time
+        self._default = default
+        self._timing_model = timing_model
+        self._loss_model = loss_model
         self.template = template
-        self.search = Search(
-            reader=reader,
-            template=template,
-            init_conf=default,
-            train_time=train_time,
-            timing_model=timing_model,
-            loss_model=loss_model,
-        )
         self.requests_queue = requests_queue
         self.confs_by_system = confs_by_system
         self.confs_by_system_lock = confs_by_system_lock
         _, self.max_time = train_time
+        self.search: Optional[Search] = None
 
     def run(self):
+        reader = DbReader(self._path)
+        self.search = Search(
+            reader=reader,
+            template=self._template,
+            init_conf=self._default,
+            train_time=self._train_time,
+            timing_model=self._timing_model,
+            loss_model=self._loss_model,
+        )
         logging.info("Started search thread")
-        while True:
-            command, args = self.requests_queue.get()
-            if command == "select":
-                system = args
-                if system is None:
+        try:
+            while True:
+                command, args = self.requests_queue.get()
+                if command == "select":
+                    system = args
+                    if system is None:
+                        break
+                    result = self.search.select_conf(system)
+                    with self.confs_by_system_lock:
+                        self.confs_by_system[system].put(result)
+                elif command == "set_template":
+                    template, init_conf, train_time = args
+                    self.search.template = template
+                    self.search.init_conf = init_conf
+                    self.search.train_time = train_time
+                    self.max_time = train_time[1]
+                    logging.info(f'Search thread: new template {template}')
+                elif command == "stop":
+                    logging.info("Stopping search thread")
                     break
-                result = self.search.select_conf(system)
-                with self.confs_by_system_lock:
-                    self.confs_by_system[system].put(result)
-            elif command == "set_template":
-                template, init_conf, train_time = args
-                self.search.template = template
-                self.search.init_conf = init_conf
-                self.search.train_time = train_time
-                self.max_time = train_time[1]
-                logging.info(f'Search thread: new template {template}')
-            elif command == "stop":
-                logging.info("Stopping search thread")
-                break
-            else:
-                assert False, f"Unknown command: {command}"
+                else:
+                    assert False, f"Unknown command: {command}"
+        finally:
+            reader.close()

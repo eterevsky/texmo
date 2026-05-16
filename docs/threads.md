@@ -313,11 +313,13 @@ Land in this order so each step is independently verifiable:
    `UpsertPredictedTimeEstimates`, `SaveModel`, `UpdateAllScores`,
    `Stop`). `SearchThread` is read-only now: the `/add` HTTP
    handler enqueues `AddRun` + `RunAdded` directly from the
-   request-handler thread. Bootstrap on `SearchServer.__init__`
-   runs on the main thread with a temporary `DbWriter` opened and
-   closed before `WriterThread` starts, so no writable connection
-   ever crosses a thread boundary; `DbWriter` defaults to
-   `check_same_thread=True`. The SQL-level
+   request-handler thread. `SearchServer.__init__` opens a temporary
+   `DbWriter` on the main thread only to apply the schema on a fresh
+   DB, then loads the persisted timing/loss models via `DbReader`
+   and posts `BootstrapTiming` / `LossRefit` for whatever's missing;
+   training runs async on the Model thread. Every connection (writer
+   and reader) is opened on the thread that uses it and inherits
+   sqlite's default `check_same_thread=True`. The SQL-level
    `_UPSERT_PREDICTED_ESTIMATE` `ON CONFLICT` guard and the
    I/O-error panic path are still outstanding (carve-outs for a
    later commit, not blockers for step 7).
@@ -334,11 +336,3 @@ Land in this order so each step is independently verifiable:
   sampling is atomic with the run insert. The result is recorded
   in the `changed_winner` column; the caller doesn't see it. No
   user-facing change.
-
-## Migration follow-ups
-
-- Drop `check_same_thread=False` in `db/common.py:open_connection`
-  once the writer lives entirely on the DBWriter thread (step 6) and
-  each Search thread owns its own reader (step 8). At that point
-  every connection is single-threaded again and the safety check
-  should be re-enabled, especially for the writer.

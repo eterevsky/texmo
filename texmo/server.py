@@ -379,13 +379,12 @@ class SearchServer(object):
         if need_loss_refit:
             self.train_queue.put(LossRefit())
 
-        # SearchThread keeps its own persistent DbReader (long-lived,
-        # used by every `select` call). Writes happen on the request
-        # handler thread directly into `write_queue` — SearchThread is
-        # read-only now.
-        self._search_reader = DbReader(self.path)
+        # SearchThread opens its own persistent DbReader inside `run()`
+        # (so the reader's connection lives on its own thread). Writes
+        # happen on the request handler thread directly into
+        # `write_queue` — SearchThread is read-only now.
         self.search_thread = SearchThread(
-            reader=self._search_reader,
+            path=self.path,
             template=template,
             train_time=train_time,
             default=self.default,
@@ -663,7 +662,6 @@ class SearchServer(object):
         self.requests_queue.put(("stop", None))
         self.search_thread.join()
         logging.info("Search thread joined")
-        self._search_reader.close()
         self.train_queue.put(ModelStop())
         self.model_thread.join()
         logging.info("Model thread joined")

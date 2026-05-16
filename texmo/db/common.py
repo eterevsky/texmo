@@ -150,7 +150,7 @@ _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'schema.sql')
 
 
 def open_connection(
-    path: Optional[str], readonly: bool, same_thread: bool = False,
+    path: Optional[str], readonly: bool,
 ) -> sqlite3.Connection:
     """Open and configure a sqlite3 connection for results.db.
 
@@ -160,12 +160,10 @@ def open_connection(
     timeout. Read-only callers must point at a real (or shared-cache)
     file — sqlite refuses `mode=ro` on a plain `:memory:` DB.
 
-    `same_thread` controls sqlite's `check_same_thread` safety. The
-    `DbWriter` defaults to True now that `WriterThread` opens it on
-    its own thread; cross-thread `DbReader`s (the persistent one on
-    `SearchServer` for SearchThread) still pass False. Once step 8 of
-    the threading refactor lands and Search creates its reader on its
-    own thread, the DbReader default can flip too.
+    Connections inherit sqlite's default `check_same_thread=True`:
+    every consumer (WriterThread, SearchThread's reader, ModelThread's
+    reader, per-request handler readers, the CLIs) opens its
+    connection on the thread that uses it.
     """
     if path is None:
         path = ':memory:'
@@ -178,12 +176,9 @@ def open_connection(
 
     if readonly:
         assert not is_memory, "Can't open in-memory database read-only"
-        db = sqlite3.connect(
-            f'file:{path}?mode=ro', uri=True,
-            check_same_thread=same_thread)
+        db = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
     else:
-        db = sqlite3.connect(
-            path, uri=is_uri, check_same_thread=same_thread)
+        db = sqlite3.connect(path, uri=is_uri)
     db.row_factory = sqlite3.Row
     db.create_function('REGEXP', 2, _regexp)
 

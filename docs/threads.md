@@ -116,10 +116,11 @@ wrapper.
   - Sends to: `DBWriter` via `write_queue` to persist predicted-time
     estimates and model snapshots.
 
-- **Latency** (new dedicated thread; see "Shared mutable objects")
+- **Latency** (dedicated thread inside `texmo/latency.py`; see
+  "Shared mutable objects")
   - Count: 1.
   - Owns: the `_measures` dict.
-  - Reads from: its `latency_queue`.
+  - Reads from: its internal `_queue` (`_Record` / `_Report`).
 
 The two werkzeug listener threads (`internal_srv.serve_forever` and
 `external_srv.serve_forever`) are infrastructure, not application
@@ -184,13 +185,16 @@ threads — they dispatch into the request-handler thread pool.
     posted the write is the same one that notifies the Model
     thread; the business logic stays out of the writer.
 
-- `latency_queue`
-  - Producers: every `Timer.__exit__`, from any thread.
-  - Consumer: the Latency thread.
-  - Commands:
-    - `record` (fields: `name`, `elapsed_seconds`)
-    - `report` (fields: none; uses `response_queue` to reply with
-      aggregated percentiles/averages)
+- `latency._queue`
+  - Producers:
+    - `Timer.__exit__` posts a `_Record(name, elapsed_ns)` from any
+      thread.
+    - `get_report()` posts a `_Report(reply)` and blocks on the reply
+      queue, which the latency thread fills with the report string.
+  - Consumer: the Latency thread (started lazily as a daemon at
+    module load).
+  - The queue is private to `texmo/latency.py`; the public surface
+    stays `Timer` / `timer(name)` / `get_report()` / `report()`.
 
 ## Shared mutable objects
 
@@ -221,9 +225,9 @@ is encapsulated behind a narrow interface with one designated writer.
 
 - **Latency** (the dedicated thread above)
   - `_measures` is owned by the thread; never touched directly.
-  - The module exposes a `Timer` context manager (puts on the
-    queue) and a `get_report()` function (sends a `report` message
-    with an ephemeral response queue and waits on the reply).
+  - The module exposes a `Timer` context manager (posts a `_Record`
+    on `__exit__`) and `get_report()` / `report()` (post a `_Report`
+    with an ephemeral reply queue and wait on the reply).
 
 The `SearchServer.template` / `default` / `train_time` objects are
 built once at frontend startup and are immutable thereafter, so they
@@ -300,10 +304,9 @@ Land in this order so each step is independently verifiable:
    **done**: `requests_queue` carries `Select` / `SetTemplate` /
    `Stop` from `texmo/search.py` (defined alongside `Search` and
    `SearchThread`). `train_queue` and `write_queue` were already on
-   the new format from steps 2 and 6. `confs_by_system` is exempt
-   (single payload type — `SearchResult | None`). The future
-   `latency_queue` will adopt the same pattern when it lands in
-   step 7.
+   the new format from steps 2 and 6; the latency thread (step 7)
+   uses `_Record` / `_Report`. `confs_by_system` is exempt (single
+   payload type — `SearchResult | None`).
 5. ~~**Split `ResultDB` into `DbReader` / `DbWriter`**~~ **done**:
    live under `texmo/db/{common,reader,writer}.py` with the schema
    at `texmo/db/schema.sql`. Semantics unchanged; the boundary is
@@ -325,8 +328,12 @@ Land in this order so each step is independently verifiable:
    `_UPSERT_PREDICTED_ESTIMATE` `ON CONFLICT` guard and the
    I/O-error panic path are still outstanding (carve-outs for a
    later commit, not blockers for step 7).
-7. **Move `latency._measures` onto its own thread** with the
-   request/response queue protocol described above.
+7. ~~**Move `latency._measures` onto its own thread**~~ **done**:
+   `texmo/latency.py` spins a daemon thread at module load that
+   owns `_measures`. `Timer.__exit__` posts `_Record(name,
+   elapsed_ns)`, `get_report()` posts `_Report(reply)` and blocks
+   on the reply queue. Public surface (`Timer` / `timer(name)` /
+   `get_report()` / `report()`) is unchanged.
 8. **Optional: spawn N Search threads.** Created explicitly in
    `server.main()`, each with its own persistent `DbReader` and
    references to the shared `TrainTimingModel` / `LossModelHolder` /

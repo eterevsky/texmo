@@ -265,6 +265,51 @@ class Search(object):
                 log2(self.template.max_weights.min), log2(maxw))
             return round(2**l)
 
+    def _predicted_time(
+        self, conf: Configuration, system: str
+    ) -> Optional[float]:
+        """Predicted train_time for `conf` on `system`, or None if no
+        prediction is available.
+
+        Prefer the persisted estimate (median if any runs exist, else
+        the predicted-from-fit value the Model thread maintains); fall
+        back to a live timing-model prediction for confs we've never
+        seen on this system.
+        """
+        conf_id = self._db.get_conf_id(conf)
+        if conf_id is not None:
+            est = self._db.get_time_estimate(conf_id, system)
+            if est is not None:
+                return est[0]
+        return self.timing_model.predict(system, conf)
+
+    def _cap_steps(
+        self, conf: Configuration, system: str
+    ) -> Configuration:
+        """Return `conf` with `steps` halved until predicted train_time
+        fits the global maxt budget.
+
+        Used by neighbor selection on dense<->rnn / latent<->lrnn
+        transitions where per-step cost can blow up 1000x. We can't
+        just drop the candidate (it'd be re-picked next iteration) and
+        we can't time-out the training (cosine decay needs the full
+        schedule), so we cap the work up front.
+
+        If no prediction exists (cold start on a fresh (system,
+        precision)), returns `conf` unchanged — first run on a new pair
+        seeds the timing model. If even `template.steps.min` predicts
+        over budget, returns the conf at the floor (bounded overrun).
+        """
+        maxt = self.train_time[1]
+        min_steps = max(self.template.steps.min, 2)
+        steps = conf.steps
+        pred = self._predicted_time(conf, system)
+        while steps > min_steps and pred is not None and pred > maxt:
+            steps = max(steps // 2, min_steps)
+            conf = conf.replace(steps=steps)
+            pred = self._predicted_time(conf, system)
+        return conf
+
     def _select_neighbor_fewest_runs(
         self, conf: Configuration, system: str
     ) -> Optional[tuple[Configuration, int, int]]:
@@ -279,6 +324,14 @@ class Search(object):
         neighbors = conf_neighbors(conf, self.template)
         if not neighbors:
             return None
+
+        # Cap predicted train_time at maxt per-neighbor by halving steps.
+        # Applied before the run-count lookup so the "fewest runs" pick
+        # weighs the capped variant — otherwise (spec, 1024 steps) with
+        # 0 runs would silently beat (spec, 32 steps) with 10 runs. The
+        # set dedupes in case two original neighbors collapse onto the
+        # same capped conf.
+        neighbors = {self._cap_steps(n, system) for n in neighbors}
 
         neighbor_ids = [
             cid for cid in (self._db.get_conf_id(n) for n in neighbors)

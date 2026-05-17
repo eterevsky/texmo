@@ -218,6 +218,7 @@ class DbReader(object):
         self, template: Template, system: Optional[str] = None,
         max_weights: Optional[int] = None,
         max_time: Optional[float] = None,
+        min_num_runs: int = 2,
     ):
         """Yield top confs ordered by weights, one per weight count.
 
@@ -231,12 +232,18 @@ class DbReader(object):
                 across-systems median_time is above this. Used by the
                 compare page; means "at least one system trains this in
                 under `max_time`".
+            min_num_runs: minimum total run count (across all systems)
+                for a conf to be included. Default 2 acts as a
+                single-run-outlier guard for display + throughput; the
+                coverage walk passes 1 so even fresh top confs surface
+                for cross-system verification.
         """
         assert type(template) is Template
 
         conditions, params = _make_template_conditions(template)
         conditions.append('median_score IS NOT NULL')
-        conditions.append('num_runs > 1')
+        conditions.append('num_runs >= :min_num_runs')
+        params['min_num_runs'] = min_num_runs
 
         if max_weights is not None:
             conditions.append('weights <= :max_weights')
@@ -476,7 +483,10 @@ class DbReader(object):
 
         Used for the per-system throughput report: with the model
         architecture pinned, we still let each system pick its own
-        optimal (batch, length, lr, steps).
+        optimal (batch, length, lr, steps). Requires `num_runs > 1`
+        across all systems — single-run scores are outliers and would
+        otherwise make the throughput graph noisy when one system
+        latched onto a thinly-sampled conf and another didn't.
         """
         query = """
             SELECT conf.id AS conf_id, spec, precision, lr, length, batch,
@@ -491,6 +501,8 @@ class DbReader(object):
             WHERE conf.spec = :spec
               AND conf.median_score IS NOT NULL
               AND ct.time_s <= :max_time
+              AND (SELECT COUNT(*) FROM run
+                   WHERE conf_id = conf.id) > 1
             ORDER BY conf.median_score ASC, ct.time_s ASC
             LIMIT 1
         """

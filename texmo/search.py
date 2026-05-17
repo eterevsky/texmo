@@ -525,7 +525,11 @@ class Search(object):
             # `top_confs_global` applies the template's max_weights
             # bound itself via `_make_template_conditions`, so no extra
             # max_weights filter here. Materialized so we can shuffle.
-            top = list(self._db.top_confs_global(self.template))
+            # `min_num_runs=1` so even single-run top confs get picked
+            # up — the whole point of this walk is to verify those
+            # faster across systems.
+            top = list(self._db.top_confs_global(
+                self.template, min_num_runs=1))
             random.shuffle(top)
 
             selected: Optional[Configuration] = None

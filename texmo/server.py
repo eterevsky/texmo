@@ -28,7 +28,7 @@ from .configuration import (
     Template,
     default_from_template,
 )
-from .db import DbReader, DbWriter
+from .db import ConfScore, DbReader, DbWriter
 from .db.writer import DbWriterProxy, Stop as WriterStop, WriterThread
 from .latency import get_report, report, timer
 from .predict.loss_rnn import LossModelHolder
@@ -40,7 +40,13 @@ from .predict.model_thread import (
     Stop as ModelStop,
 )
 from .predict.timing import TrainTimingModel
-from .report import build_throughput_graph, per_system_throughput
+from .report import (
+    build_fastest_loss_graph,
+    build_fastest_time_graph,
+    build_throughput_graph,
+    fastest_near_best,
+    per_system_throughput,
+)
 from .run import Run
 from .search import (
     Select,
@@ -95,46 +101,6 @@ def build_graph(confs: list[Configuration]) -> bytes:
     plt.plot(xs, ys)
     plt.xlabel('weights')
     plt.ylabel('enthropy, b/B')
-    f = io.BytesIO()
-    plt.savefig(f, format='png')
-    return f.getvalue()
-
-
-def build_scaling_graph(
-    segments: list[tuple[int, int, float]], system: str
-) -> bytes:
-    """Plot weight budget -> fastest time to reach near-best loss.
-
-    `segments` is a list of (w_low, w_high, time) tuples. Each segment
-    is flat: for any w in [w_low, w_high), the fastest time is `time`.
-    Draws a step function with a single plot() call so matplotlib
-    connects adjacent segments as one line.
-    """
-    plt.ioff()
-    plt.clf()
-    _fig, ax = plt.subplots()
-    ax.set_xscale('log')
-    ax.set_yscale('log')
-    ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
-
-    y_ticks = [0.003, 0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 60, 180, 600]
-    y_labels = [
-        '3 ms', '10 ms', '30 ms', '100 ms', '300 ms', '1 s', '3 s', '10 s', '30 s', '1 m', '3 m', '10 m']
-    ax.set_yticks(y_ticks)
-    ax.set_yticklabels(y_labels)
-    ax.set_yticks([], minor=True)
-
-    xs: list[float] = []
-    ys: list[float] = []
-    for w_low, w_high, t in sorted(segments, key=lambda s: s[0]):
-        xs.append(w_low)
-        ys.append(t)
-        xs.append(w_high - 0.1)
-        ys.append(t)
-    ax.plot(xs, ys)
-
-    ax.set_xlabel('weights')
-    ax.set_ylabel(f'fastest time to near-best loss on {system}')
     f = io.BytesIO()
     plt.savefig(f, format='png')
     return f.getvalue()
@@ -424,52 +390,11 @@ class SearchServer(object):
 
         # Use a dedicated read-only connection to avoid contending with
         # the writer thread for the main connection.
-        scaling_graph = None
-        fastest = []
         with DbReader(self.path) as ro_db:
             systems = ro_db.get_systems()
             top_confs = list(
                 ro_db.top_confs_global(
                     self.template, system=selected_system))
-
-            # Compute-scaling analysis: only makes sense for a specific
-            # system because training times vary wildly across hardware.
-            if selected_system is not None and top_confs:
-                segments = ro_db.fastest_near_best_segments(
-                    self.template,
-                    system=selected_system,
-                    pareto=top_confs,
-                )
-                # Deduplicate by number of weights: two configs with the
-                # same weight count shouldn't both appear — keep the one
-                # with the lower median_time.
-                by_weights = {}
-                for w_low, w_high, cs in segments:
-                    nw = cs.conf.model.num_weights
-                    existing = by_weights.get(nw)
-                    if (existing is None
-                            or cs.median_time < existing.median_time):
-                        by_weights[nw] = cs
-                for cs in sorted(
-                    by_weights.values(),
-                    key=lambda c: c.conf.model.num_weights,
-                ):
-                    fastest.append(_conf_row(cs))
-                # The last segment has w_high = None (extends to +infty).
-                # Cap it at 2x the max Pareto weight for plotting.
-                max_pareto_w = max(
-                    cs.conf.model.num_weights for cs in top_confs)
-                plot_segments = []
-                for w_low, w_high, cs in segments:
-                    if cs.median_time is None:
-                        continue
-                    if w_high is None:
-                        w_high = max_pareto_w * 2
-                    plot_segments.append((w_low, w_high, cs.median_time))
-                if plot_segments:
-                    scaling_graph = base64.b64encode(
-                        build_scaling_graph(plot_segments, selected_system)
-                    ).decode('ascii')
 
         graph = build_graph(top_confs)
 
@@ -491,8 +416,6 @@ class SearchServer(object):
             time=train_time,
             top=top,
             graph=base64.b64encode(graph).decode('ascii'),
-            fastest=fastest,
-            scaling_graph=scaling_graph,
             systems=systems,
             selected_system=selected_system,
         )
@@ -565,6 +488,51 @@ class SearchServer(object):
             num_systems=len(per_system),
             systems=all_systems,
             selected_systems=selected_set,
+        )
+
+    def fastest(self, args):
+        """Render the cross-system fastest-near-best report.
+
+        For each weight bucket on the global Pareto front, finds the
+        (conf, system) pair that reaches within 1% of the best loss
+        in the lowest time across all systems. Renders two graphs
+        (loss and time per weight) plus a table.
+        """
+        with DbReader(self.path) as ro_db:
+            segments = fastest_near_best(ro_db, self.template)
+
+        # Deduplicate by weight count for the table — two confs at the
+        # same weight count shouldn't both appear; keep the faster one.
+        by_weights: dict[int, ConfScore] = {}
+        for _, _, cs in segments:
+            nw = cs.conf.model.num_weights
+            existing = by_weights.get(nw)
+            if existing is None or cs.median_time < existing.median_time:
+                by_weights[nw] = cs
+        confs = [
+            _conf_row(cs)
+            for cs in sorted(
+                by_weights.values(),
+                key=lambda c: c.conf.model.num_weights,
+            )
+        ]
+
+        loss_graph = None
+        time_graph = None
+        if segments:
+            max_w = max(cs.conf.model.num_weights for _, _, cs in segments)
+            loss_graph = base64.b64encode(
+                build_fastest_loss_graph(segments, max_w)
+            ).decode('ascii')
+            time_graph = base64.b64encode(
+                build_fastest_time_graph(segments, max_w)
+            ).decode('ascii')
+
+        return render_template(
+            "fastest.html",
+            confs=confs,
+            loss_graph=loss_graph,
+            time_graph=time_graph,
         )
 
     def compare(self, args):
@@ -727,6 +695,11 @@ class SearchServer(object):
         def _throughput():
             with timer("SearchServer.throughput"):
                 return self.throughput(request.args)
+
+        @app.route("/fastest", methods=["GET"])
+        def _fastest():
+            with timer("SearchServer.fastest"):
+                return self.fastest(request.args)
 
         @app.route("/select", methods=["GET"])
         def _select():

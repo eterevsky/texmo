@@ -3,6 +3,7 @@ the per-strategy reports logged in `texmo/search.py`, plus the
 data-and-rendering helpers for the report charts."""
 
 import io
+from typing import Callable, Optional
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -116,6 +117,107 @@ def build_throughput_graph(
     ax.set_xlabel('weights')
     ax.set_ylabel('multiplications / second')
     ax.legend(loc='best', fontsize='small')
+    f = io.BytesIO()
+    plt.savefig(f, format='png')
+    return f.getvalue()
+
+
+# --- fastest-near-best report (cross-system) --------------------------------
+
+
+def fastest_near_best(
+    db: DbReader,
+    template: Template,
+    tolerance: float = 0.01,
+) -> list[tuple[int, Optional[int], ConfScore]]:
+    """Cross-system fastest-to-near-best segments for `template`.
+
+    Wraps `top_confs_global` (the Pareto frontier across all systems)
+    and `fastest_near_best_segments_any_system`. Each returned
+    `ConfScore` carries the winning system + its median_time, so the
+    rendered row looks like the report's "12.2 s on m5" column.
+    """
+    pareto = list(db.top_confs_global(template))
+    return db.fastest_near_best_segments_any_system(
+        template, pareto, tolerance=tolerance)
+
+
+def _step_plot_xy(
+    segments: list[tuple[int, Optional[int], ConfScore]],
+    value: Callable[[ConfScore], Optional[float]],
+    cap_open_right: int,
+) -> tuple[list[float], list[float]]:
+    """Render fastest-near-best segments as a step plot (xs, ys).
+
+    `value(cs)` extracts the y at each segment; the last segment's
+    `w_high=None` (unbounded right) is capped at `cap_open_right` so
+    the line has somewhere to end."""
+    xs: list[float] = []
+    ys: list[float] = []
+    for w_low, w_high, cs in sorted(segments, key=lambda s: s[0]):
+        y = value(cs)
+        if y is None:
+            continue
+        hi = cap_open_right if w_high is None else w_high
+        xs.append(w_low)
+        ys.append(y)
+        xs.append(hi - 0.1)
+        ys.append(y)
+    return xs, ys
+
+
+def build_fastest_loss_graph(
+    segments: list[tuple[int, Optional[int], ConfScore]],
+    max_weights: int,
+) -> bytes:
+    """Step plot of median_score vs. weights, log-log."""
+    plt.ioff()
+    plt.clf()
+    _fig, ax = plt.subplots(figsize=(14, 9))
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    ax.yaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    ax.yaxis.set_minor_formatter(matplotlib.ticker.ScalarFormatter())
+
+    xs, ys = _step_plot_xy(
+        segments, lambda cs: cs.median_score, max_weights * 2)
+    ax.plot(xs, ys)
+
+    ax.set_xlabel('weights')
+    ax.set_ylabel('loss at near-best (b/B)')
+    f = io.BytesIO()
+    plt.savefig(f, format='png')
+    return f.getvalue()
+
+
+def build_fastest_time_graph(
+    segments: list[tuple[int, Optional[int], ConfScore]],
+    max_weights: int,
+) -> bytes:
+    """Step plot of fastest median_time vs. weights, log-log, with
+    human-readable y-tick labels (3ms..10m)."""
+    plt.ioff()
+    plt.clf()
+    _fig, ax = plt.subplots(figsize=(14, 9))
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+
+    y_ticks = [0.003, 0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 60, 180, 600]
+    y_labels = [
+        '3 ms', '10 ms', '30 ms', '100 ms', '300 ms',
+        '1 s', '3 s', '10 s', '30 s', '1 m', '3 m', '10 m']
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels)
+    ax.set_yticks([], minor=True)
+
+    xs, ys = _step_plot_xy(
+        segments, lambda cs: cs.median_time, max_weights * 2)
+    ax.plot(xs, ys)
+
+    ax.set_xlabel('weights')
+    ax.set_ylabel('fastest time to near-best loss')
     f = io.BytesIO()
     plt.savefig(f, format='png')
     return f.getvalue()

@@ -424,6 +424,94 @@ class DbReader(object):
         segments.sort(key=lambda seg: seg[0])
         return segments
 
+    def fastest_near_best_segments_any_system(
+        self,
+        template: Template,
+        pareto: list[ConfScore],
+        tolerance: float = 0.01,
+    ) -> list[tuple[int, Optional[int], ConfScore]]:
+        """Like `fastest_near_best_segments` but considers every system
+        — for each qualifying conf, the system with the lowest
+        median_time wins, and that (system, time) is attached to the
+        returned `ConfScore`. Used by the cross-system fastest report
+        to answer "across all systems, what's the cheapest way to
+        reach near-best loss at this weight budget?".
+        """
+        if not pareto:
+            return []
+
+        conf_fields = ', '.join([
+            'spec', 'precision', 'lr',
+            'decay', 'cosine', 'length', 'batch', 'steps'])
+
+        segments: list[tuple[int, Optional[int], ConfScore]] = []
+
+        n = len(pareto)
+        ws = [cs.conf.model.num_weights for cs in pareto]
+        ls = [cs.median_score for cs in pareto]
+
+        for i in range(n):
+            w_left = ws[i]
+            w_right: Optional[int] = ws[i + 1] if i + 1 < n else None
+            threshold = ls[i] * (1.0 + tolerance)
+
+            conditions, params = _make_template_conditions(template)
+            conditions.append('median_score IS NOT NULL')
+            conditions.append('median_score <= :threshold')
+            params['threshold'] = threshold
+            if w_right is not None:
+                conditions.append('weights < :w_right')
+                params['w_right'] = w_right
+            where = 'WHERE ' + ' AND '.join(conditions)
+
+            # Fetch every (conf, system) pair with a `median` cte row;
+            # ORDER BY ct.time_s ASC means the first occurrence of each
+            # conf_id is the system with the fastest time. We dedupe in
+            # Python because per-conf MIN-with-tied-system is awkward
+            # in vanilla SQL.
+            query = f"""
+                SELECT conf.id AS conf_id, {conf_fields},
+                       weights,
+                       median_score,
+                       (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs,
+                       ct.system AS system,
+                       ct.time_s AS median_time
+                FROM conf
+                JOIN conf_time_estimate AS ct
+                    ON ct.conf_id = conf.id AND ct.source = 'median'
+                {where}
+                ORDER BY ct.time_s ASC
+            """
+            cur = self._db.execute(query, params)
+
+            # Same dedup-by-weight walk as `fastest_near_best_segments`,
+            # but each conf appears once (we drop subsequent
+            # per-system entries via `seen`).
+            uncovered_right: Optional[int] = w_right
+            done = False
+            seen: set[int] = set()
+            for row in cur:
+                cid = row['conf_id']
+                if cid in seen:
+                    continue
+                seen.add(cid)
+                w = row['weights']
+                if uncovered_right is not None and w >= uncovered_right:
+                    continue
+                seg_low = max(w, w_left)
+                segments.append(
+                    (seg_low, uncovered_right, ConfScore._from_row(row)))
+                uncovered_right = seg_low
+                if w <= w_left:
+                    done = True
+                    break
+            assert done, (
+                f"interval [{w_left}, {w_right}) not fully covered — "
+                "the Pareto point itself should have been in the results")
+
+        segments.sort(key=lambda seg: seg[0])
+        return segments
+
     def top_confs_for_system(
         self,
         system: str,

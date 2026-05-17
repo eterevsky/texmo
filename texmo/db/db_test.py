@@ -705,3 +705,59 @@ def test_has_covering_run_different_batch_does_not_cover(db):
     )
     query = _conf_with_steps(256, batch=32)
     assert db.has_covering_run(query, system="rpi") is False
+
+
+def test_fastest_near_best_segments_any_system_empty(db):
+    template = _make_template()
+    assert db.fastest_near_best_segments_any_system(
+        template=template, pareto=[]) == []
+
+
+def test_fastest_near_best_segments_any_system_picks_fastest_system(db):
+    """A single conf with runs on two systems — the returned segment's
+    `system` field is whichever system had the lower median_time."""
+    template = _make_template()
+    conf, _ = _make_conf_run(spec="bytes|dense.8.gelu")
+    # Same conf on two systems: rpi slow, whitebox fast.
+    _add_runs(db, conf, [5.00, 5.00], "rpi", 10.0)
+    _add_runs(db, conf, [5.00, 5.00], "whitebox", 2.0)
+
+    pareto = list(db.top_confs_global(template))
+    segments = db.fastest_near_best_segments_any_system(
+        template=template, pareto=pareto)
+
+    assert len(segments) == 1
+    lo, hi, cs = segments[0]
+    assert str(cs.conf.model) == "bytes|dense.8.gelu"
+    assert cs.system == "whitebox"
+    assert cs.median_time == pytest.approx(2.0)
+
+
+def test_fastest_near_best_segments_any_system_cross_system(db):
+    """Two confs with different best-system winners; both segments
+    should reflect their respective winning systems."""
+    template = _make_template()
+    conf_a, _ = _make_conf_run(spec="bytes|dense.8.gelu")
+    conf_b, _ = _make_conf_run(spec="bytes|dense.32.gelu")
+    wa = conf_a.model.num_weights
+    wb = conf_b.model.num_weights
+    assert wa < wb
+
+    # dense.8 fastest on rpi; dense.32 fastest on whitebox.
+    _add_runs(db, conf_a, [5.00, 5.00], "rpi", 3.0)
+    _add_runs(db, conf_a, [5.00, 5.00], "whitebox", 8.0)
+    _add_runs(db, conf_b, [4.00, 4.00], "rpi", 30.0)
+    _add_runs(db, conf_b, [4.00, 4.00], "whitebox", 5.0)
+
+    pareto = list(db.top_confs_global(template))
+    segments = db.fastest_near_best_segments_any_system(
+        template=template, pareto=pareto)
+
+    by_spec = {
+        str(cs.conf.model): (lo, hi, cs.system, cs.median_time)
+        for lo, hi, cs in segments
+    }
+    assert by_spec["bytes|dense.8.gelu"][2] == "rpi"
+    assert by_spec["bytes|dense.8.gelu"][3] == pytest.approx(3.0)
+    assert by_spec["bytes|dense.32.gelu"][2] == "whitebox"
+    assert by_spec["bytes|dense.32.gelu"][3] == pytest.approx(5.0)

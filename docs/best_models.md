@@ -1,0 +1,115 @@
+# Current best models
+
+Pareto-best configurations by weight count, snapshot of 105 rows from the result DB on 2026-05-17.
+Generated from cosine-LR runs only. Loss is per-byte cross-entropy on the held-out set;
+time is the median wall-clock training time on the indicated system.
+
+Spec conventions are explained in the [README](../README.md#what-good-means-here).
+
+| Weights | Loss | Runs | Time | Batch×Len | LR | Steps | P | Spec |
+|--------:|-----:|-----:|-----:|----------:|---:|------:|--:|------|
+| 5 | 6.7461 | 4 | 1.86 s on m5 | 32×16 | 1/32↘0 | 32768 | fp32 | `bits.1+bp\|` |
+| 7 | 6.2867 | 7 | 5.97 s on m5 | 32×8192 | 1/4↘0 | 4096 | fp32 | `bits.1+bp\|dense.1.gelu` |
+| 8 | 5.7821 | 8 | 0.76 s on m5 | 2×2048 | 1/16↘0 | 16384 | fp32 | `bits.1+bp\|dense.1.tanh-suffix.2` |
+| 9 | 5.7776 | 7 | 11.15 s on m5 | 64×128 | 1/8↘0 | 65536 | fp32 | `bits.1+bp\|rnn.1.tanh-suffix.2` |
+| 10 | 5.6538 | 8 | 1.59 s on m5 | 4×512 | 1/32↘0 | 65536 | fp32 | `bits.1+bp\|dense.1.tanh-suffix.4` |
+| 11 | 5.6303 | 5 | 21.16 s on m5 | 1×512 | 1/32↘0 | 1048576 | fp32 | `bits.1+bp\|rnn.1.tanh-suffix.4` |
+| 12 | 5.5866 | 5 | 35.20 s on m5 | 16×1024 | 1/256↘0 | 131072 | fp32 | `bits.1+bp\|dense.1.tanh-suffix.4-dense.1.tanh` |
+| 13 | 5.5729 | 8 | 13.24 s on m5 | 32×256 | 1/32↘0 | 65536 | fp32 | `bits.1+bp\|rnn.1.tanh-suffix.4-dense.1.tanh` |
+| 14 | 5.4742 | 12 | 1.73 s on m5 | 256×64 | 1/16↘0 | 4096 | fp32 | `bits.1+bp\|mgru.1` |
+| 15 | 5.4284 | 7 | 12.16 s on m5 | 4×2048 | 1/4↘0 | 65536 | fp32 | `bits.1+bp\|mgru.1-suffix.2` |
+| 16 | 5.3494 | 3 | 57.55 s on m5 | 4×512 | 1/64↘0 | 1048576 | fp32 | `bits.1+bp\|skip.1.add-rnn.1.tanh-norm-dense.1.tanh-skip.2.add-suffix.2-dense.1.tanh` |
+| 17 | 5.3121 | 14 | 1.13 s on m5 | 32×256 | 1/16↘0 | 4096 | fp32 | `bits.1+bp\|skip.1.cat-rnn.1.tanh-norm-dense.1.tanh-skip.2.add-suffix.2-dense.1.tanh` |
+| 18 | 5.2311 | 2 | 129.38 s on m5 | 4×256 | 1/16↘0 | 4194304 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-norm-dense.1.tanh-suffix.2` |
+| 20 | 5.1547 | 7 | 6.88 s on m5 | 2×2048 | 1/8↘0 | 65536 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-norm-dense.1.tanh-suffix.2-dense.1.tanh` |
+| 21 | 5.1381 | 4 | 62.66 s on m5 | 1×2048 | 1/8↘0 | 1048576 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-norm-dense.1.tanh-skip.2.cat-suffix.2-dense.1.tanh` |
+| 22 | 5.1294 | 7 | 19.29 s on m5 | 1×1024 | 1/8↘0 | 524288 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-norm-dense.1.tanh-skip.2.add-suffix.4-dense.1.tanh` |
+| 25 | 5.0881 | 6 | 33.43 s on m5 | 4×4096 | 1/32↘0 | 65536 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-norm-dense.2.tanh-suffix.2` |
+| 26 | 5.0833 | 5 | 39.26 s on m5 | 16×256 | 1/64↘0 | 262144 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-norm-skip.1.cat-dense.1.tanh-norm-suffix.2` |
+| 27 | 5.0344 | 5 | 8.30 s on m5 | 1×4096 | 1/32↘0 | 65536 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-norm-dense.2.tanh-suffix.2-dense.1.tanh` |
+| 28 | 5.0230 | 5 | 2.46 s on m5 | 1×2048 | 1/32↘0 | 32768 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-norm-dense.2.tanh-norm-skip.2.add-suffix.2-dense.1.tanh` |
+| 29 | 5.0106 | 6 | 4.72 s on m5 | 1×2048 | 1/8↘0 | 32768 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-norm-latent.2.4-suffix.2` |
+| 31 | 4.9674 | 3 | 92.44 s on m5 | 4×2048 | 1/32↘0 | 262144 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-norm-latent.2.2-suffix.2-dense.1.tanh` |
+| 32 | 4.9363 | 5 | 30.17 s on m5 | 4×512 | 1/8↘0 | 262144 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-norm-latent.2.2-suffix.2-rnn.1.tanh` |
+| 33 | 4.9313 | 6 | 35.78 s on m5 | 4×512 | 1/16↘0 | 262144 | fp32 | `bits.1+bp\|skip.1.cat-mingru.1-latent.2.2-suffix.2-dense.1.tanh` |
+| 34 | 4.9218 | 5 | 30.95 s on m5 | 2×1024 | 1/16↘0 | 262144 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-latent.2.2-suffix.2-skip.1.add-dense.1.tanh-norm` |
+| 35 | 4.9035 | 2 | 204.78 s on m5 | 4×2048 | 1/16↘0 | 524288 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-latent.2.2-suffix.2-skip.1.cat-dense.1.tanh-norm` |
+| 38 | 4.8875 | 2 | 60.08 s on m5 | 4×1024 | 1/8↘0 | 262144 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-latent.2.2-skip.2.add-suffix.4-dense.1.tanh-dense.1.tanh` |
+| 40 | 4.8824 | 4 | 20.17 s on m5 | 1×1024 | 1/32↘0 | 262144 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-latent.2.2-skip.2.cat-suffix.2-dense.1.tanh-norm-suffix.2-dense.1.tanh-dense.1.tanh` |
+| 41 | 4.8689 | 2 | 99.75 s on m5 | 32×512 | 1/64↘0 | 131072 | fp32 | `bits.1+bp\|skip.2.add-rnn.4.tanh-norm` |
+| 42 | 4.8252 | 4 | 37.08 s on m5 | 1×2048 | 1/32↘0 | 262144 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-latent.2.2-skip.2.cat-suffix.4-dense.1.tanh-norm-suffix.2-dense.1.tanh` |
+| 45 | 4.8150 | 2 | 320.94 s on m5 | 4×4096 | 1/16↘0 | 131072 | fp32 | `bits.1+bp\|rnn.4.tanh-norm-suffix.2` |
+| 49 | 4.7840 | 4 | 50.91 s on m5 | 2×1024 | 1/32↘0 | 262144 | fp32 | `bits.1+bp\|skip.1.add-mingru.1-norm-latent.2.2-skip.2.cat-suffix.4-rnn.1.tanh-norm-skip.2.cat-suffix.2-dense.1.tanh-norm-rnn.1.tanh` |
+| 50 | 4.7796 | 6 | 39.71 s on m5 | 16×1024 | 1/8↘0 | 32768 | fp32 | `bits.1+bp\|skip.2.add-mgru.1-skip.2.cat-dense.4.tanh-norm-skip.2.cat-suffix.2-dense.1.tanh` |
+| 51 | 4.7651 | 5 | 12.97 s on m5 | 1×2048 | 1/8↘0 | 65536 | fp32 | `bits.1+bp\|skip.2.add-mgru.2-skip.2.cat-suffix.2-dense.2.tanh` |
+| 53 | 4.7523 | 5 | 4.65 s on m5 | 1×1024 | 1/32↘0 | 65536 | fp32 | `bits.1+bp\|skip.1.cat-rnn.4.tanh-suffix.2` |
+| 55 | 4.7441 | 5 | 16.00 s on m5 | 2×512 | 1/32↘0 | 262144 | fp32 | `bits.1+bp\|rnn.4.tanh-skip.1.add-mingru.1-norm-suffix.2` |
+| 57 | 4.7286 | 4 | 15.70 s on m5 | 2×1024 | 1/32↘0 | 131072 | fp32 | `bits.1+bp\|rnn.4.tanh-skip.1.cat-mingru.1-norm-suffix.2` |
+| 61 | 4.6977 | 5 | 3.89 s on m5 | 1×1024 | 1/16↘0 | 32768 | fp32 | `bits.1+bp\|skip.2.add-mgru.2-skip.1.cat-dense.4.tanh-norm-suffix.2` |
+| 65 | 4.6907 | 6 | 42.12 s on m5 | 4×1024 | 1/16↘0 | 65536 | fp32 | `bits.1+bp\|skip.2.cat-mgru.2-skip.1.add-dense.4.tanh-norm-suffix.2` |
+| 66 | 4.6765 | 6 | 4.83 s on m5 | 1×1024 | 1/16↘0 | 32768 | fp32 | `bits.1+bp\|skip.2.add-mgru.2-mingru.4-norm-skip.2.add-suffix.2-dense.1.tanh` |
+| 67 | 4.6690 | 4 | 2.70 s on m5 | 32×128 | 1/8↘0 | 8192 | fp32 | `bits.1+bp\|skip.1.cat-mgru.2-dense.4.tanh-norm-suffix.2-dense.1.tanh` |
+| 68 | 4.6631 | 3 | 175.93 s on m5 | 4×1024 | 1/16↘0 | 262144 | fp32 | `bits.1+bp\|skip.2.cat-mgru.2-skip.1.add-dense.4.tanh-norm-suffix.2-rnn.1.tanh` |
+| 69 | 4.6337 | 4 | 168.75 s on m5 | 4×2048 | 1/8↘0 | 131072 | fp32 | `bits.1+bp\|skip.2.cat-mgru.2-skip.1.cat-dense.4.tanh-suffix.2` |
+| 73 | 4.6061 | 3 | 358.55 s on mini | 2×1024 | 1/32↘0 | 131072 | fp32 | `bits.1+bp\|lrnn.4.2-norm-skip.1.cat-mingru.1-norm-suffix.2` |
+| 77 | 4.5923 | 2 | 20.02 s on m5 | 64×128 | 1/16↘0 | 32768 | fp32 | `bits.1+bp\|skip.3.add-mgru.2-norm-skip.1.cat-rnn.4.tanh-suffix.2` |
+| 79 | 4.5867 | 2 | 107.15 s on m5 | 128×256 | 1/16↘0 | 65536 | fp32 | `bits.1+bp\|skip.1.add-mgru.4-dense.1.tanh` |
+| 81 | 4.5577 | 2 | 205.53 s on m5 | 8×1024 | 1/64↘0 | 131072 | fp32 | `bits.1+bp\|mgru.4-norm-suffix.2` |
+| 83 | 4.5433 | 3 | 71.66 s on m5 | 16×1024 | 1/16↘0 | 32768 | fp32 | `bits.1+bp\|mgru.4-norm-skip.1.cat-dense.1.gelu-norm` |
+| 85 | 4.5032 | 5 | 44.30 s on m5 | 1×2048 | 1/16↘0 | 262144 | fp32 | `bits.1+bp\|rnn.4.tanh-mingru.4-norm-suffix.2` |
+| 93 | 4.4922 | 4 | 65.91 s on m5 | 32×256 | 1/16↘0 | 32768 | fp32 | `bits.1+bp\|mgru.4-lrnn.2.2` |
+| 97 | 4.4743 | 4 | 133.08 s on m5 | 16×1024 | 1/16↘0 | 65536 | fp32 | `bits.1+bp\|mgru.4-dense.4.gelu` |
+| 101 | 4.4501 | 2 | 869.45 s on mini | 1×2048 | 1/16↘0 | 262144 | fp32 | `bits.1+bp\|lrnn.4.2-mingru.4-norm-suffix.2` |
+| 106 | 4.4351 | 4 | 86.79 s on m5 | 64×256 | 1/16↘0 | 65536 | fp32 | `bits.1+bp\|mgru.4-norm-skip.4.add-dense.4.gelu-norm-skip.1.cat-dense.1.tanh` |
+| 108 | 4.4287 | 4 | 56.03 s on m5 | 32×256 | 1/16↘0 | 65536 | fp32 | `bits.1+bp\|mgru.4-norm-skip.3.cat-dense.4.gelu-norm-skip.1.cat-rnn.1.tanh` |
+| 113 | 4.4045 | 3 | 103.85 s on m5 | 32×512 | 1/32↘0 | 65536 | fp32 | `bits.1+bp\|mgru.4-norm-skip.2.add-suffix.2-dense.4.gelu` |
+| 117 | 4.3506 | 7 | 36.45 s on m5 | 64×512 | 1/16↘0 | 16384 | fp32 | `bits.1+bp\|mgru.4-norm-skip.2.cat-suffix.2-dense.4.gelu` |
+| 124 | 4.3503 | 3 | 260.06 s on m5 | 8×512 | 1/16↘0 | 524288 | fp32 | `bits.1+bp\|rnn.8.tanh-skip.1.cat-rnn.1.tanh` |
+| 129 | 4.3444 | 4 | 66.54 s on m5 | 8×256 | 1/32↘0 | 131072 | fp32 | `bits.1+bp\|mgru.4-mingru.4-norm-suffix.4` |
+| 130 | 4.3395 | 2 | 42.59 s on m5 | 16×1024 | 1/16↘0 | 16384 | fp32 | `bits.1+bp\|mgru.4-skip.1.cat-mingru.4-norm-skip.1.add-dense.1.relu` |
+| 131 | 4.3383 | 3 | 92.39 s on m5 | 16×1024 | 1/16↘0 | 32768 | fp32 | `bits.1+bp\|skip.2.add-mgru.4-skip.1.cat-mingru.4-norm-skip.1.add-rnn.1.tanh` |
+| 134 | 4.3357 | 5 | 54.91 s on m5 | 1×1024 | 1/16↘0 | 131072 | fp32 | `bits.1+bp\|skip.3.add-mgru.2-suffix.2-skip.1.add-mgru.4-norm-skip.2.add-suffix.2-dense.2.tanh-norm-skip.1.cat-mingru.1-norm` |
+| 135 | 4.3007 | 3 | 95.35 s on m5 | 1×1024 | 1/16↘0 | 524288 | fp32 | `bits.1+bp\|skip.3.add-mgru.2-suffix.2-skip.1.add-mingru.4-norm-skip.2.add-suffix.2-dense.2.tanh-norm-skip.1.cat-mingru.4-norm` |
+| 139 | 4.2999 | 4 | 83.87 s on m5 | 2×512 | 1/32↘0 | 262144 | fp32 | `bits.1+bp\|rnn.8.tanh-skip.1.add-mingru.1-norm-suffix.2` |
+| 148 | 4.2807 | 4 | 9.86 s on m5 | 1×1024 | 1/16↘0 | 65536 | fp32 | `bits.4.oh+bp\|rnn.2.tanh-rnn.4.tanh-norm` |
+| 149 | 4.2733 | 3 | 106.58 s on m5 | 32×512 | 1/32↘0 | 65536 | fp32 | `bits.1+bp\|mgru.4-norm-skip.2.cat-suffix.4-dense.4.gelu` |
+| 152 | 4.2534 | 4 | 13.22 s on 5060ti | 8×2048 | 1/32↘0 | 32768 | fp32 | `bits.4.oh+bp\|dense.2.tanh-suffix.4-dense.4.gelu-norm` |
+| 153 | 4.2488 | 2 | 112.12 s on m5 | 64×1024 | 1/16↘0 | 32768 | fp32 | `bits.1+bp\|rnn.8.tanh-norm-skip.1.cat-dense.4.gelu-norm` |
+| 155 | 4.2258 | 3 | 79.05 s on m5 | 32×256 | 1/16↘0 | 65536 | fp32 | `bits.1+bp\|mgru.4-mgru.4-skip.1.cat-dense.1.relu` |
+| 160 | 4.2231 | 3 | 196.52 s on mini | 8×2048 | 1/8↘0 | 131072 | fp32 | `bits.4.oh+bp\|rnn.2.tanh-suffix.2-mingru.4-norm` |
+| 164 | 4.2095 | 2 | 141.19 s on mini | 8×512 | 1/16↘0 | 65536 | fp32 | `bits.4.oh+bp\|lrnn.2.2-suffix.2-skip.1.add-mingru.4-norm` |
+| 170 | 4.2006 | 3 | 50.08 s on mini | 8×1024 | 1/16↘0 | 65536 | fp32 | `bits.4.oh+bp\|latent.2.2-skip.4.add-suffix.2-mingru.4-norm-skip.1.add-dense.2.gelu` |
+| 172 | 4.1877 | 3 | 200.25 s on mini | 8×512 | 1/8↘0 | 65536 | fp32 | `bits.4.oh+bp\|latent.2.2-suffix.2-lrnn.4.2` |
+| 176 | 4.1354 | 3 | 60.58 s on mini | 16×2048 | 1/16↘0 | 32768 | fp32 | `bits.4.oh+bp\|dense.2.tanh-skip.2.add-suffix.2-skip.1.add-mingru.4-norm-skip.1.add-dense.4.gelu` |
+| 184 | 4.1254 | 3 | 116.64 s on mini | 8×1024 | 1/16↘0 | 32768 | fp32 | `bits.4.oh+bp\|lrnn.2.2-skip.3.add-mingru.4-norm-skip.2.add-suffix.2-dense.4.gelu` |
+| 185 | 4.1248 | 3 | 182.48 s on mini | 8×2048 | 1/8↘0 | 131072 | fp32 | `bits.4.oh+bp\|latent.2.2-skip.4.add-suffix.2-mingru.4-norm-skip.1.add-dense.4.gelu-skip.1.add-dense.1.gelu` |
+| 193 | 4.1085 | 3 | 196.15 s on mini | 8×2048 | 1/16↘0 | 131072 | fp32 | `bits.4.oh+bp\|latent.2.2-skip.4.cat-suffix.2-mingru.4-norm-skip.1.add-dense.4.gelu-skip.1.add-dense.1.gelu` |
+| 200 | 4.1061 | 3 | 123.29 s on mini | 8×1024 | 1/32↘0 | 131072 | fp32 | `bits.4.oh+bp\|latent.2.2-suffix.2-mingru.4-norm-skip.2.add-mingru.4-norm` |
+| 202 | 4.0827 | 3 | 149.11 s on m5 | 4×1024 | 1/16↘0 | 262144 | fp32 | `bits.4.oh+bp\|latent.2.2-skip.2.cat-suffix.2-mingru.4-norm-skip.2.add-dense.4.gelu-skip.1.add-dense.2.tanh` |
+| 212 | 4.0745 | 3 | 154.82 s on mini | 8×2048 | 1/16↘0 | 131072 | fp32 | `bits.4.oh+bp\|dense.2.tanh-skip.4.add-suffix.2-mingru.4-norm-skip.4.add-suffix.2-dense.4.gelu-skip.1.add-dense.4.tanh` |
+| 216 | 4.0493 | 3 | 152.26 s on mini | 4×1024 | 1/16↘0 | 262144 | fp32 | `bits.4.oh+bp\|latent.2.2-skip.2.cat-suffix.2-mingru.4-norm-skip.2.add-dense.4.gelu-skip.1.add-dense.4.tanh` |
+| 228 | 4.0410 | 3 | 153.24 s on mini | 4×2048 | 1/16↘0 | 131072 | fp32 | `bits.4.oh+bp\|dense.2.tanh-skip.2.cat-suffix.2-mingru.4-norm-skip.3.add-dense.4.gelu-norm-skip.1.add-latent.4.2` |
+| 235 | 4.0299 | 3 | 48.59 s on m5 | 16×512 | 1/16↘0 | 32768 | fp32 | `bits.1+bp\|mgru.8-norm-skip.1.add-dense.2.gelu` |
+| 237 | 4.0199 | 3 | 48.21 s on m5 | 16×512 | 1/16↘0 | 32768 | fp32 | `bits.1+bp\|mgru.8-norm-skip.1.cat-dense.2.gelu` |
+| 248 | 3.9874 | 4 | 95.82 s on m5 | 8×1024 | 1/16↘0 | 65536 | fp32 | `bits.4.oh+bp\|rnn.4.tanh-suffix.2-skip.1.cat-mingru.2-norm-dense.4.tanh` |
+| 263 | 3.9774 | 4 | 189.61 s on m5 | 8×2048 | 1/8↘0 | 65536 | fp32 | `bits.4.oh+bp\|rnn.4.tanh-skip.2.cat-suffix.2-mingru.2-norm-skip.2.add-dense.4.gelu-skip.4.cat-suffix.2-dense.1.tanh-skip.1.add-dense.1.relu` |
+| 266 | 3.9648 | 2 | 235.55 s on m5 | 64×256 | 1/16↘0 | 131072 | fp32 | `bits.1+bp\|mgru.8-norm-skip.4.add-dense.4.gelu-skip.2.cat-suffix.2-skip.1.add-dense.1.tanh` |
+| 278 | 3.9411 | 5 | 38.87 s on mini | 8×2048 | 1/8↘0 | 32768 | fp32 | `bits.4.oh+bp\|dense.4.tanh-skip.2.cat-suffix.2-mingru.4-norm-skip.2.add-dense.4.gelu-skip.1.add-dense.2.tanh` |
+| 292 | 3.9410 | 2 | 179.32 s on mini | 8×2048 | 1/16↘0 | 131072 | fp32 | `bits.4.oh+bp\|dense.4.tanh-skip.2.cat-suffix.2-mingru.4-norm-skip.2.cat-dense.4.gelu-skip.1.add-dense.2.tanh-skip.1.add-rnn.1.relu` |
+| 296 | 3.9397 | 5 | 12.45 s on m5 | 8×1024 | 1/8↘0 | 16384 | fp32 | `bits.4.oh+bp\|dense.4.tanh-skip.2.cat-suffix.2-mingru.4-norm-skip.3.add-dense.4.gelu-norm-skip.1.add-dense.4.tanh` |
+| 301 | 3.9374 | 3 | 11.96 s on mini | 8×1024 | 1/8↘0 | 16384 | fp32 | `bits.4.oh+bp\|dense.4.tanh-skip.2.cat-suffix.2-mingru.4-norm-skip.3.add-suffix.2-dense.4.gelu-skip.1.add-dense.1.tanh` |
+| 307 | 3.9321 | 2 | 378.03 s on mini | 8×2048 | 1/8↘0 | 131072 | fp32 | `bits.4.oh+bp\|rnn.4.tanh-skip.2.cat-suffix.2-mingru.4-norm-skip.2.add-dense.4.gelu-skip.1.add-dense.1.tanh-skip.1.cat-rnn.1.relu` |
+| 310 | 3.9105 | 4 | 26.49 s on mini | 4×2048 | 1/8↘0 | 32768 | fp32 | `bits.4.oh+bp\|dense.4.tanh-skip.2.cat-suffix.2-mingru.4-norm-skip.2.add-dense.4.gelu-skip.1.cat-dense.2.tanh` |
+| 311 | 3.8849 | 3 | 183.66 s on m5 | 8×2048 | 1/8↘0 | 65536 | fp32 | `bits.4.oh+bp\|rnn.4.tanh-skip.2.cat-suffix.2-mingru.4-norm-skip.2.add-dense.4.gelu-skip.4.cat-suffix.2-dense.1.tanh-skip.1.add-dense.1.relu` |
+| 336 | 3.8800 | 5 | 35.66 s on m5 | 8×256 | 1/64↘0 | 65536 | fp32 | `bits.4.oh+bp\|rnn.4.tanh-rnn.8.gelu` |
+| 350 | 3.8611 | 2 | 158.15 s on mini | 8×1024 | 1/8↘0 | 32768 | fp32 | `bits.4.oh+bp\|lrnn.4.2-skip.2.cat-suffix.2-mingru.2-norm-skip.2.add-suffix.2-dense.4.gelu-skip.1.cat-dense.2.tanh` |
+| 352 | 3.8570 | 3 | 96.91 s on m5 | 8×256 | 1/64↘0 | 65536 | fp32 | `bits.4.oh+bp\|lrnn.4.2-rnn.8.gelu` |
+| 360 | 3.8433 | 3 | 59.67 s on m5 | 8×1024 | 1/16↘0 | 65536 | fp32 | `bits.4.oh+bp\|dense.4.tanh-skip.3.add-suffix.2-mingru.4-skip.2.add-suffix.2-skip.1.add-dense.8.gelu` |
+| 376 | 3.8268 | 3 | 67.37 s on m5 | 4×1024 | 1/16↘0 | 65536 | fp32 | `bits.4.oh+bp\|rnn.4.tanh-norm-skip.3.add-suffix.2-mingru.4-skip.2.add-suffix.2-skip.1.add-dense.8.gelu` |
+| 392 | 3.8028 | 3 | 136.93 s on m5 | 8×2048 | 1/8↘0 | 32768 | fp32 | `bits.4.oh+bp\|dense.4.tanh-skip.5.add-suffix.2-mgru.4-skip.2.add-suffix.2-skip.1.add-dense.8.gelu` |
+| 416 | 3.7841 | 3 | 91.27 s on mini | 32×256 | 1/16↘0 | 32768 | fp32 | `bits.4.oh+bp\|lrnn.8.2-norm` |
+| 432 | 3.7625 | 4 | 105.60 s on mini | 8×1024 | 1/16↘0 | 131072 | fp32 | `bits.4.oh+bp\|dense.4.tanh-skip.5.add-suffix.2-mingru.4-suffix.2-dense.8.gelu-norm-skip.1.add-dense.8.gelu` |
+| 464 | 3.7551 | 2 | 232.11 s on mini | 8×1024 | 1/16↘0 | 262144 | fp32 | `bits.4.oh+bp\|dense.4.tanh-skip.4.add-suffix.2-skip.1.cat-mingru.4-dense.8.gelu-norm-skip.1.add-dense.8.gelu` |
+| 484 | 3.7290 | 3 | 143.33 s on m5 | 32×128 | 1/32↘0 | 65536 | fp32 | `bits.4.oh+bp\|lrnn.8.4-norm-skip.2.add-suffix.2-dense.4.gelu` |
+| 488 | 3.7095 | 4 | 130.23 s on mini | 32×256 | 1/32↘0 | 32768 | fp32 | `bits.4.oh+bp\|lrnn.8.4-norm-skip.1.add-dense.8.gelu` |
+| 552 | 3.6688 | 3 | 132.48 s on mini | 32×256 | 1/32↘0 | 32768 | fp32 | `bits.4.oh+bp\|lrnn.8.4-norm-skip.3.add-suffix.2-dense.8.gelu-norm` |

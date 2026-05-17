@@ -12,9 +12,6 @@ DB = "results/db.sqlite"
 # runs on the current system.
 SYSTEM_NAME = "system"
 
-TRAIN_TIMING = "results/train-timing.jsonl"
-SAMPLE_TIMING = "results/sample-timing.jsonl"
-
 SERVER_HOST = "localhost:5000"
 
 # Bearer token for the authenticated API. Generated with

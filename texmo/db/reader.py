@@ -187,6 +187,31 @@ class DbReader(object):
             'SELECT DISTINCT system FROM run ORDER BY system')
         return [row[0] for row in cur]
 
+    def has_covering_run(
+        self, conf: Configuration, min_steps: int, system: str,
+    ) -> bool:
+        """True if `system` has a run with the same (spec, lr, length,
+        batch, precision, decay, cosine) as `conf` and at least
+        `min_steps` steps. Used by the coverage-walk strategy to skip
+        confs that already have a comparable or longer run on the
+        target system."""
+        params = dict(conf.to_dict())
+        params['min_steps'] = min_steps
+        params['system'] = system
+        cur = self._db.execute(
+            '''SELECT 1 FROM run
+               JOIN conf ON run.conf_id = conf.id
+               WHERE conf.spec = :spec AND conf.lr = :lr
+                 AND conf.length = :length AND conf.batch = :batch
+                 AND conf.precision = :precision
+                 AND conf.decay = :decay AND conf.cosine = :cosine
+                 AND conf.steps >= :min_steps
+                 AND run.system = :system
+               LIMIT 1''',
+            params,
+        )
+        return cur.fetchone() is not None
+
     # --- search-strategy queries -------------------------------------------
 
     def top_confs_global(

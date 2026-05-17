@@ -76,6 +76,11 @@ _CANDIDATE_STEPS = 1024
 # one on each select_conf call. The fallback on None still kicks in.
 _TIME_BUDGET_PROB = 0.3
 
+# Probability of running the cross-system coverage walk per select. When
+# the previous walk on this system found 2+ uncovered top confs, the
+# next call fires unconditionally (see `Search._coverage_flag`).
+_COVERAGE_PROB = 0.1
+
 
 def top_confs_report(
     confs: list[ConfScore], max_weights: int, max_time: Optional[float], system: Optional[str]
@@ -239,6 +244,12 @@ class Search(object):
         # `LossModel` gets swapped atomically on refit.
         self.timing_model = timing_model
         self.loss_model = loss_model
+
+        # Sticky per-system flag set by `_select_uncovered_top` when it
+        # finds 2+ uncovered top confs — keeps the coverage walk firing
+        # at 100% on the next select for that system until the gap
+        # closes. Reset by the same call when fewer than 2 are found.
+        self._coverage_flag: dict[str, bool] = {}
 
     def _select_time(self) -> float:
         tmin, tmax = self.train_time
@@ -486,37 +497,43 @@ class Search(object):
 
             return None
 
-    def _select_global_top(
-        self, max_weights: int, system: str
+    def _select_uncovered_top(
+        self, system: str
     ) -> Optional[Configuration]:
-        """Cross-system coverage: pick the global top conf at
-        `weights ≤ max_weights`, cap its steps to fit maxt on `system`,
-        and propose it if this system hasn't run it yet.
+        """Walk every top conf the template admits, cap each for
+        `system`, and return the first whose capped variant has no
+        covering run on `system` (= no run with the same
+        spec/lr/length/batch/precision/decay/cosine and steps ≥ the
+        capped count).
 
-        Without this, the throughput-comparison page is misleading —
-        we only know how a top conf performs on the system(s) that
-        happened to discover it. Falls through (returns None) once
-        every global top is covered, so the regular search strategies
-        keep running.
+        Sets `self._coverage_flag[system]` to True when 2+ uncovered
+        confs are found so the next select on this system fires this
+        walk unconditionally; resets to False otherwise. This is the
+        bulk coverage push that keeps the throughput-comparison page
+        honest across slow systems.
         """
-        with latency.timer("Search._select_global_top"):
-            top_confs = list(
-                self._db.top_confs_global(
-                    self.template, max_weights=max_weights))
-            if not top_confs:
-                return None
-            # `top_confs_global` yields a strictly-improving Pareto
-            # front; the last one is the global best at this budget.
-            best = top_confs[-1]
-            capped = self._cap_steps(best.conf, system)
-            conf_id = self._db.get_conf_id(capped)
-            if conf_id is not None:
-                counts = self._db.get_run_counts(
-                    [conf_id], system=system)
-                _, system_runs = counts.get(conf_id, (0, 0))
-                if system_runs > 0:
-                    return None
-            return capped
+        with latency.timer('Search._select_uncovered_top'):
+            # `top_confs_global` applies the template's max_weights
+            # bound itself via `_make_template_conditions`, so no extra
+            # max_weights filter here. Iterated lazily — we break out
+            # as soon as we know the flag should fire.
+            selected: Optional[Configuration] = None
+            uncovered = 0
+            for c in self._db.top_confs_global(self.template):
+                capped = self._cap_steps(c.conf, system)
+                if self._db.has_covering_run(
+                        capped, capped.steps, system):
+                    continue
+                uncovered += 1
+                if selected is None:
+                    selected = capped
+                if uncovered >= 2:
+                    # Already enough to set the flag; no need to keep
+                    # walking the rest of the Pareto.
+                    break
+
+            self._coverage_flag[system] = uncovered >= 2
+            return selected
 
     def _select_predicted_best(
         self, t: float, max_weights: int, system: str, bfs_depth: int,
@@ -647,9 +664,10 @@ class Search(object):
         """Select a SearchResult, or None if nothing matches.
 
         Strategies, tried in order with fallback:
-        * global-top — always tried; cross-system coverage for the
-          global top conf at the current weight budget. Falls through
-          once every top is covered on this system.
+        * coverage-walk — bulk coverage push, fires with probability
+          `_COVERAGE_PROB` (or 100% if the previous walk on this system
+          left 2+ uncovered tops). Independent of `t` and
+          `max_weights`.
         * predicted-best at BFS depth 2 (needs both loss and timing
           models) — _PREDICTED_2ND_NEIGHBOR_PROB of the time;
         * predicted-best at BFS depth 3 (bigger jump from the seed) —
@@ -659,16 +677,22 @@ class Search(object):
         * neighbor-walk — the always-available fallback.
         """
         with latency.timer("Search.select_conf"):
+            # Coverage walk runs *before* t / max_weights selection so
+            # the bulk cross-system push isn't confined to the current
+            # iteration's weight bucket. Sticky on this system when the
+            # previous walk left more uncovered to do.
+            if (
+                self._coverage_flag.get(system, False)
+                or random.random() < _COVERAGE_PROB
+            ):
+                conf = self._select_uncovered_top(system)
+                if conf is not None:
+                    logging.info(
+                        f'Conf for {system}: {conf} (coverage_walk)')
+                    return SearchResult(conf, 'coverage_walk', system)
+
             t = self._select_time()
             max_weights = self._select_max_weights(t, system)
-
-            # Cross-system coverage first: if the global top conf at
-            # this weight budget hasn't been run on `system`, do that.
-            # Falls through once every global top is covered.
-            conf = self._select_global_top(max_weights, system)
-            if conf is not None:
-                logging.info(f'Conf for {system}: {conf} (global_top)')
-                return SearchResult(conf, 'global_top', system)
 
             if random.random() < _PREDICTED_2ND_NEIGHBOR_PROB:
                 conf = self._select_predicted_best(

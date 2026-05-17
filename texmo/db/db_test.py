@@ -659,3 +659,49 @@ def test_top_confs_global_system_filter(db):
         for cs in db.top_confs_global(template, system="rpi")
     }
     assert rpi_specs == {"bytes|dense.32.gelu", "bytes|dense.64.gelu"}
+
+
+def _conf_with_steps(steps, batch=32):
+    model = build_model_def("bytes|dense.64.gelu", precision=Precision.FP32)
+    return Configuration(
+        model=model, lr=0.25, length=128, batch=batch, steps=steps, decay=1,
+    )
+
+
+def test_has_covering_run_exact_match(db):
+    conf = _conf_with_steps(256)
+    db.add_run(conf, Run(system="rpi", step_loss=[0.1], loss=1.0, train_time=2.0))
+    assert db.has_covering_run(conf, min_steps=256, system="rpi") is True
+
+
+def test_has_covering_run_higher_steps_covers(db):
+    """A run at 1024 steps covers a 256-steps query — the higher-steps
+    run is strictly more informative."""
+    higher = _conf_with_steps(1024)
+    db.add_run(higher, Run(system="rpi", step_loss=[0.1], loss=1.0, train_time=2.0))
+    query = _conf_with_steps(256)
+    assert db.has_covering_run(query, min_steps=256, system="rpi") is True
+
+
+def test_has_covering_run_lower_steps_does_not_cover(db):
+    lower = _conf_with_steps(128)
+    db.add_run(lower, Run(system="rpi", step_loss=[0.1], loss=1.0, train_time=2.0))
+    query = _conf_with_steps(256)
+    assert db.has_covering_run(query, min_steps=256, system="rpi") is False
+
+
+def test_has_covering_run_wrong_system(db):
+    conf = _conf_with_steps(256)
+    db.add_run(conf, Run(system="rpi", step_loss=[0.1], loss=1.0, train_time=2.0))
+    assert db.has_covering_run(conf, min_steps=256, system="whitebox") is False
+
+
+def test_has_covering_run_different_batch_does_not_cover(db):
+    """A run at the same steps but different batch is a different
+    configuration in the timing sense — should not count as covered."""
+    db.add_run(
+        _conf_with_steps(256, batch=64),
+        Run(system="rpi", step_loss=[0.1], loss=1.0, train_time=2.0),
+    )
+    query = _conf_with_steps(256, batch=32)
+    assert db.has_covering_run(query, min_steps=256, system="rpi") is False

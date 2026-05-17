@@ -10,10 +10,10 @@ from .run import Run
 from .search import Search, _generate_limits, _run_limit_sequences
 
 
-def _make_conf(steps=1024):
-    model = build_model_def("bytes|dense.8.gelu", precision=Precision.FP32)
+def _make_conf(steps=1024, batch=32, spec="bytes|dense.8.gelu"):
+    model = build_model_def(spec, precision=Precision.FP32)
     return Configuration(
-        model=model, lr=0.01, length=128, batch=32, steps=steps, decay=1,
+        model=model, lr=0.01, length=128, batch=batch, steps=steps, decay=1,
     )
 
 
@@ -108,7 +108,7 @@ def _make_search_at(path):
     )
 
 
-def _seed_runs(path, conf, system, n):
+def _seed_runs(path, conf, system, n, loss_base=0.5):
     """Add `n` runs of `conf` on `system` so it qualifies as a top
     conf (`num_runs > 1` + non-null `median_score`)."""
     writer = DbWriter(path)
@@ -116,40 +116,72 @@ def _seed_runs(path, conf, system, n):
         for i in range(n):
             writer.add_run(conf, Run(
                 system=system, step_loss=[0.1],
-                loss=0.5 + 0.01 * i, train_time=2.0))
+                loss=loss_base + 0.01 * i, train_time=2.0))
     finally:
         writer.close()
 
 
-def test_select_global_top_empty_db(tmp_path):
+def test_select_uncovered_top_empty_db(tmp_path):
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
     search = _make_search_at(path)
-    assert search._select_global_top(max_weights=10_000, system='b') is None
+    assert search._select_uncovered_top('b') is None
+    assert search._coverage_flag.get('b', False) is False
 
 
-def test_select_global_top_returns_uncovered_conf(tmp_path):
+def test_select_uncovered_top_one_uncovered_no_flag(tmp_path):
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
     conf = _make_conf(steps=256)
-    _seed_runs(path, conf, system='a', n=2)
+    _seed_runs(path, conf, system='a', n=2)  # qualifies as top
     search = _make_search_at(path)
-    result = search._select_global_top(max_weights=10_000, system='b')
-    assert result is not None
-    # No timing-model fit → `_cap_steps` is a no-op, so we get the conf
-    # back unchanged.
+    result = search._select_uncovered_top('b')
     assert result == conf
+    # Only one uncovered conf — flag stays False.
+    assert search._coverage_flag.get('b', False) is False
 
 
-def test_select_global_top_skips_when_covered(tmp_path):
+def test_select_uncovered_top_two_uncovered_sets_flag(tmp_path):
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    # Distinct specs (different weight counts) and a strictly better
+    # loss for the larger one so both surface in `top_confs_global`'s
+    # Pareto-improving stream.
+    confA = _make_conf(steps=256, spec="bytes|dense.8.gelu")
+    confB = _make_conf(steps=256, spec="bytes|dense.16.gelu")
+    _seed_runs(path, confA, system='a', n=2, loss_base=0.5)
+    _seed_runs(path, confB, system='a', n=2, loss_base=0.3)
+    search = _make_search_at(path)
+    result = search._select_uncovered_top('b')
+    assert result in (confA, confB)
+    # 2+ uncovered — next select on 'b' will fire unconditionally.
+    assert search._coverage_flag['b'] is True
+
+
+def test_select_uncovered_top_all_covered(tmp_path):
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
     conf = _make_conf(steps=256)
     _seed_runs(path, conf, system='a', n=2)
     _seed_runs(path, conf, system='b', n=1)
     search = _make_search_at(path)
-    assert search._select_global_top(
-        max_weights=10_000, system='b') is None
+    assert search._select_uncovered_top('b') is None
+    assert search._coverage_flag['b'] is False
+
+
+def test_select_uncovered_top_higher_steps_covers(tmp_path):
+    """A run with more steps than the capped variant counts as covered
+    — no need to re-run the same architecture at fewer steps."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    conf_query = _make_conf(steps=256)
+    conf_higher = _make_conf(steps=1024)
+    _seed_runs(path, conf_query, system='a', n=2)   # makes it a top conf
+    _seed_runs(path, conf_higher, system='b', n=1)  # covers conf_query on 'b'
+    search = _make_search_at(path)
+    # conf_query is still uncovered on 'b' since steps=1024 >= 256 means
+    # the higher-steps run covers it. No selection.
+    assert search._select_uncovered_top('b') is None
 
 
 def test_run_limit_sequences():

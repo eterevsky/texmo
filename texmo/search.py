@@ -541,13 +541,13 @@ class Search(object):
                 uncovered += 1
                 if selected is None:
                     selected = capped
-                if uncovered >= _COVERAGE_STICKY_THRESHOLD:
-                    # Already enough to set the flag; no need to keep
-                    # walking the rest of the Pareto.
-                    break
 
-            self._coverage_flag[system] = (
-                uncovered >= _COVERAGE_STICKY_THRESHOLD)
+            sticky = uncovered >= _COVERAGE_STICKY_THRESHOLD
+            logging.info(
+                f'Coverage walk {system}: {uncovered}/{len(top)} '
+                f'top confs uncovered, sticky={sticky}'
+            )
+            self._coverage_flag[system] = sticky
             return selected
 
     def _select_predicted_best(

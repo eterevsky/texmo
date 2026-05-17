@@ -671,7 +671,7 @@ def _conf_with_steps(steps, batch=32):
 def test_has_covering_run_exact_match(db):
     conf = _conf_with_steps(256)
     db.add_run(conf, Run(system="rpi", step_loss=[0.1], loss=1.0, train_time=2.0))
-    assert db.has_covering_run(conf, min_steps=256, system="rpi") is True
+    assert db.has_covering_run(conf, system="rpi") is True
 
 
 def test_has_covering_run_higher_steps_covers(db):
@@ -680,20 +680,20 @@ def test_has_covering_run_higher_steps_covers(db):
     higher = _conf_with_steps(1024)
     db.add_run(higher, Run(system="rpi", step_loss=[0.1], loss=1.0, train_time=2.0))
     query = _conf_with_steps(256)
-    assert db.has_covering_run(query, min_steps=256, system="rpi") is True
+    assert db.has_covering_run(query, system="rpi") is True
 
 
 def test_has_covering_run_lower_steps_does_not_cover(db):
     lower = _conf_with_steps(128)
     db.add_run(lower, Run(system="rpi", step_loss=[0.1], loss=1.0, train_time=2.0))
     query = _conf_with_steps(256)
-    assert db.has_covering_run(query, min_steps=256, system="rpi") is False
+    assert db.has_covering_run(query, system="rpi") is False
 
 
 def test_has_covering_run_wrong_system(db):
     conf = _conf_with_steps(256)
     db.add_run(conf, Run(system="rpi", step_loss=[0.1], loss=1.0, train_time=2.0))
-    assert db.has_covering_run(conf, min_steps=256, system="whitebox") is False
+    assert db.has_covering_run(conf, system="whitebox") is False
 
 
 def test_has_covering_run_different_batch_does_not_cover(db):
@@ -704,4 +704,4 @@ def test_has_covering_run_different_batch_does_not_cover(db):
         Run(system="rpi", step_loss=[0.1], loss=1.0, train_time=2.0),
     )
     query = _conf_with_steps(256, batch=32)
-    assert db.has_covering_run(query, min_steps=256, system="rpi") is False
+    assert db.has_covering_run(query, system="rpi") is False

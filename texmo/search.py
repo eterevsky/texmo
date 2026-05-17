@@ -76,10 +76,17 @@ _CANDIDATE_STEPS = 1024
 # one on each select_conf call. The fallback on None still kicks in.
 _TIME_BUDGET_PROB = 0.3
 
-# Probability of running the cross-system coverage walk per select. When
-# the previous walk on this system found 2+ uncovered top confs, the
-# next call fires unconditionally (see `Search._coverage_flag`).
+# Probability of running the cross-system coverage walk per select.
+# When the previous walk on this system found enough uncovered top
+# confs (see `_COVERAGE_STICKY_THRESHOLD`), the next call fires
+# unconditionally via `Search._coverage_flag`.
 _COVERAGE_PROB = 0.1
+
+# Sticky-flag threshold: keep firing the coverage walk only when at
+# least this many uncovered top confs remain on the system. Set high
+# enough that successive selects within the prefetch gap window
+# don't pile up on the same few confs before any run finishes.
+_COVERAGE_STICKY_THRESHOLD = 5
 
 
 def top_confs_report(
@@ -500,39 +507,43 @@ class Search(object):
     def _select_uncovered_top(
         self, system: str
     ) -> Optional[Configuration]:
-        """Walk every top conf the template admits, cap each for
-        `system`, and return the first whose capped variant has no
-        covering run on `system` (= no run with the same
-        spec/lr/length/batch/precision/decay/cosine and steps ≥ the
-        capped count).
+        """Walk every top conf the template admits in random order,
+        cap each for `system`, and return the first whose capped
+        variant has no covering run on `system` (= no run with the
+        same spec/lr/length/batch/precision/decay/cosine and steps ≥
+        the capped count).
 
-        Sets `self._coverage_flag[system]` to True when 2+ uncovered
-        confs are found so the next select on this system fires this
-        walk unconditionally; resets to False otherwise. This is the
-        bulk coverage push that keeps the throughput-comparison page
-        honest across slow systems.
+        Sets `self._coverage_flag[system]` to True when
+        `_COVERAGE_STICKY_THRESHOLD`+ uncovered confs are found, so
+        the next select on this system fires this walk
+        unconditionally; resets to False otherwise. The randomized
+        order keeps successive selects from picking the same conf
+        during the prefetch gap window (before the previous run is
+        written back).
         """
         with latency.timer('Search._select_uncovered_top'):
             # `top_confs_global` applies the template's max_weights
             # bound itself via `_make_template_conditions`, so no extra
-            # max_weights filter here. Iterated lazily — we break out
-            # as soon as we know the flag should fire.
+            # max_weights filter here. Materialized so we can shuffle.
+            top = list(self._db.top_confs_global(self.template))
+            random.shuffle(top)
+
             selected: Optional[Configuration] = None
             uncovered = 0
-            for c in self._db.top_confs_global(self.template):
+            for c in top:
                 capped = self._cap_steps(c.conf, system)
-                if self._db.has_covering_run(
-                        capped, capped.steps, system):
+                if self._db.has_covering_run(capped, system):
                     continue
                 uncovered += 1
                 if selected is None:
                     selected = capped
-                if uncovered >= 2:
+                if uncovered >= _COVERAGE_STICKY_THRESHOLD:
                     # Already enough to set the flag; no need to keep
                     # walking the rest of the Pareto.
                     break
 
-            self._coverage_flag[system] = uncovered >= 2
+            self._coverage_flag[system] = (
+                uncovered >= _COVERAGE_STICKY_THRESHOLD)
             return selected
 
     def _select_predicted_best(

@@ -188,15 +188,15 @@ class DbReader(object):
         return [row[0] for row in cur]
 
     def has_covering_run(
-        self, conf: Configuration, min_steps: int, system: str,
+        self, conf: Configuration, system: str,
     ) -> bool:
         """True if `system` has a run with the same (spec, lr, length,
         batch, precision, decay, cosine) as `conf` and at least
-        `min_steps` steps. Used by the coverage-walk strategy to skip
+        `conf.steps` steps. Used by the coverage-walk strategy to skip
         confs that already have a comparable or longer run on the
         target system."""
         params = dict(conf.to_dict())
-        params['min_steps'] = min_steps
+        params['min_steps'] = conf.steps
         params['system'] = system
         cur = self._db.execute(
             '''SELECT 1 FROM run

@@ -141,7 +141,9 @@ def test_select_uncovered_top_one_uncovered_no_flag(tmp_path):
     assert search._coverage_flag.get('b', False) is False
 
 
-def test_select_uncovered_top_two_uncovered_sets_flag(tmp_path):
+def test_select_uncovered_top_below_threshold_no_flag(tmp_path):
+    """Two uncovered confs isn't enough to set the sticky flag with
+    `_COVERAGE_STICKY_THRESHOLD=5`."""
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
     # Distinct specs (different weight counts) and a strictly better
@@ -154,7 +156,43 @@ def test_select_uncovered_top_two_uncovered_sets_flag(tmp_path):
     search = _make_search_at(path)
     result = search._select_uncovered_top('b')
     assert result in (confA, confB)
-    # 2+ uncovered — next select on 'b' will fire unconditionally.
+    assert search._coverage_flag.get('b', False) is False
+
+
+def test_select_uncovered_top_at_threshold_sets_flag(
+    tmp_path, monkeypatch,
+):
+    """With `_COVERAGE_STICKY_THRESHOLD` uncovered confs the next
+    select on this system fires unconditionally."""
+    from texmo.db.reader import ConfScore
+    from texmo import search as search_mod
+
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    search = _make_search_at(path)
+
+    # Build a fake Pareto front big enough to clear the threshold.
+    n = search_mod._COVERAGE_STICKY_THRESHOLD
+    fake = [
+        ConfScore(
+            conf_id=i,
+            conf=_make_conf(steps=256, batch=8 + i),
+            median_score=0.5 - 0.01 * i,
+            system='a',
+            median_time=1.0,
+            num_runs=2,
+        )
+        for i in range(n)
+    ]
+    monkeypatch.setattr(
+        search._db, 'top_confs_global',
+        lambda template, **kwargs: iter(fake))
+    monkeypatch.setattr(
+        search._db, 'has_covering_run',
+        lambda conf, system: False)  # all uncovered
+
+    result = search._select_uncovered_top('b')
+    assert result is not None
     assert search._coverage_flag['b'] is True
 
 

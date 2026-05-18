@@ -43,6 +43,7 @@ from ..layers.dense import DenseDef
 from ..layers.gru import GruDef, MgruDef, MinGruDef
 from ..layers.latent import LatentDef, LrnnDef
 from ..layers.lstm import LstmDef
+from ..layers.msr import MsrDef
 from ..layers.norm import NormDef
 from ..layers.rnn import RnnDef
 from ..layers.skip import SkipDef
@@ -86,6 +87,21 @@ def _features_suffix(
 ) -> list[float]:
     osize = isize * suffix_length
     return _features_base(isize, osize, batch, length) + [suffix_length]
+
+
+def _features_msr(
+    isize: int, osize: int, batch: int, length: int
+) -> list[float]:
+    # Dense matmul features cover the stacked Q/K/V projection (NNLS
+    # picks a ~3x larger coefficient). The new L^2 terms cover the two
+    # T x T einsums (Q K^T and decayed scores @ V) and the decay
+    # elementwise multiply — being defensive with multiple shapes so
+    # NNLS can pick whichever fits the measured data.
+    return _features_dense(isize, osize, batch, length) + [
+        length * length,
+        length * length * osize,
+        length * length * osize * batch,
+    ]
 
 
 def _features_skip(isize: int, batch: int, length: int) -> list[float]:
@@ -152,6 +168,8 @@ def _layer_component(layer, batch: int, length: int) -> Component:
         features = _features_suffix(layer.input_size, batch, length, layer.length)
     elif isinstance(layer, SkipDef):
         features = _features_skip(layer.input_size, batch, length)
+    elif isinstance(layer, MsrDef):
+        features = _features_msr(layer.input_size, layer.size, batch, length)
     elif isinstance(layer, _MATMUL_LAYER_TYPES):
         features = _features_dense(layer.input_size, layer.size, batch, length)
     elif isinstance(layer, NormDef):

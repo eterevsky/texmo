@@ -204,6 +204,46 @@ def test_jax_causality():
 
 # -- Cross-backend agreement --
 
+# -- Neighbors --
+
+def test_msr_neighbors_size_and_heads_mutations():
+    d = MsrDef(4, 2, input_size=8)
+    neighbors = list(d.neighbors())
+    # 2x dim
+    assert "msr.2.2" in neighbors
+    assert "msr.8.2" in neighbors
+    # 2x heads
+    assert "msr.4.1" in neighbors
+    assert "msr.4.4" in neighbors
+    # No mgru swap when heads != 1.
+    assert not any(n.startswith("mgru.") for n in neighbors)
+
+
+def test_msr_neighbors_min_dim_clamped():
+    """dim must stay >= 2 (RoPE needs at least one pair)."""
+    d = MsrDef(2, 4, input_size=8)
+    neighbors = list(d.neighbors())
+    assert "msr.4.4" in neighbors          # double dim
+    assert "msr.1.4" not in neighbors      # halve dim would be 1
+    assert "msr.2.2" in neighbors          # halve heads
+    assert "msr.2.8" in neighbors          # double heads
+
+
+def test_msr_neighbors_swap_with_mgru_at_heads_1():
+    d = MsrDef(8, 1, input_size=4)
+    neighbors = list(d.neighbors())
+    assert "mgru.8" in neighbors
+    # heads 1 can still double; halve would be 0.5 → drops out via power2_neighbors.
+    assert "msr.8.2" in neighbors
+
+
+def test_mgru_includes_msr_neighbor():
+    from texmo.layers.gru import MgruDef
+    d = MgruDef(8, input_size=4)
+    neighbors = list(d.neighbors())
+    assert "msr.8.1" in neighbors
+
+
 def test_torch_matches_jax():
     """Torch and JAX implementations must agree on shared weights."""
     dim, heads, input_size = 4, 2, 8

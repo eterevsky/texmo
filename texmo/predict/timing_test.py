@@ -83,6 +83,28 @@ def test_featurize_base_values():
         dense.features, expected_base + expected_matmul)
 
 
+def test_featurize_msr_l2_features():
+    """msr features extend dense_matmul with [L^2, L^2*OS, L^2*OS*B]."""
+    conf = _conf("bits.1+bp|msr.2.4-dense.8.gelu", batch=4, length=10)
+    comps = featurize(conf)
+    # Order: input, msr, dense, output.
+    msr = comps[1]
+    assert msr.type_id == "msr"
+    # msr OS = heads * dim = 4 * 2 = 8.  IS comes from the bits.1+bp
+    # input layer's output (one-hot encoding width).
+    os_, b, l = 8, 4, 10
+    is_ = int(msr.features[3])  # the IS feature, validated by the base block
+    bl = b * l
+    expected_base = [1, l, bl, is_, is_ * l, is_ * bl,
+                     os_, os_ * l, os_ * bl]
+    expected_matmul = [is_ * os_, is_ * os_ * l, is_ * os_ * bl]
+    expected_l2 = [l * l, l * l * os_, l * l * os_ * b]
+    np.testing.assert_array_equal(
+        msr.features, expected_base + expected_matmul + expected_l2)
+    # Sanity: there should be 15 features (9 base + 3 matmul + 3 L^2).
+    assert msr.features.shape == (15,)
+
+
 def test_predict_total_time_with_known_weights():
     """If only T_step has nonzero weights, total = steps * step_per_layer_sum."""
     conf = _conf("bits.1+bp|dense.8.gelu", batch=4, length=10, steps=100)

@@ -122,6 +122,19 @@ class LayerDef(object):
                     yield f"rnn.{self.size}.tanh"
             return
 
+        if self.name == "msr":
+            # 2x dim (must stay >= 2 — RoPE needs at least one pair).
+            for d in power2_neighbors(self.dim):
+                if d >= 2:
+                    yield f"msr.{d}.{self.heads}"
+            # 2x heads (must stay >= 1).
+            for h in power2_neighbors(self.heads):
+                yield f"msr.{self.dim}.{h}"
+            # Single-head msr swaps with mgru of the same size.
+            if self.heads == 1:
+                yield f"mgru.{self.dim}"
+            return
+
         # Size mutations (keep same layer type and activation)
         if self.name in ("dense", "rnn"):
             for s in power2_neighbors(self.size):
@@ -151,6 +164,10 @@ class LayerDef(object):
             # lstm <-> gru, mgru (but not mingru)
             if self.name in ("gru", "mgru"):
                 yield f"lstm.{self.size}"
+            # mgru <-> msr.X.1 (single-head retention has the same
+            # vector state width as mgru.X).
+            if self.name == "mgru":
+                yield f"msr.{self.size}.1"
         elif self.name == "lstm":
             yield f"gru.{self.size}"
             yield f"mgru.{self.size}"

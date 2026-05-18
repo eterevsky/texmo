@@ -53,6 +53,10 @@ class LossModel:
     # `_init_global_features` then emits 6 globals to match the old
     # `W_glob` shape. New fits set this True.
     has_cosine: bool = False
+    # False on pickles trained before the msr layer landed. Adds one
+    # extra per-layer slot for log2(msr.heads) so the predictor can
+    # distinguish msr.X.Y from msr.X.Z at the same total size.
+    has_msr_heads: bool = False
 
     def predict(self, confs: list[Configuration]) -> np.ndarray:
         return predict(
@@ -65,6 +69,7 @@ class LossModel:
             out_hidden=self.out_hidden,
             out_activation=self.out_activation,
             has_cosine=self.has_cosine,
+            has_msr_heads=self.has_msr_heads,
         )
 
 
@@ -95,11 +100,11 @@ class LossModelHolder:
 
 # A layer is "simple" if it's fully described by its input/output sizes
 # plus its type (which is captured by the bool slot). The rest
-# (suffix, latent, lrnn, skip) carry an extra dimension and get
+# (suffix, latent, lrnn, msr, skip) carry an extra dimension and get
 # dedicated slots; we deliberately don't give them bool slots since
 # their extra-dim slot already signals "this is that type" (non-zero
 # only for that type, except skip.X=1 which we handle with raw X).
-_EXTRA_DIM_TYPES = {'suffix', 'latent', 'lrnn'}
+_EXTRA_DIM_TYPES = {'suffix', 'latent', 'lrnn', 'msr'}
 
 
 def _is_simple_type(t: str) -> bool:
@@ -152,17 +157,20 @@ def discover_simple_types(
     return sorted(seen)
 
 
-def _layer_feature_dim(n_simple: int) -> int:
+def _layer_feature_dim(n_simple: int, has_msr_heads: bool = False) -> int:
     # [log(num_weights), log(in), log(out)] + bool per simple type +
     # [suffix_len, latent_reps, lrnn_reps, skip_add_dist, skip_cat_dist]
-    return 3 + n_simple + 5
+    # + (log(msr_heads) if has_msr_heads else nothing)
+    return 3 + n_simple + 5 + (1 if has_msr_heads else 0)
 
 
 def _layer_features(
     layer, simple_type_idx: dict[str, int], n_simple: int,
+    has_msr_heads: bool = False,
 ) -> np.ndarray:
     out_size = _layer_output_size(layer)
-    feat = np.zeros(_layer_feature_dim(n_simple), dtype=np.float32)
+    feat = np.zeros(
+        _layer_feature_dim(n_simple, has_msr_heads), dtype=np.float32)
     # log2(max(..., 1)) lets weightless layers (skip, possibly norm)
     # land at 0 rather than -inf.
     feat[0] = np.log2(max(layer.num_weights, 1))
@@ -182,6 +190,8 @@ def _layer_features(
         feat[3 + n_simple + 3] = layer.distance
     elif t == 'skip.cat':
         feat[3 + n_simple + 4] = layer.distance
+    elif t == 'msr' and has_msr_heads:
+        feat[3 + n_simple + 5] = np.log2(layer.heads)
     return feat
 
 
@@ -190,10 +200,11 @@ def _build_input_arrays(
     simple_type_idx: dict[str, int],
     max_layers: int,
     has_cosine: bool,
+    has_msr_heads: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     n = len(confs)
     n_simple = len(simple_type_idx)
-    feat_dim = _layer_feature_dim(n_simple)
+    feat_dim = _layer_feature_dim(n_simple, has_msr_heads)
     n_global = N_INIT_GLOBAL if has_cosine else N_INIT_GLOBAL_LEGACY
     init_globals = np.zeros((n, n_global), dtype=np.float32)
     layer_feats = np.zeros((n, max_layers, feat_dim), dtype=np.float32)
@@ -202,7 +213,7 @@ def _build_input_arrays(
         init_globals[i] = _init_global_features(conf, has_cosine)
         for j, layer in enumerate(conf.model.layers[:max_layers]):
             layer_feats[i, j] = _layer_features(
-                layer, simple_type_idx, n_simple)
+                layer, simple_type_idx, n_simple, has_msr_heads)
             masks[i, j] = 1.0
     return init_globals, layer_feats, masks
 
@@ -380,16 +391,17 @@ def fit(
     confs = [c for c, _ in train_data]
     max_layers = max((len(c.model.layers) for c in confs), default=1)
     max_layers = max(max_layers, 1)
-    # Always emit the cosine slot when fitting from current code.
+    # Always emit the cosine + msr_heads slots when fitting from current code.
     init_globals_np, layer_feats_np, masks_np = _build_input_arrays(
-        confs, type_idx, max_layers, has_cosine=True)
+        confs, type_idx, max_layers, has_cosine=True, has_msr_heads=True)
     targets_np = _build_targets(train_data)
     init_globals = jnp.asarray(init_globals_np)
     layer_feats = jnp.asarray(layer_feats_np)
     masks = jnp.asarray(masks_np)
     targets = jnp.asarray(targets_np)
 
-    n_layer_feat = _layer_feature_dim(len(simple_types))
+    n_layer_feat = _layer_feature_dim(
+        len(simple_types), has_msr_heads=True)
     rng = jax.random.PRNGKey(seed)
     rng, init_key = jax.random.split(rng)
     params = _init_params(
@@ -469,6 +481,7 @@ def train_loss_model(
         out_hidden=32,
         out_activation='gelu',
         has_cosine=True,
+        has_msr_heads=True,
     )
 
 
@@ -485,10 +498,12 @@ def predict(
     out_hidden: int = 0,
     out_activation: str = 'gelu',
     has_cosine: bool = False,
+    has_msr_heads: bool = False,
 ) -> np.ndarray:
     type_idx = {t: i for i, t in enumerate(simple_types)}
     ig_np, lf_np, m_np = _build_input_arrays(
-        confs, type_idx, max_layers, has_cosine=has_cosine)
+        confs, type_idx, max_layers,
+        has_cosine=has_cosine, has_msr_heads=has_msr_heads)
     preds = _forward(
         params, jnp.asarray(ig_np), jnp.asarray(lf_np), jnp.asarray(m_np),
         cell_activation, feat_proj, rnn_sub_steps, cell_type, pooling,

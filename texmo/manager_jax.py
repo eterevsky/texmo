@@ -208,7 +208,11 @@ class ManagerJax(Manager):
             batch=self.test_batch,
             tokenset_name=self.model_def.input.tokens_name,
         )
-        total_loss = model32.loss_batch_masked(weights32, batch, lengths)
+        # Recurrent form avoids the O(B*H*L^2) scores tensor that the
+        # parallel forward materializes — required to fit 1024x1024 eval
+        # in 16 GB on systems with msr layers.
+        total_loss = model32.loss_batch_masked_recurrent(
+            weights32, batch, lengths)
         return float(total_loss) / (self.test_sample_len * self.test_batch)
 
     def continue_prefix(

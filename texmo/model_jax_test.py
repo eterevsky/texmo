@@ -130,6 +130,54 @@ def test_no_layers():
     assert logits0.shape == (2,)
 
 
+def _assert_recurrent_matches_forward(spec: str, B: int = 2, T: int = 6):
+    model, weights = _build(spec)
+    batch = jax.random.randint(
+        jax.random.PRNGKey(7), (B, T), 0, model.ntokens)
+    fwd = model.forward(weights, batch)
+    rec = model.forward_recurrent(weights, batch)
+    assert rec.shape == fwd.shape
+    np.testing.assert_allclose(np.asarray(rec), np.asarray(fwd), atol=1e-5)
+
+
+def test_forward_recurrent_dense():
+    _assert_recurrent_matches_forward("bits.1+bp|dense.8.gelu")
+
+
+def test_forward_recurrent_mgru():
+    _assert_recurrent_matches_forward("bits.1+bp|mgru.8")
+
+
+def test_forward_recurrent_multi_layer():
+    _assert_recurrent_matches_forward(
+        "bits.1+bp|dense.8.gelu-mgru.4-norm")
+
+
+def test_forward_recurrent_msr():
+    _assert_recurrent_matches_forward("bits.1+bp|msr.4.2")
+
+
+def test_forward_recurrent_msr_in_pipeline():
+    _assert_recurrent_matches_forward(
+        "bits.1+bp|dense.8.tanh-msr.4.2-dense.4.gelu")
+
+
+def test_forward_recurrent_with_skip():
+    _assert_recurrent_matches_forward(
+        "bits.1+bp|skip.2.add-dense.4.tanh-dense.4.gelu")
+
+
+def test_loss_batch_masked_recurrent_matches_parallel():
+    model, weights = _build("bits.1+bp|msr.4.2-dense.4.gelu")
+    B, T = 2, 8
+    batch = jax.random.randint(jax.random.PRNGKey(11), (B, T), 0, 2)
+    lengths = jnp.array([T, T - 2], dtype=jnp.int32)
+    parallel = model.loss_batch_masked(weights, batch, lengths)
+    recurrent = model.loss_batch_masked_recurrent(weights, batch, lengths)
+    np.testing.assert_allclose(
+        float(parallel), float(recurrent), atol=1e-5)
+
+
 def test_weight_count():
     md = ModelDef("bits.1+bp|dense.8.gelu", Precision.FP32)
     model = md.build_jax()

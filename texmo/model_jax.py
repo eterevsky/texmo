@@ -169,3 +169,65 @@ class ModelJax:
             logits, batch)
         mask = jnp.arange(per_token.shape[1]) < lengths[:, jnp.newaxis]
         return _1_BY_LOG2 * jnp.sum(per_token * mask)
+
+    def forward_recurrent(
+        self, weights: Weights, batch: jax.Array
+    ) -> jax.Array:
+        """Same logits as forward(), computed via scanned per-token step().
+
+        For msr layers this trades the O(batch*heads*length^2) scores
+        tensor for an O(batch*heads*dim^2) state matrix — a large memory
+        and (on CPU at tiny dim) compute win. For non-msr layers it's
+        the same step path used in inference, just batched and scanned,
+        so no asymptotic change.
+        """
+        batch_size = batch.shape[0]
+
+        init_state, init_logits = self.initial_step(weights)
+
+        # Broadcast each leaf of the un-batched initial state to the
+        # batch dim. tree.map skips None leaves automatically.
+        # jnp.asarray converts Python-int leaves (e.g. the input
+        # layer's position counter) into 0-d jnp scalars so they can
+        # be broadcast and follow the vmap.
+        def add_batch(x):
+            arr = jnp.asarray(x)
+            return jnp.broadcast_to(arr, (batch_size,) + arr.shape)
+        batched_state = jax.tree.map(add_batch, init_state)
+
+        # vmap one step over the batch axis (state and input token both
+        # have axis 0). weights stay un-batched (shared across samples).
+        batched_step = jax.vmap(
+            lambda s, t: self.step(weights, s, t),
+            in_axes=(0, 0),
+        )
+
+        # Consume tokens 0..length-2; their outputs are logits 1..length-1.
+        inputs_t = jnp.transpose(batch[:, :-1], (1, 0))  # (length-1, batch)
+
+        def scan_fn(state, token_t):
+            return batched_step(state, token_t)
+
+        _, logits_t = jax.lax.scan(scan_fn, batched_state, inputs_t)
+        # logits_t: (length-1, batch, vocab)
+
+        init_logits_batched = jnp.broadcast_to(
+            init_logits, (batch_size,) + init_logits.shape)
+        all_logits = jnp.concatenate(
+            [init_logits_batched[None], logits_t], axis=0
+        )  # (length, batch, vocab)
+        return jnp.transpose(all_logits, (1, 0, 2))  # (batch, length, vocab)
+
+    def loss_batch_masked_recurrent(
+        self, weights: Weights, batch: jax.Array, lengths: jax.Array
+    ) -> jax.Array:
+        """Same as loss_batch_masked but via forward_recurrent.
+
+        Used for eval where the parallel form's O(L^2) scores tensor
+        OOMs at full eval shapes (e.g. 1024x1024) on the 16 GB systems.
+        """
+        logits = self.forward_recurrent(weights, batch)
+        per_token = optax.softmax_cross_entropy_with_integer_labels(
+            logits, batch)
+        mask = jnp.arange(per_token.shape[1]) < lengths[:, jnp.newaxis]
+        return _1_BY_LOG2 * jnp.sum(per_token * mask)

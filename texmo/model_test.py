@@ -375,6 +375,39 @@ def test_skip_adjacent_skips_invalid():
     assert not md.is_valid()
 
 
+def test_two_msr_adjacent_invalid():
+    md = ModelDef(
+        "bits.1+bp|dense.4.tanh-msr.2.2-msr.4.1-dense.4.gelu",
+        Precision.FP32,
+    )
+    assert not md.is_valid()
+
+
+def test_neighbors_append_msr():
+    """Append yields msr.<new_size>.1 alongside the other recurrent layers."""
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    # min(32, 256) = 32 → appended msr has dim=32, heads=1.
+    assert "bytes|dense.32.gelu-msr.32.1" in neighbor_specs
+
+
+def test_neighbors_append_msr_skipped_at_size_1():
+    """msr requires dim >= 2; append should skip msr at new_size=1."""
+    md = ModelDef("bits.1+bp|", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    # Other recurrent appends fire at size 1...
+    assert "bits.1+bp|mgru.1" in neighbor_specs
+    # ...but msr.1.1 would have no RoPE pair.
+    assert "bits.1+bp|msr.1.1" not in neighbor_specs
+
+
+def test_neighbors_append_msr_remove_roundtrip():
+    md = ModelDef("bytes|dense.32.gelu-msr.32.1", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    # Removing the trailing msr is the symmetric "drop the appended layer".
+    assert "bytes|dense.32.gelu" in neighbor_specs
+
+
 def test_skip_source_before_norm_invalid():
     md = ModelDef(
         "bytes|dense.32.gelu-skip.1.add-norm-dense.32.gelu", Precision.FP32)

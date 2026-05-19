@@ -447,6 +447,10 @@ class ModelDef(object):
             # the skip pseudo-layer is a norm).
             if l1.name == "skip" and l2.name == "norm":
                 return False
+            # Two msr layers can't be adjacent — both maintain matrix
+            # state and serve the same architectural role.
+            if l1.name == "msr" and l2.name == "msr":
+                return False
 
         # Merge point can't be right after a suffix: the layer just
         # before each skip's target position (i.e. the last skipped
@@ -495,6 +499,10 @@ class ModelDef(object):
         for name in ("gru", "mgru", "mingru", "lstm"):
             yield _make_spec(chain(
                 layers_str, (f"{name}.{new_size}",)))
+        # msr.X.1 requires dim >= 2 for at least one RoPE pair.
+        if new_size >= 2:
+            yield _make_spec(chain(
+                layers_str, (f"msr.{new_size}.1",)))
 
         # 3. Remove last layer (symmetric with append)
         if self.layers:

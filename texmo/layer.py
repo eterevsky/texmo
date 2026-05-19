@@ -165,8 +165,9 @@ class LayerDef(object):
             if self.name in ("gru", "mgru"):
                 yield f"lstm.{self.size}"
             # mgru <-> msr.X.1 (single-head retention has the same
-            # vector state width as mgru.X).
-            if self.name == "mgru":
+            # vector state width as mgru.X). msr needs dim >= 2 for
+            # at least one RoPE pair, so skip when mgru.1.
+            if self.name == "mgru" and self.size >= 2:
                 yield f"msr.{self.size}.1"
         elif self.name == "lstm":
             yield f"gru.{self.size}"

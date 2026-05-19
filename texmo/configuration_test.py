@@ -327,6 +327,15 @@ def test_neighbor_walk_excludes_exp_when_not_in_decay_types():
     assert none.replace(cosine=True) in neighbors
 
 
+def test_default_from_template_rejects_invalid_spec():
+    """An explicitly-provided --default-spec must pass model.is_valid()."""
+    import pytest
+    t = _meta_template([DecayType.COSINE])
+    # msr requires dim >= 2 (RoPE needs at least one pair); msr.1.1 fails.
+    with pytest.raises(ValueError, match="not a valid model"):
+        default_from_template(t, spec="bits.1+bp|msr.1.1")
+
+
 def test_default_from_template_decay_types():
     spec = "bytes|dense.32.gelu"
     none_conf = default_from_template(_meta_template([DecayType.NONE]), spec)

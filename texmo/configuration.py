@@ -489,16 +489,21 @@ def default_from_template(
                         found = True
 
     if spec is not None:
+        model = build_model_def(spec, precision=precision)
+        if not model.is_valid():
+            raise ValueError(
+                f"Default spec {spec!r} is not a valid model "
+                f"(at precision={precision.value})."
+            )
         return Configuration(
-                        model=build_model_def(spec, precision=precision),
-                        lr=lr,
-                        length=length,
-                        batch=batch,
-                        steps=steps,
-                        decay=decay,
-                        cosine=cosine,
-                    )
-
+            model=model,
+            lr=lr,
+            length=length,
+            batch=batch,
+            steps=steps,
+            decay=decay,
+            cosine=cosine,
+        )
 
     raise RuntimeError(
         "Can't pick up a default model that would fit the template"

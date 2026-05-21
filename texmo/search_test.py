@@ -222,6 +222,87 @@ def test_select_uncovered_top_higher_steps_covers(tmp_path):
     assert search._select_uncovered_top('b') is None
 
 
+def test_select_predicted_best_no_seed_returns_none(tmp_path):
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    search = _make_search_at(path)
+    # No runs at all -> no top conf for 'a' -> no seed -> None.
+    assert search._select_predicted_best_impl(
+        t=4.0, max_weights=INF, system='a', bfs_depth=2,
+    ) is None
+
+
+def test_select_predicted_best_no_timing_returns_none(
+    tmp_path, monkeypatch,
+):
+    """Seed exists, but the timing model isn't fit — every _norm()
+    returns None, adjusted is empty, function returns None."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    seed_conf = _make_conf(steps=256, spec="bytes|dense.8.gelu")
+    _seed_runs(path, seed_conf, system='a', n=3)
+    search = _make_search_at(path)
+    # predict returns None for every conf (no model fit).
+    monkeypatch.setattr(
+        search.timing_model, 'predict', lambda system, conf: None)
+    assert search._select_predicted_best_impl(
+        t=4.0, max_weights=INF, system='a', bfs_depth=2,
+    ) is None
+
+
+def test_select_predicted_best_happy_path(tmp_path, monkeypatch):
+    """End-to-end: seed exists, timing+loss models stubbed, depth-2 BFS
+    runs, a Configuration comes back. Time scales linearly with steps
+    so a band of step values is feasible — locks in that the function
+    actually exercises (W, T) variety from the neighbor walk and that
+    over-budget step counts get capped rather than dropped."""
+    import numpy as np
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    seed_conf = _make_conf(steps=256, spec="bytes|dense.8.gelu")
+    _seed_runs(path, seed_conf, system='a', n=3)
+    search = _make_search_at(path)
+
+    # max_t = train_time[1] = 16.0. Time = 16.0 * (steps / 1024), so
+    # any steps <= 1024 fits; > 1024 overflows. Returning 1024 from
+    # predict_max_steps covers every conf with the same cap.
+    monkeypatch.setattr(
+        search.timing_model, 'predict',
+        lambda system, conf: 16.0 * conf.steps / 1024.0)
+    monkeypatch.setattr(
+        search.timing_model, 'predict_max_steps',
+        lambda system, conf, t: 1024)
+
+    # Record what gets scored — lets us assert on the candidate pool.
+    scored_confs: list[Configuration] = []
+
+    class FakeLossModel:
+        def is_ready(self): return True
+        def predict(self, confs):
+            scored_confs.extend(confs)
+            return np.full(len(confs), -1.0, dtype=np.float32)
+
+    search.loss_model = FakeLossModel()
+
+    picked = search._select_predicted_best_impl(
+        t=4.0, max_weights=INF, system='a', bfs_depth=2)
+    assert picked is not None
+    assert isinstance(picked, Configuration)
+
+    # Sanity on what was scored:
+    assert scored_confs, "loss model never invoked"
+    # Every scored conf must fit max_t -- either under-budget natively
+    # or capped to 1024.
+    assert all(c.steps <= 1024 for c in scored_confs)
+    # And (W, T) variety survives the post-BFS normalization: multiple
+    # distinct steps values appear in the candidate pool, not just the
+    # cap value. (Step neighbors include c.steps/2 and c.steps*2 from
+    # the seed at 256; depth 2 reaches 64 and 1024.)
+    distinct_steps = {c.steps for c in scored_confs}
+    assert len(distinct_steps) >= 3, (
+        f"expected multiple step values in candidates; got {distinct_steps}")
+
+
 def test_run_limit_sequences():
     seqs = []
     for i, s in enumerate(_run_limit_sequences()):

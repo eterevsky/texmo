@@ -41,34 +41,57 @@ for whether each strategy is earning its slot.
 
 ### 1. `predicted_2nd_neighbor`
 
-Picked ~15% of the time (tunable). Requires both the loss model and
-the timing model to be fitted.
+Gated by `_PREDICTED_2ND_NEIGHBOR_PROB`. Requires both the loss
+model and the timing model to be fitted.
 
-Take the top conf (lowest median loss) for `(system, max_weights,
-max_time≤t)` as a seed. BFS to depth 2 (~100 candidates), filter by `weights ≤
-max_weights`, predict per-step time and adjust `steps` to the budget,
-predict log-loss for each adjusted candidate, then score each by the
-**compound** median of `(predicted_log_loss, observed_log_losses...)`.
-Walk the top 9 across run-limit sequences `[1] / [2,1,1] / [3,2,2,1×6]`,
-returning the first candidate whose total run count is below the
-position's limit.
+Pipeline (shared with `predicted_3rd_neighbor`; see
+`Search._select_predicted_best_impl`):
+
+1. **Seed pick.** Take the top conf (lowest median loss) for
+   `(system, max_weights, max_time ≤ t)` — `t` is the per-select
+   sampled time budget. If none, bail.
+2. **BFS over unnormalized neighbors** to `bfs_depth` (2 for this
+   strategy). The set is deduped on the raw `Configuration` — every
+   step / batch / lr / arch mutation produced by `conf_neighbors`
+   stays distinct in the walk. Over-budget intermediates are kept;
+   they're just bridges to other candidates at depth N.
+3. **Weight filter.** Drop confs whose `num_weights > max_weights`.
+4. **Per-conf step cap.** For each survivor, ask the timing model
+   for the predicted total time at the conf's current `steps`. If
+   it already fits `max_t = train_time[1]`, keep the conf
+   unchanged. Otherwise replace `steps` with the largest pow2 that
+   does fit; drop the conf if even the smallest run won't fit.
+   **The cap is to `max_t`, not to the sampled `t`** — `t` is for
+   seed selection only, so step counts are scored at the largest
+   budget the user has authorized. Multiple over-budget neighbors
+   can collapse to the same capped form; dedupe on the result.
+5. **Score and walk.** Predict log-loss for each surviving conf,
+   compute a **compound** median of `(predicted_log_loss,
+   observed_log_losses...)`, sort ascending. Walk the top 9 across
+   run-limit sequences `[1] / [2,1,1] / [3,2,2,1×6]`, returning
+   the first candidate whose total run count is below the
+   position's limit.
+
+The "BFS doesn't normalize, post-BFS does" split is what preserves
+(W, T) variety end-to-end: under-budget step counts from the
+neighbor walk survive into the scoring pool, instead of collapsing
+into a single max-fitting T per W.
 
 ### 2. `predicted_3rd_neighbor`
 
-Picked ~20% of the remaining 85% (tunable). Same machinery as the
-2nd-neighbor strategy but BFS depth 3 (~1000 candidates). Larger jump
-from the seed into less-explored territory; predictor noise is
-correspondingly higher.
+Gated by `_PREDICTED_3RD_NEIGHBOR_PROB`. Same pipeline as the
+2nd-neighbor strategy but with `bfs_depth = 3` (~1000 candidates).
+Larger jump from the seed into less-explored territory; predictor
+noise is correspondingly higher.
 
 ### 3. `time_budget`
 
-Picked ~30% of the time, conditional on the two predictor strategies
-not firing (tunable). Score-ordered scan of confs with `time_estimate
-≤ t AND weights ≤ max_weights` (using either median or predicted time
-estimates). For each iteration of an expanding run-limit sequence
-(`[1] / [2,1,1] / [3,2,2,1×6] / ...`), pick the first position whose
-total run count is below the limit at that position, or whose
-`system_runs == 0`.
+Gated by `_TIME_BUDGET_PROB`. Score-ordered scan of confs with
+`time_estimate ≤ t AND weights ≤ max_weights` (using either median
+or predicted time estimates). For each iteration of an expanding
+run-limit sequence (`[1] / [2,1,1] / [3,2,2,1×6] / ...`), pick the
+first position whose total run count is below the limit at that
+position, or whose `system_runs == 0`.
 
 ### 4. `neighbor`
 

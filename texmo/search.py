@@ -62,19 +62,15 @@ SearchMessage = Select | SetTemplate | Stop
 # Probability of running the predicted-best strategy at BFS depth 2
 # (~100 candidates) before falling back to others. Requires both loss
 # and timing models to be ready.
-_PREDICTED_2ND_NEIGHBOR_PROB = 0.15
+_PREDICTED_2ND_NEIGHBOR_PROB = 0.05
 
 # Probability of running predicted-best at BFS depth 3 (~1000
 # candidates — bigger jump from the seed). Same model requirements.
-_PREDICTED_3RD_NEIGHBOR_PROB = 0.2
-
-# Placeholder value for the `steps` field when deduplicating candidate
-# configurations — we replace it with a budget-fitting value later.
-_CANDIDATE_STEPS = 1024
+_PREDICTED_3RD_NEIGHBOR_PROB = 0.05
 
 # Probability of choosing the time-budget strategy over the top-neighbor
 # one on each select_conf call. The fallback on None still kicks in.
-_TIME_BUDGET_PROB = 0.3
+_TIME_BUDGET_PROB = 0.2
 
 # Probability of running the cross-system coverage walk per select.
 # When the previous walk on this system found enough uncovered top
@@ -583,26 +579,21 @@ class Search(object):
         seed_conf = seed.conf
 
         # BFS to `bfs_depth` from the seed, including the seed itself.
-        # Normalize steps to a constant before inserting into the set
-        # — otherwise confs differing only in steps end up as separate
-        # entries, then collapse to the same thing after the
-        # budget-fitting step. Expand from unnormalized (= seed's
-        # actual steps) so neighbor generation matches the seed's
-        # parameter grid.
-        def _norm(c: Configuration) -> Configuration:
-            return c if c.steps == _CANDIDATE_STEPS else c.replace(
-                steps=_CANDIDATE_STEPS)
-
-        visited: set[Configuration] = {_norm(seed_conf)}
+        # We dedupe on the raw (unnormalized) conf so that step and
+        # batch mutations stay distinct in the walk — over-budget
+        # intermediates are fine, they just won't survive the
+        # post-BFS normalization. (W, T) variety from the neighbor
+        # walk is preserved end-to-end this way.
+        visited: set[Configuration] = {seed_conf}
         frontier: list[Configuration] = [seed_conf]
         for _ in range(bfs_depth):
             next_frontier: list[Configuration] = []
             for c in frontier:
                 for n in conf_neighbors(c, self.template):
-                    nn = _norm(n)
-                    if nn not in visited:
-                        visited.add(nn)
-                        next_frontier.append(n)
+                    if n in visited:
+                        continue
+                    visited.add(n)
+                    next_frontier.append(n)
             if not next_frontier:
                 break
             frontier = next_frontier
@@ -610,30 +601,42 @@ class Search(object):
         # Filter by weight budget *after* the BFS, so intermediate
         # neighbors with too many weights can still lead us to
         # smaller-but-different final candidates at depth N.
-        candidates = {c for c in visited if c.num_weights <= max_weights}
-        if not candidates:
+        weight_filtered = [
+            c for c in visited if c.num_weights <= max_weights]
+        if not weight_filtered:
             return None
 
-        # Pick the largest pow2 step count that fits the budget for each.
-        # The timing model owns the inversion (init / scan / step
-        # decomposition lives inside it). `predict_max_steps` returns
-        # None iff no model is fit for (system, precision); since
-        # precision is the same across `confs_in`, the first None means
-        # the whole strategy is unavailable.
-        confs_in = list(candidates)
-        adjusted = []
-        for c in confs_in:
-            max_steps = self.timing_model.predict_max_steps(system, c, t)
-            if max_steps is None:
+        # Seed selection uses the sampled `t`; the step-fit cap uses
+        # the configured maximum training time. We want to score
+        # candidates at the largest budget the user has authorized,
+        # not at whatever `t` happened to be sampled this iteration.
+        max_t = self.train_time[1]
+
+        # Normalize each weight-budget candidate: leave alone if its
+        # predicted total time already fits max_t, cap c.steps to the
+        # largest pow2 that does fit otherwise, drop the conf if even
+        # the smallest training run won't fit (or the timing model
+        # isn't fit for this system/precision). Multiple over-budget
+        # neighbors can normalize to the same capped conf, so dedupe.
+        def _norm(c: Configuration) -> Optional[Configuration]:
+            predicted = self.timing_model.predict(system, c)
+            if predicted is None:
                 return None
-            if max_steps < 2:
-                continue
-            if max_steps == c.steps:
-                adjusted.append(c)
-            else:
-                adjusted.append(c.replace(steps=max_steps))
-        if not adjusted:
+            if predicted <= max_t:
+                return c
+            ms = self.timing_model.predict_max_steps(system, c, max_t)
+            if ms is None or ms < 2:
+                return None
+            return c.replace(steps=ms)
+
+        adjusted_set: set[Configuration] = set()
+        for c in weight_filtered:
+            nc = _norm(c)
+            if nc is not None:
+                adjusted_set.add(nc)
+        if not adjusted_set:
             return None
+        adjusted = list(adjusted_set)
 
         # Predict loss for each adjusted conf (log2 space).
         log_preds = self.loss_model.predict(adjusted)

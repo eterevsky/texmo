@@ -59,18 +59,21 @@ class Stop:
 
 SearchMessage = Select | SetTemplate | Stop
 
-# Probability of running the predicted-best strategy at BFS depth 2
-# (~100 candidates) before falling back to others. Requires both loss
-# and timing models to be ready.
-_PREDICTED_2ND_NEIGHBOR_PROB = 0.05
-
-# Probability of running predicted-best at BFS depth 3 (~1000
-# candidates — bigger jump from the seed). Same model requirements.
-_PREDICTED_3RD_NEIGHBOR_PROB = 0.05
-
-# Probability of choosing the time-budget strategy over the top-neighbor
-# one on each select_conf call. The fallback on None still kicks in.
-_TIME_BUDGET_PROB = 0.2
+# Per-select strategy split. One weighted draw per `select_conf`
+# decides which main strategy fires first; if it returns None (e.g.
+# `predicted_*` without a fitted loss model), we fall back to the
+# neighbor walk, then to the default conf. Coverage walk runs
+# separately at the top of `select_conf`. Weights must sum to 1.0.
+_STRATEGY_PROBS: list[tuple[str, float]] = [
+    ('predicted_2nd_neighbor', 0.1),
+    ('predicted_3rd_neighbor', 0.1),
+    ('time_budget', 0.2),
+    ('neighbor', 0.6),
+]
+assert abs(sum(w for _, w in _STRATEGY_PROBS) - 1.0) < 1e-9, (
+    f"_STRATEGY_PROBS must sum to 1.0, "
+    f"got {sum(w for _, w in _STRATEGY_PROBS)}"
+)
 
 # Probability of running the cross-system coverage walk per select.
 # When the previous walk on this system found enough uncovered top
@@ -678,21 +681,61 @@ class Search(object):
                     return c
         return None
 
+    def _result(
+        self, conf: Configuration, strategy: str, system: str,
+    ) -> SearchResult:
+        logging.info(f'Conf for {system}: {conf} ({strategy})')
+        return SearchResult(conf, strategy, system)
+
+    def _select_default(self, system: str) -> Optional[Configuration]:
+        """Return init_conf, unless it no longer matches the current
+        template or has already been explored enough on this system."""
+        if not self.template.match(self.init_conf):
+            logging.info(
+                f'No conf for {system}: init_conf does not match template')
+            return None
+        conf_id = self._db.get_conf_id(self.init_conf)
+        if conf_id is not None:
+            counts = self._db.get_run_counts([conf_id], system=system)
+            total_runs, system_runs = counts.get(conf_id, (0, 0))
+            if total_runs >= 7 and system_runs >= 1:
+                logging.info(
+                    f'No conf for {system}: init_conf has {total_runs} '
+                    f'total runs ({system_runs} on this system)')
+                return None
+        return self.init_conf
+
+    def _run_strategy(
+        self, name: str, t: float, max_weights: int, system: str,
+    ) -> Optional[Configuration]:
+        match name:
+            case 'predicted_2nd_neighbor':
+                return self._select_predicted_best(
+                    t, max_weights, system, bfs_depth=2)
+            case 'predicted_3rd_neighbor':
+                return self._select_predicted_best(
+                    t, max_weights, system, bfs_depth=3)
+            case 'time_budget':
+                return self._select_time_budget(t, max_weights, system)
+            case 'neighbor':
+                return self._select_top_neighbor(t, max_weights, system)
+            case _:
+                raise ValueError(f"unknown strategy: {name}")
+
     def select_conf(self, system: str) -> Optional[SearchResult]:
         """Select a SearchResult, or None if nothing matches.
 
-        Strategies, tried in order with fallback:
-        * coverage-walk — bulk coverage push, fires with probability
-          `_COVERAGE_PROB` (or 100% if the previous walk on this system
-          left 2+ uncovered tops). Independent of `t` and
-          `max_weights`.
-        * predicted-best at BFS depth 2 (needs both loss and timing
-          models) — _PREDICTED_2ND_NEIGHBOR_PROB of the time;
-        * predicted-best at BFS depth 3 (bigger jump from the seed) —
-          _PREDICTED_3RD_NEIGHBOR_PROB of the time, same model
-          requirements;
-        * time-budget — _TIME_BUDGET_PROB of the time;
-        * neighbor-walk — the always-available fallback.
+        Coverage walk runs first (independent of t / max_weights) and
+        fires either with probability `_COVERAGE_PROB` or
+        unconditionally when its sticky flag is set on this system.
+
+        After that, one weighted random draw over `_STRATEGY_PROBS`
+        picks the main strategy. If the picked strategy returns None
+        (e.g. `predicted_*` without a fitted loss model, or
+        `time_budget` with no qualifying confs), we fall back to the
+        neighbor walk. If neighbor too is unavailable, fall back to
+        the default conf (skipped if it doesn't match the current
+        template or has already been explored enough).
         """
         with latency.timer("Search.select_conf"):
             # Coverage walk runs *before* t / max_weights selection so
@@ -705,56 +748,32 @@ class Search(object):
             ):
                 conf = self._select_uncovered_top(system)
                 if conf is not None:
-                    logging.info(
-                        f'Conf for {system}: {conf} (coverage_walk)')
-                    return SearchResult(conf, 'coverage_walk', system)
+                    return self._result(conf, 'coverage_walk', system)
 
             t = self._select_time()
             max_weights = self._select_max_weights(t, system)
 
-            if random.random() < _PREDICTED_2ND_NEIGHBOR_PROB:
-                conf = self._select_predicted_best(
-                    t, max_weights, system, bfs_depth=2)
-                if conf is not None:
-                    return SearchResult(conf, 'predicted_2nd_neighbor', system)
-
-            if random.random() < _PREDICTED_3RD_NEIGHBOR_PROB:
-                conf = self._select_predicted_best(
-                    t, max_weights, system, bfs_depth=3)
-                if conf is not None:
-                    return SearchResult(conf, 'predicted_3rd_neighbor', system)
-
-            if random.random() < _TIME_BUDGET_PROB:
-                conf = self._select_time_budget(t, max_weights, system)
-                if conf is not None:
-                    return SearchResult(conf, 'time_budget', system)
-
-            conf = self._select_top_neighbor(t, max_weights, system)
+            picked, _ = random.choices(
+                _STRATEGY_PROBS,
+                weights=[w for _, w in _STRATEGY_PROBS],
+                k=1,
+            )[0]
+            conf = self._run_strategy(picked, t, max_weights, system)
             if conf is not None:
-                logging.info(f'Conf for {system}: {conf}')
-                return SearchResult(conf, 'neighbor', system)
+                return self._result(conf, picked, system)
 
-            # Template can change on the fly — re-check init_conf still
-            # matches before falling back to it.
-            if not self.template.match(self.init_conf):
-                logging.info(
-                    f'No conf for {system}: init_conf does not match template')
-                return None
+            # First-line strategy was unavailable -- always fall back
+            # to the neighbor walk.
+            if picked != 'neighbor':
+                conf = self._run_strategy(
+                    'neighbor', t, max_weights, system)
+                if conf is not None:
+                    return self._result(conf, 'neighbor', system)
 
-            # Skip init_conf if it's already been explored enough.
-            conf_id = self._db.get_conf_id(self.init_conf)
-            if conf_id is not None:
-                counts = self._db.get_run_counts([conf_id], system=system)
-                total_runs, system_runs = counts.get(conf_id, (0, 0))
-                if total_runs >= 7 and system_runs >= 1:
-                    logging.info(
-                        f'No conf for {system}: init_conf has {total_runs} '
-                        f'total runs ({system_runs} on this system)')
-                    return None
-
-            logging.info(
-                f'Conf for {system}: {self.init_conf} (default)')
-            return SearchResult(self.init_conf, 'default', system)
+            conf = self._select_default(system)
+            if conf is not None:
+                return self._result(conf, 'default', system)
+            return None
 
 
 class SearchThread(threading.Thread):

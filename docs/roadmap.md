@@ -10,12 +10,37 @@ Given a parameter budget N and compute budget T, answer:
 
 ## Architectures to add
 
-* **mLSTM (xLSTM family).** LSTM with a matrix-valued cell state and
-  scalar input/forget gates (both input-dependent). Strict
-  generalisation of LSTM. Neighbor relation: `lstm.X <-> mlstm.X` as
-  a type swap. Cheapest matrix-state experiment — directly tests
-  whether content-dependent gating (which MSR lacked) is what makes
-  matrix-state useful at small weight budgets.
+### LSTM-family bake-off
+
+Goal: figure out which modern LSTM tricks (matrix state,
+exponential gating, multiplicative recurrent transitions) are
+actually useful at small weight budgets. All three become layer-
+type-swap neighbours of `lstm.X`.
+
+* **matLSTM** (Beck et al. 2024, xLSTM paper, "mLSTM" in the
+  paper — renamed here to disambiguate from the unrelated Krause-
+  2016 mLSTM). LSTM with a matrix-valued cell state, covariance /
+  outer-product write, and exponential input/forget gates (both
+  input-dependent). Strict generalisation of vector LSTM. Tests
+  whether content-dependent gating + matrix state work at small
+  weight budgets where MSR didn't.
+* **sLSTM** (Beck et al. 2024, xLSTM paper). Scalar-state companion
+  to matLSTM — keeps the exponential gating + stabilisation tricks
+  without the matrix cell. Tests whether the "modern LSTM tricks"
+  alone (without matrix state) help at our scale.
+* **mLSTM (multiplicative)** (Krause, Murray, Renals & Lu 2016).
+  Input-modulated recurrent transitions — the recurrent transition
+  function is per-input. Scalar state. Different family from the
+  xLSTM mLSTM; the name collision is unfortunate.
+
+Decision point after the three are on the board: if matLSTM beats
+LSTM at our parameter budgets, follow up with **matGRU** — same
+matrix-state machinery but with mGRU's single input-dependent
+forget gate instead of LSTM-style input/forget pair. Novel; not in
+any paper. Tests whether the GRU-beats-LSTM observation we already
+see at scalar state carries over to matrix state.
+
+### Other
 
 * **DeltaNet.** Linear-attention with delta-rule updates:
   `S_t = S_{t-1}·(I − β k_t k_t^T) + β k_t v_t^T`, with `β_t` learned
@@ -23,7 +48,7 @@ Given a parameter budget N and compute budget T, answer:
   to online L2 regression of values against keys (i.e. a closed-form
   flavour of test-time training). Parallel-trainable via the
   Yang-et-al 2024 scan. Tests the "MSR's fixed γ is what hurt"
-  hypothesis directly. Do after mLSTM.
+  hypothesis directly. Do after the LSTM-family bake-off.
 
 * **S4D.** Simplest structured-state-space model: diagonal linear
   recurrence with complex eigenvalues, HiPPO initialisation.
@@ -45,6 +70,20 @@ Given a parameter budget N and compute budget T, answer:
   as a search axis. Deferred until at least one matrix-state
   layer is on the Pareto front — comparing attention against MSR
   alone isn't useful.
+
+### Candidates to revisit
+
+* **HGRN2** (Qin et al. 2024, "Hierarchically Gated Recurrent
+  Network"). Adds depth-dependent gating — lower layers have
+  lower forget rates (longer memory), upper layers shorter. The
+  gain comes mostly in multi-layer models; less obviously useful
+  at our typical 1-2 hidden-layer regime, so deferred until we
+  have a baseline that benefits from depth.
+* **LRU** (Orvieto et al. 2023, "Resurrecting Recurrent Neural
+  Networks for Long Sequences", DeepMind). Linear recurrence with
+  complex eigenvalues + input-dependent gating — essentially S4D-
+  with-input-dependent-gates. Revisit after S4D so we have a
+  baseline structured-recurrence to compare against.
 
 ## Training procedures
 

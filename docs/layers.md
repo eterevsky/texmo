@@ -114,6 +114,42 @@ Standard LSTM with four gates (forget, input, output, candidate):
 - PyTorch: cuDNN-fused `nn.LSTM`.
 - `num_weights = 4 * size * (input_size + size) + 4 * size`.
 
+## sLSTM (`slstm.<size>`)
+
+Scalar-state sLSTM from xLSTM (Beck et al. 2024). Same weight
+shape and memory-mixing structure as `lstm` (single head, full
+`R_*` matrices), with sLSTM's "modern LSTM tricks" layered on
+top: exponential input gate with max-tracking stabilisation,
+normaliser carry, and an attention-like `c / n` readout instead
+of the usual `tanh(c)`. JAX only.
+
+    gates = W_ih x + W_hh h + b                      # (4·size,)
+    z     = tanh(gates[:s])                          # cell input
+    o     = sigmoid(gates[3s:4s])                    # output gate
+    log_f = log_sigmoid(gates[2s:3s])
+    m_new = max(log_f + m, gates[s:2s])              # stabiliser
+    i_st  = exp(gates[s:2s] - m_new)                 # <= 1
+    f_st  = exp(log_f + m - m_new)                   # <= 1
+    c_new = f_st · c + i_st · z
+    n_new = f_st · n + i_st
+    h_new = o · (c_new / n_new)                      # paper eq (10)
+
+- State per sample: `(h, c, n, m)` — all `(size,)` vectors. `n`
+  and `m` add zero parameters; they're derived from gate values.
+- `num_weights` is **identical to LstmDef**:
+  `4·size·(input_size + size) + 4·size`. Useful comparison
+  point: the head-to-head with `lstm.X` isolates the effect of
+  the exp-gate + normaliser + stabiliser tricks at the same
+  parameter budget.
+- Single head only. Multi-head sLSTM (memory mixing within
+  heads, not across) is deferred until single-head data tells us
+  whether the bake-off is worth pursuing further.
+- Forward is `lax.scan` with input projection `W_ih x` hoisted;
+  everything else depends on the `h` carry so stays in the body.
+- Output uses pure `c / n` per the paper (no `max(n, 1)`
+  clipping); the stabiliser keeps both numerator and denominator
+  in fp32 range during training.
+
 ## matLSTM (`matlstm.<size>`)
 
 Matrix-state LSTM from xLSTM (Beck et al. 2024 —

@@ -16,6 +16,7 @@ from .layers.latent import LatentDef, LrnnDef
 from .layers.lstm import LstmDef
 from .layers.matlstm import MatLstmDef
 from .layers.msr import MsrDef
+from .layers.slstm import SLstmDef
 from .layers.norm import NormDef
 from .layers.rnn import RnnDef
 from .layers.skip import SkipDef, SkipModule
@@ -676,6 +677,9 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
 
     if name == "matlstm":
         return MatLstmDef(int(parts[1]), input_size=input_size)
+
+    if name == "slstm":
+        return SLstmDef(int(parts[1]), input_size=input_size)
 
     if name == "msr":
         return MsrDef(

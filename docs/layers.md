@@ -114,6 +114,37 @@ Standard LSTM with four gates (forget, input, output, candidate):
 - PyTorch: cuDNN-fused `nn.LSTM`.
 - `num_weights = 4 * size * (input_size + size) + 4 * size`.
 
+## mulLSTM (`mullstm.<size>`)
+
+Multiplicative LSTM from Krause, Murray, Renals & Lu 2016
+("Multiplicative LSTM for Sequence Modelling"). Renamed here
+to `mullstm` to disambiguate from `matlstm` (Beck-2024 xLSTM) --
+the literature calls both "mLSTM" but they're unrelated
+architectures.
+
+The key idea: the previous hidden state `h_{t-1}` is element-wise
+modulated by an input-dependent projection before reaching the
+standard LSTM gates. Different inputs give different effective
+recurrent transitions.
+
+    m       = (W_mx x) ⊙ (W_mh h_{t-1})              # (size,)
+    gates   = W_ih x + W_hh m + b                     # (4·size,)
+    z       = tanh(gates[:s])
+    i,f,o   = sigmoid(...)
+    c_new   = f · c + i · z
+    h_new   = o · tanh(c_new)
+
+- State per sample: `(h, c)` -- identical to vanilla LSTM.
+- Weights add a multiplicative pair on top of LSTM's gates:
+  - `w_mx: (size, input_size)` -- multiplicative input projection.
+  - `w_mh: (size, size)` -- multiplicative hidden projection.
+  - Plus the usual `w_ih`, `w_hh`, `b` (4 stacked gates with bias).
+- `num_weights = 5·size·(input_size + size) + 4·size` -- vanilla
+  LSTM plus `size·(input_size + size)` extra for the multiplicative
+  path. ~25% more parameters than `lstm.X` at the same size.
+- Forward in JAX is a `lax.scan` with both input-only projections
+  (`W_ih x` and `W_mx x`) hoisted out of the scan body.
+
 ## sLSTM (`slstm.<size>`)
 
 Scalar-state sLSTM from xLSTM (Beck et al. 2024). Same weight

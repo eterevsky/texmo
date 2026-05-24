@@ -264,6 +264,52 @@ def _meta_template(decay_types=None) -> Template:
     )
 
 
+def test_template_num_layers_default_accepts_any_depth():
+    """Without an explicit num_layers, every depth matches."""
+    t = Template(
+        spec=None, precision=list(Precision),
+        lr=None, length=None, batch=None, steps=None,
+        max_weights=(2, INF),
+    )
+    assert t.match_model(_md("bits.1+bp|"))
+    assert t.match_model(_md("bits.1+bp|dense.4.gelu"))
+    assert t.match_model(
+        _md("bits.1+bp|dense.4.gelu-mgru.4-dense.4.gelu"))
+
+
+def test_template_num_layers_filters_by_depth():
+    """num_layers=(1, 2) rejects 0-layer and 3-layer specs."""
+    t = Template(
+        spec=None, precision=list(Precision),
+        lr=None, length=None, batch=None, steps=None,
+        max_weights=(2, INF),
+        num_layers=(1, 2),
+    )
+    # 0 layers: rejected.
+    assert not t.match_model(_md("bits.1+bp|"))
+    # 1 layer: accepted.
+    assert t.match_model(_md("bits.1+bp|dense.4.gelu"))
+    # 2 layers: accepted.
+    assert t.match_model(_md("bits.1+bp|dense.4.gelu-mgru.4"))
+    # 3 layers: rejected.
+    assert not t.match_model(
+        _md("bits.1+bp|dense.4.gelu-mgru.4-dense.4.gelu"))
+
+
+def test_template_num_layers_counts_all_pipeline_layers():
+    """suffix/norm/skip count as layers (they appear in the spec)."""
+    t = Template(
+        spec=None, precision=list(Precision),
+        lr=None, length=None, batch=None, steps=None,
+        max_weights=(2, INF),
+        num_layers=(2, 2),
+    )
+    # 1 weighted layer + 1 suffix = 2 layers total: accepted.
+    assert t.match_model(_md("bits.1+bp|suffix.2-dense.4.gelu"))
+    # 1 weighted layer alone: 1 layer, rejected.
+    assert not t.match_model(_md("bits.1+bp|dense.4.gelu"))
+
+
 def test_template_match_filters_by_decay_type():
     none = _conf("bytes|dense.32.gelu", batch=128, decay=1.0)
     exp = _conf("bytes|dense.32.gelu", batch=128, decay=0.5)

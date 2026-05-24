@@ -407,6 +407,7 @@ class SearchServer(object):
             "index.html",
             spec=pattern,
             weights=_render_bounds(self.template.max_weights),
+            num_layers=_render_bounds(self.template.num_layers),
             length=_render_bounds(self.template.length),
             batch=_render_bounds(self.template.batch),
             precision=precision,

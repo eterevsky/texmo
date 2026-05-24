@@ -80,6 +80,13 @@ def init_args(parser: argparse.ArgumentParser, config):
         help='range for the _maximal_ number of weights in the model',
     )
     parser.add_argument(
+        '--num-layers',
+        type=str,
+        default=None,
+        help='range for the number of intermediate layers in the model'
+             ' (e.g. "1-3"); counts every layer in the spec',
+    )
+    parser.add_argument(
         "-p",
         "--precision",
         type=str,

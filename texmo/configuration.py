@@ -290,6 +290,7 @@ class Template(object):
         max_weights: IntLimits,
         precision: list[Precision],
         decay_types: Optional[Iterable[DecayType | str]] = None,
+        num_layers: Optional[IntLimits] = None,
     ):
         if not spec:
             self.regex = None
@@ -304,6 +305,12 @@ class Template(object):
                 self.spec = None
 
         self.max_weights = Bounds(max_weights, 16)
+        # num_layers bounds the count of intermediate layers in the
+        # pipeline (everything between input and output dense; counts
+        # suffix/norm/skip too, matching what's visible in the spec).
+        # min default 0 -- specs like 'bits.1+bp|' (no hidden layers)
+        # are valid.
+        self.num_layers = Bounds(num_layers, 0)
         self.length = Bounds(length, 1)
         self.batch = Bounds(batch, 1)
         self.precision = precision
@@ -338,6 +345,7 @@ class Template(object):
             max_weights=_parse_interval(args.weights, int),
             precision=precision,
             decay_types=decay_types,
+            num_layers=_parse_interval(args.num_layers, int),
         )
 
     @staticmethod
@@ -361,6 +369,7 @@ class Template(object):
             max_weights=_parse_interval(params['weights'], int),
             precision=precision,
             decay_types=decay_types,
+            num_layers=_parse_interval(params.get('num_layers'), int),
         )
 
     def __str__(self):
@@ -374,11 +383,14 @@ class Template(object):
             + f'batch={self.batch}, '
             + f'steps={self.steps}, '
             + f'max_weights={self.max_weights}, '
+            + f'num_layers={self.num_layers}, '
             + f'decay_types=\'{decay_types}\')'
         )
 
     def match_model(self, model: ModelDef) -> bool:
         if model.num_weights > self.max_weights.max:
+            return False
+        if not self.num_layers.match(len(model.layers)):
             return False
         if self.spec is not None:
             return self.spec == str(model)

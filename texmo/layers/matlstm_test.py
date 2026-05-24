@@ -97,6 +97,53 @@ def test_jax_causality():
         np.asarray(out_a[0, 5:]), np.asarray(out_b[0, 5:]))
 
 
+# -- Neighbors --
+
+def test_matlstm_neighbors_size_mutations_and_family_swaps():
+    d = MatLstmDef(4, input_size=8)
+    neighbors = list(d.neighbors())
+    # Size 2x in both directions.
+    assert "matlstm.2" in neighbors
+    assert "matlstm.8" in neighbors
+    # All-to-all within the LSTM family.
+    assert "lstm.4" in neighbors
+    assert "slstm.4" in neighbors
+    assert "mullstm.4" in neighbors
+
+
+def test_matlstm_neighbors_min_size_clamped():
+    """matlstm requires size >= 2 — halving from size=2 doesn't fire."""
+    d = MatLstmDef(2, input_size=8)
+    neighbors = list(d.neighbors())
+    assert "matlstm.4" in neighbors
+    assert "matlstm.1" not in neighbors
+
+
+# -- Timing model features --
+
+def test_matlstm_features_include_os2():
+    """matlstm features extend dense_matmul with [OS^2, OS^2*L, OS^2*B*L]."""
+    from texmo.configuration import Configuration
+    from texmo.model import build_model_def
+    from texmo.precision import Precision
+    from texmo.predict.timing import featurize
+
+    conf = Configuration(
+        build_model_def("bits.1+bp|matlstm.4-dense.4.gelu", Precision.FP32),
+        lr=0.01, length=10, batch=4, steps=100, decay=1.0,
+    )
+    comps = featurize(conf)
+    # Order: input, matlstm, dense, output.
+    ml = comps[1]
+    assert ml.type_id == "matlstm"
+    # Tail OS^2 features should appear (15 total = 9 base + 3 matmul + 3 OS^2).
+    assert ml.features.shape == (15,)
+    os_, b, l = 4, 4, 10
+    assert ml.features[-3] == os_ * os_
+    assert ml.features[-2] == os_ * os_ * l
+    assert ml.features[-1] == os_ * os_ * b * l
+
+
 def test_jax_long_sequence_numerically_stable():
     """The exponential input gate without stabilisation would overflow
     at long T; the m_t tracker keeps |C| bounded."""

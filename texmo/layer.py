@@ -136,12 +136,18 @@ class LayerDef(object):
             return
 
         # Size mutations (keep same layer type and activation)
+        _LSTM_FAMILY = ("lstm", "matlstm", "slstm", "mullstm")
         if self.name in ("dense", "rnn"):
             for s in power2_neighbors(self.size):
                 yield f"{self.name}.{s}.{self._activation}"
-        elif self.name in ("gru", "mgru", "mingru", "lstm"):
+        elif self.name in ("gru", "mgru", "mingru", "lstm", "slstm", "mullstm"):
             for s in power2_neighbors(self.size):
                 yield f"{self.name}.{s}"
+        elif self.name == "matlstm":
+            # matlstm needs size >= 2 (matrix cell isn't meaningful at D=1).
+            for s in power2_neighbors(self.size):
+                if s >= 2:
+                    yield f"{self.name}.{s}"
 
         # Type swaps
         _RECURRENT = ("gru", "mgru", "mingru")
@@ -169,9 +175,20 @@ class LayerDef(object):
             # at least one RoPE pair, so skip when mgru.1.
             if self.name == "mgru" and self.size >= 2:
                 yield f"msr.{self.size}.1"
-        elif self.name == "lstm":
-            yield f"gru.{self.size}"
-            yield f"mgru.{self.size}"
+        elif self.name in _LSTM_FAMILY:
+            # All-to-all within the LSTM family (lstm/matlstm/slstm/
+            # mullstm). matlstm has size >= 2 constraint; skip the
+            # swap target when current size is 1.
+            for other in _LSTM_FAMILY:
+                if other == self.name:
+                    continue
+                if other == "matlstm" and self.size < 2:
+                    continue
+                yield f"{other}.{self.size}"
+            # lstm also keeps its existing swaps with gru/mgru.
+            if self.name == "lstm":
+                yield f"gru.{self.size}"
+                yield f"mgru.{self.size}"
 
     def build_module(self, state_dict: Optional[dict[str, Tensor]] = None) -> LayerModule:
         """Create an nn.Module for this layer.

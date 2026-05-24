@@ -383,6 +383,26 @@ def test_two_msr_adjacent_invalid():
     assert not md.is_valid()
 
 
+def test_neighbors_append_lstm_family():
+    """The append-a-layer mechanism yields the full LSTM family."""
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert "bytes|dense.32.gelu-lstm.32" in neighbor_specs
+    assert "bytes|dense.32.gelu-slstm.32" in neighbor_specs
+    assert "bytes|dense.32.gelu-mullstm.32" in neighbor_specs
+    assert "bytes|dense.32.gelu-matlstm.32" in neighbor_specs
+
+
+def test_neighbors_append_matlstm_skipped_at_size_1():
+    """matlstm needs size >= 2; append skips it at new_size=1."""
+    md = ModelDef("bits.1+bp|", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert "bits.1+bp|lstm.1" in neighbor_specs
+    assert "bits.1+bp|slstm.1" in neighbor_specs
+    assert "bits.1+bp|mullstm.1" in neighbor_specs
+    assert "bits.1+bp|matlstm.1" not in neighbor_specs
+
+
 def test_neighbors_append_msr():
     """Append yields msr.<new_size>.1 alongside the other recurrent layers."""
     md = ModelDef("bytes|dense.32.gelu", Precision.FP32)

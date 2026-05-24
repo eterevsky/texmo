@@ -79,13 +79,26 @@ def test_neighbors():
     # Size mutations
     assert "lstm.16" in neighbors
     assert "lstm.64" in neighbors
-    # Type swaps (gru and mgru only)
+    # Type swaps (gru and mgru only among the older recurrent layers)
     assert "gru.32" in neighbors
     assert "mgru.32" in neighbors
     # Not a neighbor of mingru or rnn
     assert "mingru.32" not in neighbors
     for act in ("relu", "gelu", "tanh"):
         assert f"rnn.32.{act}" not in neighbors
+    # All-to-all within the LSTM family.
+    assert "matlstm.32" in neighbors
+    assert "slstm.32" in neighbors
+    assert "mullstm.32" in neighbors
+
+
+def test_neighbors_lstm_size_1_skips_matlstm():
+    """matlstm needs size >= 2, so swapping from lstm.1 skips it."""
+    d = LstmDef(1, input_size=4)
+    neighbors = list(d.neighbors())
+    assert "slstm.1" in neighbors
+    assert "mullstm.1" in neighbors
+    assert "matlstm.1" not in neighbors
 
 
 def test_gru_has_lstm_neighbor():

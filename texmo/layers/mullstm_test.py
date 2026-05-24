@@ -86,6 +86,18 @@ def test_jax_forward_matches_step():
         np.testing.assert_allclose(fwd[0, t], out, atol=1e-5)
 
 
+# -- Neighbors --
+
+def test_mullstm_neighbors_size_mutations_and_family_swaps():
+    d = MulLstmDef(4, input_size=8)
+    neighbors = list(d.neighbors())
+    assert "mullstm.2" in neighbors
+    assert "mullstm.8" in neighbors
+    assert "lstm.4" in neighbors
+    assert "matlstm.4" in neighbors
+    assert "slstm.4" in neighbors
+
+
 def test_jax_causality():
     """Perturbing token t+1 must not change output at position t."""
     _, layer, weights = _make_jax(size=4, input_size=4)

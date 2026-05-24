@@ -499,11 +499,13 @@ class ModelDef(object):
             for activation in ("relu", "gelu", "tanh"):
                 yield _make_spec(chain(
                     layers_str, (f"{name}.{new_size}.{activation}",)))
-        for name in ("gru", "mgru", "mingru", "lstm"):
+        for name in ("gru", "mgru", "mingru", "lstm", "slstm", "mullstm"):
             yield _make_spec(chain(
                 layers_str, (f"{name}.{new_size}",)))
-        # msr.X.1 requires dim >= 2 for at least one RoPE pair.
+        # matlstm and msr both need size/dim >= 2.
         if new_size >= 2:
+            yield _make_spec(chain(
+                layers_str, (f"matlstm.{new_size}",)))
             yield _make_spec(chain(
                 layers_str, (f"msr.{new_size}.1",)))
 

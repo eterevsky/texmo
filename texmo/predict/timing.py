@@ -43,10 +43,13 @@ from ..layers.dense import DenseDef
 from ..layers.gru import GruDef, MgruDef, MinGruDef
 from ..layers.latent import LatentDef, LrnnDef
 from ..layers.lstm import LstmDef
+from ..layers.matlstm import MatLstmDef
 from ..layers.msr import MsrDef
+from ..layers.mullstm import MulLstmDef
 from ..layers.norm import NormDef
 from ..layers.rnn import RnnDef
 from ..layers.skip import SkipDef
+from ..layers.slstm import SLstmDef
 from ..layers.suffix import SuffixDef
 from ..precision import Precision
 from .predict_common import layer_type_id
@@ -87,6 +90,20 @@ def _features_suffix(
 ) -> list[float]:
     osize = isize * suffix_length
     return _features_base(isize, osize, batch, length) + [suffix_length]
+
+
+def _features_matlstm(
+    isize: int, osize: int, batch: int, length: int
+) -> list[float]:
+    # Dense matmul features cover Q/K/V/IFO projections. Add three
+    # OS^2 terms for the per-step matrix-state ops (outer product
+    # v*k^T, scaled add into C, C@q readout). No L^2 -- matLSTM is
+    # scan-based, not parallel-form.
+    return _features_dense(isize, osize, batch, length) + [
+        osize * osize,
+        osize * osize * length,
+        osize * osize * batch * length,
+    ]
 
 
 def _features_msr(
@@ -143,6 +160,8 @@ _MATMUL_LAYER_TYPES = (
     LstmDef,
     LatentDef,
     LrnnDef,
+    SLstmDef,
+    MulLstmDef,
 )
 
 
@@ -168,6 +187,9 @@ def _layer_component(layer, batch: int, length: int) -> Component:
         features = _features_suffix(layer.input_size, batch, length, layer.length)
     elif isinstance(layer, SkipDef):
         features = _features_skip(layer.input_size, batch, length)
+    elif isinstance(layer, MatLstmDef):
+        features = _features_matlstm(
+            layer.input_size, layer.size, batch, length)
     elif isinstance(layer, MsrDef):
         features = _features_msr(layer.input_size, layer.size, batch, length)
     elif isinstance(layer, _MATMUL_LAYER_TYPES):

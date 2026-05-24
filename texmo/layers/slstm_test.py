@@ -98,6 +98,28 @@ def test_jax_causality():
         np.asarray(out_a[0, 5:]), np.asarray(out_b[0, 5:]))
 
 
+# -- Neighbors --
+
+def test_slstm_neighbors_size_mutations_and_family_swaps():
+    d = SLstmDef(4, input_size=8)
+    neighbors = list(d.neighbors())
+    assert "slstm.2" in neighbors
+    assert "slstm.8" in neighbors
+    assert "lstm.4" in neighbors
+    assert "matlstm.4" in neighbors
+    assert "mullstm.4" in neighbors
+
+
+def test_slstm_neighbors_at_size_1_skips_matlstm():
+    """matlstm requires size >= 2; family swap must skip it at size 1."""
+    d = SLstmDef(1, input_size=4)
+    neighbors = list(d.neighbors())
+    assert "slstm.2" in neighbors          # size mutation up
+    assert "lstm.1" in neighbors           # family swap to lstm
+    assert "mullstm.1" in neighbors        # family swap to mullstm
+    assert "matlstm.1" not in neighbors    # matlstm needs size >= 2
+
+
 def test_jax_long_sequence_numerically_stable():
     """The exponential input gate without stabilisation would overflow
     at long T; the m_t tracker keeps c and n bounded."""

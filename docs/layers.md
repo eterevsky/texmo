@@ -114,6 +114,40 @@ Standard LSTM with four gates (forget, input, output, candidate):
 - PyTorch: cuDNN-fused `nn.LSTM`.
 - `num_weights = 4 * size * (input_size + size) + 4 * size`.
 
+## matLSTM (`matlstm.<size>`)
+
+Matrix-state LSTM from xLSTM (Beck et al. 2024 —
+"xLSTM: Extended Long Short-Term Memory"). Cell state is a `(D, D)`
+matrix updated by an outer-product write, with scalar input /
+forget / output gates and exponential gating + max-tracking
+stabilisation for numerical bounds. JAX only.
+
+    q     = W_q x
+    k     = (W_k x) / sqrt(D)
+    v     = W_v x
+    i_pre, f_pre, o_pre = W_ifo x + b_ifo                # scalars
+    log_f = log_sigmoid(f_pre)
+    m_new = max(log_f + m, i_pre)                        # stabiliser
+    i_st  = exp(i_pre - m_new)
+    f_st  = exp(log_f + m - m_new)
+    o     = sigmoid(o_pre)
+    C_new = f_st · C + i_st · outer(v, k)
+    n_new = f_st · n + i_st · k
+    h     = o · (C_new @ q) / max(|n_new · q|, 1)
+
+- State per sample: matrix `C: (D, D)`, normaliser `n: (D,)`,
+  stabiliser `m: scalar`.
+- No biases on Q / K / V (transformer convention); single bias per
+  scalar gate.
+- Constraint: `size >= 2`. `D = 1` would degenerate to a scalar cell
+  and reduces to a (poorly conditioned) scalar LSTM variant.
+- `num_weights = 3 * size * input_size + 3 * input_size + 3`.
+- Forward in JAX is a `lax.scan` over time — no parallel form like
+  MSR's, since the exponential-gated cumulative product through
+  `(f_st, i_st)` doesn't factor cleanly. The recurrent-eval path
+  (see `model_jax.forward_recurrent`) handles it the same way as
+  any other scan-based layer.
+
 ## Suffix (`suffix.<length>`)
 
 Sliding window: stacks the last `length` inputs into a single vector of

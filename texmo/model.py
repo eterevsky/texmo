@@ -14,6 +14,7 @@ from .layers.input_bits import InputBitsDef, InputBitsModule
 from .layers.input_bytes import InputBytesDef, InputBytesModule
 from .layers.latent import LatentDef, LrnnDef
 from .layers.lstm import LstmDef
+from .layers.matlstm import MatLstmDef
 from .layers.msr import MsrDef
 from .layers.norm import NormDef
 from .layers.rnn import RnnDef
@@ -672,6 +673,9 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
 
     if name == "lstm":
         return LstmDef(int(parts[1]), input_size=input_size)
+
+    if name == "matlstm":
+        return MatLstmDef(int(parts[1]), input_size=input_size)
 
     if name == "msr":
         return MsrDef(

@@ -11,9 +11,23 @@ from ..layer_jax import LayerWeights, xavier_uniform
 
 
 def _normalize_jax(x: jax.Array, eps: float = 1e-5) -> jax.Array:
-    """L2-normalize along the last axis. Matches PyTorch's F.normalize."""
-    norm = jnp.linalg.norm(x, axis=-1, keepdims=True)
-    return x / jnp.maximum(norm, eps)
+    """L2-normalize along the last axis, gradient-safe at x=0.
+
+    Uses `sqrt(||x||^2 + eps)` rather than `max(||x||, eps)` because
+    jnp.linalg.norm at the zero vector has a NaN derivative
+    (x_i / ||x|| = 0/0), which the max() form would propagate
+    through autodiff even when the value path takes the eps branch.
+    The additive smoothing inside sqrt makes the gradient well-
+    defined everywhere.
+
+    Adds `eps` (not `eps*eps`) inside sqrt: `eps*eps = 1e-10` would
+    be a denormal in fp16 (loses precision below ~6e-5) and would
+    fall under bf16's coarse mantissa quantum, so the additive
+    smoothing would effectively vanish. `eps = 1e-5` is well within
+    range for all three dtypes we train in.
+    """
+    norm_sq = jnp.sum(x * x, axis=-1, keepdims=True)
+    return x / jnp.sqrt(norm_sq + eps)
 
 
 def _normalize(x: Tensor) -> Tensor:

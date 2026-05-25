@@ -17,16 +17,19 @@ class LmguJax(LayerJax):
     mGRU blend.
 
     Per step:
-        xt_n  = norm(x)
-        h_n   = norm(h)
         hc[0] = 0
         f[0]  = 0
         for i in range(reps):
             hc[i+1] = norm(tanh(
-                W_h_i x_n + W_h_h (f[i] * h_n) + W_h_s hc[i] + b_h))
+                W_h_i x + W_h_h (f[i] * h) + W_h_s hc[i] + b_h))
             f[i+1]  = sigmoid(
-                W_f_i x_n + W_f_h h_n + W_f_s hc[i+1] + b_f)
+                W_f_i x + W_f_h h + W_f_s hc[i+1] + b_f)
         h_new = (1 - f[reps]) * h + f[reps] * hc[reps]
+
+    Only `hc` is L2-normalized -- this is the architecturally
+    significant constraint (direction-only candidate); raw `x` and
+    `h` are fed to the W matmuls without normalization, matching
+    standard mGRU.
 
     The unit-norm constraint on hc gives a clean factorisation:
     hc represents direction, f represents magnitude. Both f and
@@ -74,14 +77,12 @@ class LmguJax(LayerJax):
     ) -> tuple[jax.Array, jax.Array]:
         # x: (input_size,), state: (size,)
         h = state
-        xt_n = _normalize_jax(x)
-        h_n = _normalize_jax(h)
 
         # Per-token constants (computed once for all reps).
-        eh_input = weights['w_h_i'] @ xt_n + weights['b_h']
+        eh_input = weights['w_h_i'] @ x + weights['b_h']
         ef_input = (
-            weights['w_f_i'] @ xt_n
-            + weights['w_f_h'] @ h_n
+            weights['w_f_i'] @ x
+            + weights['w_f_h'] @ h
             + weights['b_f']
         )
 
@@ -91,7 +92,7 @@ class LmguJax(LayerJax):
 
         def body(carry, _):
             hc, f = carry
-            e_h = eh_input + w_h_h @ (f * h_n) + w_h_s @ hc
+            e_h = eh_input + w_h_h @ (f * h) + w_h_s @ hc
             hc_new = _normalize_jax(jnp.tanh(e_h))
             e_f = ef_input + w_f_s @ hc_new
             f_new = jax.nn.sigmoid(e_f)
@@ -112,9 +113,8 @@ class LmguJax(LayerJax):
         # inputs: (batch, seq_len, input_size)
         # Hoist input-only projections (with bias baked in) outside
         # the time scan -- they're constant per token.
-        xt_n_all = _normalize_jax(inputs)
-        eh_xb_all = xt_n_all @ weights['w_h_i'].T + weights['b_h']
-        ef_xb_all = xt_n_all @ weights['w_f_i'].T + weights['b_f']
+        eh_xb_all = inputs @ weights['w_h_i'].T + weights['b_h']
+        ef_xb_all = inputs @ weights['w_f_i'].T + weights['b_f']
 
         eh_xb_t = jnp.transpose(eh_xb_all, (1, 0, 2))  # (T, B, size)
         ef_xb_t = jnp.transpose(ef_xb_all, (1, 0, 2))
@@ -127,15 +127,14 @@ class LmguJax(LayerJax):
 
         def time_step(h, inp):
             eh_xb, ef_xb = inp
-            h_n = _normalize_jax(h)
             # h-dependent part for f is constant across reps.
-            ef_input = ef_xb + h_n @ w_f_h.T
+            ef_input = ef_xb + h @ w_f_h.T
 
             def reps_body(carry, _):
                 hc, f = carry
                 e_h = (
                     eh_xb
-                    + (f * h_n) @ w_h_h.T
+                    + (f * h) @ w_h_h.T
                     + hc @ w_h_s.T
                 )
                 hc_new = _normalize_jax(jnp.tanh(e_h))

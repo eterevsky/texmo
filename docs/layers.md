@@ -295,19 +295,21 @@ Per token, the gate `f` and candidate `hc` are jointly refined for
 `reps` iterations starting from zeros; after the loop, the standard
 mGRU blend updates the time-recurrent state:
 
-    xt_n  = normalize(x)
-    h_n   = normalize(h)
     hc[0] = 0
     f[0]  = 0
     for i in range(reps):
         hc[i+1] = normalize(tanh(
-            W_h_i x_n + W_h_h (f[i] * h_n) + W_h_s hc[i] + b_h))
+            W_h_i x + W_h_h (f[i] * h) + W_h_s hc[i] + b_h))
         f[i+1]  = sigmoid(
-            W_f_i x_n + W_f_h h_n + W_f_s hc[i+1] + b_f)
+            W_f_i x + W_f_h h + W_f_s hc[i+1] + b_f)
     h_new = (1 - f[reps]) * h + f[reps] * hc[reps]
 
 - State per sample: `h: (size,)` — same as mgru. The `hc, f`
   iteration is local to a single token.
+- Only `hc` is L2-normalized — this is the architecturally
+  significant constraint (direction-only candidate). Raw `x` and `h`
+  are fed to the W matmuls without normalization, matching standard
+  mGRU.
 - Unit-norm constraint on `hc` (the `normalize` after `tanh`) gives
   a clean factorisation: `hc` represents direction, `f` represents
   magnitude. Both `f` and `hc` are computed against unit-norm `hc`,

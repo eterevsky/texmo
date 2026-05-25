@@ -45,12 +45,21 @@
     </head>
     <body>
         <main>
+        {% if error %}
+        <p style="background:#fee; border:1px solid #c33; color:#900; padding:0.5rem 0.75rem; border-radius:4px;">
+            <strong>Couldn't apply template:</strong> {{ error }}
+        </p>
+        {% endif %}
         <form action="/update" method="post">
             <table>
                 <caption>Template</caption>
                 <tr>
                     <td>Model spec regex:</td>
                     <td><input type="text" name="spec" value="{{ spec }}"></td>
+                </tr>
+                <tr>
+                    <td>Default spec (seed):</td>
+                    <td><input type="text" name="default_spec" value="{{ default_spec }}" placeholder="(optional; auto-pick when blank)"></td>
                 </tr>
                 <tr>
                     <td>Weights:</td>

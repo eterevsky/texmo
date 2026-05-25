@@ -23,7 +23,9 @@ def _make_app():
 def _render(**overrides):
     defaults = dict(
         spec="bytes|dense.32.gelu",
+        default_spec="",
         weights="32-1024",
+        num_layers="0-3",
         length="128",
         batch="32-256",
         precision={p: (p == Precision.FP32) for p in Precision},
@@ -47,6 +49,7 @@ def _render(**overrides):
         graph='',
         systems=[],
         selected_system=None,
+        error=None,
     )
     defaults.update(overrides)
     with _make_app().test_request_context():
@@ -100,6 +103,23 @@ def test_index_copy_command_link():
     assert 'copy-link' in html
     # The pipe in the spec is quoted so it's shell-safe.
     assert "bytes|dense.32.gelu&#39;" in html
+
+
+def test_index_default_spec_field_present():
+    html = _render(default_spec="bits.1+bp|norm-lrnn.4.2")
+    assert 'name="default_spec"' in html
+    assert 'bits.1+bp|norm-lrnn.4.2' in html
+
+
+def test_index_no_error_banner_by_default():
+    html = _render(error=None)
+    assert "Couldn't apply template" not in html
+
+
+def test_index_renders_error_banner_when_set():
+    html = _render(error="example failure")
+    assert "Couldn't apply template" in html
+    assert 'example failure' in html
 
 
 def test_fastest_empty_renders_message():
@@ -167,6 +187,75 @@ def test_search_server_add_run_writes_median_estimate(tmp_path):
     time_s, source = est
     assert source == "median"
     assert time_s == pytest.approx(12.5)
+
+
+def _form_params(**overrides):
+    """Build a minimal /update form-param dict."""
+    params = {
+        'spec': 'bytes|dense.32.gelu',
+        'default_spec': '',
+        'weights': '2-inf',
+        'num_layers': '',
+        'length': '',
+        'batch': '',
+        'steps': '',
+        'lr': '',
+        'time': '',
+        'fp32': 'on',
+        'decay_none': 'on',
+    }
+    params.update(overrides)
+    return params
+
+
+def test_search_server_update_invalid_regex_renders_error_no_crash(tmp_path):
+    """A regex that the auto-finder can't resolve must produce an
+    error-banner re-render, not a 500. The live template stays
+    untouched so the search keeps running.
+    """
+    path = str(tmp_path / "test.db")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    original_template = server.template
+
+    with _make_app().test_request_context():
+        # Regex containing a layer that's never in the auto-finder
+        # seed list and no default_spec to fall back on.
+        result = server.update(_form_params(
+            spec='.*norm-lrnn.*', default_spec=''))
+
+    # Returns the rendered index page (a string), not a redirect.
+    assert isinstance(result, str)
+    assert "Couldn't apply template" in result
+    # The user's submitted regex is preserved in the form.
+    assert '.*norm-lrnn.*' in result
+    # Live template unchanged.
+    assert server.template is original_template
+
+
+def test_search_server_update_default_spec_overrides_unresolvable_regex(tmp_path):
+    """If the regex doesn't resolve but a valid default_spec is
+    provided, the update succeeds and the default_spec is the seed.
+    """
+    path = str(tmp_path / "test.db")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+
+    with _make_app().test_request_context():
+        result = server.update(_form_params(
+            spec='.*norm-lrnn.*',
+            default_spec='bits.1+bp|gru.4-norm-lrnn.2.2',
+        ))
+
+    # Successful update returns a redirect, not an HTML string.
+    assert not isinstance(result, str)
+    assert server._default_spec == 'bits.1+bp|gru.4-norm-lrnn.2.2'
+    assert str(server.default.model) == (
+        'bits.1+bp|gru.4-norm-lrnn.2.2')
 
 
 def test_search_server_add_run_does_not_overwrite_median_with_prediction(tmp_path):

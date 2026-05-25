@@ -378,19 +378,35 @@ class SearchServer(object):
         self.write_queue.put(WriterStop())
 
     def index(self, selected_system: Optional[str] = None):
-        if self.template.spec:
-            pattern = self.template.spec
-        elif self.template.regex:
-            pattern = self.template.regex.pattern
+        return self._render_index(
+            template=self.template,
+            default_spec=self._default_spec or '',
+            train_time=self.train_time,
+            selected_system=selected_system,
+        )
+
+    def _render_index(
+        self,
+        *,
+        template: Template,
+        default_spec: str,
+        train_time: tuple[float, float],
+        selected_system: Optional[str] = None,
+        error: Optional[str] = None,
+    ):
+        if template.spec:
+            pattern = template.spec
+        elif template.regex:
+            pattern = template.regex.pattern
         else:
             pattern = ''
 
         precision = {}
         for p in Precision:
-            precision[p] = p in self.template.precision
+            precision[p] = p in template.precision
 
         decay_types = {
-            t.value: t in self.template.decay_types for t in DecayType
+            t.value: t in template.decay_types for t in DecayType
         }
 
         # Use a dedicated read-only connection to avoid contending with
@@ -399,47 +415,65 @@ class SearchServer(object):
             systems = ro_db.get_systems()
             top_confs = list(
                 ro_db.top_confs_global(
-                    self.template, system=selected_system))
+                    template, system=selected_system))
 
         graph = build_graph(top_confs)
 
         top = [_conf_row(tc) for tc in top_confs]
 
-        tmin, tmax = self.train_time
-        train_time = f'{tmin}-{tmax}'
+        tmin, tmax = train_time
+        train_time_str = f'{tmin}-{tmax}'
 
         return render_template(
             "index.html",
             spec=pattern,
-            weights=_render_bounds(self.template.max_weights),
-            num_layers=_render_bounds(self.template.num_layers),
-            length=_render_bounds(self.template.length),
-            batch=_render_bounds(self.template.batch),
+            default_spec=default_spec,
+            weights=_render_bounds(template.max_weights),
+            num_layers=_render_bounds(template.num_layers),
+            length=_render_bounds(template.length),
+            batch=_render_bounds(template.batch),
             precision=precision,
-            lr=_render_bounds(self.template.lr),
+            lr=_render_bounds(template.lr),
             decay_types=decay_types,
-            steps=_render_bounds(self.template.steps),
-            time=train_time,
+            steps=_render_bounds(template.steps),
+            time=train_time_str,
             top=top,
             graph=base64.b64encode(graph).decode('ascii'),
             systems=systems,
             selected_system=selected_system,
+            error=error,
         )
 
     def update(self, params):
-        new_template = Template.from_form(params)
-        # Rebuild init_conf for the new template. If the user typed a
-        # literal spec, that becomes the seed; otherwise fall back to
-        # the CLI --default-spec; otherwise default_from_template's
-        # auto-finder picks something matching.
-        spec = new_template.spec or self._default_spec
-        new_default = default_from_template(new_template, spec=spec)
-        time_str = params.get("time", "")
-        if time_str:
-            tmin, tmax = map(float, time_str.split("-"))
-            new_train_time = (tmin, tmax)
-        else:
-            new_train_time = self.train_time
+        # The form's default_spec field is authoritative: empty means
+        # "no override, let the auto-finder pick". Replaces any prior
+        # value (CLI --default-spec on startup, or previous form value).
+        new_default_spec = params.get('default_spec', '').strip()
+        new_template = None
+        new_default = None
+        new_train_time = self.train_time
+        try:
+            new_template = Template.from_form(params)
+            spec = new_template.spec or new_default_spec or None
+            new_default = default_from_template(new_template, spec=spec)
+            time_str = params.get("time", "")
+            if time_str:
+                tmin, tmax = map(float, time_str.split("-"))
+                new_train_time = (tmin, tmax)
+        except Exception as exc:
+            # Re-render the index with the (partially) submitted form
+            # values and an error banner; leave the live template
+            # untouched so the search keeps running on the last known-
+            # good configuration.
+            logging.warning(f"update() rejected form: {exc}")
+            return self._render_index(
+                template=new_template or self.template,
+                default_spec=new_default_spec or (
+                    self._default_spec or ''),
+                train_time=new_train_time,
+                error=str(exc),
+            )
+
         # Mutate the search thread's state via a queue message so the
         # update applies atomically between two select_conf calls
         # rather than racing the loop.
@@ -454,6 +488,7 @@ class SearchServer(object):
         self.template = new_template
         self.default = new_default
         self.train_time = new_train_time
+        self._default_spec = new_default_spec
         logging.info(f'New default configuration: {new_default}')
         logging.info(f'New template: {new_template}')
         logging.info(f'New train time: {new_train_time}')

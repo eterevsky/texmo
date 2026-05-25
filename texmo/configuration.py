@@ -229,9 +229,12 @@ class Bounds(object):
     def pick_default(self, default: float) -> float:
         if self.min <= default <= self.max:
             return default
-        elif self.min == 0:
+        if self.min == 0:
             return self.max
-
+        if self.max == INF:
+            # No finite upper bound -- anchor to min (symmetric to
+            # the min == 0 case above). Geometric mean would be inf.
+            return self.min
         mid = math.sqrt(self.min * self.max)
         round_mid = 2 ** round(math.log2(mid))
         assert self.min <= round_mid <= self.max

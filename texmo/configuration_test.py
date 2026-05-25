@@ -264,6 +264,22 @@ def _meta_template(decay_types=None) -> Template:
     )
 
 
+def test_default_from_template_steps_above_default():
+    """steps=(4, INF) used to OverflowError in pick_default(2) because
+    the geometric-mean fallback tried log2(inf). Now it anchors to min."""
+    t = Template(
+        spec=None, precision=[Precision.FP32],
+        lr=None, length=None, batch=None,
+        steps=(4, INF),
+        max_weights=(2, INF),
+        decay_types=[DecayType.COSINE],
+    )
+    conf = default_from_template(t, spec="bits.1+bp|dense.4.gelu")
+    # When the requested default (2) is below the template's min (4),
+    # we anchor to min rather than blowing up on geometric mean.
+    assert conf.steps == 4
+
+
 def test_template_num_layers_default_accepts_any_depth():
     """Without an explicit num_layers, every depth matches."""
     t = Template(

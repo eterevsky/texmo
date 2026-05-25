@@ -13,6 +13,7 @@ from .layers.gru import GruDef, MgruDef, MinGruDef
 from .layers.input_bits import InputBitsDef, InputBitsModule
 from .layers.input_bytes import InputBytesDef, InputBytesModule
 from .layers.latent import LatentDef, LrnnDef
+from .layers.lmgu import LmguDef
 from .layers.lstm import LstmDef
 from .layers.matlstm import MatLstmDef
 from .layers.msr import MsrDef
@@ -700,6 +701,10 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
 
     if name == "lrnn":
         return LrnnDef(
+            int(parts[1]), int(parts[2]), input_size=input_size)
+
+    if name == "lmgu":
+        return LmguDef(
             int(parts[1]), int(parts[2]), input_size=input_size)
 
     if name == "suffix":

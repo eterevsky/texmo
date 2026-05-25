@@ -102,7 +102,7 @@ class LayerDef(object):
                 yield f"suffix.{l}"
             return
 
-        if self.name in ("latent", "lrnn"):
+        if self.name in ("latent", "lrnn", "lmgu"):
             # Size 2x (keep > 1)
             for s in power2_neighbors(self.size):
                 if s > 1:
@@ -111,15 +111,22 @@ class LayerDef(object):
             for r in power2_neighbors(self.reps):
                 if r >= 2:
                     yield f"{self.name}.{self.size}.{r}"
-            # Swap latent <-> lrnn
-            other = "lrnn" if self.name == "latent" else "latent"
-            yield f"{other}.{self.size}.{self.reps}"
-            # Collapse to dense/rnn at reps == 2
+            # Swaps among the depth-recurrent family at same (S, R).
+            if self.name == "latent":
+                yield f"lrnn.{self.size}.{self.reps}"
+            elif self.name == "lrnn":
+                yield f"latent.{self.size}.{self.reps}"
+                yield f"lmgu.{self.size}.{self.reps}"
+            elif self.name == "lmgu":
+                yield f"lrnn.{self.size}.{self.reps}"
+            # Collapse to non-iterating cousin at reps == 2.
             if self.reps == 2:
                 if self.name == "latent":
                     yield f"dense.{self.size}.tanh"
-                else:
+                elif self.name == "lrnn":
                     yield f"rnn.{self.size}.tanh"
+                elif self.name == "lmgu":
+                    yield f"mgru.{self.size}"
             return
 
         if self.name == "msr":
@@ -175,6 +182,10 @@ class LayerDef(object):
             # at least one RoPE pair, so skip when mgru.1.
             if self.name == "mgru" and self.size >= 2:
                 yield f"msr.{self.size}.1"
+            # mgru <-> lmgu.X.2 (the depth-recurrent variant collapses
+            # to mgru at reps=2). lmgu needs size > 1.
+            if self.name == "mgru" and self.size > 1:
+                yield f"lmgu.{self.size}.2"
         elif self.name in _LSTM_FAMILY:
             # All-to-all within the LSTM family (lstm/matlstm/slstm/
             # mullstm). matlstm has size >= 2 constraint; skip the

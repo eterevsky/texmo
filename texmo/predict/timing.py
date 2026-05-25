@@ -42,6 +42,7 @@ from ..configuration import Configuration
 from ..layers.dense import DenseDef
 from ..layers.gru import GruDef, MgruDef, MinGruDef
 from ..layers.latent import LatentDef, LrnnDef
+from ..layers.lmgu import LmguDef
 from ..layers.lstm import LstmDef
 from ..layers.matlstm import MatLstmDef
 from ..layers.msr import MsrDef
@@ -160,6 +161,7 @@ _MATMUL_LAYER_TYPES = (
     LstmDef,
     LatentDef,
     LrnnDef,
+    LmguDef,
     SLstmDef,
     MulLstmDef,
 )

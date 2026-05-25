@@ -286,6 +286,47 @@ timestep's hidden state as additional context:
 - `num_weights = size * input_size + size + size * size + size * size`.
 - Constraints: same as Latent.
 
+## Lmgu (`lmgu.<size>.<reps>`)
+
+Latent-recurrent mGRU — combines mGRU's gating with `lrnn`-style
+depth-recurrent iteration of the gate and candidate.
+
+Per token, the gate `f` and candidate `hc` are jointly refined for
+`reps` iterations starting from zeros; after the loop, the standard
+mGRU blend updates the time-recurrent state:
+
+    xt_n  = normalize(x)
+    h_n   = normalize(h)
+    hc[0] = 0
+    f[0]  = 0
+    for i in range(reps):
+        hc[i+1] = normalize(tanh(
+            W_h_i x_n + W_h_h (f[i] * h_n) + W_h_s hc[i] + b_h))
+        f[i+1]  = sigmoid(
+            W_f_i x_n + W_f_h h_n + W_f_s hc[i+1] + b_f)
+    h_new = (1 - f[reps]) * h + f[reps] * hc[reps]
+
+- State per sample: `h: (size,)` — same as mgru. The `hc, f`
+  iteration is local to a single token.
+- Unit-norm constraint on `hc` (the `normalize` after `tanh`) gives
+  a clean factorisation: `hc` represents direction, `f` represents
+  magnitude. Both `f` and `hc` are computed against unit-norm `hc`,
+  so the final blend is consistent.
+- Weights: 6 matrices (input / h / state projections, one set each
+  for `hc` and `f`) plus 2 biases.
+  `num_weights = 2·size·input_size + 4·size·size + 2·size`.
+- `num_mults = num_weights · reps` (same coarse approximation as
+  lrnn — the recurrent matmuls fire `reps` times per token).
+- Constraints: `size > 1`, `reps >= 2`, both powers of 2.
+- Forward in JAX hoists the input-only projections outside the
+  outer time scan; the per-iteration matmuls stay in the inner
+  `reps` scan.
+
+Neighbor relations:
+- `lmgu.X.R ↔ lrnn.X.R` (family swap at same size and reps).
+- `lmgu.X.2 ↔ mgru.X` (the non-iterating cousin at `reps=2`).
+- 2× mutations on size (clamped to `> 1`) and reps (clamped to `>= 2`).
+
 ## Skip (`skip.<X>.<add|cat>`) — residual connections
 
 Pseudo-layer that marks the start of a residual connection spanning

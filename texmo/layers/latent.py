@@ -41,14 +41,16 @@ class LatentModule(LayerModule):
 
     Each call iterates a shared block `reps` times on a fresh latent state:
 
-        e = Wi @ normalize(x) + b
+        e = Wi @ x + b
         s_0 = 0
         s_i = tanh(Wr @ normalize(s_{i-1}) + e)   for i = 1..reps
         out = s_reps
 
     The input contribution `e` is re-injected at every iteration; this is
     what makes the recurrence stable and gives the layer its "iterative
-    refinement" character.
+    refinement" character. Raw `x` is fed to Wi without normalization --
+    prepend a `norm` layer in the spec to recover the previous
+    (pre-normalized-input) behaviour.
     """
 
     def __init__(self, input_size: int, size: int, reps: int):
@@ -70,7 +72,7 @@ class LatentModule(LayerModule):
     def step(
         self, state: LayerState, input: Tensor
     ) -> tuple[LayerState, Tensor]:
-        e = self.wi(_normalize(input))
+        e = self.wi(input)
         s = self._init_latent(e)
         for _ in range(self.reps):
             s = torch.tanh(self.wr(_normalize(s)) + e)
@@ -78,7 +80,7 @@ class LatentModule(LayerModule):
 
     def forward(self, inputs: Tensor) -> Tensor:
         # inputs: (batch, seq_len, input_size)
-        e = self.wi(_normalize(inputs))  # (batch, seq_len, size)
+        e = self.wi(inputs)  # (batch, seq_len, size)
         s = self._init_latent(e)
         for _ in range(self.reps):
             s = torch.tanh(self.wr(_normalize(s)) + e)
@@ -91,10 +93,14 @@ class LrnnModule(LayerModule):
     At each timestep, runs `reps` refinement iterations using the previous
     timestep's hidden state as additional context:
 
-        e_t = Wi @ normalize(x_t) + Wh @ normalize(h_{t-1}) + b
+        e_t = Wi @ x_t + Wh @ normalize(h_{t-1}) + b
         s_0 = 0
         s_i = tanh(Wr @ normalize(s_{i-1}) + e_t)
         h_t = s_reps
+
+    Raw `x_t` is fed to Wi without normalization -- prepend a `norm`
+    layer in the spec to recover the previous (pre-normalized-input)
+    behaviour.
     """
 
     def __init__(self, input_size: int, size: int, reps: int):
@@ -124,7 +130,7 @@ class LrnnModule(LayerModule):
     def step(
         self, state: LayerState, input: Tensor
     ) -> tuple[LayerState, Tensor]:
-        e = self.wi(_normalize(input)) + self.wh(_normalize(state))
+        e = self.wi(input) + self.wh(_normalize(state))
         s = self._init_latent(e)
         for _ in range(self.reps):
             s = torch.tanh(self.wr(_normalize(s)) + e)
@@ -133,7 +139,7 @@ class LrnnModule(LayerModule):
     def forward(self, inputs: Tensor) -> Tensor:
         # inputs: (batch, seq_len, input_size)
         # Precompute the input contribution for all timesteps at once.
-        wi_x = self.wi(_normalize(inputs))  # (batch, seq_len, size)
+        wi_x = self.wi(inputs)  # (batch, seq_len, size)
 
         batch, seq_len, _ = inputs.shape
         h = torch.zeros(
@@ -152,7 +158,9 @@ class LrnnModule(LayerModule):
 class LatentJax(LayerJax):
     """Depth-recurrent dense layer (see LatentModule).
 
-    Latent state is always zero-initialized (no RNG needed).
+    Latent state is always zero-initialized (no RNG needed). Raw `x`
+    is not normalized before the Wi projection; prepend a `norm`
+    layer in the spec to recover that.
     """
 
     def __init__(self, input_size: int, size: int, reps: int, dtype):
@@ -173,7 +181,7 @@ class LatentJax(LayerJax):
         self, weights: LayerWeights, state, x: jax.Array
     ) -> tuple[None, jax.Array]:
         # x: (input_size,)
-        e = weights['w_i'] @ _normalize_jax(x) + weights['b']
+        e = weights['w_i'] @ x + weights['b']
         w_r = weights['w_r']
 
         def body(s, _):
@@ -188,7 +196,7 @@ class LatentJax(LayerJax):
     ) -> jax.Array:
         # inputs: (batch, seq_len, input_size)
         # No time recurrence — each position is independent.
-        e = _normalize_jax(inputs) @ weights['w_i'].T + weights['b']
+        e = inputs @ weights['w_i'].T + weights['b']
         w_r = weights['w_r']
 
         def body(s, _):
@@ -201,7 +209,9 @@ class LatentJax(LayerJax):
 class LrnnJax(LayerJax):
     """Depth-recurrent RNN combining time recurrence with latent reasoning.
 
-    See LrnnModule. Latent state is always zero-initialized.
+    See LrnnModule. Latent state is always zero-initialized. Raw `x`
+    is not normalized before the Wi projection; prepend a `norm`
+    layer in the spec to recover that.
     """
 
     def __init__(self, input_size: int, size: int, reps: int, dtype):
@@ -227,7 +237,7 @@ class LrnnJax(LayerJax):
         self, weights: LayerWeights, state, x: jax.Array
     ) -> tuple[jax.Array, jax.Array]:
         # x: (input_size,), state: (size,)
-        e = (weights['w_i'] @ _normalize_jax(x)
+        e = (weights['w_i'] @ x
              + weights['w_h'] @ _normalize_jax(state)
              + weights['b'])
         w_r = weights['w_r']
@@ -243,8 +253,8 @@ class LrnnJax(LayerJax):
         self, weights: LayerWeights, inputs: jax.Array
     ) -> jax.Array:
         # inputs: (batch, seq_len, input_size)
-        # Hoist the input projection (with normalization) out of the scan.
-        wi_x = (_normalize_jax(inputs) @ weights['w_i'].T + weights['b'])
+        # Hoist the input projection out of the scan.
+        wi_x = inputs @ weights['w_i'].T + weights['b']
         wi_x_t = jnp.transpose(wi_x, (1, 0, 2))
 
         w_h = weights['w_h']

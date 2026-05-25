@@ -17,19 +17,22 @@ class LmguJax(LayerJax):
     mGRU blend.
 
     Per step:
+        h_n   = norm(h)
         hc[0] = 0
         f[0]  = 0
         for i in range(reps):
             hc[i+1] = norm(tanh(
-                W_h_i x + W_h_h (f[i] * h) + W_h_s hc[i] + b_h))
+                W_h_i x + W_h_h (f[i] * h_n) + W_h_s hc[i] + b_h))
             f[i+1]  = sigmoid(
-                W_f_i x + W_f_h h + W_f_s hc[i+1] + b_f)
+                W_f_i x + W_f_h h_n + W_f_s hc[i+1] + b_f)
         h_new = (1 - f[reps]) * h + f[reps] * hc[reps]
 
-    Only `hc` is L2-normalized -- this is the architecturally
-    significant constraint (direction-only candidate); raw `x` and
-    `h` are fed to the W matmuls without normalization, matching
-    standard mGRU.
+    `hc` is L2-normalized inside the reps loop (the architecturally
+    significant direction-only-candidate constraint), and the
+    time-recurrent `h` is L2-normalized before each use as `h_n`
+    (it has size >= 2 by validity check, so no degenerate axes).
+    Raw `x` is fed to the W matmuls without normalization -- prepend
+    a `norm` layer in the spec to recover that behaviour.
 
     The unit-norm constraint on hc gives a clean factorisation:
     hc represents direction, f represents magnitude. Both f and
@@ -77,12 +80,13 @@ class LmguJax(LayerJax):
     ) -> tuple[jax.Array, jax.Array]:
         # x: (input_size,), state: (size,)
         h = state
+        h_n = _normalize_jax(h)
 
         # Per-token constants (computed once for all reps).
         eh_input = weights['w_h_i'] @ x + weights['b_h']
         ef_input = (
             weights['w_f_i'] @ x
-            + weights['w_f_h'] @ h
+            + weights['w_f_h'] @ h_n
             + weights['b_f']
         )
 
@@ -92,7 +96,7 @@ class LmguJax(LayerJax):
 
         def body(carry, _):
             hc, f = carry
-            e_h = eh_input + w_h_h @ (f * h) + w_h_s @ hc
+            e_h = eh_input + w_h_h @ (f * h_n) + w_h_s @ hc
             hc_new = _normalize_jax(jnp.tanh(e_h))
             e_f = ef_input + w_f_s @ hc_new
             f_new = jax.nn.sigmoid(e_f)
@@ -127,14 +131,15 @@ class LmguJax(LayerJax):
 
         def time_step(h, inp):
             eh_xb, ef_xb = inp
+            h_n = _normalize_jax(h)
             # h-dependent part for f is constant across reps.
-            ef_input = ef_xb + h @ w_f_h.T
+            ef_input = ef_xb + h_n @ w_f_h.T
 
             def reps_body(carry, _):
                 hc, f = carry
                 e_h = (
                     eh_xb
-                    + (f * h) @ w_h_h.T
+                    + (f * h_n) @ w_h_h.T
                     + hc @ w_h_s.T
                 )
                 hc_new = _normalize_jax(jnp.tanh(e_h))

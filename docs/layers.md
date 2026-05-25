@@ -250,16 +250,19 @@ No learned weights. Stateless.
 Depth-recurrent dense layer — iterative refinement of a latent state.
 Inspired by https://arxiv.org/abs/2502.05171.
 
-    e = W_i @ normalize(x) + b
+    e = W_i @ x + b
     s_0 = 0
     s_i = tanh(W_r @ normalize(s_{i-1}) + e)   for i = 1..reps
     out = s_reps
 
 The input contribution `e` is re-injected at every iteration; this is
 what makes the recurrence stable and gives the layer its "iterative
-refinement" character.
+refinement" character. Raw `x` is fed to `W_i` without normalization;
+prepend a `norm` layer in the spec to recover the pre-2026-05 behaviour.
 
-- Normalization along the feature axis with `max(||·||, eps)`.
+- Normalization uses Tikhonov form `x / sqrt(||x||^2 + eps)`, which
+  has well-defined gradients at `x = 0` (the `max(||x||, eps)` variant
+  propagates NaNs through autodiff there).
 - No time recurrence — each position is independent.
 - JAX: uses `lax.scan` over `reps` with fixed length.
 - PyTorch: `reps` Python loop iterations.
@@ -276,11 +279,15 @@ Latent-recurrent RNN: combines time recurrence with latent reasoning.
 At each timestep, runs `reps` refinement iterations using the previous
 timestep's hidden state as additional context:
 
-    e_t = W_i @ normalize(x_t) + W_h @ normalize(h_{t-1}) + b
+    e_t = W_i @ x_t + W_h @ normalize(h_{t-1}) + b
     s_0 = 0
     s_i = tanh(W_r @ normalize(s_{i-1}) + e_t)
     h_t = s_reps
 
+- Raw `x_t` is fed to `W_i` without normalization; prepend `norm` in
+  the spec to recover the pre-2026-05 behaviour. The recurrent
+  hidden state `h` is still L2-normalized (it has size ≥ 2 so the
+  unit-norm projection isn't degenerate).
 - JAX: outer `lax.scan` over time, nested `lax.scan` over reps.
 - PyTorch: Python loops for both.
 - `num_weights = size * input_size + size + size * size + size * size`.
@@ -295,21 +302,23 @@ Per token, the gate `f` and candidate `hc` are jointly refined for
 `reps` iterations starting from zeros; after the loop, the standard
 mGRU blend updates the time-recurrent state:
 
+    h_n   = normalize(h)
     hc[0] = 0
     f[0]  = 0
     for i in range(reps):
         hc[i+1] = normalize(tanh(
-            W_h_i x + W_h_h (f[i] * h) + W_h_s hc[i] + b_h))
+            W_h_i x + W_h_h (f[i] * h_n) + W_h_s hc[i] + b_h))
         f[i+1]  = sigmoid(
-            W_f_i x + W_f_h h + W_f_s hc[i+1] + b_f)
+            W_f_i x + W_f_h h_n + W_f_s hc[i+1] + b_f)
     h_new = (1 - f[reps]) * h + f[reps] * hc[reps]
 
 - State per sample: `h: (size,)` — same as mgru. The `hc, f`
   iteration is local to a single token.
-- Only `hc` is L2-normalized — this is the architecturally
-  significant constraint (direction-only candidate). Raw `x` and `h`
-  are fed to the W matmuls without normalization, matching standard
-  mGRU.
+- `hc` is L2-normalized inside the reps loop (the architecturally
+  significant direction-only-candidate constraint) and the
+  time-recurrent `h` is normalized before each use as `h_n`. Raw `x`
+  is fed to `W_*_i` without normalization; prepend a `norm` layer
+  in the spec to recover the pre-2026-05 behaviour.
 - Unit-norm constraint on `hc` (the `normalize` after `tanh`) gives
   a clean factorisation: `hc` represents direction, `f` represents
   magnitude. Both `f` and `hc` are computed against unit-norm `hc`,

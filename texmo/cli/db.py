@@ -51,6 +51,24 @@ def clear_system_init_args(parser: argparse.ArgumentParser, config):
     parser.set_defaults(func=clear_system)
 
 
+def backfill_num_layers(args: argparse.Namespace):
+    writer = DbWriter.from_args(args.db)
+    n = writer.backfill_num_layers()
+    logging.info(f"Backfilled num_layers for {n} confs")
+
+
+def backfill_num_layers_init_args(
+    parser: argparse.ArgumentParser, config
+):
+    parser.add_argument(
+        "--db",
+        type=str,
+        default=config.DB,
+        help="path to the database",
+    )
+    parser.set_defaults(func=backfill_num_layers)
+
+
 def bootstrap_estimates(args: argparse.Namespace):
     writer = DbWriter.from_args(args.db)
     with DbReader.from_args(args.db) as reader:

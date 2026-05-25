@@ -48,9 +48,9 @@ from .common import (
 
 INSERT_CONF = """
 INSERT INTO conf (spec, weights, lr, length, batch, steps, precision,
-                  decay, cosine)
+                  decay, cosine, num_layers)
 VALUES (:spec, :weights, :lr, :length, :batch, :steps, :precision,
-        :decay, :cosine)
+        :decay, :cosine, :num_layers)
 """
 
 INSERT_RUN = """
@@ -150,6 +150,7 @@ class DbWriter(object):
             self._conf_id_cache[conf] = conf_id
             return conf_id
         conf_dict['weights'] = conf.num_weights
+        conf_dict['num_layers'] = len(conf.model.layers)
         cur.execute(INSERT_CONF, conf_dict)
         conf_id = cur.lastrowid
         self._conf_id_cache[conf] = conf_id
@@ -357,6 +358,52 @@ class DbWriter(object):
             for row in cur.fetchall():
                 self._update_scores(cur, row['conf_id'], row['system'])
             self._db.commit()
+
+    def backfill_num_layers(self, batch_size: int = 1000) -> int:
+        """Populate `num_layers` for every conf row where it's NULL.
+
+        Used to migrate existing databases after the `num_layers`
+        column was added. Returns the number of rows updated. Logs
+        progress every batch.
+        """
+        from ..model import build_model_def
+        from ..precision import Precision
+
+        cur = self._db.cursor()
+        cur.execute("SELECT COUNT(*) FROM conf WHERE num_layers IS NULL")
+        total = cur.fetchone()[0]
+        if total == 0:
+            return 0
+        logging.info(
+            f"Backfilling num_layers for {total} confs...")
+
+        updated = 0
+        while True:
+            cur.execute(
+                "SELECT id, spec FROM conf "
+                "WHERE num_layers IS NULL LIMIT :n",
+                {'n': batch_size},
+            )
+            rows = cur.fetchall()
+            if not rows:
+                break
+            updates = []
+            for row in rows:
+                try:
+                    model = build_model_def(
+                        row['spec'], precision=Precision.FP32)
+                    updates.append((len(model.layers), row['id']))
+                except Exception as exc:
+                    logging.warning(
+                        f"skipping conf id={row['id']} "
+                        f"spec={row['spec']!r}: {exc}")
+            cur.execute('BEGIN IMMEDIATE')
+            cur.executemany(
+                "UPDATE conf SET num_layers = ? WHERE id = ?", updates)
+            cur.execute('COMMIT')
+            updated += len(updates)
+            logging.info(f"  {updated}/{total} done")
+        return updated
 
     def clear_system(self, system: str) -> int:
         """Delete all runs and time estimates for a given system.

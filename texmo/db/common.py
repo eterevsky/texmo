@@ -81,6 +81,12 @@ def _make_template_conditions(template) -> tuple[list[str], dict]:
     if template.max_weights.max < INF:
         conditions.append('weights <= :weights_max')
         params['weights_max'] = template.max_weights.max
+    if template.num_layers.min > 0:
+        conditions.append('num_layers >= :num_layers_min')
+        params['num_layers_min'] = template.num_layers.min
+    if template.num_layers.max < INF:
+        conditions.append('num_layers <= :num_layers_max')
+        params['num_layers_max'] = template.num_layers.max
     if len(template.precision) != len(Precision):
         precisions_list = ', '.join(f'"{p}"' for p in template.precision)
         conditions.append(f'precision IN ({precisions_list})')
@@ -149,6 +155,17 @@ WHERE spec = :spec
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'schema.sql')
 
 
+def _maybe_add_num_layers_column(db) -> None:
+    """Lazy ALTER TABLE for the num_layers column added after the
+    initial schema. NULL for old rows; populate via the
+    db-backfill-num-layers CLI command."""
+    cur = db.execute("PRAGMA table_info(conf)")
+    columns = {row['name'] for row in cur.fetchall()}
+    if 'num_layers' not in columns:
+        db.execute("ALTER TABLE conf ADD COLUMN num_layers INTEGER")
+        db.commit()
+
+
 def open_connection(
     path: Optional[str], readonly: bool,
 ) -> sqlite3.Connection:
@@ -195,6 +212,9 @@ def open_connection(
         with open(_SCHEMA_PATH) as schema:
             db.executescript(schema.read())
             db.commit()
+    elif not readonly:
+        # Existing DB -- run any additive column migrations.
+        _maybe_add_num_layers_column(db)
 
     # Enable WAL for file-backed DBs so the timing thread and search
     # thread can write concurrently without blocking readers.

@@ -26,6 +26,12 @@ CREATE TABLE conf (
     batch INTEGER NOT NULL,
     steps INTEGER NOT NULL,
 
+    -- Number of intermediate layers in the spec (everything between
+    -- the input and the output dense, counting suffix/norm/skip).
+    -- Populated on insert; NULL for rows from before this column was
+    -- added (run the db-backfill-num-layers CLI to fix those).
+    num_layers INTEGER,
+
     -- Scores based on the runs.
     median_score REAL,
 

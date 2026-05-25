@@ -63,6 +63,15 @@ def parse_args():
     )
     db.bootstrap_estimates_init_args(parser_bootstrap_estimates, config)
 
+    parser_backfill_num_layers = subparsers.add_parser(
+        "db-backfill-num-layers",
+        help=(
+            "Populate the num_layers column for confs from before the "
+            "column was added (parses spec, counts layers, updates row)"
+        ),
+    )
+    db.backfill_num_layers_init_args(parser_backfill_num_layers, config)
+
     parser_strategy_stats = subparsers.add_parser(
         "strategy-stats",
         help="Per-strategy run counts and %% of runs that changed the winner",

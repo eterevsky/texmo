@@ -179,15 +179,13 @@ class Configuration(object):
 
     @property
     def learning_str(self) -> str:
-        render_lr = lambda lr: str(int(lr)) if lr >= 1 else f'1/{str(int(1/lr))}'
-        lr = render_lr(self.lr)
+        lr = format_lr(self.lr)
         if self.cosine:
             return f'{lr}↘0'
         if self.decay == 1:
             final = ''
         else:
-            final = self.lr * self.decay
-            final = '→' + render_lr(final)
+            final = '→' + format_lr(self.lr * self.decay)
 
         return f'{lr}{final}'
 
@@ -262,6 +260,15 @@ FloatLimits = Optional[float | tuple[float, float]]
 # whether each survives. Lower bound is 0 so the walk can halve
 # indefinitely; in practice the search doesn't chase decay to zero.
 _DECAY_NEIGHBOR_BOUNDS = Bounds(None, 0, max_value=1)
+
+
+def format_lr(lr: float) -> str:
+    """Render a learning rate as either an integer or a `1/X` fraction.
+
+    Matches the format the train CLI accepts via `parse_lr`, so a
+    value formatted here can be pasted back as `--lr=1/128`.
+    """
+    return str(int(lr)) if lr >= 1 else f'1/{int(1 / lr)}'
 
 
 def _parse_number(arg: str, num_type: type) -> int|float:

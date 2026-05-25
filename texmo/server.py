@@ -27,6 +27,7 @@ from .configuration import (
     Precision,
     Template,
     default_from_template,
+    format_lr,
 )
 from .db import ConfScore, DbReader, DbWriter
 from .db.writer import DbWriterProxy, Stop as WriterStop, WriterThread
@@ -233,15 +234,19 @@ def _compare_defaults(live: Template) -> dict:
 def _conf_row(conf_score) -> dict:
     """Build a template row dict for a ConfScore."""
     conf = conf_score.conf
-    cosine_flag = ' --cosine' if conf.cosine else ''
+    # --decay and --cosine are mutually exclusive; only emit the
+    # flag that's actually in use.
+    schedule_flag = (
+        ' --cosine' if conf.cosine
+        else f' --decay {format_lr(conf.decay)}'
+    )
     cmd = (
         f'uv run texmo.py train'
         f" -s '{conf.model}'"
         f' -p {conf.precision}'
         f' -b {conf.batch}'
-        f' --lr {conf.lr}'
-        f' --decay {conf.decay}'
-        f'{cosine_flag}'
+        f' --lr {format_lr(conf.lr)}'
+        f'{schedule_flag}'
         f' -l {conf.length}'
         f' --steps {conf.steps}'
     )

@@ -47,6 +47,11 @@ def show_loss_graph(manager: Manager):
 def parse_lr(x: str) -> float:
     if x.startswith("2^"):
         return 2 ** int(x[2:])
+    if "/" in x:
+        # Fraction form: '1/128' -> 0.0078125. Matches the way LRs
+        # appear in conf reports (`1/128`, `1/64`, ...).
+        num, den = x.split("/", 1)
+        return float(num) / float(den)
     return float(x)
 
 

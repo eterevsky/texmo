@@ -166,6 +166,18 @@ def _maybe_add_num_layers_column(db) -> None:
         db.commit()
 
 
+def _maybe_add_pick_me_column(db) -> None:
+    """Lazy ALTER TABLE for the pick_me column. Default 0 backfills
+    existing rows so the search treats them as non-priority."""
+    cur = db.execute("PRAGMA table_info(conf)")
+    columns = {row['name'] for row in cur.fetchall()}
+    if 'pick_me' not in columns:
+        db.execute(
+            "ALTER TABLE conf "
+            "ADD COLUMN pick_me INTEGER NOT NULL DEFAULT 0")
+        db.commit()
+
+
 def open_connection(
     path: Optional[str], readonly: bool,
 ) -> sqlite3.Connection:
@@ -215,6 +227,7 @@ def open_connection(
     elif not readonly:
         # Existing DB -- run any additive column migrations.
         _maybe_add_num_layers_column(db)
+        _maybe_add_pick_me_column(db)
 
     # Enable WAL for file-backed DBs so the timing thread and search
     # thread can write concurrently without blocking readers.

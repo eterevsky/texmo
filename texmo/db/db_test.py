@@ -761,3 +761,116 @@ def test_fastest_near_best_segments_any_system_cross_system(db):
     assert by_spec["bytes|dense.8.gelu"][3] == pytest.approx(3.0)
     assert by_spec["bytes|dense.32.gelu"][2] == "whitebox"
     assert by_spec["bytes|dense.32.gelu"][3] == pytest.approx(5.0)
+
+
+# --- pick_me / invalid-conf filter -----------------------------------------
+
+
+def _pick_me_conf(spec="bytes|dense.32.gelu"):
+    model = build_model_def(spec, precision=Precision.FP32)
+    return Configuration(
+        model=model, lr=0.1, length=128, batch=32, steps=256, decay=1.0,
+    )
+
+
+def test_add_pick_me_conf_inserts_with_flag_set(db):
+    conf = _pick_me_conf()
+    cid, inserted = db.writer.add_pick_me_conf(conf)
+    assert inserted is True
+    flag = db._db.execute(
+        'SELECT pick_me FROM conf WHERE id = ?', (cid,)).fetchone()[0]
+    assert flag == 1
+
+
+def test_add_pick_me_conf_does_not_reflag_existing(db):
+    """If the conf already exists with pick_me=0, the call must not
+    silently flip its flag — that conf already has measurement
+    history and we shouldn't re-prioritize it."""
+    conf = _pick_me_conf()
+    # Insert via normal find_or_add (pick_me defaults to 0).
+    first_id = db.writer.find_or_add_conf(conf)
+    cid, inserted = db.writer.add_pick_me_conf(conf)
+    assert inserted is False
+    assert cid == first_id
+    flag = db._db.execute(
+        'SELECT pick_me FROM conf WHERE id = ?', (cid,)).fetchone()[0]
+    assert flag == 0
+
+
+def test_pick_me_conf_returns_flagged_untrained(db):
+    """A pick_me=1 conf with no runs is returned."""
+    conf = _pick_me_conf()
+    db.writer.add_pick_me_conf(conf)
+    template = _make_template()
+    got = db.pick_me_conf(template)
+    assert got == conf
+
+
+def test_pick_me_conf_returns_none_after_min_runs(db):
+    """Once a pick_me conf has >= min_runs, it's no longer returned."""
+    conf = _pick_me_conf()
+    db.writer.add_pick_me_conf(conf)
+    # Add two runs (default min_runs = 2).
+    db.add_run(conf, Run(
+        system="rpi", step_loss=None, loss=1.0, train_time=1.0))
+    db.add_run(conf, Run(
+        system="rpi", step_loss=None, loss=2.0, train_time=1.0))
+    template = _make_template()
+    assert db.pick_me_conf(template) is None
+
+
+def test_pick_me_conf_ignores_unflagged(db):
+    """Confs without pick_me=1 are never returned."""
+    conf, run = _make_conf_run()
+    db.add_run(conf, run)  # adds the conf with pick_me=0
+    template = _make_template()
+    assert db.pick_me_conf(template) is None
+
+
+def test_top_confs_global_filters_invalid_by_default(db):
+    """A conf where norm is the first stack layer is invalid; it must
+    not appear in the Pareto by default, but does with
+    `include_invalid=True`."""
+    invalid_conf, _ = _make_conf_run(spec="bits.1+bp|norm-rnn.2.tanh")
+    db.add_run(invalid_conf, Run(
+        system="rpi", step_loss=None, loss=0.5, train_time=1.0))
+    db.add_run(invalid_conf, Run(
+        system="rpi", step_loss=None, loss=0.6, train_time=1.0))
+
+    template = _make_template()
+    assert list(db.top_confs_global(template)) == []
+
+    with_invalid = list(
+        db.top_confs_global(template, include_invalid=True))
+    assert len(with_invalid) == 1
+    assert str(with_invalid[0].conf.model) == "bits.1+bp|norm-rnn.2.tanh"
+
+
+def test_top_confs_global_invalid_does_not_block_heavier_valid(db):
+    """When the best conf at weight bucket W1 is invalid, a valid
+    conf at heavier weight W2 with worse-but-still-better-than-best-so-
+    far score must still surface — the invalid one shouldn't bump
+    `best_score` for the monotonic-improvement filter."""
+    # bits.1+bp|norm-rnn.2.tanh is small (a few dozen weights);
+    # bytes|dense.32.gelu is heavier. Give the invalid one a *worse*
+    # score so the valid one is naturally Pareto-better than nothing
+    # (best_score starts at INF). Without the "don't bump best_score
+    # on skipped invalid" guard, the invalid skip would still raise
+    # best_score and hide the valid heavier conf.
+    invalid_conf, _ = _make_conf_run(spec="bits.1+bp|norm-rnn.2.tanh")
+    valid_conf, _ = _make_conf_run(spec="bytes|dense.32.gelu")
+
+    # Same score so the only thing that distinguishes them is weights;
+    # the invalid one comes first by weight ascending. If the filter
+    # bumped best_score on skip, the valid one (same score) would be
+    # blocked by the `< best_score` check.
+    for c, loss in [(invalid_conf, 5.0), (invalid_conf, 5.1),
+                    (valid_conf, 5.0), (valid_conf, 5.1)]:
+        db.add_run(c, Run(
+            system="rpi", step_loss=None, loss=loss, train_time=1.0))
+
+    specs = {
+        str(cs.conf.model)
+        for cs in db.top_confs_global(_make_template())
+    }
+    assert specs == {"bytes|dense.32.gelu"}

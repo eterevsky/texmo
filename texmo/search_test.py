@@ -303,6 +303,40 @@ def test_select_predicted_best_happy_path(tmp_path, monkeypatch):
         f"expected multiple step values in candidates; got {distinct_steps}")
 
 
+def test_select_conf_returns_pick_me_with_priority(tmp_path):
+    """A pick_me=1 conf with no runs must win over every other strategy."""
+    path = str(tmp_path / "test.db")
+    writer = DbWriter(path)
+    pm_conf = _make_conf(steps=256, spec="bytes|dense.16.gelu")
+    _, inserted = writer.add_pick_me_conf(pm_conf)
+    assert inserted
+    writer.close()
+    search = _make_search_at(path)
+    result = search.select_conf('rpi')
+    assert result is not None
+    assert result.strategy == 'pick_me'
+    assert result.conf == pm_conf
+
+
+def test_select_conf_skips_pick_me_after_min_runs(tmp_path):
+    """Once a pick_me conf has accumulated its min_runs threshold, the
+    strategy yields and lower-priority strategies fire instead."""
+    path = str(tmp_path / "test.db")
+    writer = DbWriter(path)
+    pm_conf = _make_conf(steps=256, spec="bytes|dense.16.gelu")
+    writer.add_pick_me_conf(pm_conf)
+    # Two runs (PICK_ME_MIN_RUNS) retires the flag's effect.
+    writer.add_run(pm_conf, Run(
+        system="rpi", step_loss=[0.1], loss=0.5, train_time=2.0))
+    writer.add_run(pm_conf, Run(
+        system="rpi", step_loss=[0.1], loss=0.6, train_time=2.0))
+    writer.close()
+    search = _make_search_at(path)
+    result = search.select_conf('rpi')
+    # Whatever fires must not be the pick_me strategy.
+    assert result is None or result.strategy != 'pick_me'
+
+
 def test_run_limit_sequences():
     seqs = []
     for i, s in enumerate(_run_limit_sequences()):

@@ -165,6 +165,41 @@ class DbWriter(object):
             cur.execute('COMMIT')
             return conf_id
 
+    def add_pick_me_conf(
+        self, conf: Configuration,
+    ) -> tuple[int, bool]:
+        """Insert `conf` with `pick_me = 1` if it isn't already in the
+        DB; otherwise leave the existing row's pick_me flag unchanged
+        (the conf has its own measurement history and we don't want
+        the migration to re-flag a conf we've already characterized).
+
+        Returns `(conf_id, was_inserted)`.
+        """
+        with latency.timer('DbWriter.add_pick_me_conf'):
+            cur = self._db.cursor()
+            cur.execute('BEGIN IMMEDIATE')
+            conf_dict = conf.to_dict()
+            cur.execute(FIND_CONF, conf_dict)
+            row = cur.fetchone()
+            if row is not None:
+                cur.execute('COMMIT')
+                return row[0], False
+            conf_dict['weights'] = conf.model.num_weights
+            conf_dict['num_layers'] = len(conf.model.layers)
+            cur.execute(
+                'INSERT INTO conf '
+                '(spec, weights, lr, length, batch, steps, precision,'
+                ' decay, cosine, num_layers, pick_me) '
+                'VALUES '
+                '(:spec, :weights, :lr, :length, :batch, :steps,'
+                ' :precision, :decay, :cosine, :num_layers, 1)',
+                conf_dict,
+            )
+            conf_id = cur.lastrowid
+            self._conf_id_cache[conf] = conf_id
+            cur.execute('COMMIT')
+            return conf_id, True
+
     # --- run insertion ------------------------------------------------------
 
     def _add_run_execute(self, cur: sqlite3.Cursor, run_dict: dict):

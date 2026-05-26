@@ -81,6 +81,11 @@ assert abs(sum(w for _, w in _STRATEGY_PROBS) - 1.0) < 1e-9, (
 # unconditionally via `Search._coverage_flag`.
 _COVERAGE_PROB = 0.1
 
+# Minimum total runs a pick_me conf needs before it stops being
+# picked preferentially. Two runs give a median that's robust to a
+# single-run outlier, which is what `top_confs_global` already uses.
+PICK_ME_MIN_RUNS = 2
+
 # Sticky-flag threshold: keep firing the coverage walk only when at
 # least this many uncovered top confs remain on the system. Set high
 # enough that successive selects within the prefetch gap window
@@ -725,8 +730,12 @@ class Search(object):
     def select_conf(self, system: str) -> Optional[SearchResult]:
         """Select a SearchResult, or None if nothing matches.
 
-        Coverage walk runs first (independent of t / max_weights) and
-        fires either with probability `_COVERAGE_PROB` or
+        Pick-me confs (explicit user-injected candidates with
+        `pick_me = 1`) take absolute priority until each has
+        `PICK_ME_MIN_RUNS` total runs.
+
+        Then the coverage walk runs (independent of t / max_weights)
+        and fires either with probability `_COVERAGE_PROB` or
         unconditionally when its sticky flag is set on this system.
 
         After that, one weighted random draw over `_STRATEGY_PROBS`
@@ -738,6 +747,13 @@ class Search(object):
         template or has already been explored enough).
         """
         with latency.timer("Search.select_conf"):
+            # Pick-me: explicit user picks bypass every other strategy
+            # until they've been measured enough times.
+            pm = self._db.pick_me_conf(
+                self.template, min_runs=PICK_ME_MIN_RUNS)
+            if pm is not None:
+                return self._result(pm, 'pick_me', system)
+
             # Coverage walk runs *before* t / max_weights selection so
             # the bulk cross-system push isn't confined to the current
             # iteration's weight bucket. Sticky on this system when the

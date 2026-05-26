@@ -219,6 +219,7 @@ class DbReader(object):
         max_weights: Optional[int] = None,
         max_time: Optional[float] = None,
         min_num_runs: int = 2,
+        include_invalid: bool = False,
     ):
         """Yield top confs ordered by weights, one per weight count.
 
@@ -237,6 +238,12 @@ class DbReader(object):
                 single-run-outlier guard for display + throughput; the
                 coverage walk passes 1 so even fresh top confs surface
                 for cross-system verification.
+            include_invalid: when True, yield confs even if
+                `model.is_valid()` is False. Default skips them — they
+                shouldn't be shown to the user, picked by search, or
+                included in reports. Migrations that want to act on
+                invalid Pareto entries (e.g. the strip-leading-norm
+                cleanup) opt in.
         """
         assert type(template) is Template
 
@@ -324,9 +331,45 @@ class DbReader(object):
 
         for row in cur:
             conf_score = ConfScore._from_row(row)
-            if conf_score.median_score < best_score:
-                best_score = conf_score.median_score
-                yield conf_score
+            if conf_score.median_score >= best_score:
+                continue
+            if not include_invalid and not conf_score.conf.model.is_valid():
+                # Skip without bumping best_score so a later valid
+                # conf at heavier weights can still surface.
+                continue
+            best_score = conf_score.median_score
+            yield conf_score
+
+    def pick_me_conf(
+        self, template: Template, min_runs: int = 2,
+    ) -> Optional[Configuration]:
+        """Return one random pick_me conf with fewer than `min_runs`
+        total runs and matching the template, or None.
+
+        The min-runs filter is computed on the fly (SELECT COUNT(*)
+        FROM run WHERE conf_id=...) so the writer doesn't have to
+        clear the pick_me flag — once a conf has enough runs it's
+        simply skipped by this query and effectively retired from
+        priority pick.
+        """
+        conditions, params = _make_template_conditions(template)
+        conditions.append('pick_me = 1')
+        conditions.append(
+            '(SELECT COUNT(*) FROM run WHERE conf_id = conf.id) '
+            '< :min_runs')
+        params['min_runs'] = min_runs
+        where = 'WHERE ' + ' AND '.join(conditions)
+        conf_fields = ', '.join([
+            'spec', 'precision', 'lr',
+            'decay', 'cosine', 'length', 'batch', 'steps'])
+        query = (
+            f'SELECT {conf_fields} FROM conf {where} '
+            'ORDER BY RANDOM() LIMIT 1'
+        )
+        row = self._db.execute(query, params).fetchone()
+        if row is None:
+            return None
+        return Configuration.from_dict(row)
 
     def fastest_near_best_segments(
         self,

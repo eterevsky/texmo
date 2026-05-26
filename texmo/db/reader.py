@@ -453,9 +453,15 @@ class DbReader(object):
                 w = row['weights']
                 if uncovered_right is not None and w >= uncovered_right:
                     continue
+                cs = ConfScore._from_row(row)
+                # Skip invalid candidates -- the Pareto inputs are
+                # already filtered (default `include_invalid=False`),
+                # so the w_left Pareto point itself remains in the
+                # query results and the `done` assertion still holds.
+                if not cs.conf.model.is_valid():
+                    continue
                 seg_low = max(w, w_left)
-                segments.append(
-                    (seg_low, uncovered_right, ConfScore._from_row(row)))
+                segments.append((seg_low, uncovered_right, cs))
                 uncovered_right = seg_low
                 if w <= w_left:
                     done = True
@@ -541,9 +547,13 @@ class DbReader(object):
                 w = row['weights']
                 if uncovered_right is not None and w >= uncovered_right:
                     continue
+                cs = ConfScore._from_row(row)
+                # Skip invalid candidates -- see the per-system
+                # variant above for the same reasoning.
+                if not cs.conf.model.is_valid():
+                    continue
                 seg_low = max(w, w_left)
-                segments.append(
-                    (seg_low, uncovered_right, ConfScore._from_row(row)))
+                segments.append((seg_low, uncovered_right, cs))
                 uncovered_right = seg_low
                 if w <= w_left:
                     done = True
@@ -601,7 +611,13 @@ class DbReader(object):
         cur = self._db.execute(query, params)
 
         for row in cur:
-            yield ConfScore._from_row(row, system)
+            cs = ConfScore._from_row(row, system)
+            # Invalid confs (e.g. norm-as-first-layer post-rename)
+            # mustn't surface as candidates for the search strategies
+            # that call this. Same convention as `top_confs_global`.
+            if not cs.conf.model.is_valid():
+                continue
+            yield cs
 
     def best_conf_for_spec_on_system(
         self,
@@ -643,7 +659,10 @@ class DbReader(object):
         row = cur.fetchone()
         if row is None:
             return None
-        return ConfScore._from_row(row, system)
+        cs = ConfScore._from_row(row, system)
+        if not cs.conf.model.is_valid():
+            return None
+        return cs
 
     def confs_under_time(
         self,
@@ -685,9 +704,16 @@ class DbReader(object):
         """
         cur = self._db.execute(query, params)
         for row in cur:
+            conf = Configuration.from_dict(row)
+            # Same invalid-conf filter as `top_confs_global`: the
+            # time-budget search strategy must not return architectures
+            # that fail `model.is_valid()` (e.g. the norm-as-first-
+            # layer rows the rename migration leaves behind).
+            if not conf.model.is_valid():
+                continue
             yield ConfWithRuns(
                 conf_id=row['conf_id'],
-                conf=Configuration.from_dict(row),
+                conf=conf,
                 median_score=row['median_score'],
                 time_estimate=row['time_estimate'],
                 total_runs=row['total_runs'],

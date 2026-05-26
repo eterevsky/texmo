@@ -846,6 +846,38 @@ def test_top_confs_global_filters_invalid_by_default(db):
     assert str(with_invalid[0].conf.model) == "bits.1+bp|norm-rnn.2.tanh"
 
 
+def test_confs_under_time_skips_invalid(db):
+    """`time_budget` calls this; invalid confs must not surface."""
+    invalid_conf, _ = _make_conf_run(spec="bits.1+bp|norm-rnn.2.tanh")
+    db.add_run(invalid_conf, Run(
+        system="rpi", step_loss=None, loss=0.5, train_time=1.0))
+    db.add_run(invalid_conf, Run(
+        system="rpi", step_loss=None, loss=0.6, train_time=1.0))
+
+    from texmo.common import INF
+    results = list(db.confs_under_time(
+        template=_make_template(), system="rpi",
+        max_weights=INF, max_time=1e9,
+    ))
+    assert results == []
+
+
+def test_top_confs_for_system_skips_invalid(db):
+    """`_select_top_neighbor`, `_select_max_weights`,
+    `_select_predicted_best_impl` all call this. Invalid confs would
+    otherwise become 'top' seeds."""
+    invalid_conf, _ = _make_conf_run(spec="bits.1+bp|norm-rnn.2.tanh")
+    db.add_run(invalid_conf, Run(
+        system="rpi", step_loss=None, loss=0.5, train_time=1.0))
+    db.add_run(invalid_conf, Run(
+        system="rpi", step_loss=None, loss=0.6, train_time=1.0))
+
+    results = list(db.top_confs_for_system(
+        system="rpi", template=_make_template(),
+    ))
+    assert results == []
+
+
 def test_top_confs_global_invalid_does_not_block_heavier_valid(db):
     """When the best conf at weight bucket W1 is invalid, a valid
     conf at heavier weight W2 with worse-but-still-better-than-best-so-

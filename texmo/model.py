@@ -602,6 +602,53 @@ class ModelDef(object):
                 yield _make_spec(chain(
                     layers_str[:i], (mutated_layer,), layers_str[i + 1:]))
 
+        # 11. Prepend a dense layer. Other appendable layers
+        # (rnn/gru/...) stay append-only -- they have their own
+        # recurrence and benefit from being first. Dense doesn't, so
+        # the search rarely starts with `<input>|dense` and never
+        # discovers `<input>|dense-X-...` lead-ins. The new size is
+        # `input.size` when the current first stack layer is a
+        # passthrough (suffix/skip/norm don't define their own size),
+        # otherwise `min(input.size, output.size)` -- the natural
+        # narrow point for a compression-style projection.
+        if (
+            not self.layers
+            or self.layers[0].name not in ("suffix", "skip", "norm")
+        ):
+            prepend_size = min(self.input.size, self.output.size)
+        else:
+            prepend_size = self.input.size
+        for activation in ("tanh", "gelu"):
+            bumped = _insert_with_skip_bumps(
+                self.layers, 0,
+                f"dense.{prepend_size}.{activation}")
+            yield _make_spec(bumped)
+
+        # 12. Remove the first layer when it's a prepend-shaped
+        # dense (symmetric with section 11). The size and activation
+        # must match what section 11 would have produced for the
+        # *remaining* layers, otherwise removing it isn't a reachable-
+        # by-prepend mutation.
+        if self.layers and self.layers[0].name == "dense":
+            next_layer = (
+                self.layers[1] if len(self.layers) >= 2 else None)
+            if (
+                next_layer is None
+                or next_layer.name not in ("suffix", "skip", "norm")
+            ):
+                expected_size = min(
+                    self.input.size, self.output.size)
+            else:
+                expected_size = self.input.size
+            first = self.layers[0]
+            if (
+                first.size == expected_size
+                and first._activation in ("tanh", "gelu")
+            ):
+                bumped = _remove_with_skip_bumps(self.layers, 0)
+                if bumped is not None:
+                    yield _make_spec(bumped)
+
     def neighbors(self) -> Iterable['ModelDef']:
         # Precision neighbors
         for p in self.precision.neighbors:

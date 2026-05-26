@@ -311,6 +311,81 @@ def test_neighbors_suffix_insert_remove():
     assert "bytes|dense.32.gelu" in neighbor_specs2
 
 
+def test_neighbors_prepend_dense_in_front_of_recurrent():
+    """The whole point of the prepend mutation: discover `dense-X`
+    lead-ins from existing `X` models, since `dense` alone is rarely
+    a viable starting point and the search never lands there."""
+    md = ModelDef("bits.1+bp|gru.4", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    # min(input.size=4, output.size=1) = 1 -- 1-token output in bits.
+    assert "bits.1+bp|dense.1.tanh-gru.4" in neighbor_specs
+    assert "bits.1+bp|dense.1.gelu-gru.4" in neighbor_specs
+
+
+def test_neighbors_prepend_dense_size_for_passthrough_next():
+    """If the current first layer is suffix/skip/norm (passthrough),
+    the prepend uses `input.size` not `min(input, output)` -- the
+    passthrough doesn't define its own size so it carries dense's
+    output through to whatever's next."""
+    md = ModelDef("bits.1+bp|suffix.2-gru.4", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    # input.size for bits.1+bp is 4 (bit value + bit-position one-hot).
+    assert "bits.1+bp|dense.4.tanh-suffix.2-gru.4" in neighbor_specs
+
+
+def test_neighbors_prepend_dense_remove_symmetric():
+    """Insertion is symmetric with removal: starting from
+    `dense.X.act-gru.4` we must reach `gru.4` as a neighbor."""
+    md = ModelDef("bits.1+bp|dense.1.tanh-gru.4", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert "bits.1+bp|gru.4" in neighbor_specs
+
+
+def test_neighbors_prepend_dense_remove_only_for_matching_size():
+    """The remove rule only fires when the first dense's size +
+    activation match what prepend would have produced -- otherwise
+    a `dense.8.gelu-gru.4` model would 'lose' the dense via a
+    mutation no prepend could undo."""
+    # dense.8 at front: prepend size for gru.4 with bits.1+bp would
+    # be min(4, 1)=1, not 8. So removing dense.8 here is asymmetric.
+    md = ModelDef("bits.1+bp|dense.8.gelu-gru.4", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    # The plain `bits.1+bp|gru.4` does NOT surface via prepend-remove
+    # (it might still surface via other paths, but not this one).
+    # We can't easily assert the *negative* (other paths exist), so
+    # instead assert that the model is iterated without error.
+    assert neighbor_specs  # well-formed iteration
+
+    # Same model but with the correct prepend size — remove fires.
+    md_match = ModelDef(
+        "bits.1+bp|dense.1.gelu-gru.4", Precision.FP32)
+    assert "bits.1+bp|gru.4" in [str(n) for n in md_match.neighbors()]
+
+
+def test_neighbors_prepend_dense_only_tanh_and_gelu():
+    """Only tanh and gelu are generated (relu is rare in practice)."""
+    md = ModelDef("bits.1+bp|gru.4", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert "bits.1+bp|dense.1.tanh-gru.4" in neighbor_specs
+    assert "bits.1+bp|dense.1.gelu-gru.4" in neighbor_specs
+    assert "bits.1+bp|dense.1.relu-gru.4" not in neighbor_specs
+
+
+def test_neighbors_prepend_dense_preserves_skip_distance():
+    """A skip at index 0 with body [1, 3) doesn't contain pos=0, so
+    prepending shifts the skip uniformly and its distance stays the
+    same — the merge still lands on the same original layer."""
+    md = ModelDef(
+        "bits.1+bp|skip.2.add-dense.4.gelu-dense.4.gelu-gru.4",
+        Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    # First layer is skip → passthrough sizing rule → input.size = 4.
+    assert (
+        "bits.1+bp|dense.4.tanh-skip.2.add-dense.4.gelu-dense.4.gelu-gru.4"
+        in neighbor_specs
+    )
+
+
 def test_neighbors_no_duplicates():
     md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
     neighbor_keys = [(str(n), n.precision) for n in md.neighbors()]

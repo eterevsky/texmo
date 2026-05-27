@@ -409,20 +409,25 @@ class SearchServer(object):
             t.value: t in template.decay_types for t in DecayType
         }
 
+        tmin, tmax = train_time
+        train_time_str = f'{tmin}-{tmax}'
+
         # Use a dedicated read-only connection to avoid contending with
         # the writer thread for the main connection.
+        # `max_time=tmax` limits the top list to confs that at least
+        # one system can train within the user's time budget -- confs
+        # whose smallest cross-system median_time exceeds tmax aren't
+        # actionable from this template.
         with DbReader(self.path) as ro_db:
             systems = ro_db.get_systems()
             top_confs = list(
                 ro_db.top_confs_global(
-                    template, system=selected_system))
+                    template, system=selected_system,
+                    max_time=tmax))
 
         graph = build_graph(top_confs)
 
         top = [_conf_row(tc) for tc in top_confs]
-
-        tmin, tmax = train_time
-        train_time_str = f'{tmin}-{tmax}'
 
         return render_template(
             "index.html",

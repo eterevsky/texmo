@@ -197,6 +197,11 @@ def _maybe_create_perf_indexes(db) -> None:
             'CREATE INDEX conf_time_estimate_conf_time '
             'ON conf_time_estimate(conf_id, time_s)')
         created = True
+    if 'conf_weights_score' not in existing:
+        db.execute(
+            'CREATE INDEX conf_weights_score '
+            'ON conf(weights, median_score)')
+        created = True
     if created:
         db.commit()
         # Stats refresh so the planner picks the new indexes.

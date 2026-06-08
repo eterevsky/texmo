@@ -132,6 +132,10 @@ CREATE INDEX conf_time_estimate_system_time
 -- per conf without a temp B-tree sort.
 CREATE INDEX conf_time_estimate_conf_time
     ON conf_time_estimate(conf_id, time_s);
+-- Lets `top_confs_global` walk conf in (weights ASC, median_score ASC)
+-- order so it can short-circuit per weight bucket once the bucket is
+-- known not to improve the running Pareto best.
+CREATE INDEX conf_weights_score ON conf(weights, median_score);
 
 -- Serialized trained models (pickled). `name` is a short key like
 -- 'timing' or 'loss'. Saved by ModelTrainingThread after each refit

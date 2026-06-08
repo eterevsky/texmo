@@ -241,21 +241,19 @@ class DbReader(object):
         """
         assert type(template) is Template
 
+        # Walk conf in (weights ASC, median_score ASC) order using the
+        # conf_weights_score index, then resolve num_runs / cte info
+        # per candidate. The previous CTE+window form materialised the
+        # whole conf table (384k rows on the live DB) with four
+        # correlated subqueries per row -- 4-7s. This form is sub-200
+        # ms because we short-circuit per weight bucket as soon as a
+        # bucket is known to not improve the running Pareto best.
         conditions, params = _make_template_conditions(template)
         conditions.append('median_score IS NOT NULL')
-        conditions.append('num_runs >= :min_num_runs')
-        params['min_num_runs'] = min_num_runs
 
         if max_weights is not None:
             conditions.append('weights <= :max_weights')
             params['max_weights'] = max_weights
-
-        if max_time is not None:
-            conditions.append(
-                "(SELECT MIN(time_s) FROM conf_time_estimate "
-                " WHERE conf_id=conf.id AND source='median')"
-                " <= :max_time")
-            params['max_time'] = max_time
 
         if system is not None:
             conditions.append(
@@ -266,72 +264,108 @@ class DbReader(object):
         conf_fields = ', '.join([
             'spec', 'precision', 'lr',
             'decay', 'cosine', 'length', 'batch', 'steps'])
-
         where = 'WHERE ' + ' AND '.join(conditions)
 
+        # Per-candidate enrichment queries (small, indexed).
+        q_runs = 'SELECT COUNT(*) FROM run WHERE conf_id = ?'
         if system is None:
-            # Best median_time across all systems, report the winning system.
-            time_select = (
-                "(SELECT system FROM conf_time_estimate "
-                " WHERE conf_id=conf.id AND source='median' "
-                " ORDER BY time_s LIMIT 1) AS system, "
-                "(SELECT MIN(time_s) FROM conf_time_estimate "
-                " WHERE conf_id=conf.id AND source='median') AS median_time"
+            # Best (lowest time) median entry across all systems.
+            q_cte = (
+                "SELECT system, time_s FROM conf_time_estimate "
+                "WHERE conf_id = ? AND source = 'median' "
+                "ORDER BY time_s LIMIT 1"
             )
         else:
-            # Median_time on the selected system specifically.
-            time_select = (
-                ":system AS system, "
-                "(SELECT time_s FROM conf_time_estimate "
-                " WHERE conf_id=conf.id AND system=:system "
-                " AND source='median') AS median_time"
+            q_cte = (
+                "SELECT :system AS system, time_s "
+                "FROM conf_time_estimate "
+                "WHERE conf_id = :id AND source = 'median' "
+                "AND system = :system"
             )
 
+        # INDEXED BY hint locks in the (weights, median_score) walk so
+        # the planner doesn't choose the unrelated conf_median_score
+        # index (which would order by score alone, defeating the
+        # per-bucket short-circuit).
         query = f"""
-            WITH conf_with_runs AS (
-                SELECT id,
-                       {conf_fields},
-                       weights,
-                       median_score,
-                       (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs,
-                       {time_select}
-                FROM conf
-                {where}
-            ),
-            ranked_confs AS (SELECT id AS conf_id,
-                   {conf_fields},
-                   weights,
-                   median_score,
-                   num_runs,
-                   system,
-                   median_time,
-                   ROW_NUMBER() OVER (PARTITION BY weights ORDER BY median_score) AS rn
-            FROM conf_with_runs
-            )
-            SELECT conf_id,
-                   {conf_fields},
-                   weights,
-                   median_score,
-                   num_runs,
-                   system,
-                   median_time
-            FROM ranked_confs
-            WHERE rn = 1
+            SELECT id, {conf_fields}, weights, median_score
+            FROM conf INDEXED BY conf_weights_score
+            {where}
+            ORDER BY weights ASC, median_score ASC
         """
 
         cur = self._db.execute(query, params)
 
         best_score = INF
+        cur_weight = -1
+        bucket_done = False
 
         for row in cur:
-            conf_score = ConfScore._from_row(row)
-            if conf_score.median_score >= best_score:
+            w = row['weights']
+            if w != cur_weight:
+                cur_weight = w
+                bucket_done = False
+            elif bucket_done:
                 continue
-            if not include_invalid and not conf_score.conf.model.is_valid():
-                # Skip without bumping best_score so a later valid
-                # conf at heavier weights can still surface.
+
+            score = row['median_score']
+            if score >= best_score:
+                # This bucket's best (we walk in score ASC) can't
+                # improve the running Pareto loss; skip the rest of
+                # the bucket without paying for any per-row lookups.
+                bucket_done = True
                 continue
-            best_score = conf_score.median_score
+
+            # Per-bucket filters: total runs and cte time.
+            if min_num_runs > 0:
+                runs = self._db.execute(
+                    q_runs, (row['id'],)).fetchone()[0]
+                if runs < min_num_runs:
+                    continue
+            else:
+                runs = self._db.execute(
+                    q_runs, (row['id'],)).fetchone()[0]
+
+            if system is None:
+                cte_row = self._db.execute(
+                    q_cte, (row['id'],)).fetchone()
+            else:
+                cte_row = self._db.execute(
+                    q_cte, {'id': row['id'], 'system': system}
+                ).fetchone()
+            if cte_row is None:
+                continue
+            cte_system, cte_time = cte_row[0], cte_row[1]
+            if max_time is not None and cte_time > max_time:
+                continue
+
+            # Build the enriched row dict for ConfScore._from_row.
+            enriched = {
+                'conf_id': row['id'],
+                'spec': row['spec'],
+                'precision': row['precision'],
+                'lr': row['lr'],
+                'decay': row['decay'],
+                'cosine': row['cosine'],
+                'length': row['length'],
+                'batch': row['batch'],
+                'steps': row['steps'],
+                'median_score': score,
+                'num_runs': runs,
+                'system': cte_system,
+                'median_time': cte_time,
+            }
+            conf_score = ConfScore._from_row(enriched)
+            if (not include_invalid
+                    and not conf_score.conf.model.is_valid()):
+                # Don't mark bucket done -- a higher-score valid conf
+                # at the same weight could still surface from the
+                # bucket. (We've already returned this row from SQL,
+                # so the next iteration moves on naturally.)
+                continue
+
+            best_score = score
+            bucket_done = True
             yield conf_score
 
     def pick_me_conf(

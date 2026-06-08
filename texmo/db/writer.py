@@ -126,9 +126,6 @@ class DbWriter(object):
             path = ':memory:'
         self._path = path
         self._db = open_connection(path, readonly=False)
-        # Configuration -> conf_id, populated by `find_or_add_conf`.
-        # Positive lookups only (None never cached).
-        self._conf_id_cache: dict[Configuration, int] = {}
 
     @property
     def path(self) -> str:
@@ -149,22 +146,15 @@ class DbWriter(object):
     def _find_or_add_conf(
         self, cur: sqlite3.Cursor, conf: Configuration
     ) -> int:
-        conf_id = self._conf_id_cache.get(conf)
-        if conf_id is not None:
-            return conf_id
         conf_dict = conf.to_dict()
         cur.execute(FIND_CONF, conf_dict)
         row = cur.fetchone()
         if row is not None:
-            conf_id = row[0]
-            self._conf_id_cache[conf] = conf_id
-            return conf_id
+            return row[0]
         conf_dict['weights'] = conf.num_weights
         conf_dict['num_layers'] = len(conf.model.layers)
         cur.execute(INSERT_CONF, conf_dict)
-        conf_id = cur.lastrowid
-        self._conf_id_cache[conf] = conf_id
-        return conf_id
+        return cur.lastrowid
 
     def find_or_add_conf(self, conf: Configuration) -> int:
         """Find the conf in the db (or insert), returning the conf_id."""
@@ -206,7 +196,6 @@ class DbWriter(object):
                 conf_dict,
             )
             conf_id = cur.lastrowid
-            self._conf_id_cache[conf] = conf_id
             cur.execute('COMMIT')
             return conf_id, True
 

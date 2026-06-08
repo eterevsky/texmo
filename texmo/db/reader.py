@@ -117,10 +117,6 @@ class DbReader(object):
         assert path is not None, "DbReader needs a real path (mode=ro)"
         self._path = path
         self._db = open_connection(path, readonly=True)
-        # Positive-only cache: once a conf has an ID, that ID is
-        # permanent. Misses always hit disk so writers adding a new
-        # conf become visible on the next lookup.
-        self._conf_id_cache: dict[Configuration, int] = {}
 
     @property
     def path(self) -> str:
@@ -141,19 +137,17 @@ class DbReader(object):
     def get_conf_id(self, conf: Configuration) -> int | None:
         """Return conf_id if this configuration exists in the DB, else None.
 
-        Uses an in-memory cache for positive lookups only.
+        The DB already has a UNIQUE covering index over every conf
+        field FIND_CONF queries on, so this lookup is ~4 us -- not
+        worth caching at the Python level (the previous
+        Configuration-keyed cache was the main culprit behind
+        long-running memory growth on the search/model threads).
         """
-        conf_id = self._conf_id_cache.get(conf)
-        if conf_id is not None:
-            return conf_id
-
         cur = self._db.execute(FIND_CONF, conf.to_dict())
         row = cur.fetchone()
         if row is None:
             return None
-        conf_id = row[0]
-        self._conf_id_cache[conf] = conf_id
-        return conf_id
+        return row[0]
 
     def get_run_counts(
         self, conf_ids: list[int], system: Optional[str] = None,

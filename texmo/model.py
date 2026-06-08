@@ -22,6 +22,7 @@ from .layers.slstm import SLstmDef
 from .layers.norm import NormDef
 from .layers.rnn import RnnDef
 from .layers.skip import SkipDef, SkipModule
+from .layers.conv import ConvDef
 from .layers.suffix import SuffixDef
 from .model_jax import ModelJax
 from .precision import Precision
@@ -510,6 +511,15 @@ class ModelDef(object):
             yield _make_spec(chain(
                 layers_str, (f"msr.{new_size}.1",)))
 
+        # Conv has no size parameter -- it inherits the previous
+        # layer's output size. Only append when that natural size
+        # equals what section 3's remove-last expects (i.e. when
+        # `last_output <= output.size`). This keeps the
+        # append/remove pair symmetric, the way MSR's matched-size
+        # append works.
+        if last_output <= self.output.size:
+            yield _make_spec(chain(layers_str, ("conv.2",)))
+
         # 3. Remove last layer (symmetric with append)
         if self.layers:
             prev_output = (
@@ -757,6 +767,10 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
     if name == "suffix":
         length = int(parts[1])
         return SuffixDef(length, input_size=input_size)
+
+    if name == "conv":
+        kernel = int(parts[1])
+        return ConvDef(kernel, input_size=input_size)
 
     if name == "skip":
         distance = int(parts[1])

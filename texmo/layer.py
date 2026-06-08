@@ -100,6 +100,17 @@ class LayerDef(object):
         if self.name == "suffix":
             for l in power2_neighbors(self.length):
                 yield f"suffix.{l}"
+            # Type swap: suffix.L <-> conv.L (same time-axis width;
+            # suffix downsamples by L, conv preserves length).
+            yield f"conv.{self.length}"
+            return
+
+        if self.name == "conv":
+            for l in power2_neighbors(self.kernel):
+                yield f"conv.{l}"
+            # Type swap: conv.L <-> suffix.L (mirror of the suffix
+            # case above).
+            yield f"suffix.{self.kernel}"
             return
 
         if self.name in ("latent", "lrnn", "lmgu"):

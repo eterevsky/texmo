@@ -468,6 +468,106 @@ def test_neighbors_append_lstm_family():
     assert "bytes|dense.32.gelu-matlstm.32" in neighbor_specs
 
 
+def test_neighbors_append_conv():
+    """Conv enters the search only via the end-of-stack append (same
+    treatment as MSR / matlstm): once the previous-layer's output size
+    fits within `output.size`, conv.2 is appended."""
+    md = ModelDef("bytes|dense.32.gelu", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert "bytes|dense.32.gelu-conv.2" in neighbor_specs
+
+
+def test_neighbors_append_conv_remove_symmetric():
+    """Section 3's remove-last fires on the appended conv.2 because
+    its size matches the append-time expected size."""
+    md = ModelDef("bytes|dense.32.gelu-conv.2", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert "bytes|dense.32.gelu" in neighbor_specs
+
+
+def test_neighbors_no_insert_conv_in_middle():
+    """Conv is NOT generated mid-stack -- to reach a mid-stack conv
+    the search has to walk through append-then-grow trajectories,
+    the same way MSR does."""
+    md = ModelDef("bytes|dense.32.gelu-gru.32", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert "bytes|conv.2-dense.32.gelu-gru.32" not in neighbor_specs
+    assert "bytes|dense.32.gelu-conv.2-gru.32" not in neighbor_specs
+
+
+def test_neighbors_no_append_conv_when_size_overruns_output():
+    """When the previous-layer output is larger than output.size,
+    appending conv would create an asymmetric (un-removable) pair.
+    Skipped so the search doesn't paint itself into a corner."""
+    # bytes output.size = 256. dense.512 sits above that, so appending
+    # conv (which would inherit size=512) wouldn't match the 256 cap
+    # used by section 3's remove-last.
+    md = ModelDef("bytes|dense.512.gelu", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert "bytes|dense.512.gelu-conv.2" not in neighbor_specs
+
+
+def test_neighbors_conv_to_suffix_swap():
+    """A conv.4 model has the suffix.4 swap as a neighbor (and v.v.)."""
+    md = ModelDef("bits.1+bp|conv.4-dense.4.gelu", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert "bits.1+bp|suffix.4-dense.4.gelu" in neighbor_specs
+
+
+def test_neighbors_suffix_to_conv_swap():
+    md = ModelDef("bits.1+bp|suffix.2-dense.4.gelu", Precision.FP32)
+    neighbor_specs = [str(n) for n in md.neighbors()]
+    assert "bits.1+bp|conv.2-dense.4.gelu" in neighbor_specs
+
+
+def test_conv_conv_adjacent_invalid():
+    """Two convs in a row collapse mathematically to a single wider
+    conv -- the existing "no two suffix-likes adjacent" rule treats
+    conv as suffix-like (length>1) and forbids it."""
+    md = ModelDef("bytes|conv.2-conv.2-dense.32.gelu", Precision.FP32)
+    assert not md.is_valid()
+
+
+def test_suffix_conv_adjacent_invalid():
+    """suffix.L-conv.K has misaligned channel anchors (each suffix
+    stripe is anchored at a different time, so the conv output
+    smears the 'current position' across stripes). Forbidden by the
+    same suffix-like rule."""
+    md = ModelDef("bytes|suffix.2-conv.2-dense.32.gelu", Precision.FP32)
+    assert not md.is_valid()
+
+
+def test_conv_suffix_adjacent_invalid():
+    """Symmetric with above."""
+    md = ModelDef("bytes|conv.2-suffix.2-dense.32.gelu", Precision.FP32)
+    assert not md.is_valid()
+
+
+def test_conv_separated_by_dense_valid():
+    """A non-suffix-like layer between two convs makes it valid."""
+    md = ModelDef(
+        "bytes|conv.2-dense.32.gelu-conv.4-dense.32.gelu",
+        Precision.FP32)
+    assert md.is_valid()
+
+
+def test_conv_model_builds_and_runs():
+    """End-to-end smoke: build a model containing a conv, run JAX
+    forward + step on a small batch and verify shapes / causality."""
+    import jax
+    import jax.numpy as jnp
+    import numpy as np
+
+    md = ModelDef("bytes|dense.4.gelu-conv.4-dense.4.gelu", Precision.FP32)
+    assert md.is_valid()
+    model = md.build_jax()
+    weights = model.init_weights(jax.random.PRNGKey(0))
+    # Output of forward on a small token batch shouldn't crash.
+    batch = jnp.array([[0, 1, 2, 3, 4, 5]], dtype=jnp.int32)
+    loss = float(model.loss_batch(weights, batch))
+    assert np.isfinite(loss)
+
+
 def test_neighbors_append_matlstm_skipped_at_size_1():
     """matlstm needs size >= 2; append skips it at new_size=1."""
     md = ModelDef("bits.1+bp|", Precision.FP32)

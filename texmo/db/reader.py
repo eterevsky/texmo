@@ -680,7 +680,16 @@ class DbReader(object):
         conditions, params = _make_template_conditions(template)
         conditions.append('median_score IS NOT NULL')
         conditions.append('weights <= :max_weights')
-        conditions.append('cte.time_s <= :max_time')
+        # EXISTS form so SQLite walks conf in `conf_median_score`
+        # ASC order and stops at the first row the caller pulls.
+        # The previous JOIN form had to filter+sort the entire cte
+        # slice for the system first -- 3-10s on the live DB; this
+        # is sub-100ms.
+        conditions.append(
+            'EXISTS (SELECT 1 FROM conf_time_estimate cte '
+            '        WHERE cte.conf_id = conf.id '
+            '          AND cte.system = :system '
+            '          AND cte.time_s <= :max_time)')
         params['max_weights'] = max_weights
         params['max_time'] = max_time
         params['system'] = system
@@ -690,15 +699,15 @@ class DbReader(object):
             SELECT conf.id AS conf_id,
                    spec, precision, lr, decay, cosine, length, batch, steps,
                    median_score,
-                   cte.time_s AS time_estimate,
+                   (SELECT cte.time_s FROM conf_time_estimate cte
+                    WHERE cte.conf_id = conf.id
+                      AND cte.system = :system) AS time_estimate,
                    (SELECT COUNT(*) FROM run
                     WHERE conf_id = conf.id) AS total_runs,
                    (SELECT COUNT(*) FROM run
                     WHERE conf_id = conf.id AND system = :system
                    ) AS system_runs
             FROM conf
-            JOIN conf_time_estimate cte
-                ON cte.conf_id = conf.id AND cte.system = :system
             {where}
             ORDER BY median_score ASC
         """

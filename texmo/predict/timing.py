@@ -39,6 +39,7 @@ import numpy as np
 from scipy.optimize import nnls
 
 from ..configuration import Configuration
+from ..layers.conv import ConvDef
 from ..layers.dense import DenseDef
 from ..layers.gru import GruDef, MgruDef, MinGruDef
 from ..layers.latent import LatentDef, LrnnDef
@@ -91,6 +92,20 @@ def _features_suffix(
 ) -> list[float]:
     osize = isize * suffix_length
     return _features_base(isize, osize, batch, length) + [suffix_length]
+
+
+def _features_conv(
+    isize: int, batch: int, length: int, kernel: int
+) -> list[float]:
+    # Depthwise causal conv: each output channel reads `kernel` past
+    # positions of the same input channel, so cost scales with
+    # isize * kernel per output position (no I*O cross term like dense).
+    # Output channel count == input channel count.
+    return _features_base(isize, isize, batch, length) + [
+        isize * kernel,
+        isize * kernel * length,
+        isize * kernel * length * batch,
+    ]
 
 
 def _features_matlstm(
@@ -187,6 +202,9 @@ def _layer_component(layer, batch: int, length: int) -> Component:
 
     if isinstance(layer, SuffixDef):
         features = _features_suffix(layer.input_size, batch, length, layer.length)
+    elif isinstance(layer, ConvDef):
+        features = _features_conv(
+            layer.input_size, batch, length, layer.kernel)
     elif isinstance(layer, SkipDef):
         features = _features_skip(layer.input_size, batch, length)
     elif isinstance(layer, MatLstmDef):

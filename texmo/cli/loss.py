@@ -319,7 +319,6 @@ class RnnPredictor(Predictor):
             self._params, confs, self._simple_types, self._max_layers,
             cell_activation=self._cell_activation,
             feat_proj=self._feat_proj,
-            has_cosine=True,
             rnn_sub_steps=self._rnn_sub_steps,
             cell_type=self._cell_type,
             pooling=self._pooling,

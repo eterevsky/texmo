@@ -38,7 +38,13 @@ BATCH_SIZE = 1024
 
 @dataclasses.dataclass
 class LossModel:
-    """All state needed to predict with a trained loss_rnn."""
+    """All state needed to predict with a trained loss_rnn.
+
+    No back-compat flags: the loss model is a few-minute refit cycle,
+    so when we change the feature schema (new layer, new global, ...)
+    we just bump the code, delete the saved row from the DB if any,
+    and the next refit produces a fresh model.
+    """
     params: dict
     simple_types: list[str]
     max_layers: int
@@ -49,17 +55,6 @@ class LossModel:
     pooling: str = 'last'
     out_hidden: int = 0
     out_activation: str = 'gelu'
-    # False on pickles trained before the cosine schedule was added —
-    # `_init_global_features` then emits 6 globals to match the old
-    # `W_glob` shape. New fits set this True.
-    has_cosine: bool = False
-    # False on pickles trained before the msr layer landed. Adds one
-    # extra per-layer slot for log2(msr.heads) so the predictor can
-    # distinguish msr.X.Y from msr.X.Z at the same total size.
-    has_msr_heads: bool = False
-    # False on pickles trained before the lmgu layer landed. Adds one
-    # extra per-layer slot for log2(lmgu.reps).
-    has_lmgu_reps: bool = False
 
     def predict(self, confs: list[Configuration]) -> np.ndarray:
         return predict(
@@ -71,9 +66,6 @@ class LossModel:
             pooling=self.pooling,
             out_hidden=self.out_hidden,
             out_activation=self.out_activation,
-            has_cosine=self.has_cosine,
-            has_msr_heads=self.has_msr_heads,
-            has_lmgu_reps=self.has_lmgu_reps,
         )
 
 
@@ -104,11 +96,12 @@ class LossModelHolder:
 
 # A layer is "simple" if it's fully described by its input/output sizes
 # plus its type (which is captured by the bool slot). The rest
-# (suffix, latent, lrnn, msr, lmgu, skip) carry an extra dimension and
-# get dedicated slots; we deliberately don't give them bool slots since
-# their extra-dim slot already signals "this is that type" (non-zero
-# only for that type, except skip.X=1 which we handle with raw X).
-_EXTRA_DIM_TYPES = {'suffix', 'latent', 'lrnn', 'msr', 'lmgu'}
+# (suffix, latent, lrnn, msr, lmgu, conv, skip) carry an extra dimension
+# and get dedicated slots; we deliberately don't give them bool slots
+# since their extra-dim slot already signals "this is that type"
+# (non-zero only for that type, except skip.X=1 which we handle with
+# raw X).
+_EXTRA_DIM_TYPES = {'suffix', 'latent', 'lrnn', 'msr', 'lmgu', 'conv'}
 
 
 def _is_simple_type(t: str) -> bool:
@@ -123,29 +116,21 @@ def _layer_output_size(layer) -> int:
     return layer.size
 
 
-# init_globals: output_size + 5 training knobs + cosine flag. The
-# cosine flag is the only non-log feature (binary). Old pickles
-# trained without the cosine slot still load and predict via
-# `LossModel.has_cosine=False`, which falls back to a 6-element
-# init_globals.
-def _init_global_features(
-    conf: Configuration, has_cosine: bool,
-) -> np.ndarray:
-    base = [
+# init_globals: output_size + 5 log training knobs + cosine flag.
+# The cosine flag is the only non-log feature (binary).
+def _init_global_features(conf: Configuration) -> np.ndarray:
+    return np.array([
         np.log2(conf.model.output.size),
         np.log2(conf.batch),
         np.log2(conf.length),
         np.log2(conf.steps),
         np.log2(conf.lr),
         np.log2(conf.decay),
-    ]
-    if has_cosine:
-        base.append(1.0 if conf.cosine else 0.0)
-    return np.array(base, dtype=np.float32)
+        1.0 if conf.cosine else 0.0,
+    ], dtype=np.float32)
 
 
 N_INIT_GLOBAL = 7
-N_INIT_GLOBAL_LEGACY = 6
 
 
 def discover_simple_types(
@@ -161,37 +146,26 @@ def discover_simple_types(
     return sorted(seen)
 
 
-def _layer_feature_dim(
-    n_simple: int,
-    has_msr_heads: bool = False,
-    has_lmgu_reps: bool = False,
-) -> int:
+def _layer_feature_dim(n_simple: int) -> int:
     # [log(num_weights), log(in), log(out)] + bool per simple type +
-    # [suffix_len, latent_reps, lrnn_reps, skip_add_dist, skip_cat_dist]
-    # + (log(msr_heads) if has_msr_heads else nothing)
-    # + (log(lmgu_reps) if has_lmgu_reps else nothing)
-    extras = (1 if has_msr_heads else 0) + (1 if has_lmgu_reps else 0)
-    return 3 + n_simple + 5 + extras
+    # 8 extra-dim slots:
+    #   [suffix_len, latent_reps, lrnn_reps,
+    #    skip_add_dist, skip_cat_dist,
+    #    msr_heads, lmgu_reps, conv_kernel]
+    return 3 + n_simple + 8
 
 
 def _layer_features(
     layer, simple_type_idx: dict[str, int], n_simple: int,
-    has_msr_heads: bool = False,
-    has_lmgu_reps: bool = False,
 ) -> np.ndarray:
     out_size = _layer_output_size(layer)
-    feat = np.zeros(
-        _layer_feature_dim(n_simple, has_msr_heads, has_lmgu_reps),
-        dtype=np.float32,
-    )
+    feat = np.zeros(_layer_feature_dim(n_simple), dtype=np.float32)
     # log2(max(..., 1)) lets weightless layers (skip, possibly norm)
     # land at 0 rather than -inf.
     feat[0] = np.log2(max(layer.num_weights, 1))
     feat[1] = np.log2(layer.input_size)
     feat[2] = np.log2(out_size)
     t = layer_type_id(layer)
-    # lmgu_offset is positioned after the optional msr_heads slot.
-    lmgu_offset = 3 + n_simple + 5 + (1 if has_msr_heads else 0)
     if _is_simple_type(t):
         if t in simple_type_idx:
             feat[3 + simple_type_idx[t]] = 1.0
@@ -205,10 +179,12 @@ def _layer_features(
         feat[3 + n_simple + 3] = layer.distance
     elif t == 'skip.cat':
         feat[3 + n_simple + 4] = layer.distance
-    elif t == 'msr' and has_msr_heads:
+    elif t == 'msr':
         feat[3 + n_simple + 5] = np.log2(layer.heads)
-    elif t == 'lmgu' and has_lmgu_reps:
-        feat[lmgu_offset] = np.log2(layer.reps)
+    elif t == 'lmgu':
+        feat[3 + n_simple + 6] = np.log2(layer.reps)
+    elif t == 'conv':
+        feat[3 + n_simple + 7] = np.log2(layer.kernel)
     return feat
 
 
@@ -216,23 +192,18 @@ def _build_input_arrays(
     confs: list[Configuration],
     simple_type_idx: dict[str, int],
     max_layers: int,
-    has_cosine: bool,
-    has_msr_heads: bool = False,
-    has_lmgu_reps: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     n = len(confs)
     n_simple = len(simple_type_idx)
-    feat_dim = _layer_feature_dim(n_simple, has_msr_heads, has_lmgu_reps)
-    n_global = N_INIT_GLOBAL if has_cosine else N_INIT_GLOBAL_LEGACY
-    init_globals = np.zeros((n, n_global), dtype=np.float32)
+    feat_dim = _layer_feature_dim(n_simple)
+    init_globals = np.zeros((n, N_INIT_GLOBAL), dtype=np.float32)
     layer_feats = np.zeros((n, max_layers, feat_dim), dtype=np.float32)
     masks = np.zeros((n, max_layers), dtype=np.float32)
     for i, conf in enumerate(confs):
-        init_globals[i] = _init_global_features(conf, has_cosine)
+        init_globals[i] = _init_global_features(conf)
         for j, layer in enumerate(conf.model.layers[:max_layers]):
             layer_feats[i, j] = _layer_features(
-                layer, simple_type_idx, n_simple,
-                has_msr_heads, has_lmgu_reps)
+                layer, simple_type_idx, n_simple)
             masks[i, j] = 1.0
     return init_globals, layer_feats, masks
 
@@ -410,19 +381,15 @@ def fit(
     confs = [c for c, _ in train_data]
     max_layers = max((len(c.model.layers) for c in confs), default=1)
     max_layers = max(max_layers, 1)
-    # Always emit the cosine + msr_heads + lmgu_reps slots when
-    # fitting from current code.
     init_globals_np, layer_feats_np, masks_np = _build_input_arrays(
-        confs, type_idx, max_layers,
-        has_cosine=True, has_msr_heads=True, has_lmgu_reps=True)
+        confs, type_idx, max_layers)
     targets_np = _build_targets(train_data)
     init_globals = jnp.asarray(init_globals_np)
     layer_feats = jnp.asarray(layer_feats_np)
     masks = jnp.asarray(masks_np)
     targets = jnp.asarray(targets_np)
 
-    n_layer_feat = _layer_feature_dim(
-        len(simple_types), has_msr_heads=True, has_lmgu_reps=True)
+    n_layer_feat = _layer_feature_dim(len(simple_types))
     rng = jax.random.PRNGKey(seed)
     rng, init_key = jax.random.split(rng)
     params = _init_params(
@@ -501,9 +468,6 @@ def train_loss_model(
         feat_proj=32,
         out_hidden=32,
         out_activation='gelu',
-        has_cosine=True,
-        has_msr_heads=True,
-        has_lmgu_reps=True,
     )
 
 
@@ -519,15 +483,10 @@ def predict(
     pooling: str = 'last',
     out_hidden: int = 0,
     out_activation: str = 'gelu',
-    has_cosine: bool = False,
-    has_msr_heads: bool = False,
-    has_lmgu_reps: bool = False,
 ) -> np.ndarray:
     type_idx = {t: i for i, t in enumerate(simple_types)}
     ig_np, lf_np, m_np = _build_input_arrays(
-        confs, type_idx, max_layers,
-        has_cosine=has_cosine, has_msr_heads=has_msr_heads,
-        has_lmgu_reps=has_lmgu_reps)
+        confs, type_idx, max_layers)
     preds = _forward(
         params, jnp.asarray(ig_np), jnp.asarray(lf_np), jnp.asarray(m_np),
         cell_activation, feat_proj, rnn_sub_steps, cell_type, pooling,

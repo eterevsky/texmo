@@ -178,6 +178,32 @@ def _maybe_add_pick_me_column(db) -> None:
         db.commit()
 
 
+def _maybe_create_perf_indexes(db) -> None:
+    """Lazy CREATE INDEX for the two cte indexes added to speed up
+    `confs_under_time`, the writer's TOP_CONF_AT query, and
+    `top_confs_global`. Idempotent: ANALYZE only runs the first time
+    an index is actually created so subsequent connects are cheap.
+    """
+    existing = {row['name'] for row in db.execute(
+        "SELECT name FROM sqlite_master WHERE type='index'")}
+    created = False
+    if 'conf_time_estimate_system_time' not in existing:
+        db.execute(
+            'CREATE INDEX conf_time_estimate_system_time '
+            'ON conf_time_estimate(system, time_s)')
+        created = True
+    if 'conf_time_estimate_conf_time' not in existing:
+        db.execute(
+            'CREATE INDEX conf_time_estimate_conf_time '
+            'ON conf_time_estimate(conf_id, time_s)')
+        created = True
+    if created:
+        db.commit()
+        # Stats refresh so the planner picks the new indexes.
+        db.execute('ANALYZE')
+        db.commit()
+
+
 def open_connection(
     path: Optional[str], readonly: bool,
 ) -> sqlite3.Connection:
@@ -228,6 +254,7 @@ def open_connection(
         # Existing DB -- run any additive column migrations.
         _maybe_add_num_layers_column(db)
         _maybe_add_pick_me_column(db)
+        _maybe_create_perf_indexes(db)
 
     # Enable WAL for file-backed DBs so the timing thread and search
     # thread can write concurrently without blocking readers.

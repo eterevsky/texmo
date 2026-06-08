@@ -62,14 +62,24 @@ VALUES (:conf_id, :system, :train_time, :timestamp, :loss, :step_loss,
 
 # Best (lowest-median_score) conf under (system, max_weights, max_time).
 # Used by add_run to tell if a new run changed the winner at that point.
+#
+# EXISTS form: walk conf by `conf_median_score` index in ASC order
+# and check the cte UNIQUE(conf_id, system) for each. The previous
+# JOIN form forced SQLite to either SCAN the 3M-row cte (when no
+# cte system index existed) or filter-then-sort the cte slice for
+# this system. EXISTS lets the planner stop at the first qualifying
+# conf -- microseconds vs 165-650 ms on the live DB.
 TOP_CONF_AT = """
 SELECT conf.id AS conf_id
 FROM conf
-JOIN conf_time_estimate cte
-    ON cte.conf_id = conf.id AND cte.system = :system
 WHERE conf.median_score IS NOT NULL
   AND conf.weights <= :max_weights
-  AND cte.time_s <= :max_time
+  AND EXISTS (
+      SELECT 1 FROM conf_time_estimate cte
+      WHERE cte.conf_id = conf.id
+        AND cte.system = :system
+        AND cte.time_s <= :max_time
+  )
 ORDER BY conf.median_score ASC
 LIMIT 1
 """

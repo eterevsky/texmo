@@ -124,6 +124,14 @@ CREATE TABLE conf_time_estimate (
 );
 
 CREATE INDEX conf_time_estimate_conf_id ON conf_time_estimate(conf_id);
+-- Lets `confs_under_time` and the writer's TOP_CONF_AT query filter
+-- cte by (system, time_s<=t) without scanning the 3M-row table.
+CREATE INDEX conf_time_estimate_system_time
+    ON conf_time_estimate(system, time_s);
+-- Lets `top_confs_global` look up min(time_s) and the winning system
+-- per conf without a temp B-tree sort.
+CREATE INDEX conf_time_estimate_conf_time
+    ON conf_time_estimate(conf_id, time_s);
 
 -- Serialized trained models (pickled). `name` is a short key like
 -- 'timing' or 'loss'. Saved by ModelTrainingThread after each refit

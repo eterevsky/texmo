@@ -1,9 +1,14 @@
 """Model2: layer-DAG-shaped reimplementation of ModelDef.
 
 The layer chain is a `LayerSeqDef` rather than a flat
-`list[LayerDef]`. SplitDef will eventually plug into this by
-holding two LayerSeqDefs as its branches; Model2 today only
-handles plain sequences without splits or skips.
+`list[LayerDef]`. SplitDef plugs into this by holding two
+LayerSeqDefs as its branches.
+
+Construction goes through `spec_parser.parse_model2(spec,
+precision)`: that's where every string-to-tree decision lives,
+including the `|`-split, the input-layer dispatch, and the
+layer-list grammar. `Model2Def.__init__` only takes already-built
+pieces and stores them.
 
 JAX only. No PyTorch counterpart.
 """
@@ -12,65 +17,46 @@ from .layers.dense import DenseDef
 from .layers.input_bits import InputBitsDef
 from .layers.input_bytes import InputBytesDef
 from .layers.seq import LayerSeqDef
-from .layers.skip import SkipDef
-from .model import _build_layer_def
 from .model2_jax import Model2Jax
 from .precision import Precision
+
+# Type alias for the input layers parse_model2 can produce -- kept
+# loose because the input-layer hierarchy doesn't have a single
+# base class today.
+InputLayer = InputBytesDef | InputBitsDef
 
 
 class Model2Def:
     """Model spec descriptor built on LayerSeqDef.
 
+    Stores already-parsed pieces (`input`, `layer_seq`, `output`)
+    plus the original spec string for round-tripping. Use
+    `spec_parser.parse_model2(spec, precision)` to construct from a
+    string.
+
     Mirrors ModelDef's public surface (spec / num_weights /
-    num_mults / is_valid / build_jax / equality / hashing). Skip
-    syntax is rejected -- the migration path is parser-level
-    translation to `split.op(...)` form, so Model2's runtime stays
-    skip-free.
+    num_mults / is_valid / build_jax / equality / hashing).
     """
 
-    def __init__(self, spec: str, precision: Precision):
+    def __init__(
+        self,
+        *,
+        spec: str,
+        precision: Precision,
+        input: InputLayer,
+        layer_seq: LayerSeqDef,
+        output: DenseDef,
+    ):
         self.spec = spec
         self.precision = precision
-
-        spec_parts = spec.split("|")
-        if len(spec_parts) == 1:
-            input_spec = ""
-            layers_spec = spec_parts[0]
-        elif len(spec_parts) == 2:
-            input_spec, layers_spec = spec_parts
-        else:
-            raise ValueError("Model spec can't contain more than one |")
-
-        if input_spec == '' or input_spec == 'bytes':
-            self.input = InputBytesDef(precision=precision)
-        elif input_spec.startswith('bits.'):
-            self.input = InputBitsDef.from_spec(
-                input_spec, precision=precision)
-        else:
-            raise ValueError(f"Unknown input type: '{input_spec}'")
-
-        layers = []
-        shape = self.input.size
-        if layers_spec:
-            for layer_spec in layers_spec.split("-"):
-                layer = _build_layer_def(layer_spec, shape)
-                if isinstance(layer, SkipDef):
-                    raise NotImplementedError(
-                        "Model2 doesn't handle `skip` yet; it'll be "
-                        "translated to `split` by the parser in the "
-                        "next iteration.")
-                layers.append(layer)
-                shape = layer.size
-
-        self.layer_seq = LayerSeqDef(layers, input_size=self.input.size)
-
-        self.ntokens = self.input.ntokens
+        self.input = input
+        self.layer_seq = layer_seq
+        self.output = output
+        self.ntokens = input.ntokens
         # 1 for the autoregressive shift + extras consumed by the
         # layer chain. layer_seq.length is already 1 + sum(extras),
         # so it doubles as the model's total padding requirement.
-        self.total_padding = self.layer_seq.length
-        output_size = self.ntokens if self.ntokens > 2 else 1
-        self.output = DenseDef(output_size, input_size=shape)
+        self.total_padding = layer_seq.length
 
     def __str__(self) -> str:
         return self.spec

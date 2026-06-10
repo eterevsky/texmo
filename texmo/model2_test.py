@@ -1,9 +1,9 @@
 """Model2 tests: parse + forward/step parity with the existing Model.
 
-Plain-sequence specs only (no skip, no split yet). The main
-correctness criterion is that Model2 produces the same logits as
-ModelDef on the same spec when given the same weights -- the
-recursive wrapper around the layer list shouldn't change anything.
+Plain-sequence specs and split specs. The main correctness
+criterion is that Model2 produces the same logits as ModelDef on
+the same plain-sequence spec when given the same weights, and that
+split specs round-trip through parse + forward/step.
 """
 import math
 
@@ -13,14 +13,14 @@ import numpy as np
 import pytest
 
 from texmo.model import ModelDef
-from texmo.model2 import Model2Def
 from texmo.precision import Precision
+from texmo.spec_parser import parse_model2
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
 
 
 def _build2(spec, precision=Precision.FP32, seed=42):
-    md = Model2Def(spec, precision)
+    md = parse_model2(spec, precision)
     model = md.build_jax()
     weights = model.init_weights(jax.random.PRNGKey(seed))
     return md, model, weights
@@ -30,7 +30,7 @@ def _build2(spec, precision=Precision.FP32, seed=42):
 
 
 def test_def_properties():
-    md = Model2Def("bytes|dense.32.gelu-dense.16.tanh", Precision.FP32)
+    md = parse_model2("bytes|dense.32.gelu-dense.16.tanh", Precision.FP32)
     assert md.input.size == 256
     assert md.layer_seq.input_size == 256
     assert md.layer_seq.size == 16
@@ -43,20 +43,20 @@ def test_def_num_weights_matches_model():
     """Model2's weight count should match ModelDef's on the same spec."""
     spec = "bits.1+bp|dense.8.gelu-dense.4.tanh"
     md = ModelDef(spec, Precision.FP32)
-    md2 = Model2Def(spec, Precision.FP32)
+    md2 = parse_model2(spec, Precision.FP32)
     assert md.num_weights == md2.num_weights
 
 
 def test_def_num_mults_matches_model():
     spec = "bits.1+bp|gru.8-dense.4.tanh"
     md = ModelDef(spec, Precision.FP32)
-    md2 = Model2Def(spec, Precision.FP32)
+    md2 = parse_model2(spec, Precision.FP32)
     assert md.num_mults == md2.num_mults
 
 
 def test_def_length_aware_total_padding():
     """suffix.4 contributes 3 to total_padding (length-1)."""
-    md = Model2Def(
+    md = parse_model2(
         "bits.1+bp|dense.4.gelu-suffix.4-dense.4.tanh", Precision.FP32)
     assert md.layer_seq.length == 4  # 1 + (1-1) + (4-1) + (1-1)
     assert md.total_padding == 4
@@ -64,7 +64,7 @@ def test_def_length_aware_total_padding():
 
 def test_def_no_layers():
     """Empty layer chain still produces a valid model spec."""
-    md = Model2Def("bits.1+bp|", Precision.FP32)
+    md = parse_model2("bits.1+bp|", Precision.FP32)
     assert md.layer_seq.layers == []
     assert md.layer_seq.size == md.input.size
     assert md.layer_seq.length == 1
@@ -75,7 +75,7 @@ def test_def_rejects_skip_for_now():
     """Model2 won't handle skip syntax until the parser learns to
     translate it into split.op(...) form."""
     with pytest.raises(NotImplementedError):
-        Model2Def(
+        parse_model2(
             "bytes|skip.1.add-dense.32.gelu-dense.32.gelu",
             Precision.FP32)
 
@@ -92,6 +92,79 @@ def test_seq_in_seq_invalid():
         input_size=8)
     outer = LayerSeqDef([inner], input_size=8)
     assert not outer.is_valid()
+
+
+# -- end-to-end with split syntax --------------------------------------
+
+
+def test_split_spec_parses_and_runs_forward():
+    """Build a Model2 from a split-containing spec, run forward,
+    verify shape and that the loss is finite."""
+    md = parse_model2(
+        "bits.1+bp|split.mul(dense.8.gelu, pass)", Precision.FP32)
+    model = md.build_jax()
+    weights = model.init_weights(jax.random.PRNGKey(0))
+    batch = jax.random.randint(
+        jax.random.PRNGKey(1), (2, 16), 0, 2).astype(jnp.int32)
+    logits = model.forward(weights, batch)
+    assert logits.shape == (2, 16, 2)
+    loss = float(model.loss_batch(weights, batch))
+    assert loss > 0
+
+
+def test_split_spec_step_matches_forward():
+    """Per-token step path agrees with the full-sequence forward
+    for a split-containing model."""
+    md = parse_model2(
+        "bits.1+bp|split.mul(dense.4.gelu, pass)", Precision.FP32)
+    model = md.build_jax()
+    weights = model.init_weights(jax.random.PRNGKey(0))
+    tokens = [0, 1, 1, 0, 1, 0]
+    batch = jnp.array([tokens], dtype=jnp.int32)
+    fwd = model.forward(weights, batch)
+
+    states, logits0 = model.initial_step(weights)
+    step_logits = [logits0]
+    for t in tokens[:-1]:
+        states, logits_t = model.step(weights, states, t)
+        step_logits.append(logits_t)
+    for i in range(len(tokens)):
+        np.testing.assert_allclose(
+            fwd[0, i], step_logits[i], atol=1e-5)
+
+
+def test_split_spec_loss_decreases():
+    """Training a split-containing model reduces the loss --
+    confirms that gradients reach both branches' weights through
+    the nested pytree."""
+    import optax
+    md = parse_model2(
+        "bits.1+bp|split.mul(dense.4.gelu, dense.4.gelu)",
+        Precision.FP32)
+    model = md.build_jax()
+    weights = model.init_weights(jax.random.PRNGKey(0))
+    batch = jax.random.randint(
+        jax.random.PRNGKey(1), (8, 32), 0, 2).astype(jnp.int32)
+    loss_fn = jax.jit(model.loss_batch)
+    grad_fn = jax.jit(jax.grad(model.loss_batch))
+    initial = float(loss_fn(weights, batch))
+    optimizer = optax.adam(0.01)
+    opt_state = optimizer.init(weights)
+    for _ in range(30):
+        grads = grad_fn(weights, batch)
+        updates, opt_state = optimizer.update(grads, opt_state, weights)
+        weights = optax.apply_updates(weights, updates)
+    final = float(loss_fn(weights, batch))
+    assert final < initial
+
+
+def test_split_skip_inside_branch_is_rejected():
+    """Skip syntax is rejected anywhere in the tree, including
+    inside a split branch, until parser-level translation lands."""
+    with pytest.raises(NotImplementedError):
+        parse_model2(
+            "bits.1+bp|split.mul(skip.1.add-dense.4.gelu, pass)",
+            Precision.FP32)
 
 
 # --- Forward / step shape sanity --------------------------------------

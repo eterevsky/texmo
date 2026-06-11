@@ -103,6 +103,56 @@ def test_skip_translated_weight_count_matches_modeldef():
     assert m1.total_padding == m2.total_padding
 
 
+# -- num_layers parity -------------------------------------------------
+
+
+@pytest.mark.parametrize("spec", [
+    "bytes|dense.16.gelu",
+    "bytes|dense.16.gelu-dense.16.gelu",
+    "bytes|dense.16.gelu-gru.16-dense.16.gelu",
+    "bytes|dense.16.gelu-skip.1.add-dense.16.gelu-dense.16.gelu",
+    "bytes|dense.16.gelu-skip.3.add"
+    "-dense.16.gelu-dense.16.gelu-dense.16.gelu-dense.16.gelu",
+    "bytes|skip.1.cat-dense.16.gelu-dense.16.gelu",
+])
+def test_num_layers_matches_modeldef(spec):
+    """For any non-overlapping skip spec, the recursive count on
+    Model2 matches the flat count on ModelDef -- the property is
+    construction-invariant under skip-to-split translation."""
+    m1 = ModelDef(spec, Precision.FP32)
+    m2 = parse_model2(spec, Precision.FP32)
+    assert m1.num_layers == m2.num_layers
+
+
+def test_num_layers_split_authored():
+    """Hand-authored split spec, no ModelDef analog. Recursive count
+    is `1 (outer dense) + 1 (split itself) + 1 (in-branch dense) +
+    0 (pass) + 1 (outer dense) = 4`."""
+    md = parse_model2(
+        "bytes|dense.16.gelu-split.mul(dense.16.gelu, pass)"
+        "-dense.16.gelu",
+        Precision.FP32)
+    assert md.num_layers == 4
+
+
+def test_num_layers_nested_splits():
+    """`split.mul(split.add(dense, pass), pass)` -- the outer split
+    counts 1, its main branch contains an inner split which counts
+    1 + (1 from dense) + 0 = 2; outer branch_b is pass = 0. Total
+    inside outer = 2. Plus outer's own +1 = 3."""
+    md = parse_model2(
+        "bytes|split.mul(split.add(dense.16.gelu, pass), pass)",
+        Precision.FP32)
+    assert md.num_layers == 3
+
+
+def test_num_layers_empty():
+    md = parse_model2("bits.1+bp|", Precision.FP32)
+    assert md.num_layers == 0
+    m1 = ModelDef("bits.1+bp|", Precision.FP32)
+    assert m1.num_layers == 0
+
+
 def test_skip_translated_spec_runs_forward():
     """Sanity: a translated skip spec actually trains."""
     md = parse_model2(

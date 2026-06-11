@@ -233,6 +233,18 @@ class SplitDef(LayerDef):
         merge_cost = self.size * max(0, len(self.branches) - 1)
         return sum(b.num_mults for b in self.branches) + merge_cost
 
+    @property
+    def num_layers(self) -> int:
+        # Counts the Split itself (1 -- it's the structural analog of
+        # the old SkipDef pseudo-layer, which also counted as 1) plus
+        # the recursive count of every branch. This makes a
+        # skip-translated spec come out to the same num_layers as the
+        # legacy ModelDef representation: e.g. `dense-skip.1.add-
+        # dense-dense` (4 in ModelDef) translates to `dense-
+        # split.add(dense, pass)-dense`, where the split contributes
+        # 1 + (1 from main branch) + (0 from pass) = 2; total 4.
+        return 1 + sum(b.num_layers for b in self.branches)
+
     def is_valid(self) -> bool:
         # 2-way constraint lives here, not in __init__, so multi-way
         # is a one-character relaxation when we're ready. Each

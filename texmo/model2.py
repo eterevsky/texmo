@@ -87,6 +87,15 @@ class Model2Def:
             + self.output.num_mults
         )
 
+    @property
+    def num_layers(self) -> int:
+        """Hidden-layer count. Recursive: a Split counts as itself
+        plus the layers inside its branches. For any skip spec that
+        the parser translated to split form, the count matches the
+        legacy ModelDef.num_layers (which counted the SkipDef
+        pseudo-layer as 1 and each in-skip layer as 1)."""
+        return self.layer_seq.num_layers
+
     def is_valid(self) -> bool:
         return (
             self.input.is_valid()

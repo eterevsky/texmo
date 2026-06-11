@@ -82,6 +82,15 @@ class LayerDef(object):
         (latent, lrnn) override this."""
         return self.num_weights
 
+    @property
+    def num_layers(self) -> int:
+        """Count of layers contributed by this LayerDef. Leaf layers
+        report 1; structural layers (LayerSeqDef holds N children;
+        SplitDef holds itself plus its branches) override to recurse
+        through their contents so the total matches `len(layers)` on
+        the equivalent flat-list ModelDef representation."""
+        return 1
+
     def is_valid(self) -> bool:
         raise NotImplementedError
 

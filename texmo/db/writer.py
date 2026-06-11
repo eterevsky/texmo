@@ -152,7 +152,7 @@ class DbWriter(object):
         if row is not None:
             return row[0]
         conf_dict['weights'] = conf.num_weights
-        conf_dict['num_layers'] = len(conf.model.layers)
+        conf_dict['num_layers'] = conf.model.num_layers
         cur.execute(INSERT_CONF, conf_dict)
         return cur.lastrowid
 
@@ -185,7 +185,7 @@ class DbWriter(object):
                 cur.execute('COMMIT')
                 return row[0], False
             conf_dict['weights'] = conf.model.num_weights
-            conf_dict['num_layers'] = len(conf.model.layers)
+            conf_dict['num_layers'] = conf.model.num_layers
             cur.execute(
                 'INSERT INTO conf '
                 '(spec, weights, lr, length, batch, steps, precision,'
@@ -426,7 +426,7 @@ class DbWriter(object):
                 try:
                     model = build_model_def(
                         row['spec'], precision=Precision.FP32)
-                    updates.append((len(model.layers), row['id']))
+                    updates.append((model.num_layers, row['id']))
                 except Exception as exc:
                     logging.warning(
                         f"skipping conf id={row['id']} "

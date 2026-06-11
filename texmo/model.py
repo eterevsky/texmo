@@ -423,6 +423,14 @@ class ModelDef(object):
             + self.output.num_mults
         )
 
+    @property
+    def num_layers(self) -> int:
+        """Hidden-layer count. Flat list including any skip pseudo-
+        layers. Matches Model2Def.num_layers's recursive walk on any
+        equivalent (skip-translated) spec by construction -- see
+        SplitDef.num_layers for the matching math."""
+        return len(self.layers)
+
     def is_valid(self) -> bool:
         if not self.input.is_valid():
             return False

@@ -400,7 +400,7 @@ class Template(object):
     def match_model(self, model: ModelDef) -> bool:
         if model.num_weights > self.max_weights.max:
             return False
-        if not self.num_layers.match(len(model.layers)):
+        if not self.num_layers.match(model.num_layers):
             return False
         if self.spec is not None:
             return self.spec == str(model)

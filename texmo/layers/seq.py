@@ -102,6 +102,13 @@ class LayerSeqDef(LayerDef):
     def num_mults(self) -> int:
         return sum(l.num_mults for l in self.layers)
 
+    @property
+    def num_layers(self) -> int:
+        # Sum of children's num_layers -- the sequence itself doesn't
+        # add to the count, only its contents do. By recursion, this
+        # walks through Split branches automatically.
+        return sum(l.num_layers for l in self.layers)
+
     def is_valid(self) -> bool:
         # A LayerSeqDef directly inside another LayerSeqDef would
         # just be a longer flat sequence -- reject so the structure

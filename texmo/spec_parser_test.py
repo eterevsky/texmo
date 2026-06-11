@@ -214,3 +214,118 @@ def test_str_roundtrip_nested_split():
     spec = "split.mul(split.add(dense.8.gelu, pass), pass)"
     layers = parse_layer_list(spec, input_size=4)
     assert str(layers[0]) == spec
+
+
+# -- skip-to-split translation ----------------------------------------
+
+
+def test_translate_single_skip():
+    """skip.1.add over one in-skip layer becomes
+    split.add(that_layer, pass)."""
+    from texmo.layers.skip import SkipDef
+    from texmo.layers.split import SplitDef
+    layers = parse_layer_list(
+        "dense.4.gelu-skip.1.add-dense.4.gelu-dense.4.gelu",
+        input_size=4)
+    # 4 layers in, 3 out (the skip pseudo-layer and its 1 in-skip
+    # layer fuse into one split).
+    assert len(layers) == 3
+    assert not any(isinstance(l, SkipDef) for l in layers)
+    # Middle layer is the translated split.
+    split = layers[1]
+    assert isinstance(split, SplitDef)
+    assert split.op == 'add'
+    assert len(split.branches[0].layers) == 1
+    assert split.branches[1].layers == []
+
+
+def test_translate_skip_distance_3():
+    """skip.3.add bundles three in-skip layers into the main branch."""
+    from texmo.layers.split import SplitDef
+    layers = parse_layer_list(
+        "dense.4.gelu-skip.3.add"
+        "-dense.4.gelu-dense.4.gelu-dense.4.gelu"
+        "-dense.4.gelu",
+        input_size=4)
+    assert len(layers) == 3
+    split = layers[1]
+    assert isinstance(split, SplitDef)
+    assert len(split.branches[0].layers) == 3
+
+
+def test_translate_multiple_non_overlapping_skips():
+    """Two skips in a row, separated by a non-skip layer, each
+    translate independently."""
+    from texmo.layers.split import SplitDef
+    layers = parse_layer_list(
+        "skip.1.add-dense.4.gelu"
+        "-dense.4.gelu"
+        "-skip.1.cat-dense.4.gelu-dense.4.gelu",
+        input_size=4)
+    # Input: 6 layers (2 skips + 4 normal). After translation:
+    # split + 1 normal + split + 1 normal = 4.
+    assert len(layers) == 4
+    assert isinstance(layers[0], SplitDef) and layers[0].op == 'add'
+    assert isinstance(layers[2], SplitDef) and layers[2].op == 'cat'
+
+
+def test_translate_skip_at_position_0():
+    """A skip as the very first stack layer translates fine -- the
+    source comes from the input encoding's output."""
+    from texmo.layers.split import SplitDef
+    layers = parse_layer_list(
+        "skip.1.add-dense.4.gelu-dense.4.gelu",
+        input_size=4)
+    assert len(layers) == 2
+    assert isinstance(layers[0], SplitDef)
+
+
+def test_translate_skip_at_end_merges_into_output():
+    """skip.D where i+D+1 == len(layers) -- the split sits at the
+    end of the chain and the model's output dense receives its
+    output. Just need to confirm it parses."""
+    from texmo.layers.split import SplitDef
+    layers = parse_layer_list(
+        "dense.4.gelu-skip.2.add-dense.4.gelu-dense.4.gelu",
+        input_size=4)
+    assert len(layers) == 2
+    assert isinstance(layers[1], SplitDef)
+    assert len(layers[1].branches[0].layers) == 2
+
+
+def test_translate_overlapping_skips_rejected():
+    """Overlapping spans can't be a tree. The parser raises
+    ValueError so the caller can decide what to do."""
+    with pytest.raises(ValueError, match="overlapping"):
+        parse_layer_list(
+            "skip.3.add-dense.4.gelu-skip.3.add"
+            "-dense.4.gelu-dense.4.gelu-dense.4.gelu-dense.4.gelu",
+            input_size=4)
+
+
+def test_translate_overshoot_skip_rejected():
+    """A skip whose span runs off the end raises -- the original
+    model_def's _skip_overshoots set this to is_valid=False; we
+    promote it to a parse error since the translation can't
+    proceed."""
+    with pytest.raises(ValueError, match="overshoots"):
+        parse_layer_list(
+            "dense.4.gelu-skip.5.add-dense.4.gelu", input_size=4)
+
+
+def test_translate_skip_inside_split_branch():
+    """Skip inside a split branch is translated by the recursion --
+    `_parse_split` calls `parse_layer_list` on each branch, which
+    applies the same `_translate_skips` pass."""
+    from texmo.layers.skip import SkipDef
+    from texmo.layers.split import SplitDef
+    layers = parse_layer_list(
+        "split.mul("
+        "dense.4.gelu-skip.1.add-dense.4.gelu-dense.4.gelu, "
+        "pass)",
+        input_size=4)
+    outer = layers[0]
+    inner_layers = outer.branches[0].layers
+    assert not any(isinstance(l, SkipDef) for l in inner_layers)
+    assert isinstance(inner_layers[1], SplitDef)
+    assert inner_layers[1].op == 'add'

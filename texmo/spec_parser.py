@@ -36,10 +36,10 @@ def parse_model2(spec: str, precision: Precision):
     """Top-level spec parser. Returns a `Model2Def`.
 
     Splits the spec on `|` into the input encoding and the layer
-    chain, builds each part, and stitches them together. Skip
-    syntax is rejected anywhere in the tree (including inside
-    Split branches) until parser-level translation to `split`
-    form lands.
+    chain, builds each part, and stitches them together. Legacy
+    `skip.D.op` syntax in the layer chain is translated to the
+    equivalent `split.op(...)` form at parse time, recursively at
+    every nesting level. The runtime sees a skip-free tree.
     """
     # Imported here to break the circular module dependency:
     # model2.py imports the parser indirectly via downstream code
@@ -50,10 +50,6 @@ def parse_model2(spec: str, precision: Precision):
     input_spec, layers_spec = _split_input_and_layers(spec)
     input_layer = _parse_input(input_spec, precision)
     layers = parse_layer_list(layers_spec, input_layer.size)
-    if _has_skip(layers):
-        raise NotImplementedError(
-            "Model2 doesn't handle `skip` yet; the parser will "
-            "translate it to `split` in a follow-up.")
 
     layer_seq = LayerSeqDef(layers, input_size=input_layer.size)
     last_shape = layers[-1].size if layers else input_layer.size
@@ -85,15 +81,71 @@ def _parse_input(input_spec: str, precision: Precision):
     raise ValueError(f"Unknown input type: '{input_spec}'")
 
 
-def _has_skip(layers: list[LayerDef]) -> bool:
-    for layer in layers:
-        if isinstance(layer, SkipDef):
-            return True
-        if isinstance(layer, SplitDef):
-            for branch in layer.branches:
-                if _has_skip(branch.layers):
-                    return True
-    return False
+def _translate_skips(
+    layers: list[LayerDef],
+) -> list[LayerDef]:
+    """Rewrite SkipDef pseudo-layers as SplitDefs.
+
+    Each `skip.D.op` at position `i` spans the next D layers
+    (positions i+1 ... i+D) and merges the source (input at
+    position i) with the output of layer i+D via `op`. The
+    equivalent split is:
+
+        layers[i] = split.op(layers[i+1]-...-layers[i+D], pass)
+
+    and the consumed positions i+1 ... i+D are dropped from the
+    rewritten list. The merge target (layer i+D+1) consumes the
+    split's output directly -- its input_size already accounts for
+    the merged shape because the original parser set it that way.
+
+    Two failure modes:
+      - Overlapping skip spans (can't be a tree). ValueError.
+      - Span overshoots the end of the layer list. ValueError.
+    """
+    if not any(isinstance(l, SkipDef) for l in layers):
+        return layers
+
+    skips: list[tuple[int, int, str]] = [
+        (i, layer.distance, layer.op)
+        for i, layer in enumerate(layers)
+        if isinstance(layer, SkipDef)
+    ]
+    # Overlap check: a skip at i with distance D claims positions
+    # [i, i+D+1). Sort by start; adjacent claims may touch but not
+    # overlap (e.g. one ends exactly where the next begins).
+    spans = sorted((i, i + d + 1) for i, d, _ in skips)
+    for (lo1, hi1), (lo2, hi2) in zip(spans, spans[1:]):
+        if hi1 > lo2:
+            raise ValueError(
+                f"overlapping skip spans can't be expressed as a "
+                f"tree: [{lo1}, {hi1}) overlaps [{lo2}, {hi2})")
+    # Overshoot check.
+    n = len(layers)
+    for i, d, _ in skips:
+        if i + d + 1 > n:
+            raise ValueError(
+                f"skip at position {i} (distance {d}) overshoots "
+                f"the layer list of length {n}")
+
+    skip_at = {i: (d, op) for i, d, op in skips}
+    out: list[LayerDef] = []
+    pos = 0
+    while pos < n:
+        if pos in skip_at:
+            d, op = skip_at[pos]
+            source_size = layers[pos].input_size
+            main_seq = LayerSeqDef(
+                list(layers[pos + 1: pos + d + 1]),
+                input_size=source_size,
+            )
+            side_seq = LayerSeqDef([], input_size=source_size)
+            out.append(SplitDef(
+                op, [main_seq, side_seq], input_size=source_size))
+            pos += d + 1
+        else:
+            out.append(layers[pos])
+            pos += 1
+    return out
 
 
 def parse_layer_list(
@@ -104,7 +156,11 @@ def parse_layer_list(
     `layers_spec` is the string AFTER the `|` (or the whole spec if
     there's no input layer). `input_size` is the channel dim coming
     into the first layer. Returns the parsed `LayerDef`s; channel
-    sizes are threaded through automatically.
+    sizes are threaded through automatically. Any `skip.D.op`
+    pseudo-layers in the parsed list are rewritten as the
+    equivalent `split.op(...)` before return, so callers see a
+    skip-free tree. Recurses naturally into split branches because
+    `_parse_split` calls back into this function for each branch.
     """
     if not layers_spec.strip():
         return []
@@ -118,7 +174,7 @@ def parse_layer_list(
         layer = _parse_layer(piece, shape)
         layers.append(layer)
         shape = layer.size
-    return layers
+    return _translate_skips(layers)
 
 
 def _parse_layer(spec: str, input_size: int) -> LayerDef:

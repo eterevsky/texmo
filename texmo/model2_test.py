@@ -71,13 +71,51 @@ def test_def_no_layers():
     assert md.total_padding == 1
 
 
-def test_def_rejects_skip_for_now():
-    """Model2 won't handle skip syntax until the parser learns to
-    translate it into split.op(...) form."""
-    with pytest.raises(NotImplementedError):
-        parse_model2(
-            "bytes|skip.1.add-dense.32.gelu-dense.32.gelu",
-            Precision.FP32)
+def test_skip_translated_to_split_at_top_level():
+    """Legacy skip syntax now parses -- it's translated to the
+    equivalent `split.op(...)` form. The runtime sees a skip-free
+    tree."""
+    from texmo.layers.skip import SkipDef
+    from texmo.layers.split import SplitDef
+    md = parse_model2(
+        "bytes|dense.16.gelu-skip.1.add-dense.16.gelu-dense.16.gelu",
+        Precision.FP32)
+    layers = md.layer_seq.layers
+    # No SkipDef should survive the translation.
+    assert not any(isinstance(l, SkipDef) for l in layers)
+    # The translated middle layer is a SplitDef with the in-skip
+    # layer in branch 0 and a pass branch in branch 1.
+    assert isinstance(layers[1], SplitDef)
+    assert layers[1].op == 'add'
+    assert len(layers[1].branches[0].layers) == 1  # the in-skip dense
+    assert layers[1].branches[1].layers == []      # pass
+
+
+def test_skip_translated_weight_count_matches_modeldef():
+    """ModelDef and translated Model2 should agree on num_weights
+    for a skip spec -- the skip pseudo-layer has 0 weights in both
+    forms (the translated SplitDef's branches hold the same dense
+    layers as the original skip's in-skip layers)."""
+    spec = "bytes|dense.16.gelu-skip.1.add-dense.16.gelu-dense.16.gelu"
+    m1 = ModelDef(spec, Precision.FP32)
+    m2 = parse_model2(spec, Precision.FP32)
+    assert m1.num_weights == m2.num_weights
+    assert m1.total_padding == m2.total_padding
+
+
+def test_skip_translated_spec_runs_forward():
+    """Sanity: a translated skip spec actually trains."""
+    md = parse_model2(
+        "bits.1+bp|dense.4.gelu-skip.1.add-dense.4.gelu-dense.4.gelu",
+        Precision.FP32)
+    model = md.build_jax()
+    weights = model.init_weights(jax.random.PRNGKey(0))
+    batch = jax.random.randint(
+        jax.random.PRNGKey(1), (2, 8), 0, 2).astype(jnp.int32)
+    logits = model.forward(weights, batch)
+    assert logits.shape == (2, 8, 2)
+    loss = float(model.loss_batch(weights, batch))
+    assert loss > 0
 
 
 def test_seq_in_seq_invalid():
@@ -158,13 +196,25 @@ def test_split_spec_loss_decreases():
     assert final < initial
 
 
-def test_split_skip_inside_branch_is_rejected():
-    """Skip syntax is rejected anywhere in the tree, including
-    inside a split branch, until parser-level translation lands."""
-    with pytest.raises(NotImplementedError):
-        parse_model2(
-            "bits.1+bp|split.mul(skip.1.add-dense.4.gelu, pass)",
-            Precision.FP32)
+def test_skip_inside_split_branch_translated():
+    """Skip inside a split branch translates the same way --
+    recursion through `_parse_split` -> `parse_layer_list` ->
+    `_translate_skips` covers it without any branch-aware logic."""
+    from texmo.layers.skip import SkipDef
+    from texmo.layers.split import SplitDef
+    md = parse_model2(
+        "bits.1+bp|split.mul("
+        "dense.4.gelu-skip.1.add-dense.4.gelu-dense.4.gelu, "
+        "pass)",
+        Precision.FP32)
+    outer = md.layer_seq.layers[0]
+    assert isinstance(outer, SplitDef)
+    # The first branch must be skip-free after translation.
+    inner_layers = outer.branches[0].layers
+    assert not any(isinstance(l, SkipDef) for l in inner_layers)
+    # It should now contain dense + nested split + dense.
+    assert isinstance(inner_layers[1], SplitDef)
+    assert inner_layers[1].op == 'add'
 
 
 # --- Forward / step shape sanity --------------------------------------

@@ -81,6 +81,38 @@ def test_train_various_specs(backend, spec):
 
 
 @pytest.mark.parametrize('spec', [
+    # Plain specs the parser handles unchanged.
+    'bits.1+bp|dense.4.gelu',
+    'bits.1+bp|gru.4-dense.2.tanh',
+    # Skip specs that get translated to split.op(...) form at parse
+    # time -- the manager should see no SkipDef.
+    'bits.1+bp|skip.1.add-dense.4.gelu-dense.4.gelu',
+    'bits.1+bp|skip.2.cat-dense.4.gelu-dense.4.gelu-dense.4.gelu',
+    # Hand-authored split spec.
+    'bits.1+bp|dense.4.gelu-split.mul(dense.4.gelu, pass)-dense.4.gelu',
+])
+def test_train_via_parse_model2_jax(spec):
+    """End-to-end smoke for the Model2 train path -- the same path
+    cli/train.py now takes. Exercises Manager init, train_step,
+    eval (which triggers the FP32 rebuild dispatch in
+    manager_jax)."""
+    from texmo.spec_parser import parse_model2
+    conf = Configuration(
+        parse_model2(spec, precision=Precision.FP32),
+        lr=0.01, length=32, batch=4, steps=2, decay=1.0,
+    )
+    manager = create_manager(
+        'jax', conf=conf, system='test',
+        dataset=_make_dataset(),
+        test_sample_len=32, test_batch=2,
+        verbose=False,
+    )
+    run, _ = manager.train_and_eval(steps=2, time_limit=None)
+    assert run.steps == 2
+    assert run.loss is not None
+
+
+@pytest.mark.parametrize('spec', [
     'bits.1+bp|',
     'bits.1+bp|suffix.2',
     'bits.1+bp|suffix.4-dense.4.gelu',

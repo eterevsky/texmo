@@ -7,8 +7,8 @@ import numpy as np
 from ..configuration import Configuration
 from ..dataset import DataSet
 from ..manager import Manager, create_manager
-from ..model import build_model_def
 from ..precision import Precision
+from ..spec_parser import parse_model2
 from ..tokens import set_tokens_dir
 
 
@@ -70,7 +70,8 @@ def train(args: argparse.Namespace):
                 "--cosine requires --decay 1 (cosine schedule already "
                 "decays LR to 0 over `steps`)")
         conf = Configuration(
-            build_model_def(args.spec, precision=Precision(args.precision)),
+            parse_model2(
+                args.spec, precision=Precision(args.precision)),
             lr=lr,
             length=args.length,
             batch=args.batch,

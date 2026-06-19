@@ -28,7 +28,7 @@ from .layers.input_bytes import InputBytesDef
 from .layers.seq import LayerSeqDef
 from .layers.skip import SkipDef
 from .layers.split import SplitDef
-from .model import _build_layer_def
+from .model import _apply_merges, _build_layer_def
 from .precision import Precision
 
 
@@ -57,8 +57,15 @@ def parse_model2(spec: str, precision: Precision):
         input_layer.ntokens if input_layer.ntokens > 2 else 1)
     output = DenseDef(output_size, input_size=last_shape)
 
+    # Canonical spec is rebuilt from the parsed tree -- so callers
+    # see split.op(...) form whether the user wrote split.op or the
+    # legacy skip.D.op (which gets translated in parse_layer_list).
+    # Parsing the canonical spec round-trips to an equivalent
+    # Model2Def.
+    canonical = f'{input_layer}|{layer_seq}'
+
     return Model2Def(
-        spec=spec, precision=precision,
+        spec=canonical, precision=precision,
         input=input_layer, layer_seq=layer_seq, output=output,
     )
 
@@ -166,13 +173,24 @@ def parse_layer_list(
         return []
     layers: list[LayerDef] = []
     shape = input_size
-    for piece in _split_at_depth_0(layers_spec, '-'):
+    # Track pending skip merges per target position so the merge-
+    # target layer's input_size reflects the post-merge shape (the
+    # original `model.py` parser does the same).
+    pending_merges: dict[int, list[tuple[int, str, int]]] = {}
+    pieces = list(_split_at_depth_0(layers_spec, '-'))
+    for i, piece in enumerate(pieces):
         piece = piece.strip()
         if not piece:
             raise ValueError(
                 f"empty layer in spec: {layers_spec!r}")
+        if i in pending_merges:
+            shape = _apply_merges(shape, pending_merges.pop(i))
         layer = _parse_layer(piece, shape)
         layers.append(layer)
+        if isinstance(layer, SkipDef):
+            target = i + layer.distance + 1
+            pending_merges.setdefault(target, []).append(
+                (shape, layer.op, i))
         shape = layer.size
     return _translate_skips(layers)
 

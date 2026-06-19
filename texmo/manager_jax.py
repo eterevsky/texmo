@@ -12,10 +12,12 @@ from .common import ttoa3
 from .configuration import Configuration
 from .manager import Manager
 from .model import build_model_def
+from .model2 import Model2Def
 from .model_jax import ModelJax, Weights
 from .precision import Precision
 from .predict import LossTrend
 from .run import Run
+from .spec_parser import parse_model2
 from .tokens import get_tokenizer
 
 # Number of training steps batched into a single JIT'd `lax.scan`.
@@ -200,8 +202,15 @@ class ManagerJax(Manager):
         """
         weights32 = jax.tree.map(
             lambda x: x.astype(jnp.float32), self.weights)
-        model32 = build_model_def(
-            self.model_def.spec, Precision.FP32).build_jax()
+        # Rebuild via the same factory the original used so the
+        # weights pytree matches (Model2Jax and ModelJax weight
+        # layouts differ slightly).
+        if isinstance(self.model_def, Model2Def):
+            model32 = parse_model2(
+                self.model_def.spec, Precision.FP32).build_jax()
+        else:
+            model32 = build_model_def(
+                self.model_def.spec, Precision.FP32).build_jax()
 
         batch, lengths = self.dataset.sample_bytes(
             nbytes=self.test_sample_len,

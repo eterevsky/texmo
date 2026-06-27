@@ -468,3 +468,166 @@ def test_bare_dense_top_level_invalid():
     chain is still rejected."""
     md = parse_model2("bits.1+bp|dense.4-dense.4.gelu", Precision.FP32)
     assert not md.is_valid()
+
+
+# --- neighbor generation ---------------------------------------------
+
+
+def _arch_neighbor_specs(model) -> set:
+    """Specs of same-precision (architecture) neighbors."""
+    return {
+        n.spec for n in model.neighbors()
+        if n.precision == model.precision
+    }
+
+
+_NEIGHBOR_BASES = [
+    "bits.1+bp|gru.4-dense.2.tanh",
+    "bits.1+bp|dense.4.gelu-suffix.2-dense.4.tanh",
+    "bits.1+bp|dense.4.gelu-split.add(dense.4.gelu, pass)-dense.4.gelu",
+    "bits.1+bp|dense.4.gelu-split.mul(dense.4.gelu, dense.4)",
+]
+
+
+@pytest.mark.parametrize("spec", _NEIGHBOR_BASES)
+def test_neighbors_all_valid_distinct_excludes_self(spec):
+    model = parse_model2(spec, Precision.FP32)
+    neighbors = list(model.neighbors())
+    assert neighbors, "expected at least one neighbor"
+    for n in neighbors:
+        assert n.is_valid(), f"invalid neighbor: {n.spec}"
+    # Architecture neighbors are distinct and never equal to self.
+    specs = [n.spec for n in neighbors if n.precision == model.precision]
+    assert model.spec not in specs
+    assert len(specs) == len(set(specs))
+
+
+@pytest.mark.parametrize("spec", _NEIGHBOR_BASES)
+def test_neighbor_specs_roundtrip(spec):
+    """Every neighbor spec is canonical (re-parses to itself)."""
+    model = parse_model2(spec, Precision.FP32)
+    for n in model.neighbors():
+        assert parse_model2(n.spec, n.precision).spec == n.spec
+
+
+def test_neighbors_cover_modeldef_non_skip():
+    """Parity: every non-skip ModelDef neighbor is also a Model2
+    neighbor (Model2 adds split/gate moves on top)."""
+    spec = "bytes|dense.32.gelu-dense.16.gelu"
+    md = ModelDef(spec, Precision.FP32)
+    m2 = parse_model2(spec, Precision.FP32)
+    md_arch = {
+        n.spec for n in md.neighbors()
+        if n.precision == md.precision and "skip." not in n.spec
+    }
+    m2_arch = _arch_neighbor_specs(m2)
+    missing = md_arch - m2_arch
+    assert not missing, f"Model2 neighbors miss: {sorted(missing)}"
+
+
+def test_neighbor_introduces_split_families():
+    specs = _arch_neighbor_specs(
+        parse_model2("bits.1+bp|dense.4.gelu-dense.4.tanh", Precision.FP32))
+    # residual (add/cat) and gate (mul) introductions all appear.
+    assert any("split.add(" in s for s in specs)
+    assert any("split.cat(" in s for s in specs)
+    assert any("split.mul(" in s for s in specs)
+
+
+def test_neighbor_op_swap_add_cat():
+    specs = _arch_neighbor_specs(parse_model2(
+        "bits.1+bp|dense.4.gelu-split.add(dense.4.gelu, pass)",
+        Precision.FP32))
+    assert "bits.1+bp|dense.4.gelu-split.cat(dense.4.gelu, pass)" in specs
+
+
+def test_neighbor_unwrap_split():
+    """A split can be removed by inlining its main branch."""
+    specs = _arch_neighbor_specs(parse_model2(
+        "bits.1+bp|dense.4.gelu-split.add(dense.4.tanh, pass)",
+        Precision.FP32))
+    assert "bits.1+bp|dense.4.gelu-dense.4.tanh" in specs
+
+
+def test_neighbor_recurses_into_branch():
+    """A layer inside a split branch gets mutated (size 2x here)."""
+    specs = _arch_neighbor_specs(parse_model2(
+        "bits.1+bp|dense.4.gelu-split.add(dense.4.tanh, pass)",
+        Precision.FP32))
+    assert "bits.1+bp|dense.4.gelu-split.add(dense.8.tanh, pass)" in specs
+
+
+def test_neighbor_mul_gate_activation_and_self_gate():
+    specs = _arch_neighbor_specs(parse_model2(
+        "bits.1+bp|dense.4.gelu-split.mul(dense.4.gelu, dense.4)",
+        Precision.FP32))
+    # gate activation toggle on the second path
+    assert any(
+        "split.mul(dense.4.gelu, dense.4.gelu)" in s for s in specs)
+    # self-gate: gate collapses to `pass` (main size == input size 4)
+    assert any("split.mul(dense.4.gelu, pass)" in s for s in specs)
+
+
+def test_neighbor_grows_split_span():
+    """The skip distance+1 analog: a split consumes the following
+    layer into its main branch."""
+    specs = _arch_neighbor_specs(parse_model2(
+        "bits.1+bp|split.add(dense.4.gelu, pass)-dense.4.tanh",
+        Precision.FP32))
+    assert (
+        "bits.1+bp|split.add(dense.4.gelu-dense.4.tanh, pass)" in specs)
+
+
+def test_neighbor_shrinks_split_span():
+    """The skip distance-1 analog: a split releases its main branch's
+    last layer back out after the split."""
+    specs = _arch_neighbor_specs(parse_model2(
+        "bits.1+bp|split.add(dense.4.gelu-dense.4.tanh, pass)",
+        Precision.FP32))
+    assert (
+        "bits.1+bp|split.add(dense.4.gelu, pass)-dense.4.tanh" in specs)
+
+
+def test_grow_shrink_are_inverse():
+    grown = "bits.1+bp|split.add(dense.4.gelu-dense.4.tanh, pass)"
+    base = "bits.1+bp|split.add(dense.4.gelu, pass)-dense.4.tanh"
+    # grow(base) -> grown
+    assert grown in _arch_neighbor_specs(parse_model2(base, Precision.FP32))
+    # shrink(grown) -> base
+    assert base in _arch_neighbor_specs(parse_model2(grown, Precision.FP32))
+
+
+def test_grow_over_suffix_filtered():
+    """Growing the span to end in a suffix-like layer is rejected by
+    the branch-can't-end-in-suffix rule (no extra bump needed)."""
+    specs = _arch_neighbor_specs(parse_model2(
+        "bits.1+bp|split.add(dense.4.gelu, pass)-suffix.2-dense.4.tanh",
+        Precision.FP32))
+    assert not any(
+        "split.add(dense.4.gelu-suffix.2, pass)" in s for s in specs)
+
+
+def test_neighbors_two_hops_never_raise():
+    """Every generated spec must parse -- neighbors() no longer
+    swallows parse errors -- including at the second hop, where the
+    branch recursion produces the deepest specs."""
+    base = parse_model2(
+        "bits.1+bp|dense.4.gelu-split.mul(dense.4.gelu, dense.4)",
+        Precision.FP32)
+    count = 0
+    for n in base.neighbors():
+        for nn in n.neighbors():  # raises if any 2-hop spec is malformed
+            assert nn.is_valid()
+            count += 1
+    assert count > 0
+
+
+def test_no_add_cat_to_mul_op_swap():
+    """mul is its own family -- a residual split never op-swaps to
+    mul, and a gate never op-swaps to add/cat."""
+    res = _arch_neighbor_specs(parse_model2(
+        "bits.1+bp|dense.4.gelu-split.add(dense.4.gelu, pass)",
+        Precision.FP32))
+    # The residual's own slot is never rewritten to split.mul(...).
+    assert not any(
+        s.endswith("split.mul(dense.4.gelu, pass)") for s in res)

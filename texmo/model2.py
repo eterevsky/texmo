@@ -13,12 +13,18 @@ pieces and stores them.
 JAX only. No PyTorch counterpart.
 """
 
+from collections.abc import Iterable
+from typing import Self
+
+from .layer import LayerDef
 from .layers.dense import DenseDef
 from .layers.input_bits import InputBitsDef
 from .layers.input_bytes import InputBytesDef
 from .layers.seq import LayerSeqDef
+from .layers.split import SplitDef
 from .model2_jax import Model2Jax
 from .precision import Precision
+from .spec_parser import parse_model2
 
 # Type alias for the input layers parse_model2 can produce -- kept
 # loose because the input-layer hierarchy doesn't have a single
@@ -104,6 +110,43 @@ class Model2Def:
         # output dense the same way.
         return self.input.is_valid() and self.layer_seq.is_valid()
 
+    def _gen_neighbor_specs(self) -> Iterable[str]:
+        """Yield raw spec strings for single-mutation neighbors."""
+        input_spec = str(self.input)
+        top = self.layer_seq.layers
+        top_str = "-".join(_strs(top))
+        # Input-layer mutations (keep the layer chain fixed).
+        for in_nb in self.input.neighbors():
+            yield f"{in_nb}|{top_str}"
+        # Layer-chain mutations (recurse into the tree).
+        for variant in _seq_variants(top, self.input.size, self.output.size):
+            yield f"{input_spec}|" + "-".join(variant)
+
+    def neighbors(self) -> Iterable[Self]:
+        """Yield single-mutation neighbor models (precision + arch).
+
+        Mirrors ModelDef.neighbors: each architecture mutation is a
+        spec string re-parsed through parse_model2 (which threads sizes
+        and validates). Dedupes on the canonical spec so distinct raw
+        mutations that normalize to the same model are yielded once, and
+        self is excluded.
+        """
+        for p in self.precision.neighbors:
+            yield parse_model2(self.spec, p)
+
+        raw_seen: set[str] = set()
+        seen: set[str] = {self.spec}
+        for raw in self._gen_neighbor_specs():
+            if raw in raw_seen:
+                continue
+            raw_seen.add(raw)
+            model = parse_model2(raw, self.precision)
+            if model.spec in seen:
+                continue
+            seen.add(model.spec)
+            if model.is_valid():
+                yield model
+
     def build_jax(self) -> Model2Jax:
         return Model2Jax(
             self.input.build_jax(),
@@ -112,3 +155,185 @@ class Model2Def:
             ntokens=self.ntokens,
             total_padding=self.total_padding,
         )
+
+
+# --- neighbor generation -------------------------------------------------
+#
+# Recursive, skip-free analog of ModelDef._gen_neighbor_specs. Each
+# mutation is emitted as a canonical spec string and re-parsed (so size
+# threading + is_valid live in one place). Split mutations form two
+# independent families:
+#   - residual: split.add / split.cat with a `pass` second path -- the
+#     skip analog (add<->cat swap, span grow/shrink via wrap/unwrap).
+#   - gate: split.mul with a dense (or pass) second path slaved to the
+#     main path's size -- GeGLU/SwiGLU/self-gating.
+
+_APPEND_ACTS = ("relu", "gelu", "tanh")
+_APPEND_RECURRENT = ("gru", "mgru", "mingru", "lstm", "slstm", "mullstm")
+_GATE_ACTS = (None, "gelu", "relu", "tanh")
+# Layers that don't define their own output size (pass the input dim
+# through); they affect the prepend/remove-first sizing heuristic.
+_PASSTHROUGH = ("suffix", "norm")
+
+
+def _strs(layers: list[LayerDef]) -> list[str]:
+    return [str(l) for l in layers]
+
+
+def _render_branch(layer_strs: list[str]) -> str:
+    return "-".join(layer_strs) if layer_strs else "pass"
+
+
+def _split_str(op: str, branch_strs: list[list[str]]) -> str:
+    inner = ", ".join(_render_branch(b) for b in branch_strs)
+    return f"split.{op}({inner})"
+
+
+def _split_variants(split: SplitDef) -> Iterable[str]:
+    """Neighbor split-strings: op-swap (residual only), branch
+    mutations, and gate-path mutations (mul)."""
+    bsl = [_strs(b.layers) for b in split.branches]
+    if split.op in ("add", "cat"):
+        other = "cat" if split.op == "add" else "add"
+        yield _split_str(other, bsl)
+        # Mutate each non-empty branch; leave `pass` branches as pass.
+        for idx, br in enumerate(split.branches):
+            if not br.layers:
+                continue
+            for variant in _seq_variants(br.layers, br.input_size, br.size):
+                new = list(bsl)
+                new[idx] = variant
+                yield _split_str(split.op, new)
+    elif split.op == "mul":  # gate family
+        main = split.branches[0]
+        main_strs = bsl[0]
+        # Second-path (gate) variants: activation toggle + self-gate.
+        for act in _GATE_ACTS:
+            gate = f"dense.{main.size}" + (f".{act}" if act else "")
+            yield _split_str("mul", [main_strs, [gate]])
+        yield _split_str("mul", [main_strs, []])  # `pass` -> self-gate
+        # Mutate the main path only; the gate stays fixed. A mutation
+        # that changes the main's output size yields an unequal-size
+        # mul that is_valid rejects, so a single-step coupled resize
+        # (gate follows the main) is NOT offered here -- deferred TODO.
+        # It's still reachable in a couple of hops (the invalid
+        # intermediate's own neighbors resize the other side), which a
+        # depth>=2 neighbor walk finds for free.
+        for variant in _seq_variants(main.layers, main.input_size, main.size):
+            yield _split_str("mul", [variant] + bsl[1:])
+
+
+def _seq_variants(
+    layers: list[LayerDef], input_size: int, output_size: int,
+) -> Iterable[list[str]]:
+    """Neighbor layer-string-lists for one sequence (top chain or a
+    split branch). The caller composes them into a full spec."""
+    strs = _strs(layers)
+    n = len(layers)
+
+    # 1. Mutate each layer in place (recurse into nested splits).
+    for i, layer in enumerate(layers):
+        if isinstance(layer, SplitDef):
+            for sv in _split_variants(layer):
+                yield strs[:i] + [sv] + strs[i + 1:]
+        else:
+            for nb in layer.neighbors():
+                yield strs[:i] + [nb] + strs[i + 1:]
+
+    last_output = layers[-1].size if layers else input_size
+    new_size = min(last_output, output_size)
+
+    # 2. Append a new layer (size matches the pipe's narrow point).
+    for act in _APPEND_ACTS:
+        for name in ("dense", "rnn"):
+            yield strs + [f"{name}.{new_size}.{act}"]
+    for name in _APPEND_RECURRENT:
+        yield strs + [f"{name}.{new_size}"]
+    if new_size >= 2:
+        yield strs + [f"matlstm.{new_size}"]
+        yield strs + [f"msr.{new_size}.1"]
+    if last_output <= output_size:
+        yield strs + ["conv.2"]
+
+    # 3. Remove the last layer (symmetric with append).
+    if layers:
+        prev_output = input_size if n == 1 else layers[-2].size
+        if last_output == min(prev_output, output_size):
+            yield strs[:-1]
+
+    # 4./5. Insert / remove suffix.2 (no skip-distance bumps in a tree).
+    for i in range(n + 1):
+        yield strs[:i] + ["suffix.2"] + strs[i:]
+    for i, s in enumerate(strs):
+        if s == "suffix.2":
+            yield strs[:i] + strs[i + 1:]
+
+    # 6./7. Insert / remove norm (never as the first layer).
+    for i in range(1, n + 1):
+        yield strs[:i] + ["norm"] + strs[i:]
+    for i, s in enumerate(strs):
+        if s == "norm":
+            yield strs[:i] + strs[i + 1:]
+
+    # 8./9. Prepend a dense lead-in / remove it (symmetric).
+    if not layers or layers[0].name not in _PASSTHROUGH:
+        prepend_size = min(input_size, output_size)
+    else:
+        prepend_size = input_size
+    for act in ("tanh", "gelu"):
+        yield [f"dense.{prepend_size}.{act}"] + strs
+    if layers and layers[0].name == "dense":
+        nxt = layers[1] if n >= 2 else None
+        if nxt is None or nxt.name not in _PASSTHROUGH:
+            expected = min(input_size, output_size)
+        else:
+            expected = input_size
+        first = layers[0]
+        if first.size == expected and first._activation in ("tanh", "gelu"):
+            yield strs[1:]
+
+    # 10. Introduce a residual split around a 1- or 2-layer span.
+    for i in range(n):
+        for d in (1, 2):
+            if i + d > n:
+                continue
+            for op in ("add", "cat"):
+                wrapped = _split_str(op, [strs[i:i + d], []])
+                yield strs[:i] + [wrapped] + strs[i + d:]
+
+    # 11. Introduce a mul gate around a single (non-split) layer.
+    for i, layer in enumerate(layers):
+        if isinstance(layer, SplitDef):
+            continue
+        gate = f"dense.{layer.size}"
+        yield strs[:i] + [_split_str("mul", [[strs[i]], [gate]])] + strs[i + 1:]
+
+    # 12. Remove a split (unwrap to its main branch).
+    for i, layer in enumerate(layers):
+        if isinstance(layer, SplitDef):
+            main = _strs(layer.branches[0].layers)
+            yield strs[:i] + main + strs[i + 1:]
+
+    # 13. Grow / shrink a split's main branch by moving its right
+    #     boundary across the adjacent layer -- the skip distance +-1
+    #     analog. Grow pulls the following (non-split) layer into the
+    #     main path; shrink pushes the main path's last layer back out
+    #     after the split. A 1-layer main shrinks via unwrap (sec. 12);
+    #     the other branches (pass / gate) are carried unchanged.
+    #     The boundary moves by exactly one: a step that would end the
+    #     branch on a suffix-like layer is simply filtered by is_valid,
+    #     rather than bumped over it the way old skip-distance did --
+    #     deferred, so a residual spanning a suffix needs a longer walk.
+    for i, layer in enumerate(layers):
+        if not isinstance(layer, SplitDef):
+            continue
+        others = [_strs(b.layers) for b in layer.branches[1:]]
+        main_strs = _strs(layer.branches[0].layers)
+        # grow: consume layers[i+1] into the main path.
+        if i + 1 < n and not isinstance(layers[i + 1], SplitDef):
+            grown = _split_str(layer.op, [main_strs + [strs[i + 1]]] + others)
+            yield strs[:i] + [grown] + strs[i + 2:]
+        # shrink: release the main path's last layer after the split.
+        if len(main_strs) >= 2:
+            shrunk = _split_str(layer.op, [main_strs[:-1]] + others)
+            yield strs[:i] + [shrunk, main_strs[-1]] + strs[i + 1:]

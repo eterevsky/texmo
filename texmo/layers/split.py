@@ -266,9 +266,13 @@ class SplitDef(LayerDef):
             # there was disallowed.
             if b.layers and b.layers[-1].length > 1:
                 return False
-        # add/mul require an output channel dim to be definable --
-        # which the broadcast-friendly merge gives us for any pair
-        # of sizes, so no further check is needed today.
+        # mul is an elementwise gate, so its branches must share an
+        # output size (the gate path is slaved to the main path; a
+        # `pass` gate means self-gating, valid only when the main path
+        # preserves the input dim). add/cat broadcast/concat and so
+        # accept differing branch sizes.
+        if self.op == "mul" and len({b.size for b in self.branches}) != 1:
+            return False
         return True
 
     def build_jax(self, dtype) -> SplitJax:

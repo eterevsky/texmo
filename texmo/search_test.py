@@ -337,6 +337,43 @@ def test_select_conf_skips_pick_me_after_min_runs(tmp_path):
     assert result is None or result.strategy != 'pick_me'
 
 
+def test_timing_ready_reflects_fitted_pairs(tmp_path):
+    from .predict.timing import Weights
+    search = _make_search(tmp_path)
+    assert search._timing_ready('sys') is False
+    search.timing_model._weights[('sys', Precision.FP32)] = Weights(
+        {}, {}, {}, {})
+    assert search._timing_ready('sys') is True
+    assert search._timing_ready('other') is False
+
+
+def test_select_conf_holds_coverage_walk_until_timing_ready(
+    tmp_path, monkeypatch,
+):
+    """The coverage walk must not fire on a system with no fitted timing
+    model (it can't cap the global top confs); once one is fit, it
+    fires."""
+    from .predict.timing import Weights
+    search = _make_search(tmp_path)
+    sentinel = _make_conf(spec="bytes|dense.16.gelu")
+    monkeypatch.setattr(
+        search, '_select_uncovered_top', lambda system: sentinel)
+    # Sticky so the walk would fire unconditionally if not gated.
+    search._coverage_flag['sys'] = True
+
+    # No timing model for 'sys' -> walk held back (some other strategy
+    # or the default fires, but never coverage_walk).
+    res = search.select_conf('sys')
+    assert res is None or res.strategy != 'coverage_walk'
+
+    # Fit a timing model for the pair -> the walk fires.
+    search.timing_model._weights[('sys', Precision.FP32)] = Weights(
+        {}, {}, {}, {})
+    res = search.select_conf('sys')
+    assert res is not None and res.strategy == 'coverage_walk'
+    assert res.conf == sentinel
+
+
 def test_run_limit_sequences():
     seqs = []
     for i, s in enumerate(_run_limit_sequences()):

@@ -305,6 +305,21 @@ class Search(object):
                 return est[0]
         return self.timing_model.predict(system, conf)
 
+    def _timing_ready(self, system: str) -> bool:
+        """True once the timing model has been fit for `system` (any
+        precision).
+
+        Until then there are no step-time predictions, so `_cap_steps`
+        falls back to the full step count. `select_conf` uses this to
+        hold the coverage walk back on a fresh system: that walk pulls
+        *global* top confs (often slow recurrent architectures tuned on
+        faster systems), and without a timing model it would run them
+        at full length here. The neighbor walk -- local, budget-bounded
+        confs -- still runs and is what seeds the timing model; once
+        it's fit, the coverage walk turns on and catches up.
+        """
+        return any(s == system for s, _ in self.timing_model.keys())
+
     def _cap_steps(
         self, conf: Configuration, system: str
     ) -> Configuration:
@@ -757,8 +772,13 @@ class Search(object):
             # Coverage walk runs *before* t / max_weights selection so
             # the bulk cross-system push isn't confined to the current
             # iteration's weight bucket. Sticky on this system when the
-            # previous walk left more uncovered to do.
-            if (
+            # previous walk left more uncovered to do. Held back until
+            # the system has a fitted timing model: without one we can't
+            # cap the (often slow, recurrent) global top confs this walk
+            # pulls, so a fresh system would run them at full length.
+            # The neighbor walk seeds the timing model first; once it's
+            # fit, this turns on and catches up on the global tops.
+            if self._timing_ready(system) and (
                 self._coverage_flag.get(system, False)
                 or random.random() < _COVERAGE_PROB
             ):

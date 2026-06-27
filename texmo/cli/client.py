@@ -9,8 +9,14 @@ from ..tokens import set_tokens_dir
 
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
-    dataset = DataSet(path=args.data, path_processed=args.data_processed)
-    dataset_wrapper = DataSetWrapper(dataset)
+    # pread sampling (no mmap readahead amplification) parallelized
+    # across worker threads, so input throughput keeps up with the GPU
+    # even for tiny models.
+    dataset = DataSet(
+        path=args.data, path_processed=args.data_processed,
+        read_mode="pread")
+    dataset_wrapper = DataSetWrapper(
+        dataset, num_workers=args.sample_threads)
 
     try:
         try:
@@ -68,6 +74,13 @@ def init_args(parser: argparse.ArgumentParser, config):
         type=str,
         default=config.SYSTEM_NAME,
         help="the name of the system that will be used to identify runs in the DB",
+    )
+    parser.add_argument(
+        "--sample-threads",
+        type=int,
+        default=getattr(config, "SAMPLE_THREADS", 4),
+        help="background worker threads for data sampling "
+             "(default: config.SAMPLE_THREADS, else 4)",
     )
     parser.add_argument(
         '--once',

@@ -14,8 +14,10 @@ from .tokens import get_tokenizer
 from .tokens.processing import process
 
 # os.pread (read at an explicit offset, no shared file cursor) is
-# Unix-only. On Windows we fall back to lseek+read, which is fine for
-# the single-threaded sampling path.
+# Unix-only; on Windows we fall back to lseek+read (serialized by
+# _read_lock). pread also releases the GIL and is safe to call
+# concurrently on a shared fd, which is what lets multiple
+# DataSetWrapper worker threads overlap their I/O waits.
 _HAS_PREAD = hasattr(os, "pread")
 
 
@@ -39,7 +41,14 @@ class DataSet(object):
         # Temporary knob so benchmark-dataset can A/B the two. mmap's
         # per-fault readahead reads ~128 KB for every random 400-byte
         # sample (~16x amplification); pread reads only what's asked.
+        # pread is also the path that parallelizes across
+        # DataSetWrapper workers (see _read / DataSetWrapper).
         self.read_mode = read_mode
+
+        # Serializes the Windows lseek+read fallback when sampling runs
+        # on multiple DataSetWrapper threads. os.pread is atomic and
+        # needs no lock, so this is uncontended on Unix.
+        self._read_lock = Lock()
 
         if data is not None:
             assert path is None
@@ -107,10 +116,11 @@ class DataSet(object):
         if self.read_mode == "pread" and fd is not None:
             if _HAS_PREAD:
                 return os.pread(fd, size, start)
-            # Windows fallback: no atomic pread. Safe here because
-            # sampling is single-threaded.
-            os.lseek(fd, start, os.SEEK_SET)
-            return os.read(fd, size)
+            # Windows fallback: lseek+read isn't atomic, so serialize
+            # it for the multi-worker case (no-op cost single-threaded).
+            with self._read_lock:
+                os.lseek(fd, start, os.SEEK_SET)
+                return os.read(fd, size)
         return data[start : start + size]
 
     def sample_tokens(self, ntokens: int, batch: int, tokenset_name: str) -> np.ndarray:
@@ -219,16 +229,32 @@ class DataSet(object):
         return samples, lengths
 
 class DataSetWrapper(object):
-    def __init__(self, dataset: DataSet):
+    """Runs sampling on background worker threads feeding off a shared
+    jobs queue, decoupling it from the training loop.
+
+    `num_workers` > 1 produces several batches concurrently. This only
+    speeds things up when the underlying DataSet uses read_mode="pread"
+    -- mmap page faults hold the GIL and so can't overlap across
+    threads. Batches are interchangeable, so workers may finish out of
+    request order without consequence.
+    """
+
+    def __init__(self, dataset: DataSet, num_workers: int = 1):
         self.dataset = dataset
+        self.num_workers = num_workers
         self.jobs_queue = Queue()
         self.results_queues: dict[tuple[int, int, str], Queue] = {}
         self.results_queues_lock = Lock()
-        self.thread = Thread(target=self._thread)
-        self.thread.start()
+        self.threads = [
+            Thread(target=self._thread) for _ in range(num_workers)
+        ]
+        for t in self.threads:
+            t.start()
 
     def join(self):
-        self.jobs_queue.put(None)
+        # One sentinel per worker so each loop exits.
+        for _ in range(self.num_workers):
+            self.jobs_queue.put(None)
 
     def sample_tokens(
         self, ntokens: int, batch: int, tokenset_name: str
@@ -240,8 +266,10 @@ class DataSetWrapper(object):
                 if key not in self.results_queues:
                     logging.info(f'Initializing the data queue for {key}')
                     self.results_queues[key] = Queue()
-                    self.jobs_queue.put(key)
-                    self.jobs_queue.put(key)
+                    # Prime enough in-flight jobs to keep every worker
+                    # busy plus one buffered batch of prefetch.
+                    for _ in range(self.num_workers + 1):
+                        self.jobs_queue.put(key)
                 results_queue = self.results_queues[key]
 
             self.jobs_queue.put(key)

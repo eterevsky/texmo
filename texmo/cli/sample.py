@@ -2,7 +2,7 @@ import argparse
 import time
 
 from ..common import itoa3
-from ..dataset import DataSet
+from ..dataset import DataSet, DataSetWrapper
 from ..tokens import get_tokenizer, set_tokens_dir
 
 
@@ -106,29 +106,46 @@ def benchmark(args: argparse.Namespace):
     batch = args.batch
     token_set = args.token_set
 
-    def run(mode: str, seconds: float = 10.0) -> float:
-        dataset.read_mode = mode
-        # One warm-up batch (tokenizer init, first faults) outside timing.
-        dataset.sample_tokens(ntokens, batch, token_set)
+    def _drive(produce, seconds: float = 10.0) -> float:
+        produce()  # warm up (tokenizer init, first faults, queue prime)
         samples = 0
         start = time.time()
         while time.time() - start < seconds:
-            dataset.sample_tokens(ntokens, batch, token_set)
+            produce()
             samples += 1
             if samples % 100 == 0:
                 print(".", end="", flush=True)
         return samples / (time.time() - start)
 
-    # TEMPORARY: A/B the current mmap path against the new pread path
-    # so we can compare the effect across systems. Drop the mmap run
-    # once pread is the default.
-    mmap_sps = run("mmap")
-    pread_sps = run("pread")
+    def run_direct(mode: str) -> float:
+        dataset.read_mode = mode
+        return _drive(lambda: dataset.sample_tokens(ntokens, batch, token_set))
+
+    def run_parallel(workers: int) -> float:
+        dataset.read_mode = "pread"
+        wrapper = DataSetWrapper(dataset, num_workers=workers)
+        try:
+            return _drive(
+                lambda: wrapper.sample_tokens(ntokens, batch, token_set))
+        finally:
+            wrapper.join()
+
+    # TEMPORARY: compare the current mmap path, single-threaded pread,
+    # and N-worker pread so we can see per-system how much each helps.
+    # Drop the mmap arm once pread is the default.
+    results = [
+        ("mmap  x1", run_direct("mmap")),
+        ("pread x1", run_direct("pread")),
+        (f"pread x{args.threads}", run_parallel(args.threads)),
+    ]
     print()
 
-    for name, sps in (("mmap ", mmap_sps), ("pread", pread_sps)):
-        print(f"{name}: {itoa3(sps)} samples/s  {itoa3(sps * ntokens * batch)} tokens/s")
-    print(f"pread speedup: {pread_sps / mmap_sps:.2f}x")
+    base = results[0][1]
+    for name, sps in results:
+        print(
+            f"{name}: {itoa3(sps)} samples/s  "
+            f"{itoa3(sps * ntokens * batch)} tokens/s  "
+            f"({sps / base:.1f}x)")
 
 
 def benchmark_init_args(parser: argparse.ArgumentParser, config):
@@ -170,6 +187,12 @@ def benchmark_init_args(parser: argparse.ArgumentParser, config):
         type=int,
         default=256,
         help="range of acceptable sample lens (default: 128)",
+    )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=4,
+        help="worker threads for the parallel pread arm (default: 4)",
     )
 
     parser.set_defaults(func=benchmark)

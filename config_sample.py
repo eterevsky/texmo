@@ -36,3 +36,10 @@ BACKEND = 'jax'
 # 'cuda,cpu'. Setting this explicitly avoids the warning about
 # failing to load the TPU plugin on Windows.
 JAX_PLATFORMS = 'cpu'
+
+# Number of background worker threads the client uses to sample
+# training data. Sampling is random-read latency bound; the client
+# reads with pread, whose I/O overlaps across threads, so a few
+# workers keep even tiny models from starving on input. 1 disables
+# the parallelism (single prefetch thread).
+SAMPLE_THREADS = 4

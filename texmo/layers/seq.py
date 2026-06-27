@@ -18,6 +18,7 @@ import jax.numpy as jnp
 
 from ..layer import LayerDef, LayerState
 from ..layer_jax import LayerJax, LayerWeights
+from .dense import DenseDef
 
 
 class LayerSeqJax(LayerJax):
@@ -109,14 +110,54 @@ class LayerSeqDef(LayerDef):
         # walks through Split branches automatically.
         return sum(l.num_layers for l in self.layers)
 
-    def is_valid(self) -> bool:
+    def is_valid(self, *, allow_terminal_bare_dense: bool = False) -> bool:
+        """Validate this sequence.
+
+        The same adjacency/first-layer rules that ModelDef enforced on
+        its flat layer list now live here, so they apply at every
+        nesting level -- the top-level chain and each Split branch
+        alike. `allow_terminal_bare_dense` is set by SplitDef when it
+        validates a branch: a branch may end in a bare `dense.X`
+        (the linear path of a gated unit). See DenseDef.is_valid.
+        """
         # A LayerSeqDef directly inside another LayerSeqDef would
         # just be a longer flat sequence -- reject so the structure
         # stays unambiguous. SplitDef is the only place a
         # LayerSeqDef is meant to appear inside another layer.
         if any(isinstance(l, LayerSeqDef) for l in self.layers):
             return False
-        return all(l.is_valid() for l in self.layers)
+
+        # Norm can't be the first layer. At the top level it would be
+        # normalizing the raw input encoding; in a branch it matches
+        # the old `skip source can't be right before a norm` rule
+        # (the branch's first layer used to be the post-skip layer).
+        if self.layers and self.layers[0].name == "norm":
+            return False
+
+        for l1, l2 in zip(self.layers[:-1], self.layers[1:]):
+            # Two suffix-like (multi-position) layers can't be adjacent.
+            if l1.length > 1 and l2.length > 1:
+                return False
+            # Two normalization layers can't be adjacent.
+            if l1.name == "norm" and l2.name == "norm":
+                return False
+            # Norm can't follow a suffix.
+            if l1.name == "suffix" and l2.name == "norm":
+                return False
+            # Two msr layers can't be adjacent -- both maintain matrix
+            # state and serve the same architectural role.
+            if l1.name == "msr" and l2.name == "msr":
+                return False
+
+        last = len(self.layers) - 1
+        for i, l in enumerate(self.layers):
+            if (allow_terminal_bare_dense and i == last
+                    and isinstance(l, DenseDef)):
+                if not l.is_valid(allow_bare=True):
+                    return False
+            elif not l.is_valid():
+                return False
+        return True
 
     def build_jax(self, dtype) -> LayerSeqJax:
         return LayerSeqJax(

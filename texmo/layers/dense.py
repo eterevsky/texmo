@@ -87,8 +87,17 @@ class DenseDef(LayerDef):
             return f"dense.{self.size}.{self._activation}"
         return f"dense.{self.size}"
 
-    def is_valid(self) -> bool:
-        return is_power2_int(self.size) and self._activation_fn is not None
+    def is_valid(self, *, allow_bare: bool = False) -> bool:
+        # A bare dense (no activation) is normally rejected: two
+        # adjacent linears collapse to one, so it adds nothing on its
+        # own. Inside a Split branch it's the value/linear path of a
+        # gated unit (GeGLU/SwiGLU: `split.mul(dense.X.gelu,
+        # dense.X)`), so SplitDef opts into `allow_bare` for a
+        # branch's terminal layer. The power-of-two size discipline
+        # still applies either way.
+        if not is_power2_int(self.size):
+            return False
+        return allow_bare or self._activation_fn is not None
 
     @property
     def num_weights(self) -> int:

@@ -187,10 +187,9 @@ class SplitDef(LayerDef):
     """Fork-and-merge layer over N (currently 2) parallel branches.
 
     Spec syntax: `split.{op}({branch_1}, {branch_2})`. Each branch
-    is a `LayerSeqDef`; an empty branch is rendered as `pass`. The
-    parser doesn't yet know this syntax -- for now SplitDefs are
-    constructed in Python directly. The parser change is item 2 of
-    the migration TODO.
+    is a `LayerSeqDef`; an empty branch is rendered as `pass`.
+    `spec_parser.parse_model2` builds these from the spec string,
+    recursing into each branch.
     """
     name = "split"
 
@@ -253,9 +252,19 @@ class SplitDef(LayerDef):
         if len(self.branches) != 2:
             return False
         for b in self.branches:
-            if not b.is_valid():
+            # Branches opt into the terminal-bare-dense carve-out:
+            # a branch's last layer may be a plain `dense.X` (the
+            # linear path of a gated unit like GeGLU).
+            if not b.is_valid(allow_terminal_bare_dense=True):
                 return False
             if b.input_size != self.input_size:
+                return False
+            # A branch can't end in a suffix-like (multi-position)
+            # layer. Mirrors the old "merge point can't be right
+            # after a suffix" rule: the merge consumes each branch's
+            # final position, and a position-consuming terminal layer
+            # there was disallowed.
+            if b.layers and b.layers[-1].length > 1:
                 return False
         # add/mul require an output channel dim to be definable --
         # which the broadcast-friendly merge gives us for any pair

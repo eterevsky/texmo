@@ -404,3 +404,67 @@ def test_forward_recurrent_matches_forward():
     par = model.forward(weights, batch)
     rec = model.forward_recurrent(weights, batch)
     np.testing.assert_allclose(np.asarray(par), np.asarray(rec), atol=1e-5)
+
+
+# --- validity rules: parity with ModelDef + the bare-dense carve-out --
+#
+# The rules ModelDef enforced on its flat layer list now live in
+# LayerSeqDef / SplitDef. These check that a spec the old model
+# rejected is still rejected after skip->split translation, that the
+# new bare-dense carve-out for gated units is accepted, and that
+# adjacency rules apply inside branches too.
+
+
+# Specs ModelDef rejects that must stay rejected once parsed into the
+# tree. Each has a skip form so it round-trips through translation.
+_INVALID_SPECS = [
+    # Norm can't be the first layer (top-level).
+    "bits.1+bp|norm-dense.4.gelu",
+    # Skip source right before a norm -> branch starts with norm.
+    "bytes|dense.32.gelu-skip.1.add-norm-dense.32.gelu",
+    # Merge point right after a suffix -> branch ends in a suffix.
+    "bytes|skip.1.add-suffix.4-dense.32.gelu",
+    # Two suffix-like layers adjacent.
+    "bits.1+bp|suffix.2-suffix.2-dense.4.gelu",
+    # Two norm adjacent.
+    "bits.1+bp|dense.4.gelu-norm-norm-dense.4.gelu",
+    # Norm follows a suffix.
+    "bits.1+bp|suffix.2-norm-dense.4.gelu",
+]
+
+
+@pytest.mark.parametrize("spec", _INVALID_SPECS)
+def test_invalid_specs_match_modeldef(spec):
+    """Both representations agree the spec is invalid."""
+    assert not ModelDef(spec, Precision.FP32).is_valid()
+    assert not parse_model2(spec, Precision.FP32).is_valid()
+
+
+_VALID_SPECS = [
+    "bits.1+bp|dense.4.gelu-suffix.2-dense.4.tanh",
+    "bytes|dense.32.gelu-skip.1.add-dense.32.gelu-dense.32.gelu",
+    # Skip source before suffix is fine (start before, skip over).
+    "bytes|dense.32.gelu-skip.2.add-suffix.2-dense.32.gelu-dense.16.gelu",
+]
+
+
+@pytest.mark.parametrize("spec", _VALID_SPECS)
+def test_valid_specs_match_modeldef(spec):
+    assert ModelDef(spec, Precision.FP32).is_valid()
+    assert parse_model2(spec, Precision.FP32).is_valid()
+
+
+def test_geglu_bare_dense_branch_valid():
+    """A GeGLU -- `split.mul(dense.X.gelu, dense.X)` -- has a bare
+    linear value path. The tree accepts it; this shape has no
+    ModelDef equivalent (the old model had no gated split)."""
+    md = parse_model2(
+        "bits.1+bp|split.mul(dense.4.gelu, dense.4)", Precision.FP32)
+    assert md.is_valid()
+
+
+def test_bare_dense_top_level_invalid():
+    """The carve-out is branch-only: a bare dense in the top-level
+    chain is still rejected."""
+    md = parse_model2("bits.1+bp|dense.4-dense.4.gelu", Precision.FP32)
+    assert not md.is_valid()

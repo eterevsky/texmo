@@ -1,7 +1,8 @@
 """SplitDef + SplitJax tests.
 
-Builds SplitDefs directly in Python (the parser doesn't know
-`split.op(...)` syntax yet -- that's the next migration item).
+Builds SplitDefs directly in Python to exercise the layer in
+isolation. End-to-end parsing of `split.op(...)` specs is covered
+in spec_parser_test.py and model2_test.py.
 """
 import jax
 import jax.numpy as jnp
@@ -10,9 +11,11 @@ import pytest
 
 from texmo.layers.conv import ConvDef
 from texmo.layers.dense import DenseDef
+from texmo.layers.norm import NormDef
 from texmo.layers.seq import LayerSeqDef
 from texmo.layers.split import (
     SplitDef, SplitJax, _align_branch_outputs, _merge_all)
+from texmo.layers.suffix import SuffixDef
 
 
 def _seq(layers, input_size):
@@ -144,6 +147,65 @@ def test_is_valid_rejects_branch_input_size_mismatch():
     bad_branch = _seq([_dense(8, 'gelu', 99)], 99)
     good_branch = _seq([_dense(8, 'gelu', 4)], 4)
     s = SplitDef('mul', [good_branch, bad_branch], input_size=4)
+    assert not s.is_valid()
+
+
+# -- Branch carve-outs & lifted adjacency rules -------------------------
+
+
+def test_is_valid_terminal_bare_dense_ok():
+    """GeGLU shape: the value path is a bare `dense.X` (no
+    activation). Allowed as a branch's terminal layer."""
+    s = SplitDef(
+        'mul',
+        [_seq([_dense(8, 'gelu', 4)], 4),
+         _seq([DenseDef(8, input_size=4)], 4)],  # bare, terminal
+        input_size=4,
+    )
+    assert s.is_valid()
+
+
+def test_is_valid_nonterminal_bare_dense_rejected():
+    """A bare dense that isn't the last layer collapses with its
+    successor -- only the terminal carve-out applies."""
+    branch = _seq(
+        [DenseDef(8, input_size=4), _dense(8, 'gelu', 8)], 4)
+    s = SplitDef(
+        'mul', [branch, _seq([_dense(8, 'gelu', 4)], 4)], input_size=4)
+    assert not s.is_valid()
+
+
+def test_is_valid_branch_norm_first_rejected():
+    """Norm can't be the first layer of a branch (mirrors the old
+    'skip source before norm' rule)."""
+    branch = _seq([NormDef(input_size=4), _dense(8, 'gelu', 4)], 4)
+    s = SplitDef(
+        'add', [branch, _seq([], 4)], input_size=4)
+    assert not s.is_valid()
+
+
+def test_is_valid_branch_ends_in_suffix_rejected():
+    """A branch can't end in a suffix-like layer (mirrors the old
+    'merge point right after a suffix' rule)."""
+    branch = _seq([SuffixDef(2, input_size=4)], 4)
+    s = SplitDef('add', [branch, _seq([], 4)], input_size=4)
+    assert not s.is_valid()
+
+
+def test_is_valid_suffix_inside_branch_ok():
+    """A suffix mid-branch (not terminal) is fine."""
+    branch = _seq(
+        [SuffixDef(2, input_size=4), _dense(8, 'gelu', 4)], 4)
+    s = SplitDef('add', [branch, _seq([], 4)], input_size=4)
+    assert s.is_valid()
+
+
+def test_is_valid_adjacent_suffix_in_branch_rejected():
+    """Two suffix-like layers adjacent inside a branch -> invalid."""
+    branch = _seq(
+        [SuffixDef(2, input_size=4), SuffixDef(2, input_size=4),
+         _dense(8, 'gelu', 4)], 4)
+    s = SplitDef('add', [branch, _seq([], 4)], input_size=4)
     assert not s.is_valid()
 
 

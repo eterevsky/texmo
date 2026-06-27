@@ -97,11 +97,12 @@ class Model2Def:
         return self.layer_seq.num_layers
 
     def is_valid(self) -> bool:
-        return (
-            self.input.is_valid()
-            and self.layer_seq.is_valid()
-            and self.output.is_valid()
-        )
+        # The output readout is a bare linear (no activation) built
+        # internally with the right shape, so it's valid by
+        # construction -- we don't run it through DenseDef.is_valid
+        # (which requires an activation). ModelDef.is_valid skips its
+        # output dense the same way.
+        return self.input.is_valid() and self.layer_seq.is_valid()
 
     def build_jax(self) -> Model2Jax:
         return Model2Jax(

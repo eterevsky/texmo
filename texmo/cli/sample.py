@@ -1,7 +1,6 @@
 import argparse
 import time
 
-from .. import latency
 from ..common import itoa3
 from ..dataset import DataSet
 from ..tokens import get_tokenizer, set_tokens_dir
@@ -107,25 +106,29 @@ def benchmark(args: argparse.Namespace):
     batch = args.batch
     token_set = args.token_set
 
-    samples = 0
-    total_tokens = 0
-    start = time.time()
+    def run(mode: str, seconds: float = 10.0) -> float:
+        dataset.read_mode = mode
+        # One warm-up batch (tokenizer init, first faults) outside timing.
+        dataset.sample_tokens(ntokens, batch, token_set)
+        samples = 0
+        start = time.time()
+        while time.time() - start < seconds:
+            dataset.sample_tokens(ntokens, batch, token_set)
+            samples += 1
+            if samples % 100 == 0:
+                print(".", end="", flush=True)
+        return samples / (time.time() - start)
 
-    while time.time() - start < 10:
-        _sample = dataset.sample_tokens(ntokens, batch, token_set)
-        total_tokens += ntokens * batch
-        samples += 1
-        if samples % 100 == 0:
-            print(".", end="", flush=True)
-
-    finish = time.time()
+    # TEMPORARY: A/B the current mmap path against the new pread path
+    # so we can compare the effect across systems. Drop the mmap run
+    # once pread is the default.
+    mmap_sps = run("mmap")
+    pread_sps = run("pread")
     print()
 
-    samples_per_sec = samples / (finish - start)
-    tokens_per_sec = total_tokens / (finish - start)
-    print(f"{itoa3(samples_per_sec)} samples/s")
-    print(f"{itoa3(tokens_per_sec)} tokens/s")
-    latency.report()
+    for name, sps in (("mmap ", mmap_sps), ("pread", pread_sps)):
+        print(f"{name}: {itoa3(sps)} samples/s  {itoa3(sps * ntokens * batch)} tokens/s")
+    print(f"pread speedup: {pread_sps / mmap_sps:.2f}x")
 
 
 def benchmark_init_args(parser: argparse.ArgumentParser, config):

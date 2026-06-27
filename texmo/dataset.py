@@ -1,6 +1,7 @@
 import itertools
 import logging
 import mmap
+import os
 import random
 from queue import Queue
 from threading import Lock, Thread
@@ -11,6 +12,11 @@ from .common import itoa3
 from .latency import timer
 from .tokens import get_tokenizer
 from .tokens.processing import process
+
+# os.pread (read at an explicit offset, no shared file cursor) is
+# Unix-only. On Windows we fall back to lseek+read, which is fine for
+# the single-threaded sampling path.
+_HAS_PREAD = hasattr(os, "pread")
 
 
 def _open_mmap(path: str) -> tuple["file", mmap.mmap]:
@@ -25,11 +31,22 @@ class DataSet(object):
         path_processed: str | None = None,
         data: bytes | mmap.mmap | None = None,
         parallel_chunks: bool = True,
+        read_mode: str = "mmap",
     ):
+        # read_mode selects how sample_tokens fetches a chunk:
+        #   "mmap"  -- slice the memory-mapped file (default)
+        #   "pread" -- read at an explicit offset via os.pread
+        # Temporary knob so benchmark-dataset can A/B the two. mmap's
+        # per-fault readahead reads ~128 KB for every random 400-byte
+        # sample (~16x amplification); pread reads only what's asked.
+        self.read_mode = read_mode
+
         if data is not None:
             assert path is None
             assert path_processed is None
             logging.info(f"Creating DataSet from data with len = {itoa3(len(data))}")
+            self.data_file = None
+            self.processed_file = None
             self.data = data
             self.processed_data = process(data)
             logging.info(f"Processed size: {itoa3(len(self.processed_data))}")
@@ -46,32 +63,55 @@ class DataSet(object):
                 self.processed_file = None
                 self.processed_data = None
 
+        # File descriptors for the pread path; None when the buffer is
+        # an in-memory bytes object (pread then falls back to slicing).
+        self.data_fd = self.data_file.fileno() if self.data_file is not None else None
+        self.processed_fd = (
+            self.processed_file.fileno() if self.processed_file is not None else None
+        )
+
         self.data_size = len(self.data)
         self.processed_data_size = len(self.processed_data) if self.processed_data else None
 
     def __del__(self):
-        if hasattr(self, "data_file"):
+        if getattr(self, "data_file", None) is not None:
             self.data_file.close()
-        if hasattr(self, "processed_file") and self.processed_file is not None:
+        if getattr(self, "processed_file", None) is not None:
             self.processed_file.close()
 
     def _select_chunk_start(
         self, processing: bool
-    ) -> tuple[bytes | mmap.mmap, int, int, bool]:
+    ) -> tuple[bytes | mmap.mmap, int | None, int, int, bool]:
         """
         Returns:
-            (data, start offset, whether the data needs processing)
+            (data buffer, its file descriptor or None, data size,
+             start offset, whether the data needs processing)
         """
         if processing and self.processed_data:
             data = self.processed_data
+            fd = self.processed_fd
             size = self.processed_data_size
             processing = False
         else:
             data = self.data
+            fd = self.data_fd
             size = self.data_size
 
         start = random.randint(0, size)
-        return data, size, start, processing
+        return data, fd, size, start, processing
+
+    def _read(
+        self, data: bytes | mmap.mmap, fd: int | None, start: int, size: int
+    ) -> bytes:
+        """Fetch `size` bytes at `start`, honoring self.read_mode."""
+        if self.read_mode == "pread" and fd is not None:
+            if _HAS_PREAD:
+                return os.pread(fd, size, start)
+            # Windows fallback: no atomic pread. Safe here because
+            # sampling is single-threaded.
+            os.lseek(fd, start, os.SEEK_SET)
+            return os.read(fd, size)
+        return data[start : start + size]
 
     def sample_tokens(self, ntokens: int, batch: int, tokenset_name: str) -> np.ndarray:
         """Generate a random sample of input data.
@@ -86,7 +126,7 @@ class DataSet(object):
 
         samples = []
         while len(samples) < batch:
-            data, data_size, start, need_processing = self._select_chunk_start(processing)
+            data, fd, data_size, start, need_processing = self._select_chunk_start(processing)
 
             if need_processing:
                 size = max(round(ntokens * tokenset.avg_bytes_per_token * 1.2), 16)
@@ -99,8 +139,7 @@ class DataSet(object):
                 if start + size > data_size:
                     break
 
-                # with timer("DataSet.sample_tokens.read"):
-                chunk = data[start : start + size]
+                chunk = self._read(data, fd, start, size)
                 valid_start = 0
                 while 128 <= chunk[valid_start] < 192:
                     valid_start += 1

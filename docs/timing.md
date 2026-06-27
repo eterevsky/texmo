@@ -75,10 +75,15 @@ Granular enough to separate kernels with distinct cost structure:
 - **Inputs** — `bytes`, `bits.1`, `bits.1+bp`, `bits.2.oh`, `bits.2.oh+bp`,
   `bits.4.oh`, `bits.4.oh+bp`, `bits.8`. One type per spec string.
 - **Hidden layers** — `dense.relu`, `dense.gelu`, `dense.tanh`,
+  `dense` (bare, no activation — only as a `split.mul` gate path),
   `rnn.relu`, `rnn.gelu`, `rnn.tanh`, `gru`, `mgru`, `mingru`,
-  `lstm`, `latent`, `lrnn`, `suffix`, `norm`, `skip.add`, `skip.cat`.
-  Activation is part of the type because different activations use
-  different kernels.
+  `lstm`, `latent`, `lrnn`, `suffix`, `norm`, `skip.add`, `skip.cat`,
+  `split.add`, `split.mul`, `split.cat`. Activation is part of the
+  type because different activations use different kernels. For a
+  Model2 spec the featurizer recurses into split branches: a split
+  contributes one `split.{op}` merge component plus the components of
+  every layer in its branches (sum-over-branches), so the branch
+  compute is accounted for the same way the old flat skip span was.
 - **Output** — single `output` type, always a dense projection.
 
 Each type carries its own pair of weight vectors (init and step
@@ -111,6 +116,14 @@ Base + the suffix length:
 #### Skip (4 features) — `skip.add` / `skip.cat`
 
     [1, IS, IS·L, IS·B·L]
+
+#### Split (4 features) — `split.add` / `split.mul` / `split.cat`
+
+Same cheap shape as skip, on the merged output width `OS`. Only the
+combine cost — the branch compute is captured by the branches' own
+per-layer components.
+
+    [1, OS, OS·L, OS·B·L]
 
 #### Input (3 features)
 

@@ -16,6 +16,7 @@ from texmo.predict.timing import (
     predict_total_time,
 )
 from texmo.run import Run
+from texmo.spec_parser import parse_model2
 
 
 def _conf(
@@ -34,6 +35,20 @@ def _conf(
         batch=batch,
         steps=steps,
         decay=decay,
+    )
+
+
+def _conf2(
+    spec: str,
+    length: int = 64,
+    batch: int = 16,
+    steps: int = 100,
+    precision: Precision = Precision.FP32,
+) -> Configuration:
+    """Configuration built on a Model2Def (parse_model2)."""
+    return Configuration(
+        parse_model2(spec, precision),
+        lr=0.01, length=length, batch=batch, steps=steps, decay=1.0,
     )
 
 
@@ -103,6 +118,72 @@ def test_featurize_msr_l2_features():
         msr.features, expected_base + expected_matmul + expected_l2)
     # Sanity: there should be 15 features (9 base + 3 matmul + 3 L^2).
     assert msr.features.shape == (15,)
+
+
+# -- Model2 / split featurization -------------------------------------
+
+
+def test_featurize_split_components_recurse_into_branches():
+    """A split contributes a merge component plus the components of
+    every layer in its branches (incl. the bare gate dense)."""
+    conf = _conf2(
+        "bits.1+bp|dense.4.gelu-split.mul(dense.4.gelu, dense.4)-dense.4.tanh",
+        batch=8, length=16)
+    types = [c.type_id for c in featurize(conf)]
+    assert types == [
+        "bits.1+bp",   # input
+        "dense.gelu",  # pre-split layer
+        "split.mul",   # merge
+        "dense.gelu",  # main branch
+        "dense",       # gate branch (bare dense -- clean key, not dense.None)
+        "dense.tanh",  # post-split layer
+        "output",
+    ]
+
+
+def test_featurize_split_merge_feature_values():
+    """split merge features are [1, OS, OS*L, OS*B*L] (4, like skip)."""
+    conf = _conf2("bits.1+bp|split.add(dense.4.gelu, pass)", batch=4, length=10)
+    split = next(c for c in featurize(conf) if c.type_id == "split.add")
+    os_ = int(split.features[1])  # merged output size
+    assert split.features.shape == (4,)
+    np.testing.assert_array_equal(
+        split.features, [1, os_, os_ * 10, os_ * 4 * 10])
+
+
+def test_skip_and_split_have_matching_compute_components():
+    """A skip-form ModelDef and its Model2 translation featurize to the
+    same per-layer compute components; only the merge type differs
+    (skip.add vs split.add)."""
+    spec = "bytes|dense.32.gelu-skip.1.add-dense.32.gelu-dense.32.gelu"
+
+    def compute(conf):
+        return sorted(
+            (c.type_id, tuple(c.features)) for c in featurize(conf)
+            if not c.type_id.startswith(("skip.", "split.")))
+
+    assert compute(_conf(spec)) == compute(_conf2(spec))
+
+
+def test_fit_and_predict_model2_split():
+    """End-to-end fit + predict on a split-containing Model2 spec."""
+    rng = np.random.default_rng(7)
+    spec = "bits.1+bp|dense.4.gelu-split.mul(dense.4.gelu, dense.4)"
+    samples = []
+    for _ in range(60):
+        batch = int(rng.choice([8, 16, 32]))
+        length = int(rng.choice([32, 64]))
+        steps = int(rng.choice([64, 128, 256]))
+        conf = _conf2(spec, batch=batch, length=length, steps=steps)
+        comps = featurize(conf)
+        total = 0.2 * len(comps) + steps * 1e-4 * len(comps)
+        samples.append((conf, _fake_run("m2sys", total)))
+
+    model = TrainTimingModel()
+    model.fit(samples)
+    assert ("m2sys", Precision.FP32) in model.keys()
+    pred = model.predict("m2sys", _conf2(spec, batch=12, length=48, steps=128))
+    assert pred is not None and pred > 0
 
 
 def test_predict_total_time_with_known_weights():

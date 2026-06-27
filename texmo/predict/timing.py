@@ -52,6 +52,7 @@ from ..layers.norm import NormDef
 from ..layers.rnn import RnnDef
 from ..layers.skip import SkipDef
 from ..layers.slstm import SLstmDef
+from ..layers.split import SplitDef
 from ..layers.suffix import SuffixDef
 from ..precision import Precision
 from .predict_common import layer_type_id
@@ -139,6 +140,16 @@ def _features_msr(
 
 def _features_skip(isize: int, batch: int, length: int) -> list[float]:
     return [1.0, isize, isize * length, isize * batch * length]
+
+
+def _features_split(osize: int, batch: int, length: int) -> list[float]:
+    # The merge itself: an elementwise op (add/mul) or a concat copy
+    # over the merged channels per position. Same cheap shape as the
+    # old skip merge; keyed per op (split.add / split.mul / split.cat)
+    # so each learns its own coefficient. The branches' compute shows
+    # up as their own per-layer components (sum-over-branches), so this
+    # term is only the combine cost. osize is the merged output width.
+    return [1.0, osize, osize * length, osize * batch * length]
 
 
 def _features_input(batch: int, length: int) -> list[float]:
@@ -231,6 +242,29 @@ def _output_component(output_def, batch: int, length: int) -> Component:
     )
 
 
+def _split_component(split, batch: int, length: int) -> Component:
+    return Component(
+        type_id=layer_type_id(split),  # split.add / split.mul / split.cat
+        features=np.array(_features_split(split.size, batch, length)),
+    )
+
+
+def _collect_layer_components(
+    layers: list, batch: int, length: int, out: list[Component]
+) -> None:
+    """Flatten a layer sequence into feature components, recursing into
+    split branches. A split adds a merge component plus the components
+    of every layer in its branches -- so the branches' compute is
+    summed in (and multi-way generalizes for free)."""
+    for layer in layers:
+        if isinstance(layer, SplitDef):
+            out.append(_split_component(layer, batch, length))
+            for branch in layer.branches:
+                _collect_layer_components(branch.layers, batch, length, out)
+        else:
+            out.append(_layer_component(layer, batch, length))
+
+
 @functools.cache
 def featurize(conf: Configuration) -> list[Component]:
     """Per-layer feature components. components[0] is the input layer.
@@ -244,8 +278,15 @@ def featurize(conf: Configuration) -> list[Component]:
     components: list[Component] = [
         _input_component(model_def.input, batch, length)
     ]
-    for layer in model_def.layers:
-        components.append(_layer_component(layer, batch, length))
+    # ModelDef exposes a flat `.layers`; Model2Def a recursive layer
+    # tree under `.layer_seq`. Duck-typed so the predictor doesn't have
+    # to import Model2Def (and drag its JAX backend in).
+    layers = (
+        model_def.layer_seq.layers
+        if hasattr(model_def, "layer_seq")
+        else model_def.layers
+    )
+    _collect_layer_components(layers, batch, length, components)
     components.append(_output_component(model_def.output, batch, length))
     return components
 

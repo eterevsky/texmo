@@ -6,7 +6,8 @@ from typing import Iterable, Optional
 
 from . import latency
 from .common import INF, itoa3
-from .model import ModelDef, build_model_def
+from .model import ModelDef
+from .spec_parser import parse_model2
 from .precision import Precision
 from .tokens.tokenizer import Tokenizer
 
@@ -55,7 +56,11 @@ class Configuration(object):
 
     @staticmethod
     def from_dict(d) -> Configuration:
-        model = build_model_def(d['spec'], precision=Precision(d['precision']))
+        # Model2 is the live representation. parse_model2 also accepts
+        # legacy skip.* specs (translating them to split form), so old
+        # DB rows and API payloads load fine; the resulting model's spec
+        # is canonical split form.
+        model = parse_model2(d['spec'], Precision(d['precision']))
         # `d` may be a plain dict (from JSON) or a sqlite3.Row. Row
         # raises IndexError on a missing column; dict raises KeyError.
         try:
@@ -81,7 +86,12 @@ class Configuration(object):
             and self.steps == other.steps
             and self.decay == other.decay
             and self.cosine == other.cosine
-            and self.model == other.model
+            # Compare by canonical spec string (what __hash__ uses), not
+            # `self.model == other.model` -- the latter is type-sensitive
+            # (ModelDef vs Model2Def never compare equal), which would
+            # split identity across the representation switch even for
+            # the same architecture.
+            and str(self.model) == str(other.model)
         )
 
     def __hash__(self) -> int:
@@ -307,9 +317,13 @@ class Template(object):
             self.spec = None
         else:
             try:
-                build_model_def(spec, precision=Precision.FP32)
+                # Store the canonical (split-form) spec so the literal
+                # match in `match_model` lines up with `str(model)` for
+                # confs built via parse_model2 -- a legacy skip.* filter
+                # still matches its split-form models.
+                model = parse_model2(spec, Precision.FP32)
                 self.regex = None
-                self.spec = spec
+                self.spec = str(model)
             except Exception:
                 self.regex = re.compile(spec)
                 self.spec = None
@@ -503,7 +517,7 @@ def default_from_template(
                 ):
                     if found: break
                     full_spec = input_spec + '|' + layer
-                    model = build_model_def(full_spec, precision=precision)
+                    model = parse_model2(full_spec, precision)
                     if not model.is_valid():
                         continue
                     if template.match_model(model):
@@ -511,7 +525,7 @@ def default_from_template(
                         found = True
 
     if spec is not None:
-        model = build_model_def(spec, precision=precision)
+        model = parse_model2(spec, precision)
         if not model.is_valid():
             raise ValueError(
                 f"Default spec {spec!r} is not a valid model "

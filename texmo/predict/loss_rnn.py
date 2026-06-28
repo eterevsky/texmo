@@ -26,6 +26,7 @@ import optax
 from .. import latency
 from ..configuration import Configuration
 from ..layers.skip import SkipDef
+from ..layers.split import SplitDef
 from ..layers.suffix import SuffixDef
 from .predict_common import MAX_LOSS, MIN_LOSS, layer_type_id
 
@@ -105,7 +106,11 @@ _EXTRA_DIM_TYPES = {'suffix', 'latent', 'lrnn', 'msr', 'lmgu', 'conv'}
 
 
 def _is_simple_type(t: str) -> bool:
-    return t not in _EXTRA_DIM_TYPES and not t.startswith('skip.')
+    return (
+        t not in _EXTRA_DIM_TYPES
+        and not t.startswith('skip.')
+        and not t.startswith('split.')
+    )
 
 
 def _layer_output_size(layer) -> int:
@@ -113,7 +118,48 @@ def _layer_output_size(layer) -> int:
         return layer.input_size * layer.length
     if isinstance(layer, SkipDef):
         return layer.input_size
+    if isinstance(layer, SplitDef):
+        # add/cat reuse the skip convention: the marker reports the
+        # merged-in (source = input) channels, and the merged width
+        # flows on as the next layer's input_size -- so a skip and its
+        # split translation match. mul has no skip analog, so report
+        # its true (main-sized) output.
+        return (
+            layer.input_size if layer.op in ('add', 'cat') else layer.size)
     return layer.size
+
+
+def _jump_length(layer) -> int:
+    """Residual/jump span: a skip's distance, or a split's main-branch
+    length. They coincide -- skip.D parses to a D-layer split -- so a
+    skip and its split translation map to the same feature value."""
+    if isinstance(layer, SkipDef):
+        return layer.distance
+    return len(layer.branches[0].layers)
+
+
+def _flatten_layers(layers: list, out: list) -> None:
+    """Flatten a Model2 layer tree into the skip-style flat sequence: a
+    split becomes a marker step followed by its main branch (branch 0)
+    inline; the other/gate branch folds into the marker. Recurses for
+    nested splits."""
+    for layer in layers:
+        out.append(layer)
+        if isinstance(layer, SplitDef):
+            _flatten_layers(layer.branches[0].layers, out)
+
+
+def _model_layers(conf: Configuration) -> list:
+    """Hidden-layer sequence for the loss RNN. ModelDef is already flat
+    (skip markers + spanned layers inline); Model2Def is flattened the
+    same way, so a skip-form model and its split translation produce
+    the same sequence."""
+    model = conf.model
+    if hasattr(model, 'layer_seq'):  # Model2Def
+        out: list = []
+        _flatten_layers(model.layer_seq.layers, out)
+        return out
+    return model.layers
 
 
 # init_globals: output_size + 5 log training knobs + cosine flag.
@@ -139,7 +185,7 @@ def discover_simple_types(
     """Sorted list of simple layer types (fully described by in/out sizes)."""
     seen: set[str] = set()
     for conf, _ in train_data:
-        for layer in conf.model.layers:
+        for layer in _model_layers(conf):
             t = layer_type_id(layer)
             if _is_simple_type(t):
                 seen.add(t)
@@ -148,11 +194,12 @@ def discover_simple_types(
 
 def _layer_feature_dim(n_simple: int) -> int:
     # [log(num_weights), log(in), log(out)] + bool per simple type +
-    # 8 extra-dim slots:
+    # 9 extra-dim slots:
     #   [suffix_len, latent_reps, lrnn_reps,
-    #    skip_add_dist, skip_cat_dist,
-    #    msr_heads, lmgu_reps, conv_kernel]
-    return 3 + n_simple + 8
+    #    skip_add_dist, skip_cat_dist,    # also split.add / split.cat span
+    #    msr_heads, lmgu_reps, conv_kernel,
+    #    split_mul_dist]
+    return 3 + n_simple + 9
 
 
 def _layer_features(
@@ -160,9 +207,15 @@ def _layer_features(
 ) -> np.ndarray:
     out_size = _layer_output_size(layer)
     feat = np.zeros(_layer_feature_dim(n_simple), dtype=np.float32)
-    # log2(max(..., 1)) lets weightless layers (skip, possibly norm)
-    # land at 0 rather than -inf.
-    feat[0] = np.log2(max(layer.num_weights, 1))
+    # For a split marker count only the non-main (gate) branch weights:
+    # the main branch is inlined as its own steps, so its weights are
+    # already represented there. log2(max(..., 1)) lets weightless
+    # markers (skip, residual split, norm) land at 0 rather than -inf.
+    if isinstance(layer, SplitDef):
+        weights = sum(b.num_weights for b in layer.branches[1:])
+    else:
+        weights = layer.num_weights
+    feat[0] = np.log2(max(weights, 1))
     feat[1] = np.log2(layer.input_size)
     feat[2] = np.log2(out_size)
     t = layer_type_id(layer)
@@ -175,16 +228,22 @@ def _layer_features(
         feat[3 + n_simple + 1] = np.log2(layer.reps)
     elif t == 'lrnn':
         feat[3 + n_simple + 2] = np.log2(layer.reps)
-    elif t == 'skip.add':
-        feat[3 + n_simple + 3] = layer.distance
-    elif t == 'skip.cat':
-        feat[3 + n_simple + 4] = layer.distance
+    # split.add / split.cat reuse the skip slots: skip.D and its split
+    # translation are the same architecture, so all skip-labeled data
+    # transfers. split.mul (no skip analog) gets its own slot. The
+    # proper per-branch treatment lands with the v2 branching predictor.
+    elif t in ('skip.add', 'split.add'):
+        feat[3 + n_simple + 3] = _jump_length(layer)
+    elif t in ('skip.cat', 'split.cat'):
+        feat[3 + n_simple + 4] = _jump_length(layer)
     elif t == 'msr':
         feat[3 + n_simple + 5] = np.log2(layer.heads)
     elif t == 'lmgu':
         feat[3 + n_simple + 6] = np.log2(layer.reps)
     elif t == 'conv':
         feat[3 + n_simple + 7] = np.log2(layer.kernel)
+    elif t == 'split.mul':
+        feat[3 + n_simple + 8] = _jump_length(layer)
     return feat
 
 
@@ -201,7 +260,7 @@ def _build_input_arrays(
     masks = np.zeros((n, max_layers), dtype=np.float32)
     for i, conf in enumerate(confs):
         init_globals[i] = _init_global_features(conf)
-        for j, layer in enumerate(conf.model.layers[:max_layers]):
+        for j, layer in enumerate(_model_layers(conf)[:max_layers]):
             layer_feats[i, j] = _layer_features(
                 layer, simple_type_idx, n_simple)
             masks[i, j] = 1.0
@@ -379,7 +438,7 @@ def fit(
         seed = random.randrange(2**31)
     type_idx = {t: i for i, t in enumerate(simple_types)}
     confs = [c for c, _ in train_data]
-    max_layers = max((len(c.model.layers) for c in confs), default=1)
+    max_layers = max((len(_model_layers(c)) for c in confs), default=1)
     max_layers = max(max_layers, 1)
     init_globals_np, layer_feats_np, masks_np = _build_input_arrays(
         confs, type_idx, max_layers)

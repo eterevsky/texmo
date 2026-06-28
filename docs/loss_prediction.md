@@ -71,6 +71,25 @@ bit; the non-zero raw feature implicitly identifies the type. Reps
 and suffix length span orders of magnitude so they go in as `log2`;
 skip distances are always small (1–4), so they go in raw.
 
+### Model2 / splits
+
+For a Model2 spec the layer tree is flattened into the same flat
+sequence a skip produced: a split becomes a marker step followed by
+its main branch (branch 0) inline; the other/gate branch folds into
+the marker (its weights land in the marker's `log2(num_weights)`, so a
+`pass` residual reads 0 and a dense gate reads its parameter count).
+
+`split.add` / `split.cat` **reuse** the `skip_add_dist` /
+`skip_cat_dist` slots: `skip.D` parses to a `D`-layer split, so the two
+representations of one architecture produce identical features and all
+skip-labeled data transfers. `split.mul` (no skip analog) gets its own
+`split_mul_dist` slot. The faithful per-branch (forking) treatment is
+deferred to a v2 branching predictor.
+
+Note: changing the feature schema (this added the `split_mul_dist`
+slot) invalidates any persisted `LossModel` — per the no-back-compat
+policy, delete the saved `'loss'` row and let the next refit rebuild.
+
 ## Training
 
 - **Loss** mean L1 between predicted and target log2 loss.

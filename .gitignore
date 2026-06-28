@@ -5,6 +5,7 @@
 !/data/pride*
 /models
 /results
+/scratch
 /target
 /uv.lock
 __pycache__

@@ -292,3 +292,69 @@ def test_search_server_add_run_does_not_overwrite_median_with_prediction(tmp_pat
     assert time_s == pytest.approx(4.5)
 
 
+
+
+# -- graceful predictor loading (Model2 transition prep) --------------
+
+from texmo.server import _load_predictor, _probe_timing
+
+
+class _FakeReader:
+    def __init__(self, model=None, raise_load=False):
+        self._model = model
+        self._raise_load = raise_load
+
+    def load_model(self, name):
+        if self._raise_load:
+            raise ValueError("corrupt pickle")
+        return self._model
+
+
+def test_load_predictor_none_when_absent():
+    assert _load_predictor(
+        _FakeReader(model=None), 'loss', lambda m: None) is None
+
+
+def test_load_predictor_returns_model_when_probe_ok():
+    sentinel = object()
+    assert _load_predictor(
+        _FakeReader(model=sentinel), 'loss', lambda m: None) is sentinel
+
+
+def test_load_predictor_ignores_incompatible_model():
+    """An old model deserializes but raises on first use (e.g. a
+    feature-dim change) -> ignored so the caller refits."""
+    def probe(_):
+        raise RuntimeError("shape mismatch")
+    assert _load_predictor(
+        _FakeReader(model=object()), 'loss', probe) is None
+
+
+def test_load_predictor_ignores_deserialization_failure():
+    assert _load_predictor(
+        _FakeReader(raise_load=True), 'loss', lambda m: None) is None
+
+
+def test_probe_timing_runs_only_on_matching_precision():
+    conf = Configuration(
+        build_model_def('bytes|dense.8.gelu', precision=Precision.FP32),
+        lr=0.01, length=64, batch=16, steps=128, decay=1.0)
+    calls = []
+
+    class _M:
+        def __init__(self, pairs):
+            self._pairs = pairs
+
+        def keys(self):
+            return self._pairs
+
+        def predict_batch(self, system, confs):
+            calls.append(system)
+
+    _probe_timing(_M([('s', Precision.FP32)]), conf)
+    assert calls == ['s']  # matching precision -> featurized
+
+    other = next(p for p in Precision if p != Precision.FP32)
+    calls.clear()
+    _probe_timing(_M([('s', other)]), conf)
+    assert calls == []  # no matching pair -> no-op, no exception

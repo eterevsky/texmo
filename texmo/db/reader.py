@@ -392,12 +392,17 @@ class DbReader(object):
             'decay', 'cosine', 'length', 'batch', 'steps'])
         query = (
             f'SELECT {conf_fields} FROM conf {where} '
-            'ORDER BY RANDOM() LIMIT 1'
+            'ORDER BY RANDOM()'
         )
-        row = self._db.execute(query, params).fetchone()
-        if row is None:
-            return None
-        return Configuration.from_dict(row)
+        for row in self._db.execute(query, params):
+            conf = Configuration.from_dict(row)
+            # Skip confs that no longer pass validity (e.g. under the
+            # Model2 rules after the representation switch) -- the search
+            # can't build/run them. The other DB-extraction paths filter
+            # the same way; pick_me is the last one to honor it.
+            if conf.model.is_valid():
+                return conf
+        return None
 
     def fastest_near_best_segments(
         self,

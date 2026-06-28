@@ -270,6 +270,40 @@ def _render_bounds(b: Bounds):
         return f'{b.min}-{b.max}'
 
 
+def _probe_timing(model: TrainTimingModel, conf: Configuration) -> None:
+    """Exercise a loaded timing model's feature path on one conf, to
+    surface a feature-schema mismatch. predict_batch returns early
+    (without featurizing) unless a fitted pair matches the conf's
+    precision, so probe against such a pair; if none exists there's
+    nothing to exercise."""
+    for system, precision in model.keys():
+        if precision == conf.precision:
+            model.predict_batch(system, [conf])
+            return
+
+
+def _load_predictor(reader, name: str, probe):
+    """Load the persisted predictor stored under `name`, returning it
+    only if it both deserializes and survives `probe` (a trivial use).
+
+    A feature-schema change (e.g. the loss model's new split slot) makes
+    an old model unpickle fine but raise a shape mismatch on the first
+    predict -- so we don't just guard deserialization, we run it once.
+    On any failure we log and return None, leaving the caller to refit.
+    """
+    try:
+        model = reader.load_model(name)
+        if model is None:
+            return None
+        probe(model)
+        return model
+    except Exception as e:
+        logging.warning(
+            f"Ignoring persisted {name!r} model "
+            f"(incompatible, will refit): {e!r}")
+        return None
+
+
 class SearchServer(object):
     def __init__(
         self,
@@ -313,7 +347,14 @@ class SearchServer(object):
         need_timing_bootstrap = True
         need_loss_refit = True
         with DbReader(self.path) as reader:
-            loaded_timing = reader.load_model('timing')
+            # Load persisted predictors, but only adopt them if they
+            # still work with the current feature schema -- an old model
+            # from before a schema change deserializes fine yet raises on
+            # the first predict. _load_predictor probes each one and
+            # returns None (-> refit) on any incompatibility.
+            loaded_timing = _load_predictor(
+                reader, 'timing',
+                lambda m: _probe_timing(m, self.default))
             if loaded_timing is not None:
                 # Adopt the persisted instance as the shared one.
                 # Safe to swap here: no threads have been started yet.
@@ -322,7 +363,9 @@ class SearchServer(object):
                 logging.info(
                     "Loaded persisted timing model from DB "
                     f"({len(loaded_timing.keys())} pairs)")
-            loaded_loss_model = reader.load_model('loss')
+            loaded_loss_model = _load_predictor(
+                reader, 'loss',
+                lambda m: m.predict([self.default]))
             if loaded_loss_model is not None:
                 self.loss_model.set_model(loaded_loss_model)
                 need_loss_refit = False

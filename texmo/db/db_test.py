@@ -819,6 +819,24 @@ def test_pick_me_conf_returns_none_after_min_runs(db):
     assert db.pick_me_conf(template) is None
 
 
+def test_pick_me_conf_skips_invalid(db):
+    """A pick_me conf that no longer passes is_valid (norm as the first
+    layer here) is skipped; a valid one is returned instead. Guards the
+    Model2 transition, where the validity rules change."""
+    invalid = _pick_me_conf("bytes|norm-dense.32.gelu")
+    assert not invalid.model.is_valid()
+    valid = _pick_me_conf("bytes|dense.32.gelu")
+    db.writer.add_pick_me_conf(invalid)
+    db.writer.add_pick_me_conf(valid)
+    assert db.pick_me_conf(_make_template()) == valid
+
+
+def test_pick_me_conf_none_when_all_invalid(db):
+    invalid = _pick_me_conf("bytes|norm-dense.32.gelu")
+    db.writer.add_pick_me_conf(invalid)
+    assert db.pick_me_conf(_make_template()) is None
+
+
 def test_pick_me_conf_ignores_unflagged(db):
     """Confs without pick_me=1 are never returned."""
     conf, run = _make_conf_run()

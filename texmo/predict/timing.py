@@ -49,6 +49,7 @@ from ..layers.matlstm import MatLstmDef
 from ..layers.msr import MsrDef
 from ..layers.mullstm import MulLstmDef
 from ..layers.norm import NormDef
+from ..layers.rglru import RglruDef
 from ..layers.rnn import RnnDef
 from ..layers.skip import SkipDef
 from ..layers.slstm import SLstmDef
@@ -106,6 +107,23 @@ def _features_conv(
         isize * kernel,
         isize * kernel * length,
         isize * kernel * length * batch,
+    ]
+
+
+def _features_rglru(
+    isize: int, block_width: int, batch: int, length: int
+) -> list[float]:
+    # Size-preserving. Two block-diagonal gates: per position the matmul
+    # cost is 2 * blocks * block_width^2 = 2 * isize * block_width
+    # (block_width = isize / blocks), scaling from isize^2 (blocks=1, a
+    # full gate) down to isize (per-channel, block_width=1). The input
+    # gating + diagonal recurrence are elementwise (the base terms);
+    # NNLS picks the coefficient (absorbs the factor 2). Gates are
+    # hoisted out of the scan, so they carry the length factor.
+    return _features_base(isize, isize, batch, length) + [
+        isize * block_width,
+        isize * block_width * length,
+        isize * block_width * length * batch,
     ]
 
 
@@ -223,6 +241,9 @@ def _layer_component(layer, batch: int, length: int) -> Component:
             layer.input_size, layer.size, batch, length)
     elif isinstance(layer, MsrDef):
         features = _features_msr(layer.input_size, layer.size, batch, length)
+    elif isinstance(layer, RglruDef):
+        features = _features_rglru(
+            layer.input_size, layer.block_width, batch, length)
     elif isinstance(layer, _MATMUL_LAYER_TYPES):
         features = _features_dense(layer.input_size, layer.size, batch, length)
     elif isinstance(layer, NormDef):

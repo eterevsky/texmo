@@ -161,3 +161,26 @@ def test_neighbors_append_rglru():
     specs = [nb.spec for nb in m.neighbors()]
     assert "bytes|dense.8.gelu-rglru.1" in specs  # single full DxD gate
     assert "bytes|dense.8.gelu-rglru.8" in specs  # per-channel gates
+
+
+def test_predictors_handle_rglru():
+    # rglru flows through both predictors: timing gets a dedicated
+    # feature component; loss treats it as a simple type.
+    from texmo.configuration import Configuration
+    from texmo.precision import Precision
+    from texmo.predict import timing
+    from texmo.predict.loss_rnn import _layer_features, _model_layers
+    from texmo.spec_parser import parse_model2
+
+    model = parse_model2("bytes|dense.8.gelu-rglru.2", Precision.FP32)
+    conf = Configuration(model, lr=0.01, length=32, batch=4, steps=1,
+                         decay=1.0)
+    # Timing: an rglru component is produced (no "unknown layer" error).
+    assert any(c.type_id == "rglru" for c in timing.featurize(conf))
+    # Loss: rglru is a simple type (one-hot + log2(num_weights/in/out)).
+    rglru_layer = next(
+        l for l in _model_layers(conf) if l.name == "rglru")
+    feat = _layer_features(rglru_layer, {"rglru": 0}, n_simple=1)
+    assert feat[0] > 0             # log2(num_weights) > 0
+    assert feat[3] == 1.0          # one-hot for the simple type "rglru"
+    assert feat[3 + 1 + 9] == 1.0  # head_block_count = log2(blocks=2)

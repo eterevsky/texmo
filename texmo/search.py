@@ -20,16 +20,25 @@ from .report import format_top_conf_row
 @dataclass
 class SearchResult:
     """A configuration paired with the system it's for and the strategy
-    label that picked it."""
+    label that picked it.
+
+    `covered` / `total` are the coverage-walk progress (top confs covered
+    on this system out of the total the template admits); set only for
+    the `coverage_walk` strategy, None otherwise.
+    """
     conf: Configuration
     strategy: str
     system: str
+    covered: int | None = None
+    total: int | None = None
 
     def to_dict(self) -> dict:
         return {
             "system": self.system,
             "conf": self.conf.to_dict(),
             "strategy": self.strategy,
+            "covered": self.covered,
+            "total": self.total,
         }
 
 
@@ -261,6 +270,11 @@ class Search(object):
         # at 100% on the next select for that system until the gap
         # closes. Reset by the same call when fewer than 2 are found.
         self._coverage_flag: dict[str, bool] = {}
+
+        # Last (covered, total) top-conf counts from `_select_uncovered_top`,
+        # per system. Attached to coverage-walk SearchResults so the
+        # client can log progress.
+        self._coverage_stats: dict[str, tuple[int, int]] = {}
 
     def _select_time(self) -> float:
         tmin, tmax = self.train_time
@@ -562,11 +576,13 @@ class Search(object):
                     selected = capped
 
             sticky = uncovered >= _COVERAGE_STICKY_THRESHOLD
+            covered = len(top) - uncovered
             logging.info(
-                f'Coverage walk {system}: {uncovered}/{len(top)} '
-                f'top confs uncovered, sticky={sticky}'
+                f'Coverage walk {system}: {covered}/{len(top)} '
+                f'top confs covered, sticky={sticky}'
             )
             self._coverage_flag[system] = sticky
+            self._coverage_stats[system] = (covered, len(top))
             return selected
 
     def _select_predicted_best(
@@ -703,9 +719,10 @@ class Search(object):
 
     def _result(
         self, conf: Configuration, strategy: str, system: str,
+        covered: int | None = None, total: int | None = None,
     ) -> SearchResult:
         logging.info(f'Conf for {system}: {conf} ({strategy})')
-        return SearchResult(conf, strategy, system)
+        return SearchResult(conf, strategy, system, covered, total)
 
     def _select_default(self, system: str) -> Optional[Configuration]:
         """Return init_conf, unless it no longer matches the current
@@ -784,7 +801,10 @@ class Search(object):
             ):
                 conf = self._select_uncovered_top(system)
                 if conf is not None:
-                    return self._result(conf, 'coverage_walk', system)
+                    covered, total = self._coverage_stats.get(
+                        system, (None, None))
+                    return self._result(
+                        conf, 'coverage_walk', system, covered, total)
 
             t = self._select_time()
             max_weights = self._select_max_weights(t, system)

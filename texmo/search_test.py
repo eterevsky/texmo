@@ -139,6 +139,8 @@ def test_select_uncovered_top_one_uncovered_no_flag(tmp_path):
     assert result == conf
     # Only one uncovered conf — flag stays False.
     assert search._coverage_flag.get('b', False) is False
+    # Stats recorded for the client log: 0 covered of 1 total.
+    assert search._coverage_stats['b'] == (0, 1)
 
 
 def test_select_uncovered_top_below_threshold_no_flag(tmp_path):
@@ -356,8 +358,11 @@ def test_select_conf_holds_coverage_walk_until_timing_ready(
     from .predict.timing import Weights
     search = _make_search(tmp_path)
     sentinel = _make_conf(spec="bytes|dense.16.gelu")
-    monkeypatch.setattr(
-        search, '_select_uncovered_top', lambda system: sentinel)
+
+    def fake_uncovered(system):
+        search._coverage_stats[system] = (3, 10)
+        return sentinel
+    monkeypatch.setattr(search, '_select_uncovered_top', fake_uncovered)
     # Sticky so the walk would fire unconditionally if not gated.
     search._coverage_flag['sys'] = True
 
@@ -372,6 +377,10 @@ def test_select_conf_holds_coverage_walk_until_timing_ready(
     res = search.select_conf('sys')
     assert res is not None and res.strategy == 'coverage_walk'
     assert res.conf == sentinel
+    # Coverage progress is attached for the client log.
+    assert res.covered == 3 and res.total == 10
+    d = res.to_dict()
+    assert d['covered'] == 3 and d['total'] == 10
 
 
 def test_run_limit_sequences():

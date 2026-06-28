@@ -132,9 +132,14 @@ def worker_loop(
                 continue
             delay = 1.0
 
-            logging.info(f'Got configuration in {ttoa3(t.value())}')
-            conf = Configuration.from_dict(d["conf"])
             strategy = d.get("strategy")
+            covered, total = d.get("covered"), d.get("total")
+            meta = f'strategy={strategy}'
+            if covered is not None and total is not None:
+                meta += f', coverage={covered}/{total}'
+            logging.info(
+                f'Got configuration in {ttoa3(t.value())} ({meta})')
+            conf = Configuration.from_dict(d["conf"])
 
             manager = create_manager(
                 backend, conf=conf, system=system, dataset=dataset, verbose=False)

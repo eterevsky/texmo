@@ -3,19 +3,24 @@
 The same per-step compute (jitted loss + grad + optimizer update) is
 driven from three different data sources, to isolate where time goes:
 
-  disk  -- sample from the memory-mapped file each step (real pipeline).
-  host  -- read a chunk of the file into a host (CPU RAM) buffer once,
-           then sample + copy host->device each step. Removes disk I/O,
-           keeps the host->device (PCIe) transfer.
-  gpu   -- load the chunk onto the GPU once and sample on-device each
-           step. Removes disk I/O AND the per-step PCIe transfer; this
-           is the pure-compute floor.
+  mmap    -- sample from the memory-mapped file each step (the legacy
+             read path: ~128 KB of readahead per random ~400 B sample).
+  pread   -- sample via os.pread (lseek+read fallback on Windows),
+             reading only the bytes asked for -- no readahead blowup.
+  ram     -- read a chunk of the file into a host (CPU RAM) buffer once,
+             then sample + copy host->device each step. No disk I/O;
+             keeps the host->device (PCIe) transfer.
+  gpu     -- load the chunk onto the GPU once and gather random rows
+             on-device each step. No disk I/O, no per-step PCIe transfer.
+  gpu-seq -- like gpu but each batch is one contiguous slab (sequential
+             walk, no random scatter) -- the cache-friendly floor.
 
 Reading the result:
-  - disk >> host  => disk I/O dominates (e.g. mmap readahead).
-  - host >> gpu   => host->device transfer dominates (PCIe / a riser
-                     degrading the link).
-  - all three ~=  => compute / driver / config is the bottleneck.
+  - mmap >> pread   => mmap readahead amplification (pread fixes it).
+  - pread >> ram    => disk I/O still dominates (slow / uncached storage).
+  - ram  >> gpu     => host->device transfer dominates (PCIe / a riser).
+  - gpu  >> gpu-seq => the random-scatter gather dominates (cache / bw).
+  - all roughly =   => compute / driver / config is the bottleneck.
 """
 import argparse
 import math
@@ -102,7 +107,7 @@ def make_disk_sampler(dataset: DataSet, ntokens: int, batch: int):
     return sample
 
 
-def make_host_sampler(buf: np.ndarray, ntokens: int, batch: int):
+def make_ram_sampler(buf: np.ndarray, ntokens: int, batch: int):
     n = buf.shape[0]
     cols = np.arange(ntokens)
 
@@ -134,6 +139,29 @@ def make_gpu_sampler(buf: np.ndarray, ntokens: int, batch: int):
     return sample
 
 
+def make_gpuseq_sampler(buf: np.ndarray, ntokens: int, batch: int):
+    # Like the gpu sampler but each batch is one *contiguous* slab of
+    # batch*ntokens bytes (walking the buffer sequentially), instead of
+    # `batch` random rows. Maximally cache / prefetch friendly -- isolates
+    # how much of the gpu-mode cost is the random-scatter gather.
+    buf_dev = jax.device_put(jnp.asarray(buf, dtype=jnp.uint8))
+    n = int(buf_dev.shape[0])
+    span = batch * ntokens
+
+    @jax.jit
+    def _sample(buf_dev, start):
+        block = jax.lax.dynamic_slice(buf_dev, (start,), (span,))
+        return block.reshape(batch, ntokens).astype(jnp.int32)
+
+    state = {'pos': 0}
+
+    def sample():
+        start = state['pos']
+        state['pos'] = (start + span) % max(1, n - span)
+        return _sample(buf_dev, np.int32(start))
+    return sample
+
+
 def run_mode(name, sample, loss_grad, optimizer, rng_key, steps):
     """Warm up once (compile + first dispatch), then time `steps`."""
     weights = init_weights(rng_key)
@@ -154,7 +182,7 @@ def run_mode(name, sample, loss_grad, optimizer, rng_key, steps):
     jax.block_until_ready(weights)          # flush async dispatch
     elapsed = perf_counter() - start
     ms = elapsed / steps * 1000
-    print(f'{name:5s}  {elapsed:7.2f}s  ({ms:6.1f} ms/step)  '
+    print(f'{name:7s}  {elapsed:7.2f}s  ({ms:6.1f} ms/step)  '
           f'last_loss={float(last_loss):.4f}')
     return name, elapsed, ms
 
@@ -167,12 +195,12 @@ def main():
                         help='number of timed training steps per mode')
     parser.add_argument('--lr', type=float, default=1/128,
                         help='learning rate (default: 1/128)')
-    parser.add_argument('--mode', choices=('disk', 'host', 'gpu', 'all'),
-                        default='all', help='data-delivery mode(s) to run')
+    parser.add_argument(
+        '--mode',
+        choices=('mmap', 'pread', 'ram', 'gpu', 'gpu-seq', 'all'),
+        default='all', help='data-delivery mode(s) to run')
     parser.add_argument('--mem-gb', type=float, default=1.0,
-                        help='chunk size (GiB) for the host and gpu modes')
-    parser.add_argument('--read-mode', choices=('mmap', 'pread'),
-                        default='mmap', help='disk-mode read path')
+                        help='chunk size (GiB) for the ram/gpu modes')
     parser.add_argument('--batch', type=int, default=256)
     parser.add_argument('--ntokens', type=int, default=256)
     args = parser.parse_args()
@@ -180,7 +208,8 @@ def main():
     print(f'Backend: {jax.default_backend()}')
     print(f'Devices: {jax.devices()}')
 
-    modes = ('disk', 'host', 'gpu') if args.mode == 'all' else (args.mode,)
+    modes = (('mmap', 'pread', 'ram', 'gpu', 'gpu-seq')
+             if args.mode == 'all' else (args.mode,))
     max_bytes = int(args.mem_gb * 2**30)
 
     pipeline = build_gru()
@@ -201,19 +230,24 @@ def main():
     rng_key = jax.random.PRNGKey(0)
 
     # Build the samplers each mode needs (load the host buffer once and
-    # share it between host and gpu modes).
+    # share it across the ram / gpu / gpu-seq modes).
     host_buf = None
-    if 'host' in modes or 'gpu' in modes:
+    if any(m in modes for m in ('ram', 'gpu', 'gpu-seq')):
         host_buf = _load_host_buffer(args.data, max_bytes)
 
     samplers = {}
-    if 'disk' in modes:
-        ds = DataSet(path=args.data, read_mode=args.read_mode)
-        samplers['disk'] = make_disk_sampler(ds, args.ntokens, args.batch)
-    if 'host' in modes:
-        samplers['host'] = make_host_sampler(host_buf, args.ntokens, args.batch)
+    for read_mode in ('mmap', 'pread'):
+        if read_mode in modes:
+            ds = DataSet(path=args.data, read_mode=read_mode)
+            samplers[read_mode] = make_disk_sampler(
+                ds, args.ntokens, args.batch)
+    if 'ram' in modes:
+        samplers['ram'] = make_ram_sampler(host_buf, args.ntokens, args.batch)
     if 'gpu' in modes:
         samplers['gpu'] = make_gpu_sampler(host_buf, args.ntokens, args.batch)
+    if 'gpu-seq' in modes:
+        samplers['gpu-seq'] = make_gpuseq_sampler(
+            host_buf, args.ntokens, args.batch)
 
     print(f'\nGRU.256  batch={args.batch} ntokens={args.ntokens}  '
           f'{args.steps} steps/mode\n')
@@ -227,7 +261,7 @@ def main():
         floor = min(ms for _, _, ms in results)
         print('\nsummary (ms/step, x over fastest):')
         for name, _, ms in results:
-            print(f'  {name:5s}  {ms:6.1f}  ({ms / floor:.2f}x)')
+            print(f'  {name:7s}  {ms:6.1f}  ({ms / floor:.2f}x)')
 
 
 if __name__ == '__main__':

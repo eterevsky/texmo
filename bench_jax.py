@@ -32,7 +32,7 @@ import jax
 import jax.numpy as jnp
 import optax
 
-from texmo.dataset import DataSet
+from texmo.dataset import DataSet, DataSetWrapper
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
 
@@ -99,9 +99,12 @@ def _load_host_buffer(path: str, max_bytes: int) -> np.ndarray:
     return buf
 
 
-def make_disk_sampler(dataset: DataSet, ntokens: int, batch: int):
+def make_disk_sampler(source, ntokens: int, batch: int):
+    # `source` is a DataSet (single-threaded) or a DataSetWrapper
+    # (multi-worker prefetch, the path the real client uses); both
+    # expose the same sample_tokens().
     def sample():
-        data = dataset.sample_tokens(
+        data = source.sample_tokens(
             ntokens=ntokens, batch=batch, tokenset_name='bytes')
         return np.asarray(data, dtype=np.int32)
     return sample
@@ -201,6 +204,10 @@ def main():
         default='all', help='data-delivery mode(s) to run')
     parser.add_argument('--mem-gb', type=float, default=1.0,
                         help='chunk size (GiB) for the ram/gpu modes')
+    parser.add_argument('--sample-threads', type=int, default=1,
+                        help='worker threads for the mmap/pread modes via '
+                             'DataSetWrapper (the real client uses 4; '
+                             'default 1 = single-threaded)')
     parser.add_argument('--batch', type=int, default=256)
     parser.add_argument('--ntokens', type=int, default=256)
     args = parser.parse_args()
@@ -236,11 +243,17 @@ def main():
         host_buf = _load_host_buffer(args.data, max_bytes)
 
     samplers = {}
+    wrappers = []
     for read_mode in ('mmap', 'pread'):
         if read_mode in modes:
             ds = DataSet(path=args.data, read_mode=read_mode)
+            if args.sample_threads > 1:
+                source = DataSetWrapper(ds, num_workers=args.sample_threads)
+                wrappers.append(source)
+            else:
+                source = ds
             samplers[read_mode] = make_disk_sampler(
-                ds, args.ntokens, args.batch)
+                source, args.ntokens, args.batch)
     if 'ram' in modes:
         samplers['ram'] = make_ram_sampler(host_buf, args.ntokens, args.batch)
     if 'gpu' in modes:
@@ -262,6 +275,9 @@ def main():
         print('\nsummary (ms/step, x over fastest):')
         for name, _, ms in results:
             print(f'  {name:7s}  {ms:6.1f}  ({ms / floor:.2f}x)')
+
+    for w in wrappers:
+        w.join()
 
 
 if __name__ == '__main__':

@@ -11,6 +11,13 @@ from .dataset import DataSetWrapper
 from .latency import timer
 from .manager import create_manager
 
+# (connect, read) timeouts for server requests. Without these a hung
+# connection (or a wedged server) blocks the client forever; with them
+# the request raises requests.Timeout, which the retry/backoff paths
+# already handle. The read budget is generous because select_conf can
+# legitimately take tens of seconds on a busy server.
+_HTTP_TIMEOUT = (10, 120)
+
 
 def retry(callable, min_delay=1, exp=1.5, max_delay=120):
     delay = min_delay
@@ -79,6 +86,7 @@ def post_result(session, add_url: str, system, run, conf, strategy):
             lambda: session.post(
                 add_url,
                 json=result,
+                timeout=_HTTP_TIMEOUT,
             )
         )
     except TypeError as e:
@@ -114,7 +122,9 @@ def worker_loop(
     while True:
         try:
             with timer("client.get(select)") as t:
-                r = s.get(select_url, params={"system": system})
+                r = s.get(
+                    select_url, params={"system": system},
+                    timeout=_HTTP_TIMEOUT)
         except requests.exceptions.RequestException as e:
             logging.warning(f'Request failed: {e}, retrying in {ttoa3(delay)}')
             time.sleep(delay)

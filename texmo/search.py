@@ -886,7 +886,18 @@ class SearchThread(threading.Thread):
                 m = self.requests_queue.get()
                 match m:
                     case Select(system=system):
-                        result = self.search.select_conf(system)
+                        # A failure in select_conf must not kill the
+                        # thread -- if it did, every client's /select
+                        # would block forever on the response queue.
+                        # Log it, hand back None (the client sleeps and
+                        # retries), and keep serving.
+                        try:
+                            result = self.search.select_conf(system)
+                        except Exception:
+                            logging.exception(
+                                f"select_conf failed for {system!r}; "
+                                f"returning no conf")
+                            result = None
                         with self.confs_by_system_lock:
                             self.confs_by_system[system].put(result)
                     case SetTemplate(

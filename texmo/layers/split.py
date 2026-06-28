@@ -21,10 +21,21 @@ import jax.numpy as jnp
 
 from ..layer import LayerDef, LayerState
 from ..layer_jax import LayerJax, LayerWeights
+from .dense import DenseDef
 from .seq import LayerSeqDef, LayerSeqJax
 
 
 _VALID_OPS = ('mul', 'add', 'cat')
+
+
+def _ends_in_bare_dense(branch: LayerSeqDef) -> bool:
+    """True if the branch's last layer is a plain dense (no activation)
+    -- the linear value/gate path of a gated unit."""
+    return (
+        bool(branch.layers)
+        and isinstance(branch.layers[-1], DenseDef)
+        and branch.layers[-1]._activation is None
+    )
 
 
 # -- Pairwise merge primitives. Element-wise on the overlap; the
@@ -266,13 +277,26 @@ class SplitDef(LayerDef):
             # there was disallowed.
             if b.layers and b.layers[-1].length > 1:
                 return False
-        # mul is an elementwise gate, so its branches must share an
-        # output size (the gate path is slaved to the main path; a
-        # `pass` gate means self-gating, valid only when the main path
-        # preserves the input dim). add/cat broadcast/concat and so
-        # accept differing branch sizes.
-        if self.op == "mul" and len({b.size for b in self.branches}) != 1:
-            return False
+        # pass-position canonical form (this also rules out the all-pass
+        # degenerate splits, where the disallowed slot is empty):
+        #   add/cat -- transform first, identity (pass) second;
+        #   mul     -- value first, gate second (gate is never pass).
+        if self.op in ("add", "cat"):
+            if not self.branches[0].layers:
+                return False
+        elif self.op == "mul":
+            if not self.branches[1].layers:
+                return False
+            # Elementwise gate -> branches share an output size.
+            if len({b.size for b in self.branches}) != 1:
+                return False
+            # Dedup the commutative GeGLU pair: a bare-dense value path
+            # (first) is only allowed for the symmetric bilinear case
+            # (gate also bare dense); otherwise the activated path goes
+            # first, e.g. mul(dense.X.gelu, dense.X) not its swap.
+            if (_ends_in_bare_dense(self.branches[0])
+                    and not _ends_in_bare_dense(self.branches[1])):
+                return False
         return True
 
     def build_jax(self, dtype) -> SplitJax:

@@ -470,6 +470,29 @@ def test_bare_dense_top_level_invalid():
     assert not md.is_valid()
 
 
+@pytest.mark.parametrize("spec, valid", [
+    # add/cat canonical: transform first, identity (pass) second.
+    ("bits.1+bp|split.add(dense.4.gelu, pass)", True),
+    ("bits.1+bp|split.add(pass, dense.4.gelu)", False),
+    ("bits.1+bp|split.cat(dense.4.gelu, pass)", True),
+    ("bits.1+bp|split.cat(pass, dense.4.gelu)", False),
+    # mul canonical: value first, gate second; the gate is never pass.
+    ("bits.1+bp|split.mul(pass, dense.4)", True),
+    ("bits.1+bp|split.mul(dense.4, pass)", False),
+    # all-pass degenerate splits are rejected for every op.
+    ("bits.1+bp|split.add(pass, pass)", False),
+    ("bits.1+bp|split.cat(pass, pass)", False),
+    ("bits.1+bp|split.mul(pass, pass)", False),
+    # mul bilinear dedup: activated value goes first (GeGLU), its swap
+    # is rejected, and the symmetric both-bare bilinear is allowed.
+    ("bits.1+bp|split.mul(dense.4.gelu, dense.4)", True),
+    ("bits.1+bp|split.mul(dense.4, dense.4.gelu)", False),
+    ("bits.1+bp|split.mul(dense.4, dense.4)", True),
+])
+def test_split_pass_position_and_bilinear_rules(spec, valid):
+    assert parse_model2(spec, Precision.FP32).is_valid() is valid
+
+
 # --- neighbor generation ---------------------------------------------
 
 
@@ -564,8 +587,8 @@ def test_neighbor_mul_gate_activation_and_self_gate():
     # gate activation toggle on the second path
     assert any(
         "split.mul(dense.4.gelu, dense.4.gelu)" in s for s in specs)
-    # self-gate: gate collapses to `pass` (main size == input size 4)
-    assert any("split.mul(dense.4.gelu, pass)" in s for s in specs)
+    # self-gate: pass is the value (first); the gate slot is never pass
+    assert any("split.mul(pass, dense.4.gelu)" in s for s in specs)
 
 
 def test_neighbor_grows_split_span():

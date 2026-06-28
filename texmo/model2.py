@@ -211,7 +211,9 @@ def _split_variants(split: SplitDef) -> Iterable[str]:
         for act in _GATE_ACTS:
             gate = f"dense.{main.size}" + (f".{act}" if act else "")
             yield _split_str("mul", [main_strs, [gate]])
-        yield _split_str("mul", [main_strs, []])  # `pass` -> self-gate
+        # self-gate: pass is the value (first); the gate slot (second)
+        # is never pass under the canonical form.
+        yield _split_str("mul", [[], main_strs])
         # Mutate the main path only; the gate stays fixed. A mutation
         # that changes the main's output size yields an unequal-size
         # mul that is_valid rejects, so a single-step coupled resize

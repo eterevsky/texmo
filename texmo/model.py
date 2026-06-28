@@ -23,6 +23,7 @@ from .layers.norm import NormDef
 from .layers.rnn import RnnDef
 from .layers.skip import SkipDef, SkipModule
 from .layers.conv import ConvDef
+from .layers.rglru import RglruDef
 from .layers.suffix import SuffixDef
 from .model_jax import ModelJax
 from .precision import Precision
@@ -779,6 +780,9 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
     if name == "conv":
         kernel = int(parts[1])
         return ConvDef(kernel, input_size=input_size)
+
+    if name == "rglru":
+        return RglruDef(int(parts[1]), input_size=input_size)
 
     if name == "skip":
         distance = int(parts[1])

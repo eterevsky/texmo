@@ -1,6 +1,7 @@
 GRU.256
 
-PyTorch + Widows + CUDA  12.37s (48.5 ms/step)
+PyTorch + Windows + 5090 CUDA  11.07s (43.4 ms/step)
+PyTorch + Windows + CUDA  12.37s (48.5 ms/step)
 JAX + WSL + CUDA  27.95s (140.5 ms/step)
 PyTorch + Mac Mini  45.42s (178.1 ms/step)
 JAX + Mac Mini + CPU  101.92s (512.2 ms/step)

@@ -293,14 +293,42 @@ def test_translate_skip_at_end_merges_into_output():
     assert len(layers[1].branches[0].layers) == 2
 
 
-def test_translate_overlapping_skips_rejected():
-    """Overlapping spans can't be a tree. The parser raises
-    ValueError so the caller can decide what to do."""
-    with pytest.raises(ValueError, match="overlapping"):
+def test_translate_crossing_skips_rejected():
+    """Crossing spans (partial overlap, neither contains the other)
+    can't be a tree. The parser raises ValueError so the caller can
+    decide what to do. Here skip.3@0 spans [0,4) and skip.3@2 spans
+    [2,6): they cross."""
+    with pytest.raises(ValueError, match="crossing"):
         parse_layer_list(
             "skip.3.add-dense.4.gelu-skip.3.add"
             "-dense.4.gelu-dense.4.gelu-dense.4.gelu-dense.4.gelu",
             input_size=4)
+
+
+def test_translate_nested_skips():
+    """A skip fully inside another skip's span (laminar) becomes a
+    nested split. skip.3@0 spans [0,4); skip.1@2 spans [2,4) -- the
+    latter nests inside the former's main branch."""
+    from texmo.layers.skip import SkipDef
+    from texmo.layers.split import SplitDef
+    layers = parse_layer_list(
+        "skip.3.add-dense.4.gelu-skip.1.add"
+        "-dense.4.gelu-dense.4.gelu",
+        input_size=4)
+    # Outer skip fuses positions 0..3 into one split; trailing dense
+    # passes through -> 2 layers, no SkipDef survives anywhere.
+    assert len(layers) == 2
+    outer = layers[0]
+    assert isinstance(outer, SplitDef) and outer.op == 'add'
+    assert outer.branches[1].layers == []
+    # Main branch holds [dense, inner_split].
+    main = outer.branches[0].layers
+    assert len(main) == 2
+    inner = main[1]
+    assert isinstance(inner, SplitDef) and inner.op == 'add'
+    assert len(inner.branches[0].layers) == 1
+    assert inner.branches[1].layers == []
+    assert not any(isinstance(l, SkipDef) for l in main)
 
 
 def test_translate_overshoot_skip_rejected():

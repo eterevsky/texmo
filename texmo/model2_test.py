@@ -114,11 +114,18 @@ def test_skip_translated_weight_count_matches_modeldef():
     "bytes|dense.16.gelu-skip.3.add"
     "-dense.16.gelu-dense.16.gelu-dense.16.gelu-dense.16.gelu",
     "bytes|skip.1.cat-dense.16.gelu-dense.16.gelu",
+    # Nested (laminar) skips: skip.3@1 spans [1,5), skip.1@3 spans
+    # [3,5) -- inner nests in the outer's main branch.
+    "bytes|dense.16.gelu-skip.3.add-dense.16.gelu-skip.1.add"
+    "-dense.16.gelu-dense.16.gelu",
+    "bytes|skip.3.add-dense.16.gelu-skip.1.cat"
+    "-dense.16.gelu-dense.16.gelu",
 ])
 def test_num_layers_matches_modeldef(spec):
-    """For any non-overlapping skip spec, the recursive count on
-    Model2 matches the flat count on ModelDef -- the property is
-    construction-invariant under skip-to-split translation."""
+    """For any laminar skip spec (non-overlapping or nested), the
+    recursive count on Model2 matches the flat count on ModelDef --
+    the property is construction-invariant under skip-to-split
+    translation."""
     m1 = ModelDef(spec, Precision.FP32)
     m2 = parse_model2(spec, Precision.FP32)
     assert m1.num_layers == m2.num_layers

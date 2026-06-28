@@ -91,49 +91,66 @@ def _parse_input(input_spec: str, precision: Precision):
 def _translate_skips(
     layers: list[LayerDef],
 ) -> list[LayerDef]:
-    """Rewrite SkipDef pseudo-layers as SplitDefs.
+    """Rewrite SkipDef pseudo-layers as SplitDefs, recursively.
 
     Each `skip.D.op` at position `i` spans the next D layers
     (positions i+1 ... i+D) and merges the source (input at
     position i) with the output of layer i+D via `op`. The
     equivalent split is:
 
-        layers[i] = split.op(layers[i+1]-...-layers[i+D], pass)
+        layers[i] = split.op(
+            translate(layers[i+1]-...-layers[i+D]), pass)
 
     and the consumed positions i+1 ... i+D are dropped from the
-    rewritten list. The merge target (layer i+D+1) consumes the
-    split's output directly -- its input_size already accounts for
-    the merged shape because the original parser set it that way.
+    rewritten list. The main branch is translated recursively, so a
+    skip nested inside another skip's span becomes a nested split.
+    The merge target (layer i+D+1) consumes the split's output
+    directly -- its input_size already accounts for the merged shape
+    because the original parser set it that way.
 
     Two failure modes:
-      - Overlapping skip spans (can't be a tree). ValueError.
+      - Crossing skip spans: a partial overlap where neither span
+        contains the other. Can't be expressed as a tree. ValueError.
       - Span overshoots the end of the layer list. ValueError.
+
+    Nested (laminar) spans are fine -- they form a forest and
+    translate into nested splits.
     """
     if not any(isinstance(l, SkipDef) for l in layers):
         return layers
 
+    n = len(layers)
     skips: list[tuple[int, int, str]] = [
         (i, layer.distance, layer.op)
         for i, layer in enumerate(layers)
         if isinstance(layer, SkipDef)
     ]
-    # Overlap check: a skip at i with distance D claims positions
-    # [i, i+D+1). Sort by start; adjacent claims may touch but not
-    # overlap (e.g. one ends exactly where the next begins).
-    spans = sorted((i, i + d + 1) for i, d, _ in skips)
-    for (lo1, hi1), (lo2, hi2) in zip(spans, spans[1:]):
-        if hi1 > lo2:
-            raise ValueError(
-                f"overlapping skip spans can't be expressed as a "
-                f"tree: [{lo1}, {hi1}) overlaps [{lo2}, {hi2})")
-    # Overshoot check.
-    n = len(layers)
+    # Overshoot check: a skip at i with distance D claims positions
+    # [i, i+D+1); that range must fit within the list.
     for i, d, _ in skips:
         if i + d + 1 > n:
             raise ValueError(
                 f"skip at position {i} (distance {d}) overshoots "
                 f"the layer list of length {n}")
 
+    # Laminar check: sorted by start, any two spans must be disjoint
+    # or nested, never crossing (partial overlap). Nested skips become
+    # nested splits via the recursion below; crossing ones can't be a
+    # tree.
+    spans = sorted((i, i + d + 1) for i, d, _ in skips)
+    for a, (lo1, hi1) in enumerate(spans):
+        for lo2, hi2 in spans[a + 1:]:
+            if lo2 >= hi1:
+                break  # disjoint -- and so are all later spans
+            if hi2 > hi1:
+                raise ValueError(
+                    f"crossing skip spans can't be expressed as a "
+                    f"tree: [{lo1}, {hi1}) crosses [{lo2}, {hi2})")
+
+    # Walk the list. The walk only lands on outermost skips: a nested
+    # skip lives inside some outer skip's [i+1, i+D+1) range, which is
+    # consumed -- and recursively translated -- when the outer skip is
+    # reached.
     skip_at = {i: (d, op) for i, d, op in skips}
     out: list[LayerDef] = []
     pos = 0
@@ -142,7 +159,7 @@ def _translate_skips(
             d, op = skip_at[pos]
             source_size = layers[pos].input_size
             main_seq = LayerSeqDef(
-                list(layers[pos + 1: pos + d + 1]),
+                _translate_skips(list(layers[pos + 1: pos + d + 1])),
                 input_size=source_size,
             )
             side_seq = LayerSeqDef([], input_size=source_size)

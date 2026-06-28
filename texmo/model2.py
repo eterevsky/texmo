@@ -339,3 +339,19 @@ def _seq_variants(
         if len(main_strs) >= 2:
             shrunk = _split_str(layer.op, [main_strs[:-1]] + others)
             yield strs[:i] + [shrunk, main_strs[-1]] + strs[i + 1:]
+
+    # 14. Append a self-gate on the running activation:
+    #     split.mul(pass, dense.{size}[.act]). Value path is the
+    #     identity (pass), gate is a learned dense of the matching size;
+    #     the activations cover the GLU family. Unlike the wrap-a-layer
+    #     gate (sec. 11) this can fire on the empty chain. Its inverse
+    #     -- dropping a trailing self-gate -- is the section-12 unwrap
+    #     (a mul whose main branch is pass unwraps to empty).
+    #     Caveat: the gate must match the activation width, so for
+    #     non-power-of-2 inputs (bits.2.oh+bp=6, bits.4.oh+bp=17) the
+    #     size-matched gate dense is rejected by the power-of-2 rule and
+    #     this is filtered from the empty chain -- it's still reachable
+    #     after any real (power-of-2) layer. Fine for bits.1+bp / bytes.
+    for act in _GATE_ACTS:
+        gate = f"dense.{last_output}" + (f".{act}" if act else "")
+        yield strs + [_split_str("mul", [[], [gate]])]

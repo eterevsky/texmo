@@ -591,6 +591,22 @@ def test_neighbor_mul_gate_activation_and_self_gate():
     assert any("split.mul(pass, dense.4.gelu)" in s for s in specs)
 
 
+def test_neighbor_append_self_gate():
+    """split.mul(pass, dense.X.act) is appendable on the running
+    activation -- reachable from the empty chain across the GLU
+    activations -- and the unwrap removes it (the inverse)."""
+    empty = _arch_neighbor_specs(parse_model2("bits.1+bp|", Precision.FP32))
+    for g in ("dense.4", "dense.4.gelu", "dense.4.relu", "dense.4.tanh"):
+        assert f"bits.1+bp|split.mul(pass, {g})" in empty
+    chain = _arch_neighbor_specs(
+        parse_model2("bits.1+bp|dense.4.gelu", Precision.FP32))
+    assert "bits.1+bp|dense.4.gelu-split.mul(pass, dense.4)" in chain
+    # inverse: unwrapping a trailing self-gate drops it.
+    gated = _arch_neighbor_specs(parse_model2(
+        "bits.1+bp|dense.4.gelu-split.mul(pass, dense.4)", Precision.FP32))
+    assert "bits.1+bp|dense.4.gelu" in gated
+
+
 def test_neighbor_grows_split_span():
     """The skip distance+1 analog: a split consumes the following
     layer into its main branch."""

@@ -119,6 +119,30 @@ def test_parse_roundtrip():
     assert str(layer_def) == "rglru.2"
 
 
+def test_neighbors_blocks_and_swaps():
+    # rglru.1: blocks x2, plus the size-preserving swaps to mgru/mingru.
+    nb = list(RglruDef(1, input_size=8).neighbors())
+    assert "rglru.2" in nb
+    assert "mgru.8" in nb
+    assert "mingru.8" in nb
+    # rglru.2 mutates blocks (down/up) but does NOT swap (not 1-block).
+    nb2 = list(RglruDef(2, input_size=8).neighbors())
+    assert "rglru.1" in nb2 and "rglru.4" in nb2
+    assert not any(s.startswith(("mgru", "mingru")) for s in nb2)
+
+
+def test_mgru_mingru_swap_to_rglru_when_size_preserving():
+    from texmo.layers.gru import GruDef, MgruDef, MinGruDef
+    # Size-preserving (size == input) -> swap to rglru.1.
+    assert "rglru.1" in list(MgruDef(8, input_size=8).neighbors())
+    assert "rglru.1" in list(MinGruDef(8, input_size=8).neighbors())
+    # Not size-preserving -> no rglru swap.
+    assert "rglru.1" not in list(MgruDef(8, input_size=16).neighbors())
+    assert "rglru.1" not in list(MinGruDef(8, input_size=16).neighbors())
+    # gru does not swap to rglru (only mgru / mingru).
+    assert "rglru.1" not in list(GruDef(8, input_size=8).neighbors())
+
+
 def test_model2_build():
     # rglru is reachable through the Model2 path (parse_model2 uses the
     # same _build_layer_def factory).
@@ -127,3 +151,13 @@ def test_model2_build():
     m = parse_model2("bytes|dense.8.gelu-rglru.2", Precision.FP32)
     assert "rglru" in [l.name for l in m.layer_seq.layers]
     m.build_jax()  # constructs without error
+
+
+def test_neighbors_append_rglru():
+    # The search can append both block extremes of rglru at the end.
+    from texmo.precision import Precision
+    from texmo.spec_parser import parse_model2
+    m = parse_model2("bytes|dense.8.gelu", Precision.FP32)
+    specs = [nb.spec for nb in m.neighbors()]
+    assert "bytes|dense.8.gelu-rglru.1" in specs  # single full DxD gate
+    assert "bytes|dense.8.gelu-rglru.8" in specs  # per-channel gates

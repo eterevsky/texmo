@@ -162,6 +162,20 @@ class LayerDef(object):
                 yield f"mgru.{self.dim}"
             return
 
+        if self.name == "rglru":
+            # The only metaparameter is the block count (power of 2);
+            # is_valid filters candidates that don't divide the width.
+            for b in power2_neighbors(self.blocks):
+                yield f"rglru.{b}"
+            # Size-preserving swap with the minimal input-gated cells, at
+            # the canonical single-block form: rglru.1 <-> mgru.X /
+            # mingru.X (which preserve size when X == input). rglru.size
+            # == input_size by construction, so the targets are size-safe.
+            if self.blocks == 1:
+                yield f"mgru.{self.size}"
+                yield f"mingru.{self.size}"
+            return
+
         # Size mutations (keep same layer type and activation)
         _LSTM_FAMILY = ("lstm", "matlstm", "slstm", "mullstm")
         if self.name in ("dense", "rnn"):
@@ -206,6 +220,12 @@ class LayerDef(object):
             # to mgru at reps=2). lmgu needs size > 1.
             if self.name == "mgru" and self.size > 1:
                 yield f"lmgu.{self.size}.2"
+            # mgru.X / mingru.X <-> rglru.1: the RG-LRU is size-preserving,
+            # so the swap is only size-safe when this cell preserves size
+            # (size == input). Lands on the canonical single-block form.
+            if (self.name in ("mgru", "mingru")
+                    and self.size == self.input_size):
+                yield "rglru.1"
         elif self.name in _LSTM_FAMILY:
             # All-to-all within the LSTM family (lstm/matlstm/slstm/
             # mullstm). matlstm has size >= 2 constraint; skip the

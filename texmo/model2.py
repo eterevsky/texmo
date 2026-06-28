@@ -251,6 +251,14 @@ def _seq_variants(
             yield strs + [f"{name}.{new_size}.{act}"]
     for name in _APPEND_RECURRENT:
         yield strs + [f"{name}.{new_size}"]
+    # rglru is size-preserving (no size arg). Append both block extremes
+    # as candidates: rglru.1 (a single full DxD gate) and rglru.{width}
+    # (blocks == width, i.e. per-channel scalar gates, block_width 1).
+    # Both are valid for the power-of-2 widths the search uses, and
+    # reachable here directly rather than only via the mgru/mingru swap.
+    yield strs + ["rglru.1"]
+    if last_output > 1:
+        yield strs + [f"rglru.{last_output}"]
     if new_size >= 2:
         yield strs + [f"matlstm.{new_size}"]
         yield strs + [f"msr.{new_size}.1"]

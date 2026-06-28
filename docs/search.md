@@ -132,20 +132,29 @@ Two layers:
 - **`LayerDef.neighbors()`** — size/length 2x mutations and type swaps
   between related layer types (dense↔rnn, rnn↔gru/mgru/mingru, etc.). See
   `layer.py:LayerDef.neighbors` for the exact mapping.
-- **`ModelDef.neighbors()`** — precision changes, input-layer mutations,
-  single-layer mutations (via `LayerDef.neighbors`), append/remove last
-  layer, insert/remove suffix.2, insert/remove norm.
+- **`Model2Def.neighbors()`** — precision changes, input-layer mutations,
+  single-layer mutations (via `LayerDef.neighbors`, recursing into split
+  branches), append/remove last layer, insert/remove suffix.2,
+  insert/remove norm, prepend/remove a dense lead-in, and the Split
+  mutations (wrap/unwrap residual and gate Splits, `add↔cat` op-swap,
+  grow/shrink a residual span, append a self-gate). Each mutation is a
+  spec string re-parsed via `parse_model2` and `is_valid`-filtered. See
+  [`split.md`](split.md). (The legacy flat `ModelDef.neighbors` is no
+  longer the search path.)
 
 Neighbors are generated **at runtime** (in-memory). No neighbor table in
 the DB. `DbReader.get_conf_id()` is cached (Configuration → id) so
 neighbor lookups are cheap.
 
-Validity constraints (`ModelDef.is_valid`):
+Validity constraints (`Model2Def.is_valid`, recursing through
+`LayerSeqDef` / `SplitDef`):
 - Input must be valid.
 - No two adjacent "suffix-like" layers (length > 1).
 - Norm can't be the first layer.
 - No two adjacent norms.
 - Norm can't follow a suffix.
+- Split rules: exactly 2 branches, canonical `pass` position, `mul`
+  branches equal-sized, no suffix-terminal branch. See [`split.md`](split.md).
 
 ## Cross-system behavior
 

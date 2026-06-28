@@ -17,14 +17,21 @@ The pipeline is:
 
 The output is always a Dense layer projecting to the token vocabulary.
 
+A layer can also be a `split.op(branch, branch)` **fork-and-merge** node
+(residual connections and gating), so the chain is really a layer-DAG,
+not a straight line — e.g. `bytes|split.add(dense.64.gelu, pass)`. See
+[`split.md`](split.md).
+
 See [`layers.md`](layers.md) for the full list of available layers.
 
 ## Two backends
 
-Every layer has both a PyTorch implementation and a JAX implementation,
+Most layers have both a PyTorch implementation and a JAX implementation,
 selectable via `--backend torch|jax`. Layer definitions (specs, weight
-counts, neighbor rules) are shared. See [`backends.md`](backends.md) for
-the trade-offs between the two.
+counts, neighbor rules) are shared. Some newer pieces are **JAX-only** —
+`split` (and the `Model2Def` layer-DAG that hosts it) plus several xLSTM
+variants (`slstm`, `matlstm`, `mullstm`) — so the architecture search
+runs on JAX. See [`backends.md`](backends.md) for the trade-offs.
 
 ## Key abstractions
 
@@ -55,6 +62,32 @@ Both support two modes:
   layer states.
 
 Factory: `build_model_def(spec, precision)` is cached by `(spec, precision)`.
+
+### Model2Def (`model2.py`) — the search representation
+
+`ModelDef` above is the **legacy flat** representation: a `list[LayerDef]`
+with `skip.D.op` pseudo-layers for residuals, and both a PyTorch and a
+JAX backend. The architecture **search now builds `Model2Def`** instead —
+a recursive **layer-DAG** where the hidden chain is a `LayerSeqDef`
+(a sequence of `LayerDef`s) and a `SplitDef` hosts two `LayerSeqDef`
+branches for fork-and-merge. This subsumes skips (`skip.D.op` →
+`split.op(span, pass)`) and adds gating (`split.mul`). See
+[`split.md`](split.md).
+
+- Constructed only via `spec_parser.parse_model2(spec, precision)`, which
+  owns every string→tree decision (the `|`-split, input dispatch, the
+  recursive layer grammar, and the legacy skip→split rewrite).
+  `Model2Def.__init__` just stores the already-parsed pieces.
+- Mirrors `ModelDef`'s public surface — `spec`, `num_weights`,
+  `num_mults`, `num_layers`, `is_valid`, `neighbors`, equality/hashing —
+  so search, timing, and loss code stay backend-agnostic. `num_layers` is
+  recursive and matches the legacy count for any skip-translated spec.
+- **JAX only**: `build_jax()` → `Model2Jax`; there is no PyTorch
+  `Model2`, and `SplitDef` has no `build_module`.
+
+`ModelDef` is retained for the few non-search call sites (the PyTorch
+FP32 fallback, `cli/time`, num-layers backfill) and is slated for
+retirement once those move over.
 
 ### LayerDef / LayerModule / LayerJax (`layer.py`, `layer_jax.py`)
 

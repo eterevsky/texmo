@@ -15,8 +15,12 @@ Detailed docs live in [`docs/`](docs/):
   abstractions, input encoding, and how the two backends fit together.
 - [`layers.md`](docs/layers.md) — the available layer types, their
   equations, parameter counts, and neighbor relations.
-- [`skip.md`](docs/skip.md) — design reference for residual
-  connections (`skip.X.add` / `skip.X.cat`).
+- [`split.md`](docs/split.md) — design reference for the `split.op(...)`
+  fork-and-merge layer (residual + gate families, validity, skip→split
+  translation, search mutations). The current `Model2` representation.
+- [`skip.md`](docs/skip.md) — **legacy** residual connections
+  (`skip.X.add` / `skip.X.cat`), superseded by `split`; kept for the
+  merge semantics Split inherits.
 - [`timing.md`](docs/timing.md) — training-step time prediction
   model (features, fit, and use).
 - [`loss_prediction.md`](docs/loss_prediction.md) — RNN loss

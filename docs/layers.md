@@ -338,33 +338,47 @@ Neighbor relations:
 - `lmgu.X.2 ↔ mgru.X` (the non-iterating cousin at `reps=2`).
 - 2× mutations on size (clamped to `> 1`) and reps (clamped to `>= 2`).
 
-## Skip (`skip.<X>.<add|cat>`) — residual connections
+## Split (`split.<op>(<branch>, <branch>)`) — fork-and-merge
 
-Pseudo-layer that marks the start of a residual connection spanning
-`X` layers. It takes no weights and doesn't transform activations on
-its own — it's a marker for `Model`/`ModelJax` to save the source
-activation and merge it back `X` layers later.
+The fork-and-merge node: both branches see the same input and their
+outputs are combined channel-wise by `op` ∈ {`add`, `cat`, `mul`}.
+Branches are layer-lists or the keyword `pass` (identity). Splits are
+the recursive successor to the legacy `skip` pseudo-layer, and host both
+residual connections and gating:
 
-- `.add` — elementwise add with soft size matching: the merged output
-  has size `max(skip_src_size, merge_point_size)`. The first
-  `min(skip_src_size, merge_point_size)` channels are summed; the
-  remaining channels from the larger vector pass through unchanged.
-- `.cat` — concatenation; output size is `skip_src_size + merge_point_size`.
+- `split.add(F, pass)` / `split.cat(F, pass)` — residual, the skip
+  analog: `x + F(x)` or `concat(F(x), x)`.
+- `split.mul(value, gate)` — gating (GeGLU / SwiGLU / self-gating):
+  `value(x) ⊙ gate(x)`, e.g. `split.mul(dense.X.gelu, dense.X)` or the
+  self-gate `split.mul(pass, dense.X.gelu)`.
 
-Example: `bytes|skip.2.add-dense.32.tanh-dense.32.tanh-dense.64.gelu`.
-The skip starts after the input (256 dims), skips over two `dense.32`
-layers, and merges before the `dense.64`. At the merge point the main
-path has 32 dims and the source has 256, so with `.add` the merged
-activation is 256 dims (32 summed, 224 appended).
+No learned weights of its own (`num_weights` = sum over branches). JAX
+only (`SplitJax`; no PyTorch module). Example:
 
-See [`skip.md`](skip.md) for the full design: validity rules, search
-mutations, and how merges are handled in `Model`/`ModelJax`.
+    bytes|dense.32.gelu-split.add(dense.32.gelu-dense.32.gelu, pass)-dense.64.tanh
+
+See [`split.md`](split.md) for the full design: merge semantics, the
+residual/gate families, canonical form + validity, skip→split
+translation, and the search mutations.
+
+### Skip (`skip.<X>.<add|cat>`) — legacy residual
+
+`skip.X.add` / `skip.X.cat` is the **legacy** residual marker — a
+pseudo-layer spanning `X` layers, merged at the end (same `.add` /
+`.cat` size semantics Split inherits). The search no longer emits skips
+and the result DB has been migrated to split-form, but skip syntax still
+parses: `spec_parser.parse_model2` translates `skip.D.op-A₁-…-A_D` to
+`split.op(A₁-…-A_D, pass)`, recursively, so nested skips become nested
+splits. See [`skip.md`](skip.md) for the historical design.
 
 ## Neighbor relations (search)
 
 The search walks the architecture space by generating "neighbors" of a
-given layer. Each layer type declares its own neighbors via
-`LayerDef.neighbors()`. Summary:
+model. Each layer type declares its own per-layer neighbors via
+`LayerDef.neighbors()`; the chain- and tree-level mutations (append /
+remove a layer, insert / remove `suffix`·`norm`, wrap / unwrap residual
+and gate Splits) live in `model2.py` — see [`split.md`](split.md).
+Per-layer summary:
 
 - **dense ↔ rnn** — with the activation preserved.
 - **dense.X.tanh ↔ latent.X.2** — promotes a dense-tanh to its
@@ -380,4 +394,6 @@ given layer. Each layer type declares its own neighbors via
 - Size `S` and reps `R` mutations: `×2`, `÷2` (keeping powers of 2 and
   minimum sizes).
 
-See `layer.py:LayerDef.neighbors` for the full rules.
+See `layer.py:LayerDef.neighbors` for the per-layer rules and
+[`split.md`](split.md) (`model2.py`) for the chain- and Split-level
+mutations.

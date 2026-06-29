@@ -4,6 +4,8 @@ import io
 import logging
 import os
 import threading
+import time
+from datetime import datetime
 from queue import Queue
 from typing import Optional
 
@@ -66,6 +68,11 @@ _EXTERNAL_PATHS = frozenset({'/select', '/add'})
 _INTERNAL_PORT = 5000
 # External port (requires Bearer auth).
 _EXTERNAL_PORT = 5001
+
+# How often (seconds) to append a latency-counter snapshot to the dump
+# file, so we have a time series of where wall-clock goes (and a record
+# that survives a hung shutdown).
+_LATENCY_DUMP_INTERVAL = 120
 
 
 def build_graph(confs: list[Configuration]) -> bytes:
@@ -733,6 +740,20 @@ class SearchServer(object):
         self.writer_thread.join()
         logging.info("Writer thread joined")
 
+    def _dump_latency_loop(self, path: str):
+        """Append a timestamped latency snapshot to `path` every
+        `_LATENCY_DUMP_INTERVAL` seconds. Daemon loop, so it never blocks
+        shutdown -- and the file survives a hung exit."""
+        while True:
+            time.sleep(_LATENCY_DUMP_INTERVAL)
+            try:
+                ts = datetime.now().isoformat(timespec='seconds')
+                with open(path, 'a') as f:
+                    f.write(f"\n===== {ts} =====\n{get_report()}")
+                    f.flush()
+            except Exception:
+                logging.exception("latency dump failed")
+
     def serve(self, api_key: str):
         """Run the Flask app on the LAN-internal and external ports.
 
@@ -740,6 +761,19 @@ class SearchServer(object):
         SIGINT or the `/stop` route), then joins the search/model
         threads and prints the latency report.
         """
+        # Persist latency counters periodically: /latency shows the live
+        # snapshot (and answers even while /select is stalled, since it
+        # doesn't touch the SearchThread); this gives the time series and
+        # a record that outlives a hung shutdown.
+        latency_log = os.path.join(
+            os.path.dirname(os.path.abspath(self.path)), 'latency.log')
+        logging.info(
+            f"Appending latency snapshots to {latency_log} every "
+            f"{_LATENCY_DUMP_INTERVAL}s")
+        threading.Thread(
+            target=self._dump_latency_loop, args=(latency_log,),
+            daemon=True).start()
+
         app = Flask("texmo")
 
         @app.before_request

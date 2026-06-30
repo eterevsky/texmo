@@ -127,22 +127,24 @@ class LayerSeqDef(LayerDef):
         if any(isinstance(l, LayerSeqDef) for l in self.layers):
             return False
 
-        # Norm can't be the first layer. At the top level it would be
-        # normalizing the raw input encoding; in a branch it matches
-        # the old `skip source can't be right before a norm` rule
-        # (the branch's first layer used to be the post-skip layer).
-        if self.layers and self.layers[0].name == "norm":
+        # A normalization (norm / rmsnorm) can't be the first layer. At
+        # the top level it would be normalizing the raw input encoding;
+        # in a branch it matches the old `skip source can't be right
+        # before a norm` rule (the branch's first layer used to be the
+        # post-skip layer).
+        if self.layers and self.layers[0].name in ("norm", "rmsnorm"):
             return False
 
         for l1, l2 in zip(self.layers[:-1], self.layers[1:]):
             # Two suffix-like (multi-position) layers can't be adjacent.
             if l1.length > 1 and l2.length > 1:
                 return False
-            # Two normalization layers can't be adjacent.
-            if l1.name == "norm" and l2.name == "norm":
+            # Two normalization layers can't be adjacent (either flavor).
+            if (l1.name in ("norm", "rmsnorm")
+                    and l2.name in ("norm", "rmsnorm")):
                 return False
-            # Norm can't follow a suffix.
-            if l1.name == "suffix" and l2.name == "norm":
+            # A normalization can't follow a suffix.
+            if l1.name == "suffix" and l2.name in ("norm", "rmsnorm"):
                 return False
             # Two msr layers can't be adjacent -- both maintain matrix
             # state and serve the same architectural role.

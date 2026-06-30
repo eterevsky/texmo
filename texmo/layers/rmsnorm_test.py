@@ -79,3 +79,55 @@ def test_parse_and_model2_build():
     m = parse_model2("bytes|dense.16.gelu-rmsnorm", Precision.FP32)
     assert "rmsnorm" in [l.name for l in m.layer_seq.layers]
     m.build_jax()  # constructs without error
+
+
+def test_norm_rmsnorm_neighbors_swap_insert_remove():
+    from texmo.layers.norm import NormDef
+    from texmo.precision import Precision
+    from texmo.spec_parser import parse_model2
+    # Def-level swap both directions.
+    assert "rmsnorm" in list(NormDef(input_size=8).neighbors())
+    assert "norm" in list(RmsNormDef(input_size=8).neighbors())
+    # Model-level norm <-> rmsnorm swap.
+    m = parse_model2("bytes|dense.8.gelu-norm-dense.8.gelu", Precision.FP32)
+    assert "bytes|dense.8.gelu-rmsnorm-dense.8.gelu" in {
+        nb.spec for nb in m.neighbors()}
+    # Insert rmsnorm into a plain chain, and remove it again.
+    m2 = parse_model2("bytes|dense.8.gelu-dense.8.gelu", Precision.FP32)
+    assert any("rmsnorm" in nb.spec for nb in m2.neighbors())
+    m3 = parse_model2("bytes|dense.8.gelu-rmsnorm-dense.8.gelu", Precision.FP32)
+    specs3 = {nb.spec for nb in m3.neighbors()}
+    assert "bytes|dense.8.gelu-dense.8.gelu" in specs3       # removed
+    assert "bytes|dense.8.gelu-norm-dense.8.gelu" in specs3  # rmsnorm->norm
+
+
+def test_rmsnorm_validity_rules():
+    from texmo.precision import Precision
+    from texmo.spec_parser import parse_model2
+
+    def ok(spec):
+        return parse_model2(spec, Precision.FP32).is_valid()
+    assert ok("bytes|dense.8.gelu-rmsnorm-dense.8.gelu")
+    assert not ok("bytes|rmsnorm-dense.8.gelu")          # first layer
+    assert not ok("bytes|dense.8.gelu-rmsnorm-rmsnorm")  # adjacent
+    assert not ok("bytes|dense.8.gelu-norm-rmsnorm")     # adjacent (mixed)
+    assert not ok("bytes|suffix.2-rmsnorm")              # after suffix
+
+
+def test_predictors_handle_rmsnorm():
+    from texmo.configuration import Configuration
+    from texmo.precision import Precision
+    from texmo.predict import timing
+    from texmo.predict.loss_rnn import _layer_features, _model_layers
+    from texmo.spec_parser import parse_model2
+    model = parse_model2("bytes|dense.8.gelu-rmsnorm", Precision.FP32)
+    conf = Configuration(model, lr=0.01, length=32, batch=4, steps=1,
+                         decay=1.0)
+    # Timing: rmsnorm gets a component (no unknown-layer error).
+    assert any(c.type_id == "rmsnorm" for c in timing.featurize(conf))
+    # Loss: rmsnorm is a simple type, and its weights (size) show up in
+    # feat[0] = log2(num_weights) -- unlike the parameter-free norm (0).
+    rm = next(l for l in _model_layers(conf) if l.name == "rmsnorm")
+    feat = _layer_features(rm, {"rmsnorm": 0}, n_simple=1)
+    assert feat[0] > 0      # log2(size) > 0
+    assert feat[3] == 1.0   # one-hot for the simple type "rmsnorm"

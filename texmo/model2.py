@@ -173,7 +173,7 @@ _APPEND_RECURRENT = ("gru", "mgru", "mingru", "lstm", "slstm", "mullstm")
 _GATE_ACTS = (None, "gelu", "relu", "tanh")
 # Layers that don't define their own output size (pass the input dim
 # through); they affect the prepend/remove-first sizing heuristic.
-_PASSTHROUGH = ("suffix", "norm")
+_PASSTHROUGH = ("suffix", "norm", "rmsnorm")
 
 
 def _strs(layers: list[LayerDef]) -> list[str]:
@@ -278,11 +278,13 @@ def _seq_variants(
         if s == "suffix.2":
             yield strs[:i] + strs[i + 1:]
 
-    # 6./7. Insert / remove norm (never as the first layer).
+    # 6./7. Insert / remove a normalization -- norm or rmsnorm -- never
+    #       as the first layer.
     for i in range(1, n + 1):
-        yield strs[:i] + ["norm"] + strs[i:]
+        for nm in ("norm", "rmsnorm"):
+            yield strs[:i] + [nm] + strs[i:]
     for i, s in enumerate(strs):
-        if s == "norm":
+        if s in ("norm", "rmsnorm"):
             yield strs[:i] + strs[i + 1:]
 
     # 8./9. Prepend a dense lead-in / remove it (symmetric).

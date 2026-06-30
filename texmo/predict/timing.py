@@ -50,6 +50,7 @@ from ..layers.msr import MsrDef
 from ..layers.mullstm import MulLstmDef
 from ..layers.norm import NormDef
 from ..layers.rglru import RglruDef
+from ..layers.rmsnorm import RmsNormDef
 from ..layers.rnn import RnnDef
 from ..layers.skip import SkipDef
 from ..layers.slstm import SLstmDef
@@ -246,7 +247,10 @@ def _layer_component(layer, batch: int, length: int) -> Component:
             layer.input_size, layer.block_width, batch, length)
     elif isinstance(layer, _MATMUL_LAYER_TYPES):
         features = _features_dense(layer.input_size, layer.size, batch, length)
-    elif isinstance(layer, NormDef):
+    elif isinstance(layer, (NormDef, RmsNormDef)):
+        # rmsnorm adds a per-channel (1+gamma) multiply on top of norm's
+        # reduce -- still O(size) elementwise, so the base features cover
+        # both (keyed separately by type_id).
         features = _features_base(layer.input_size, layer.size, batch, length)
     else:
         raise ValueError(f"unknown layer type for timing model: {layer}")

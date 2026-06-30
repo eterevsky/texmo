@@ -122,6 +122,13 @@ class LayerDef(object):
             yield f"suffix.{self.kernel}"
             return
 
+        if self.name in ("norm", "rmsnorm"):
+            # Swap between the parameter-free L2 norm and the learned-
+            # scale RMS norm; both are size-preserving with no other
+            # metaparameter.
+            yield "rmsnorm" if self.name == "norm" else "norm"
+            return
+
         if self.name in ("latent", "lrnn", "lmgu"):
             # Size 2x (keep > 1)
             for s in power2_neighbors(self.size):

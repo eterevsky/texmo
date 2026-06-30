@@ -630,6 +630,13 @@ class DbReader(object):
             params['limit'] = limit
             limit = 'LIMIT :limit'
 
+        # INDEXED BY conf_median_score: walk confs in median_score order
+        # and early-exit at the LIMIT, instead of the planner's default
+        # (scan all confs under the weight cap, then temp-B-tree sort),
+        # which touches a large fraction of the 400k-conf table every call
+        # (~1.5s on prod). Only called on the search hot path with the
+        # worker's active system, where the top conf usually qualifies ->
+        # a shallow walk (ms-to-100ms). See `Search._select_max_weights`.
         query = f"""
             SELECT conf.id AS conf_id, spec, precision, lr, length, batch,
                 decay, cosine, steps, median_score,
@@ -638,7 +645,8 @@ class DbReader(object):
                  WHERE conf_id = conf.id AND system = :system
                    AND source = 'median'
                  ORDER BY time_s LIMIT 1) AS median_time
-            FROM conf {where} ORDER BY median_score ASC {limit}
+            FROM conf INDEXED BY conf_median_score {where}
+            ORDER BY median_score ASC {limit}
             """
 
         cur = self._db.execute(query, params)

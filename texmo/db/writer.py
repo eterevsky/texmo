@@ -69,9 +69,16 @@ VALUES (:conf_id, :system, :train_time, :timestamp, :loss, :step_loss,
 # cte system index existed) or filter-then-sort the cte slice for
 # this system. EXISTS lets the planner stop at the first qualifying
 # conf -- microseconds vs 165-650 ms on the live DB.
+# INDEXED BY conf_median_score forces the planner to walk confs in
+# median_score order and stop at the first match (LIMIT 1), instead of
+# its default "scan every conf under the weight cap -> temp-B-tree sort",
+# which touches a large fraction of the 400k-conf table every call (~1.5s
+# on the prod DB). The walk early-exits in ms-to-100ms on an established
+# active system. Always called with the worker's (active) system, where
+# the best-scoring conf usually has an estimate -> a shallow walk.
 TOP_CONF_AT = """
 SELECT conf.id AS conf_id
-FROM conf
+FROM conf INDEXED BY conf_median_score
 WHERE conf.median_score IS NOT NULL
   AND conf.weights <= :max_weights
   AND EXISTS (

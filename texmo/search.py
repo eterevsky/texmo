@@ -1,6 +1,7 @@
 import logging
 import random
 import threading
+import time
 from dataclasses import dataclass
 from math import log2
 from queue import Queue
@@ -100,6 +101,22 @@ PICK_ME_MIN_RUNS = 2
 # enough that successive selects within the prefetch gap window
 # don't pile up on the same few confs before any run finishes.
 _COVERAGE_STICKY_THRESHOLD = 5
+
+# Bounds on the predicted-best BFS. Unbounded, the visited set grows
+# ~k^depth with the per-conf neighbor count k, and each visited conf
+# costs a conf_neighbors call (~25ms: every mutation is re-parsed), a
+# timing predict, and a get_conf_id query -- a fat seed at depth 3 was
+# observed to hold the single SearchThread for 7+ minutes, timing out
+# every client (they retry, the queue grows, and each queued select has
+# its own chance of another depth-3: the stall self-perpetuates).
+# _BFS_FRONTIER_CAP random-samples each BFS level (keeps the depth-N
+# reachability diverse instead of truncating by enumeration order);
+# _BFS_TIME_BUDGET is the hard wall-clock stop for the expansion loop.
+# A clipped BFS still yields a valid, slightly less exhaustive
+# candidate set. Typical calls (p50 ~1.5s) don't hit either bound.
+_BFS_FRONTIER_CAP = 256
+_BFS_VISITED_CAP = 4096
+_BFS_TIME_BUDGET_S = 5.0
 
 
 def top_confs_report(
@@ -625,17 +642,36 @@ class Search(object):
         # walk is preserved end-to-end this way.
         visited: set[Configuration] = {seed_conf}
         frontier: list[Configuration] = [seed_conf]
+        deadline = time.monotonic() + _BFS_TIME_BUDGET_S
+        clipped: str | None = None
         for _ in range(bfs_depth):
             next_frontier: list[Configuration] = []
             for c in frontier:
+                if time.monotonic() >= deadline:
+                    clipped = 'time budget'
+                    break
+                if len(visited) >= _BFS_VISITED_CAP:
+                    clipped = 'visited cap'
+                    break
                 for n in conf_neighbors(c, self.template):
                     if n in visited:
                         continue
                     visited.add(n)
                     next_frontier.append(n)
-            if not next_frontier:
+            if clipped or not next_frontier:
                 break
+            # Sample oversized levels so depth-N reachability stays
+            # diverse instead of truncating by enumeration order (which
+            # would bias expansion toward the first layers' mutations).
+            # Sampled-out confs stay in `visited` and still get scored.
+            if len(next_frontier) > _BFS_FRONTIER_CAP:
+                next_frontier = random.sample(
+                    next_frontier, _BFS_FRONTIER_CAP)
             frontier = next_frontier
+        if clipped:
+            logging.info(
+                f'predicted-best BFS clipped by {clipped} '
+                f'(depth {bfs_depth}, |visited|={len(visited)}, {system})')
 
         # Filter by weight budget *after* the BFS, so intermediate
         # neighbors with too many weights can still lead us to
@@ -891,6 +927,13 @@ class SearchThread(threading.Thread):
                         # would block forever on the response queue.
                         # Log it, hand back None (the client sleeps and
                         # retries), and keep serving.
+                        # Start/done logs bracket the (serial) work so a
+                        # slow call is visible live, with the backlog it
+                        # is holding up.
+                        logging.info(
+                            f'select_conf({system}) start '
+                            f'(queue depth {self.requests_queue.qsize()})')
+                        t0 = time.monotonic()
                         try:
                             result = self.search.select_conf(system)
                         except Exception:
@@ -898,6 +941,10 @@ class SearchThread(threading.Thread):
                                 f"select_conf failed for {system!r}; "
                                 f"returning no conf")
                             result = None
+                        logging.info(
+                            f'select_conf({system}) done in '
+                            f'{ttoa3(time.monotonic() - t0)} '
+                            f'({"no conf" if result is None else result.strategy})')
                         with self.confs_by_system_lock:
                             self.confs_by_system[system].put(result)
                     case SetTemplate(

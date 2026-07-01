@@ -748,10 +748,20 @@ class SearchServer(object):
             time.sleep(_LATENCY_DUMP_INTERVAL)
             try:
                 ts = datetime.now().isoformat(timespec='seconds')
+                # Queue state: pending Selects on the (serial) search
+                # thread, and per-system ready-but-unfetched responses.
+                with self.confs_by_system_lock:
+                    per_system = {
+                        s: q.qsize() for s, q in self.confs_by_system.items()
+                    }
+                queues = (
+                    f"requests_queue: {self.requests_queue.qsize()}  "
+                    f"responses: {per_system}\n"
+                )
                 # utf-8 explicitly: the report has 'us' rendered as the
                 # micro sign, which Windows' default cp1252 can't encode.
                 with open(path, 'a', encoding='utf-8') as f:
-                    f.write(f"\n===== {ts} =====\n{get_report()}")
+                    f.write(f"\n===== {ts} =====\n{queues}{get_report()}")
                     f.flush()
             except Exception:
                 logging.exception("latency dump failed")

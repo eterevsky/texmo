@@ -1,3 +1,4 @@
+import copy
 import logging
 import random
 import threading
@@ -11,7 +12,7 @@ import numpy as np
 
 from . import latency
 from .common import INF, itoa3, ttoa3
-from .configuration import Configuration, Template, conf_neighbors
+from .configuration import Bounds, Configuration, Template, conf_neighbors
 from .db import ConfScore, ConfWithRuns, DbReader
 from .predict.loss_rnn import LossModelHolder
 from .predict.timing import TrainTimingModel
@@ -90,6 +91,44 @@ assert abs(sum(w for _, w in _STRATEGY_PROBS) - 1.0) < 1e-9, (
 # confs (see `_COVERAGE_STICKY_THRESHOLD`), the next call fires
 # unconditionally via `Search._coverage_flag`.
 _COVERAGE_PROB = 0.1
+
+# Layer-count diversification: per select, sample a cap on num_layers
+# and run the whole select (seed queries, neighbor/BFS expansion via
+# conf_neighbors' match_model filter, and hence the final conf) under
+# the base template intersected with that cap. Pulls part of the budget
+# toward shallow models so the search doesn't fixate on mutations of one
+# long layer chain. None = unrestricted. pick_me, the coverage walk and
+# the default fallback stay on the base template (explicit picks and
+# cross-system coverage shouldn't be dodged by a sampled cap). Weights
+# must sum to 1.0.
+_LAYER_CAP_PROBS: list[tuple[Optional[int], float]] = [
+    (None, 0.6),
+    (1, 0.1),
+    (2, 0.1),
+    (3, 0.1),
+    (4, 0.1),
+]
+assert abs(sum(w for _, w in _LAYER_CAP_PROBS) - 1.0) < 1e-9
+
+
+def _layer_capped_template(
+    template: Template, cap: Optional[int],
+) -> tuple[Template, Optional[int]]:
+    """Intersect `template` with a num_layers cap.
+
+    Returns (template, cap): a shallow copy with `num_layers` tightened
+    to the cap (sub-objects are shared, never mutated), or the base
+    template itself (cap None) when the draw is unrestricted -- or when
+    the cap is below the base floor / already implied by the base bound.
+    """
+    if cap is None:
+        return template, None
+    base = template.num_layers
+    if base.min > cap or base.max <= cap:
+        return template, None
+    capped = copy.copy(template)
+    capped.num_layers = Bounds((base.min, cap), 0)
+    return capped, cap
 
 # Minimum total runs a pick_me conf needs before it stops being
 # picked preferentially. Two runs give a median that's robust to a
@@ -300,22 +339,22 @@ class Search(object):
         assert 0 < tmin < tmax
         return 2 ** random.uniform(log2(tmin), log2(tmax))
 
-    def _select_max_weights(self, t, system: str):
+    def _select_max_weights(self, t, system: str, template: Template):
         with latency.timer("Search._select_max_weights"):
             try:
                 top_conf = next(
                     self._db.top_confs_for_system(
-                        max_time=t, system=system, limit=1, template=self.template)
+                        max_time=t, system=system, limit=1, template=template)
                 )
             except StopIteration:
-                return self.template.max_weights.min
+                return template.max_weights.min
             maxw = 8 * top_conf.conf.model.num_weights
-            if self.template.max_weights.min >= maxw:
-                return self.template.max_weights.min
-            if self.template.max_weights.max <= maxw:
-                maxw = self.template.max_weights.max
+            if template.max_weights.min >= maxw:
+                return template.max_weights.min
+            if template.max_weights.max <= maxw:
+                maxw = template.max_weights.max
             l = random.uniform(
-                log2(self.template.max_weights.min), log2(maxw))
+                log2(template.max_weights.min), log2(maxw))
             return round(2**l)
 
     def _predicted_time(
@@ -379,7 +418,7 @@ class Search(object):
         return conf
 
     def _select_neighbor_fewest_runs(
-        self, conf: Configuration, system: str
+        self, conf: Configuration, system: str, template: Template,
     ) -> Optional[tuple[Configuration, int, int]]:
         """Find the neighbor with fewest runs that matches the template.
 
@@ -389,7 +428,7 @@ class Search(object):
         selected; otherwise it's compared against the min-runs threshold
         from _generate_limits.
         """
-        neighbors = conf_neighbors(conf, self.template)
+        neighbors = conf_neighbors(conf, template)
         if not neighbors:
             return None
 
@@ -432,13 +471,14 @@ class Search(object):
         return None
 
     def _select_top_neighbor(
-            self, t: float, max_weights: int, system: str
+            self, t: float, max_weights: int, system: str,
+            template: Template,
     ) -> Optional[Configuration]:
         with latency.timer("Search._select_top_neighbor"):
             top_confs = list(
                 self._db.top_confs_for_system(
                     max_time=t, max_weights=max_weights, system=system,
-                    limit=10, template=self.template
+                    limit=10, template=template
                 )
             )
             if not top_confs:
@@ -459,7 +499,7 @@ class Search(object):
                         top_confs = list(
                             self._db.top_confs_for_system(
                                 max_time=t, max_weights=max_weights, system=system,
-                                limit=end, template=self.template
+                                limit=end, template=template
                             )
                         )
                         have_confs = end
@@ -476,7 +516,7 @@ class Search(object):
                     for j in range(start, min(end, len(top_confs))):
                         if len(min_runs_neighbor) < j + 1:
                             result = self._select_neighbor_fewest_runs(
-                                top_confs[j].conf, system)
+                                top_confs[j].conf, system, template)
                             min_runs_neighbor.append(result)
 
                         result = min_runs_neighbor[j]
@@ -495,7 +535,8 @@ class Search(object):
                                 return neighbor_conf
 
     def _select_time_budget(
-        self, t: float, max_weights: int, system: str
+        self, t: float, max_weights: int, system: str,
+        template: Template,
     ) -> Optional[Configuration]:
         """Score-ordered scan with a widening total-runs requirement.
 
@@ -509,7 +550,7 @@ class Search(object):
         """
         with latency.timer("Search._select_time_budget"):
             source = iter(self._db.confs_under_time(
-                template=self.template, system=system,
+                template=template, system=system,
                 max_weights=max_weights, max_time=t,
             ))
             candidates: list[ConfWithRuns] = []
@@ -604,6 +645,7 @@ class Search(object):
 
     def _select_predicted_best(
         self, t: float, max_weights: int, system: str, bfs_depth: int,
+        template: Template,
     ) -> Optional[Configuration]:
         """Predictor-guided tournament.
 
@@ -620,14 +662,15 @@ class Search(object):
             f'Search._select_predicted_best.depth{bfs_depth}'
         ):
             return self._select_predicted_best_impl(
-                t, max_weights, system, bfs_depth)
+                t, max_weights, system, bfs_depth, template)
 
     def _select_predicted_best_impl(
         self, t: float, max_weights: int, system: str, bfs_depth: int,
+        template: Template,
     ) -> Optional[Configuration]:
         try:
             seed = next(self._db.top_confs_for_system(
-                system=system, template=self.template,
+                system=system, template=template,
                 max_weights=max_weights, max_time=t, limit=1,
             ))
         except StopIteration:
@@ -653,7 +696,7 @@ class Search(object):
                 if len(visited) >= _BFS_VISITED_CAP:
                     clipped = 'visited cap'
                     break
-                for n in conf_neighbors(c, self.template):
+                for n in conf_neighbors(c, template):
                     if n in visited:
                         continue
                     visited.add(n)
@@ -778,20 +821,33 @@ class Search(object):
                 return None
         return self.init_conf
 
+    def _sample_layer_capped_template(self) -> tuple[Template, Optional[int]]:
+        """Sample a per-select num_layers cap from `_LAYER_CAP_PROBS`
+        and intersect it with the base template."""
+        (cap, _), = random.choices(
+            _LAYER_CAP_PROBS,
+            weights=[w for _, w in _LAYER_CAP_PROBS],
+            k=1,
+        )
+        return _layer_capped_template(self.template, cap)
+
     def _run_strategy(
         self, name: str, t: float, max_weights: int, system: str,
+        template: Template,
     ) -> Optional[Configuration]:
         match name:
             case 'predicted_2nd_neighbor':
                 return self._select_predicted_best(
-                    t, max_weights, system, bfs_depth=2)
+                    t, max_weights, system, bfs_depth=2, template=template)
             case 'predicted_3rd_neighbor':
                 return self._select_predicted_best(
-                    t, max_weights, system, bfs_depth=3)
+                    t, max_weights, system, bfs_depth=3, template=template)
             case 'time_budget':
-                return self._select_time_budget(t, max_weights, system)
+                return self._select_time_budget(
+                    t, max_weights, system, template)
             case 'neighbor':
-                return self._select_top_neighbor(t, max_weights, system)
+                return self._select_top_neighbor(
+                    t, max_weights, system, template)
             case _:
                 raise ValueError(f"unknown strategy: {name}")
 
@@ -842,15 +898,25 @@ class Search(object):
                     return self._result(
                         conf, 'coverage_walk', system, covered, total)
 
+            # Layer-count diversification: this select (seed queries,
+            # neighbor/BFS expansion, and hence the trained conf) may run
+            # under a sampled num_layers cap. The fallback chain below
+            # stays capped too; only the final default fallback is base.
+            template, layer_cap = self._sample_layer_capped_template()
+            if layer_cap is not None:
+                logging.info(
+                    f'Layer-capped select for {system}: '
+                    f'num_layers <= {layer_cap}')
+
             t = self._select_time()
-            max_weights = self._select_max_weights(t, system)
+            max_weights = self._select_max_weights(t, system, template)
 
             picked, _ = random.choices(
                 _STRATEGY_PROBS,
                 weights=[w for _, w in _STRATEGY_PROBS],
                 k=1,
             )[0]
-            conf = self._run_strategy(picked, t, max_weights, system)
+            conf = self._run_strategy(picked, t, max_weights, system, template)
             if conf is not None:
                 return self._result(conf, picked, system)
 
@@ -858,7 +924,7 @@ class Search(object):
             # to the neighbor walk.
             if picked != 'neighbor':
                 conf = self._run_strategy(
-                    'neighbor', t, max_weights, system)
+                    'neighbor', t, max_weights, system, template)
                 if conf is not None:
                     return self._result(conf, 'neighbor', system)
 

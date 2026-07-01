@@ -7,7 +7,13 @@ from .model import build_model_def
 from .predict.loss_rnn import LossModelHolder
 from .predict.timing import TrainTimingModel
 from .run import Run
-from .search import Search, _generate_limits, _run_limit_sequences
+from .configuration import conf_neighbors
+from .search import (
+    Search,
+    _generate_limits,
+    _layer_capped_template,
+    _run_limit_sequences,
+)
 
 
 def _make_conf(steps=1024, batch=32, spec="bytes|dense.8.gelu"):
@@ -83,12 +89,61 @@ def test_select_neighbor_fewest_runs_drops_seed_when_cap_collides(
     monkeypatch.setattr(
         search, '_predicted_time',
         lambda c, s: 64.0 * (c.steps / 1024.0))
-    result = search._select_neighbor_fewest_runs(conf, 'test')
+    result = search._select_neighbor_fewest_runs(
+        conf, 'test', search.template)
     if result is not None:
         neighbor, _, _ = result
         assert neighbor != conf, (
             "neighbor selection returned the seed conf — cap should "
             "have dropped it after collapsing the 2x-steps variant")
+
+
+def _make_template(num_layers=None):
+    return Template(
+        spec=None, precision=list(Precision),
+        lr=(0, INF), length=(1, INF), batch=(1, INF),
+        steps=(4, INF), max_weights=(2, INF),
+        num_layers=num_layers,
+    )
+
+
+def test_layer_capped_template_derivation():
+    base = _make_template()
+    # No cap -> base template object, unchanged.
+    t, cap = _layer_capped_template(base, None)
+    assert t is base and cap is None
+    # A cap intersects to (0, cap) on a copy; base is untouched.
+    t, cap = _layer_capped_template(base, 2)
+    assert cap == 2 and t is not base
+    assert t.num_layers.min == 0 and t.num_layers.max == 2
+    assert base.num_layers.max == INF
+    # Cap below the base floor -> unrestricted.
+    floored = _make_template(num_layers=(2, INF))
+    t, cap = _layer_capped_template(floored, 1)
+    assert t is floored and cap is None
+    # Cap at or above the base max -> already implied, unrestricted.
+    tight = _make_template(num_layers=(0, 2))
+    for c in (2, 4):
+        t, cap = _layer_capped_template(tight, c)
+        assert t is tight and cap is None
+    # Cap inside the base range -> applies, keeps the base floor.
+    mid = _make_template(num_layers=(1, 8))
+    t, cap = _layer_capped_template(mid, 3)
+    assert cap == 3 and t.num_layers.min == 1 and t.num_layers.max == 3
+
+
+def test_layer_capped_template_prunes_neighbors():
+    base = _make_template()
+    conf = _make_conf(spec="bytes|dense.8.gelu")  # 1 hidden layer
+    capped, cap = _layer_capped_template(base, 1)
+    assert cap == 1
+    # Under the base template some mutations grow the chain...
+    assert any(
+        n.model.num_layers > 1 for n in conf_neighbors(conf, base))
+    # ...under the capped template none do (and some survive).
+    capped_neighbors = conf_neighbors(conf, capped)
+    assert capped_neighbors
+    assert all(n.model.num_layers <= 1 for n in capped_neighbors)
 
 
 def _make_search_at(path):
@@ -231,6 +286,7 @@ def test_select_predicted_best_no_seed_returns_none(tmp_path):
     # No runs at all -> no top conf for 'a' -> no seed -> None.
     assert search._select_predicted_best_impl(
         t=4.0, max_weights=INF, system='a', bfs_depth=2,
+        template=search.template,
     ) is None
 
 
@@ -249,6 +305,7 @@ def test_select_predicted_best_no_timing_returns_none(
         search.timing_model, 'predict', lambda system, conf: None)
     assert search._select_predicted_best_impl(
         t=4.0, max_weights=INF, system='a', bfs_depth=2,
+        template=search.template,
     ) is None
 
 
@@ -287,7 +344,8 @@ def test_select_predicted_best_happy_path(tmp_path, monkeypatch):
     search.loss_model = FakeLossModel()
 
     picked = search._select_predicted_best_impl(
-        t=4.0, max_weights=INF, system='a', bfs_depth=2)
+        t=4.0, max_weights=INF, system='a', bfs_depth=2,
+        template=search.template)
     assert picked is not None
     assert isinstance(picked, Configuration)
 

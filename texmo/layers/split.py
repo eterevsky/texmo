@@ -244,6 +244,17 @@ class SplitDef(LayerDef):
         return sum(b.num_mults for b in self.branches) + merge_cost
 
     @property
+    def projects_input(self) -> bool:
+        # The split fans its input out to every branch; a preceding
+        # bare dense collapses only if EVERY branch head absorbs it.
+        # A `pass` branch (or a conv/rglru/norm-headed one) carries the
+        # projection through unabsorbed, so the dense stays meaningful.
+        return all(
+            bool(b.layers) and b.layers[0].projects_input
+            for b in self.branches
+        )
+
+    @property
     def num_layers(self) -> int:
         # Counts the Split itself (1 -- it's the structural analog of
         # the old SkipDef pseudo-layer, which also counted as 1) plus
@@ -263,10 +274,10 @@ class SplitDef(LayerDef):
         if len(self.branches) != 2:
             return False
         for b in self.branches:
-            # Branches opt into the terminal-bare-dense carve-out:
-            # a branch's last layer may be a plain `dense.X` (the
-            # linear path of a gated unit like GeGLU).
-            if not b.is_valid(allow_terminal_bare_dense=True):
+            # Branches opt into the split-branch carve-outs (terminal
+            # bare dense, bare dense before conv/rglru, leading norm --
+            # see LayerSeqDef.is_valid).
+            if not b.is_valid(in_split_branch=True):
                 return False
             if b.input_size != self.input_size:
                 return False

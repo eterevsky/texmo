@@ -166,8 +166,8 @@ def test_is_valid_terminal_bare_dense_ok():
 
 
 def test_is_valid_nonterminal_bare_dense_rejected():
-    """A bare dense that isn't the last layer collapses with its
-    successor -- only the terminal carve-out applies."""
+    """A bare dense followed by a projecting layer (another dense)
+    collapses into its successor's input matmul -> invalid."""
     branch = _seq(
         [DenseDef(8, input_size=4), _dense(8, 'gelu', 8)], 4)
     s = SplitDef(
@@ -175,13 +175,31 @@ def test_is_valid_nonterminal_bare_dense_rejected():
     assert not s.is_valid()
 
 
-def test_is_valid_branch_norm_first_rejected():
-    """Norm can't be the first layer of a branch (mirrors the old
-    'skip source before norm' rule)."""
-    branch = _seq([NormDef(input_size=4), _dense(8, 'gelu', 4)], 4)
+def test_is_valid_bare_dense_before_non_projecting_ok():
+    """Griffin's linear front-end: a bare dense feeding conv -> rglru
+    doesn't collapse (both consume the input without a full matmul)."""
+    from texmo.layers.conv import ConvDef
+    from texmo.layers.rglru import RglruDef
+    branch = _seq(
+        [DenseDef(8, input_size=4),
+         ConvDef(4, input_size=8),
+         RglruDef(1, input_size=8)], 4)
     s = SplitDef(
-        'add', [branch, _seq([], 4)], input_size=4)
-    assert not s.is_valid()
+        'mul', [branch, _seq([_dense(8, 'gelu', 4)], 4)], input_size=4)
+    assert s.is_valid()
+
+
+def test_is_valid_branch_norm_first_ok_pre_norm():
+    """A branch may start with a normalization -- the pre-norm residual
+    pattern split.add(rmsnorm-..., pass). (Supersedes the old 'skip
+    source before norm' rule.) Top-level leading norm stays invalid."""
+    from texmo.layers.rmsnorm import RmsNormDef
+    for norm in (NormDef(input_size=4), RmsNormDef(input_size=4)):
+        branch = _seq([norm, _dense(8, 'gelu', 4)], 4)
+        s = SplitDef('add', [branch, _seq([], 4)], input_size=4)
+        assert s.is_valid()
+    # The top-level chain (no in_split_branch) still rejects it.
+    assert not _seq([NormDef(input_size=4)], 4).is_valid()
 
 
 def test_is_valid_branch_ends_in_suffix_rejected():
@@ -400,3 +418,22 @@ def test_align_branch_outputs_drops_leading_positions():
     assert aligned[0].shape == (1, 7, 2)
     assert aligned[1].shape == (1, 7, 2)
     assert aligned[2].shape == (1, 7, 2)
+
+
+def test_hawk_recurrent_block_spec_valid():
+    """The full Hawk/Griffin residual block is expressible AND
+    search-valid: pre-norm rmsnorm, linear->conv->rglru gated by a
+    gelu dense, bare-dense out-projection as branch terminal, plus the
+    GeGLU MLP sub-block."""
+    from texmo.precision import Precision
+    from texmo.spec_parser import parse_model2
+    spec = (
+        "bits.1+bp|dense.2.gelu"
+        "-split.add(rmsnorm-split.mul(dense.2-conv.4-rglru.1,"
+        " dense.2.gelu)-dense.2, pass)"
+        "-split.add(rmsnorm-split.mul(dense.2.gelu, dense.2)-dense.2,"
+        " pass)"
+    )
+    m = parse_model2(spec, Precision.FP32)
+    assert m.is_valid()
+    m.build_jax()  # constructs without error

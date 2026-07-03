@@ -110,15 +110,30 @@ class LayerSeqDef(LayerDef):
         # walks through Split branches automatically.
         return sum(l.num_layers for l in self.layers)
 
-    def is_valid(self, *, allow_terminal_bare_dense: bool = False) -> bool:
+    def is_valid(self, *, in_split_branch: bool = False) -> bool:
         """Validate this sequence.
 
         The same adjacency/first-layer rules that ModelDef enforced on
         its flat layer list now live here, so they apply at every
         nesting level -- the top-level chain and each Split branch
-        alike. `allow_terminal_bare_dense` is set by SplitDef when it
-        validates a branch: a branch may end in a bare `dense.X`
-        (the linear path of a gated unit). See DenseDef.is_valid.
+        alike. `in_split_branch` is set by SplitDef when it validates a
+        branch.
+
+        Bare (activation-less) dense placement follows one principle: a
+        bare dense is legal exactly when its consumer does NOT start by
+        linearly projecting it (else the two matrices collapse into one
+        and the dense is degenerate). Concretely:
+          - mid-sequence: allowed iff the next layer's `projects_input`
+            is False (conv / rglru / norm / rmsnorm / suffix, or a split
+            with a non-absorbing branch head) -- e.g. Griffin's
+            linear-conv-RG-LRU front-end. Applies at the top level too.
+          - terminal in a split branch: allowed -- the consumer is the
+            elementwise/concat merge (the GeGLU linear path).
+          - terminal at the top level: forbidden -- the consumer is the
+            model's implicit output dense, which absorbs it.
+
+        A branch may also START with a normalization -- the pre-norm
+        residual pattern, `split.add(rmsnorm-..., pass)`.
         """
         # A LayerSeqDef directly inside another LayerSeqDef would
         # just be a longer flat sequence -- reject so the structure
@@ -127,12 +142,15 @@ class LayerSeqDef(LayerDef):
         if any(isinstance(l, LayerSeqDef) for l in self.layers):
             return False
 
-        # A normalization (norm / rmsnorm) can't be the first layer. At
-        # the top level it would be normalizing the raw input encoding;
-        # in a branch it matches the old `skip source can't be right
-        # before a norm` rule (the branch's first layer used to be the
-        # post-skip layer).
-        if self.layers and self.layers[0].name in ("norm", "rmsnorm"):
+        # A normalization (norm / rmsnorm) can't be the first layer of
+        # the top-level chain -- it would be normalizing the raw input
+        # encoding. Inside a split branch it IS allowed: that's the
+        # pre-norm residual block (this deliberately supersedes the old
+        # `skip source can't be right before a norm` rule, now that
+        # rmsnorm carries a learned scale and pre-norm is the standard
+        # block shape).
+        if (not in_split_branch and self.layers
+                and self.layers[0].name in ("norm", "rmsnorm")):
             return False
 
         for l1, l2 in zip(self.layers[:-1], self.layers[1:]):
@@ -153,9 +171,14 @@ class LayerSeqDef(LayerDef):
 
         last = len(self.layers) - 1
         for i, l in enumerate(self.layers):
-            if (allow_terminal_bare_dense and i == last
-                    and isinstance(l, DenseDef)):
-                if not l.is_valid(allow_bare=True):
+            if isinstance(l, DenseDef):
+                # See the docstring: bare dense is legal iff its
+                # consumer doesn't absorb the projection.
+                if i < last:
+                    allow_bare = not self.layers[i + 1].projects_input
+                else:
+                    allow_bare = in_split_branch
+                if not l.is_valid(allow_bare=allow_bare):
                     return False
             elif not l.is_valid():
                 return False

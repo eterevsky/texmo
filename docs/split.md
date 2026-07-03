@@ -72,9 +72,14 @@ cross-mutate into each other:
    branches consume the same input), and **doesn't end in a
    suffix-like** (`length > 1`) layer. The last rule mirrors the old
    "merge point can't be right after a suffix": the merge consumes each
-   branch's final position. Branches opt into the **terminal-bare-dense
-   carve-out** — a branch may end in a plain `dense.X` (no activation),
-   the linear value/gate path of a gated unit.
+   branch's final position. Branch carve-outs (see
+   `LayerSeqDef.is_valid`): a branch may **end in a bare `dense.X`**
+   (the merge doesn't absorb the projection — the GeGLU linear path),
+   and may **start with a normalization** (the pre-norm residual
+   pattern, `split.add(rmsnorm-…, pass)`). More generally a bare dense
+   is legal exactly when its consumer doesn't open with a full linear
+   projection (`projects_input`) — so `dense.X-conv.4-rglru.B`
+   (Griffin's linear front-end) is valid anywhere.
 3. **Pass position is canonical.** `add` / `cat`: branch 0 (the
    transform) is non-empty, branch 1 is `pass`. `mul`: branch 1 (the
    gate) is non-empty (never `pass`), branch 0 is the value. This also

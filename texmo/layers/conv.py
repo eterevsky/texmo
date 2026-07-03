@@ -116,5 +116,11 @@ class ConvDef(LayerDef):
         # Per-channel kernel (L * D) plus per-channel bias (D).
         return self.input_size * (self.kernel + 1)
 
+    @property
+    def projects_input(self) -> bool:
+        # Depthwise: per-channel temporal kernels, no cross-channel
+        # matmul -- a preceding bare dense doesn't collapse into it.
+        return False
+
     def build_jax(self, dtype) -> ConvJax:
         return ConvJax(self.input_size, self.kernel, dtype)

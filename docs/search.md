@@ -150,9 +150,14 @@ Validity constraints (`Model2Def.is_valid`, recursing through
 `LayerSeqDef` / `SplitDef`):
 - Input must be valid.
 - No two adjacent "suffix-like" layers (length > 1).
-- Norm can't be the first layer.
+- Norm/rmsnorm can't open the top-level chain (a split branch may —
+  that's the pre-norm residual pattern).
 - No two adjacent norms.
 - Norm can't follow a suffix.
+- A bare (activation-less) dense is legal iff its consumer doesn't
+  start with a full linear projection (`LayerDef.projects_input`):
+  before conv/rglru/norms, as a branch terminal — not before
+  dense/rnn/gru-family or at the chain end.
 - Split rules: exactly 2 branches, canonical `pass` position, `mul`
   branches equal-sized, no suffix-terminal branch. See [`split.md`](split.md).
 

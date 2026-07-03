@@ -173,5 +173,12 @@ class RglruDef(LayerDef):
         gate = self.blocks * self.block_width * (self.block_width + 1)
         return lam + 2 * gate
 
+    @property
+    def projects_input(self) -> bool:
+        # The gates are (block-diagonal) projections of x, but x itself
+        # also enters elementwise via i * x -- a preceding bare dense
+        # survives (Griffin's linear front-end feeds conv + rglru).
+        return False
+
     def build_jax(self, dtype) -> RglruJax:
         return RglruJax(self.input_size, self.blocks, dtype)

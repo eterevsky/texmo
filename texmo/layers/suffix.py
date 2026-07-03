@@ -94,6 +94,10 @@ class SuffixDef(LayerDef):
     def num_weights(self) -> int:
         return 0
 
+    @property
+    def projects_input(self) -> bool:
+        return False  # weightless window stacking, no matmul
+
     def build_module(self, state_dict=None) -> SuffixModule:
         return SuffixModule(self.length, self.input_size)
 

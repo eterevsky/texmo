@@ -83,6 +83,18 @@ class LayerDef(object):
         return self.num_weights
 
     @property
+    def projects_input(self) -> bool:
+        """True when the layer's first operation on its input is a full
+        linear projection (W @ x) — so a preceding bare (activation-less)
+        dense would collapse into that projection and is degenerate.
+        Used by `LayerSeqDef.is_valid` to decide where a bare dense is
+        allowed. Default True (the conservative choice for new layers);
+        overridden False by layers that consume their input elementwise
+        or per-channel (conv, suffix, norm, rmsnorm, rglru) and by
+        Split, which projects only if every branch head does."""
+        return True
+
+    @property
     def num_layers(self) -> int:
         """Count of layers contributed by this LayerDef. Leaf layers
         report 1; structural layers (LayerSeqDef holds N children;

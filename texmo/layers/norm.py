@@ -76,6 +76,10 @@ class NormDef(LayerDef):
     def num_weights(self) -> int:
         return 0
 
+    @property
+    def projects_input(self) -> bool:
+        return False  # nonlinear elementwise rescale, no matmul
+
     def build_module(
         self, state_dict: dict[str, Tensor] | None = None
     ) -> NormModule:

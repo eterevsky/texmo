@@ -427,8 +427,6 @@ def test_forward_recurrent_matches_forward():
 _INVALID_SPECS = [
     # Norm can't be the first layer (top-level).
     "bits.1+bp|norm-dense.4.gelu",
-    # Skip source right before a norm -> branch starts with norm.
-    "bytes|dense.32.gelu-skip.1.add-norm-dense.32.gelu",
     # Merge point right after a suffix -> branch ends in a suffix.
     "bytes|skip.1.add-suffix.4-dense.32.gelu",
     # Two suffix-like layers adjacent.
@@ -445,6 +443,16 @@ def test_invalid_specs_match_modeldef(spec):
     """Both representations agree the spec is invalid."""
     assert not ModelDef(spec, Precision.FP32).is_valid()
     assert not parse_model2(spec, Precision.FP32).is_valid()
+
+
+def test_pre_norm_branch_diverges_from_legacy_modeldef():
+    """Intentional divergence: a skip source right before a norm
+    translates to a branch that STARTS with norm -- the pre-norm
+    residual pattern, which Model2 now allows (legacy ModelDef keeps
+    its old 'skip source before norm' rule until retirement)."""
+    spec = "bytes|dense.32.gelu-skip.1.add-norm-dense.32.gelu"
+    assert not ModelDef(spec, Precision.FP32).is_valid()
+    assert parse_model2(spec, Precision.FP32).is_valid()
 
 
 _VALID_SPECS = [

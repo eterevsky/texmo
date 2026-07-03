@@ -75,5 +75,9 @@ class RmsNormDef(LayerDef):
     def num_weights(self) -> int:
         return self.size  # the learned per-channel gamma
 
+    @property
+    def projects_input(self) -> bool:
+        return False  # nonlinear elementwise rescale, no matmul
+
     def build_jax(self, dtype) -> RmsNormJax:
         return RmsNormJax(self.input_size, dtype)

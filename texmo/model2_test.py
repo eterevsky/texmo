@@ -685,3 +685,30 @@ def test_no_add_cat_to_mul_op_swap():
     # The residual's own slot is never rewritten to split.mul(...).
     assert not any(
         s.endswith("split.mul(dense.4.gelu, pass)") for s in res)
+
+
+def test_hawk_conf_neighbors_no_crash():
+    """Neighbor enumeration over a conf containing bare denses (the
+    Hawk block's linear front-end and GeGLU path) must not emit
+    unparseable specs. Regression: bare DenseDef.neighbors() rendered
+    size mutations as 'dense.N.None', which crashed re-parsing."""
+    spec = (
+        "bits.1+bp|dense.2.gelu"
+        "-split.add(rmsnorm-split.mul(dense.2-conv.4-rglru.1,"
+        " dense.2.gelu)-dense.2, pass)"
+        "-split.add(rmsnorm-split.mul(dense.2.gelu, dense.2)-dense.2,"
+        " pass)"
+    )
+    m = parse_model2(spec, Precision.FP32)
+    neighbors = list(m.neighbors())  # raised KeyError('None') before
+    assert neighbors
+    assert all("None" not in nb.spec for nb in neighbors)
+
+
+def test_bare_dense_neighbors_well_formed():
+    from texmo.layers.dense import DenseDef
+    nbs = list(DenseDef(8, input_size=8).neighbors())
+    # Size mutations render without an activation suffix...
+    assert "dense.4" in nbs and "dense.16" in nbs
+    # ...and no cross-type swap or ".None" artifacts appear.
+    assert not any("None" in s or s.startswith("rnn") for s in nbs)

@@ -198,8 +198,12 @@ class LayerDef(object):
         # Size mutations (keep same layer type and activation)
         _LSTM_FAMILY = ("lstm", "matlstm", "slstm", "mullstm")
         if self.name in ("dense", "rnn"):
+            # A bare dense (linear/gate path inside a split branch) has
+            # no activation -- render without the suffix, else the
+            # f-string emits a literal ".None" that fails to parse.
+            act = f".{self._activation}" if self._activation else ""
             for s in power2_neighbors(self.size):
-                yield f"{self.name}.{s}.{self._activation}"
+                yield f"{self.name}.{s}{act}"
         elif self.name in ("gru", "mgru", "mingru", "lstm", "slstm", "mullstm"):
             for s in power2_neighbors(self.size):
                 yield f"{self.name}.{s}"
@@ -212,9 +216,12 @@ class LayerDef(object):
         # Type swaps
         _RECURRENT = ("gru", "mgru", "mingru")
         if self.name == "dense":
-            yield f"rnn.{self.size}.{self._activation}"
-            if self._activation == "tanh" and self.size > 1:
-                yield f"latent.{self.size}.2"
+            # Cross-type swaps need an activation to carry over; a bare
+            # dense (linear path) stays a dense.
+            if self._activation:
+                yield f"rnn.{self.size}.{self._activation}"
+                if self._activation == "tanh" and self.size > 1:
+                    yield f"latent.{self.size}.2"
         elif self.name == "rnn":
             yield f"dense.{self.size}.{self._activation}"
             for other in _RECURRENT:

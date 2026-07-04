@@ -22,6 +22,7 @@ from .layers.slstm import SLstmDef
 from .layers.norm import NormDef
 from .layers.rnn import RnnDef
 from .layers.skip import SkipDef, SkipModule
+from .layers.attn import AttnDef
 from .layers.conv import ConvDef
 from .layers.rglru import RglruDef
 from .layers.rmsnorm import RmsNormDef
@@ -787,6 +788,11 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
 
     if name == "rglru":
         return RglruDef(int(parts[1]), input_size=input_size)
+
+    if name == "attn":
+        return AttnDef(
+            int(parts[1]), int(parts[2]), int(parts[3]),
+            input_size=input_size)
 
     if name == "skip":
         distance = int(parts[1])

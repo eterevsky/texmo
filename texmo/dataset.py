@@ -131,7 +131,7 @@ class DataSet(object):
         """
         tokenizer = get_tokenizer(tokenset_name)
         tokenset = tokenizer.tokenset
-        assert tokenset.processing in ("raw", "capswords")
+        assert tokenset.processing in ("raw", "capswords", "gemma")
         processing = tokenset.processing == "capswords"
 
         samples = []
@@ -189,7 +189,7 @@ class DataSet(object):
         """
         tokenizer = get_tokenizer(tokenset_name)
         tokenset = tokenizer.tokenset
-        assert tokenset.processing in ("raw", "capswords")
+        assert tokenset.processing in ("raw", "capswords", "gemma")
         processing = tokenset.processing == "capswords"
 
         samples = []

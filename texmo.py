@@ -34,6 +34,11 @@ def parse_args():
     )
     sample.sample_init_args(parser_sample, config)
 
+    parser_tokenize = subparsers.add_parser(
+        "tokenize", help="tokenize a given text and show the tokens"
+    )
+    sample.tokenize_init_args(parser_tokenize, config)
+
     parser_train = subparsers.add_parser("train", help="train a model")
     train.init_args(parser_train, config)
 

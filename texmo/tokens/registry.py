@@ -7,6 +7,7 @@ from .bits_tokenizer import (
     BitsTokenizer4,
     BytesTokenizer,
 )
+from .bpe_tokenizer import BpeTokenizer
 from .tokenizer import Tokenizer
 from .tokenset import TokenSet
 
@@ -47,7 +48,13 @@ def get_tokenizer(name: str):
     try:
         token_set = TokenSet.from_json_file(path)
         logging.info(f"Loaded tokenset from {path}")
-        tokenizer = Tokenizer(token_set)
+        if token_set.algorithm == "bpe":
+            # BPE sets (converted SentencePiece vocabs) use the merge
+            # loop; the DP tokenizer's dense suffix automaton would
+            # also be prohibitively large at 256k pieces.
+            tokenizer = BpeTokenizer(token_set)
+        else:
+            tokenizer = Tokenizer(token_set)
     except FileNotFoundError:
         tokenizer = None
     _TOKENIZERS[name] = tokenizer

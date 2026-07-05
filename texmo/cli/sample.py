@@ -1,4 +1,5 @@
 import argparse
+import sys
 import time
 
 from ..common import itoa3
@@ -54,6 +55,58 @@ def sample(args: argparse.Namespace):
                 print(tokenset.tokens[token], end="|")
             print()
         print()
+
+
+def tokenize(args: argparse.Namespace):
+    """Tokenize a given text (not a corpus sample) and show the ids and
+    token strings -- for eyeballing and for comparing against reference
+    tokenizers."""
+    set_tokens_dir(args.tokens_dir)
+    tokenizer = get_tokenizer(args.tokens)
+    tokenset = tokenizer.tokenset
+
+    if args.text is not None:
+        text = args.text
+    elif args.file is not None:
+        with open(args.file, encoding="utf-8") as f:
+            text = f.read()
+    else:
+        text = sys.stdin.read()
+
+    if hasattr(tokenizer, "encode"):  # BPE sets take str + bos flag
+        ids = tokenizer.encode(text, add_bos=args.bos)
+    else:
+        ids = tokenizer.tokenize(text.encode("utf-8"))
+
+    print(list(ids))
+    print()
+    for i in ids:
+        print(f"{i}\t{ascii(str(tokenset.tokens[i]))}")
+
+
+def tokenize_init_args(parser: argparse.ArgumentParser, config):
+    parser.add_argument(
+        "--tokens-dir",
+        type=str,
+        default=config.TOKENS_DIR,
+        help="directory with token sets",
+    )
+    parser.add_argument(
+        "-t",
+        "--tokens",
+        type=str,
+        required=True,
+        help="name of the token set",
+    )
+    parser.add_argument(
+        "--text", type=str, default=None, help="text to tokenize")
+    parser.add_argument(
+        "--file", type=str, default=None,
+        help="read the text from a file (default: stdin)")
+    parser.add_argument(
+        "--bos", action="store_true",
+        help="prepend the beginning-of-sequence token (BPE sets)")
+    parser.set_defaults(func=tokenize)
 
 
 def sample_init_args(parser: argparse.ArgumentParser, config):

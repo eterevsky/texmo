@@ -20,6 +20,7 @@ from .layer import LayerDef, _ATTN_SWAP_WINDOW
 from .layers.dense import DenseDef
 from .layers.input_bits import InputBitsDef
 from .layers.input_bytes import InputBytesDef
+from .layers.input_tokens import TokensInputDef
 from .layers.seq import LayerSeqDef
 from .layers.split import SplitDef
 from .model2_jax import Model2Jax
@@ -29,7 +30,7 @@ from .spec_parser import parse_model2
 # Type alias for the input layers parse_model2 can produce -- kept
 # loose because the input-layer hierarchy doesn't have a single
 # base class today.
-InputLayer = InputBytesDef | InputBitsDef
+InputLayer = InputBytesDef | InputBitsDef | TokensInputDef
 
 
 class Model2Def:

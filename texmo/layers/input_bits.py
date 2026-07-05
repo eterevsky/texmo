@@ -176,12 +176,18 @@ class InputBitsJax:
                 pos_encodings.append(_to_bit_array(i, bp_bits))
             self.pos_encodings = jnp.array(pos_encodings, dtype=dtype)
 
+    def init_weights(self, rng: jax.Array) -> None:
+        # Parameter-free encoding. All input layers share the weighted
+        # signature (weights as first argument, None here) so Model2Jax
+        # calls them uniformly.
+        return None
+
     def init_state(self) -> int | None:
         if self.bp:
             return 0
         return None
 
-    def _initial_vector(self, position: int = -1) -> jax.Array:
+    def _initial_vector(self, weights, position: int = -1) -> jax.Array:
         """Input vector for 'no token observed yet' (max entropy)."""
         if self.one_hot:
             v = jnp.full((self.ntokens,), 1.0 / self.ntokens, dtype=self.dtype)
@@ -191,7 +197,7 @@ class InputBitsJax:
             v = jnp.concatenate([v, self.pos_encodings[position % self.positions]])
         return v
 
-    def step(self, state, token: int) -> tuple:
+    def step(self, weights, state, token: int) -> tuple:
         """Encode a single token, returning (new_state, output)."""
         out = self.encodings[token]
         if self.bp:
@@ -199,7 +205,9 @@ class InputBitsJax:
             state = (state + 1) % self.positions
         return state, out
 
-    def forward(self, tokens: jax.Array, padding: int = 0) -> jax.Array:
+    def forward(
+        self, weights, tokens: jax.Array, padding: int = 0,
+    ) -> jax.Array:
         """Encode a batch of token sequences.
 
         Args:
@@ -221,7 +229,7 @@ class InputBitsJax:
 
         if padding > 0:
             pad_vecs = jnp.stack(
-                [self._initial_vector(position=-padding + i)
+                [self._initial_vector(weights, position=-padding + i)
                  for i in range(padding)])
             pad = jnp.broadcast_to(pad_vecs, (batch, padding, self.size))
             out = jnp.concatenate([pad, out], axis=1)

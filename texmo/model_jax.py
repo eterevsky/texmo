@@ -105,7 +105,7 @@ class ModelJax:
         p = self._total_padding
         v = None
         for i in range(p):
-            v = self.input._initial_vector(position=-p + i)
+            v = self.input._initial_vector(None, position=-p + i)
             v, layer_states = self._run_pipeline_step(v, weights, layer_states)
 
         states = [input_state] + layer_states
@@ -118,7 +118,7 @@ class ModelJax:
         self, weights: Weights, states: State, token: int
     ) -> tuple[State, jax.Array]:
         """Run one step of inference."""
-        input_state, v = self.input.step(states[0], token)
+        input_state, v = self.input.step(None, states[0], token)
         v, new_layer_states = self._run_pipeline_step(v, weights, states[1:])
         _, logits = self.output.step(weights[-1], None, v)
         if self._pad_output:
@@ -127,7 +127,7 @@ class ModelJax:
 
     def forward(self, weights: Weights, batch: jax.Array) -> jax.Array:
         """Forward pass on a batch for training."""
-        v = self.input.forward(batch[:, :-1], padding=self._total_padding)
+        v = self.input.forward(None, batch[:, :-1], padding=self._total_padding)
 
         pending: dict[int, jax.Array] = {}
         for i, (layer, lw) in enumerate(zip(self.layers, weights[1:-1])):

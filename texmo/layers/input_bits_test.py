@@ -400,7 +400,7 @@ def test_model_bits4_oh_loss():
 def test_jax_bits1_forward():
     layer = InputBitsDef.from_spec('bits.1').build_jax()
     tokens = jnp.array([[0, 1, 1, 0]], dtype=jnp.int32)
-    out = layer.forward(tokens)
+    out = layer.forward(None, tokens)
     assert out.shape == (1, 4, 1)
     assert out.dtype == jnp.float32
     np.testing.assert_array_equal(out[0, :, 0], [0, 1, 1, 0])
@@ -410,18 +410,18 @@ def test_jax_bits1_bp_forward():
     layer = InputBitsDef.from_spec('bits.1+bp').build_jax()
     assert layer.size == 1 + 3  # 1 bit + 3 bp bits
     tokens = jnp.array([[0, 1, 1, 0, 1, 0, 0, 1]], dtype=jnp.int32)
-    out = layer.forward(tokens)
+    out = layer.forward(None, tokens)
     assert out.shape == (1, 8, 4)
 
 
 def test_jax_bits1_bp_step_matches_forward():
     layer = InputBitsDef.from_spec('bits.1+bp').build_jax()
     tokens = jnp.array([[0, 1, 1, 0, 1, 0, 0, 1]], dtype=jnp.int32)
-    fwd = layer.forward(tokens)
+    fwd = layer.forward(None, tokens)
 
     state = layer.init_state()
     for t in range(8):
-        state, out = layer.step(state, int(tokens[0, t]))
+        state, out = layer.step(None, state, int(tokens[0, t]))
         np.testing.assert_allclose(out, fwd[0, t], atol=1e-6)
 
 
@@ -429,7 +429,7 @@ def test_jax_bits2_oh_forward():
     layer = InputBitsDef.from_spec('bits.2.oh').build_jax()
     assert layer.size == 4
     tokens = jnp.array([[0, 1, 2, 3]], dtype=jnp.int32)
-    out = layer.forward(tokens)
+    out = layer.forward(None, tokens)
     assert out.shape == (1, 4, 4)
     # one-hot check
     np.testing.assert_array_equal(out[0, 0], [1, 0, 0, 0])
@@ -439,7 +439,7 @@ def test_jax_bits2_oh_forward():
 def test_jax_forward_with_padding():
     layer = InputBitsDef.from_spec('bits.1+bp').build_jax()
     tokens = jnp.array([[0, 1]], dtype=jnp.int32)
-    out = layer.forward(tokens, padding=2)
+    out = layer.forward(None, tokens, padding=2)
     assert out.shape == (1, 4, 4)
     # Padding positions should have 0.5 for the bit value (max entropy)
     assert out[0, 0, 0] == 0.5

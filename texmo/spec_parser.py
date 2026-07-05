@@ -25,6 +25,7 @@ from .layer import LayerDef
 from .layers.dense import DenseDef
 from .layers.input_bits import InputBitsDef
 from .layers.input_bytes import InputBytesDef
+from .layers.input_tokens import TokensInputDef
 from .layers.seq import LayerSeqDef
 from .layers.skip import SkipDef
 from .layers.split import SplitDef
@@ -84,6 +85,9 @@ def _parse_input(input_spec: str, precision: Precision):
         return InputBytesDef(precision=precision)
     if input_spec.startswith('bits.'):
         return InputBitsDef.from_spec(
+            input_spec, precision=precision)
+    if input_spec.startswith('tokens.'):
+        return TokensInputDef.from_spec(
             input_spec, precision=precision)
     raise ValueError(f"Unknown input type: '{input_spec}'")
 

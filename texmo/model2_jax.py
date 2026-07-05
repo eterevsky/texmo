@@ -9,11 +9,12 @@ is the parser's job -- by the time anything reaches Model2Jax, the
 spec is split-form (or skip-free).
 
 Weights layout: `[input_weights, layer_seq_weights, output_weights]`.
-Today's input encodings are parameter-free so the first slot is
-None; a future learned-embedding input would put its weights pytree
-there. `layer_seq_weights` is itself a list (one entry per child
-layer in the LayerSeqJax), so the full pytree is
-`[None, [w_layer_0, w_layer_1, ...], w_output]` -- JAX treats
+All input layers share the weighted signature (weights first, like
+regular layers): the byte/bit encodings are parameter-free and return
+None from init_weights / ignore the argument, while tokens.*.emb puts
+its embedding table in slot 0. `layer_seq_weights` is itself a list
+(one entry per child layer in the LayerSeqJax), so the full pytree is
+`[input_or_None, [w_layer_0, w_layer_1, ...], w_output]` -- JAX treats
 nested lists/dicts uniformly.
 
 States layout: `[input_state, layer_seq_state]` where
@@ -50,9 +51,9 @@ class Model2Jax:
         self._total_padding = total_padding
 
     def init_weights(self, rng: jax.Array):
-        k_seq, k_out = jax.random.split(rng)
+        k_in, k_seq, k_out = jax.random.split(rng, 3)
         return [
-            None,
+            self.input.init_weights(k_in),
             self.layer_seq.init_weights(k_seq),
             self.output.init_weights(k_out),
         ]
@@ -70,7 +71,7 @@ class Model2Jax:
         p = self._total_padding
         v = None
         for i in range(p):
-            v = self.input._initial_vector(position=-p + i)
+            v = self.input._initial_vector(weights[0], position=-p + i)
             layer_seq_state, v = self.layer_seq.step(
                 weights[1], layer_seq_state, v)
 
@@ -82,7 +83,7 @@ class Model2Jax:
     def step(
         self, weights, states, token,
     ) -> tuple[list, jax.Array]:
-        input_state, v = self.input.step(states[0], token)
+        input_state, v = self.input.step(weights[0], states[0], token)
         layer_seq_state, v = self.layer_seq.step(
             weights[1], states[1], v)
         _, logits = self.output.step(weights[-1], None, v)
@@ -91,7 +92,8 @@ class Model2Jax:
         return [input_state, layer_seq_state], logits
 
     def forward(self, weights, batch: jax.Array) -> jax.Array:
-        v = self.input.forward(batch[:, :-1], padding=self._total_padding)
+        v = self.input.forward(
+            weights[0], batch[:, :-1], padding=self._total_padding)
         v = self.layer_seq.forward(weights[1], v)
         logits = self.output.forward(weights[-1], v)
         if self._pad_output:

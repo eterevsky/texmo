@@ -1,11 +1,14 @@
 /.python-version
+/.venv
 /checkpoints
 /config.py
 /data/*
 !/data/pride*
 /models
+/log.txt
 /results
 /scratch
+/setup.txt
 /target
 /uv.lock
 __pycache__

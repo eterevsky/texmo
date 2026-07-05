@@ -194,15 +194,16 @@ def discover_simple_types(
 
 def _layer_feature_dim(n_simple: int) -> int:
     # [log(num_weights), log(in), log(out)] + bool per simple type +
-    # 10 extra-dim slots:
+    # 11 extra-dim slots:
     #   [suffix_len, latent_reps, lrnn_reps,
     #    skip_add_dist, skip_cat_dist,    # also split.add / split.cat span
     #    msr_heads, lmgu_reps, conv_kernel,
-    #    split_mul_dist, head_block_count]
-    # head_block_count = log2(rglru blocks); reserved to also carry
-    # attention heads once that layer lands. Additive -- rglru still gets
-    # its simple-type one-hot for identity (msr keeps its own heads slot).
-    return 3 + n_simple + 10
+    #    split_mul_dist, head_block_count, attn_window]
+    # head_block_count = log2(rglru blocks / attn heads) -- the shared
+    # partition-count slot. attn_window = log2(attn window). Additive --
+    # rglru/attn still get their simple-type one-hots for identity (msr
+    # keeps its own heads slot).
+    return 3 + n_simple + 11
 
 
 def _layer_features(
@@ -247,10 +248,15 @@ def _layer_features(
         feat[3 + n_simple + 7] = np.log2(layer.kernel)
     elif t == 'split.mul':
         feat[3 + n_simple + 8] = _jump_length(layer)
-    # Shared head/block-count slot (additive, reused by attention heads
-    # later): rglru's block count. rglru keeps its simple-type one-hot.
+    # Shared head/block-count slot (additive): rglru's block count and
+    # attn's head count partition the channel dim the same way. Both
+    # layers keep their simple-type one-hots; attn additionally sets
+    # its window slot.
     if t == 'rglru':
         feat[3 + n_simple + 9] = np.log2(layer.blocks)
+    elif t == 'attn':
+        feat[3 + n_simple + 9] = np.log2(layer.heads)
+        feat[3 + n_simple + 10] = np.log2(layer.window)
     return feat
 
 

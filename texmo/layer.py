@@ -5,6 +5,11 @@ import torch.nn as nn
 from torch import Tensor
 
 from .common import power2_neighbors
+
+# Window used when a type swap lands on attn from a layer that has no
+# window of its own (msr <-> attn). Modest starting point; the window
+# then mutates freely (x2 / /2) within attn.
+_ATTN_SWAP_WINDOW = 16
 from .layer_jax import LayerJax
 
 LayerState = Any
@@ -124,6 +129,10 @@ class LayerDef(object):
             # Type swap: suffix.L <-> conv.L (same time-axis width;
             # suffix downsamples by L, conv preserves length).
             yield f"conv.{self.length}"
+            # Type swap: suffix.L <-> single-head attn over the same
+            # span -- the learned-soft wrap of the last L positions vs
+            # the hard concat. Size = the suffix's input width.
+            yield f"attn.{self.input_size}.1.{self.length}"
             return
 
         if self.name == "conv":
@@ -179,6 +188,29 @@ class LayerDef(object):
             # Single-head msr swaps with mgru of the same size.
             if self.heads == 1:
                 yield f"mgru.{self.dim}"
+            # Attention-family swap: linear attention <-> softmax
+            # attention at matching size/heads (attn needs a window;
+            # start modest and let it mutate).
+            yield f"attn.{self.dim}.{self.heads}.{_ATTN_SWAP_WINDOW}"
+            return
+
+        if self.name == "attn":
+            # 2x mutations on all three metaparameters; is_valid
+            # filters the boundary cases (head_dim >= 4, window >= 2).
+            for s in power2_neighbors(self.size):
+                yield f"attn.{s}.{self.heads}.{self.window}"
+            for h in power2_neighbors(self.heads):
+                yield f"attn.{self.size}.{h}.{self.window}"
+            for w in power2_neighbors(self.window):
+                yield f"attn.{self.size}.{self.heads}.{w}"
+            # Attention-family swap (mirror of the msr case above).
+            yield f"msr.{self.size}.{self.heads}"
+            # Mirror of the suffix swap: single-head attn over window W
+            # at the input width <-> suffix.W (hard concat of the same
+            # span). Guarded to the exact image of the forward swap so
+            # the relation stays symmetric.
+            if self.heads == 1 and self.size == self.input_size:
+                yield f"suffix.{self.window}"
             return
 
         if self.name == "rglru":

@@ -11,16 +11,17 @@ from texmo.precision import Precision
 def test_neighbors():
     d = SuffixDef(4, input_size=8)
     neighbors = list(d.neighbors())
-    # Size mutations + the conv.L type-swap at the same L.
-    assert neighbors == ["suffix.2", "suffix.8", "conv.4"]
+    # Size mutations + the conv.L type-swap + the single-head attn
+    # swap over the same span, sized to the suffix's input width.
+    assert neighbors == ["suffix.2", "suffix.8", "conv.4", "attn.8.1.4"]
 
 
 def test_neighbors_min():
     d = SuffixDef(2, input_size=4)
     neighbors = list(d.neighbors())
     # suffix.1 is invalid but still generated (ModelDef filters);
-    # conv.2 is the same-L type swap.
-    assert neighbors == ["suffix.1", "suffix.4", "conv.2"]
+    # conv.2 is the same-L type swap, attn.4.1.2 the soft-wrap swap.
+    assert neighbors == ["suffix.1", "suffix.4", "conv.2", "attn.4.1.2"]
 
 
 def test_def_properties():

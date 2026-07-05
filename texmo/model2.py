@@ -16,7 +16,7 @@ JAX only. No PyTorch counterpart.
 from collections.abc import Iterable
 from typing import Self
 
-from .layer import LayerDef
+from .layer import LayerDef, _ATTN_SWAP_WINDOW
 from .layers.dense import DenseDef
 from .layers.input_bits import InputBitsDef
 from .layers.input_bytes import InputBytesDef
@@ -259,6 +259,11 @@ def _seq_variants(
     yield strs + ["rglru.1"]
     if last_output > 1:
         yield strs + [f"rglru.{last_output}"]
+    # Append a single-head attention seed sized to the running width
+    # (deliberately NOT min(width, output_size) like the other appends
+    # -- attention keeps the stream width). heads/window mutate from
+    # there; tiny widths (head_dim < 4) are filtered by is_valid.
+    yield strs + [f"attn.{last_output}.1.{_ATTN_SWAP_WINDOW}"]
     if new_size >= 2:
         yield strs + [f"matlstm.{new_size}"]
         yield strs + [f"msr.{new_size}.1"]

@@ -150,3 +150,68 @@ def test_parse_and_model2_build():
     m = parse_model2("bytes|dense.8.gelu-attn.8.2.8", Precision.FP32)
     assert "attn" in [l.name for l in m.layer_seq.layers]
     m.build_jax()  # constructs without error
+
+
+def test_neighbors_mutations_and_family_swaps():
+    # 2x mutations on all three metaparameters + the msr swap.
+    nbs = list(AttnDef(16, 2, 8, input_size=6).neighbors())
+    for expect in ("attn.8.2.8", "attn.32.2.8", "attn.16.1.8",
+                   "attn.16.4.8", "attn.16.2.4", "attn.16.2.16",
+                   "msr.16.2"):
+        assert expect in nbs, expect
+    # heads != 1 -> no suffix swap.
+    assert not any(s.startswith("suffix") for s in nbs)
+    # suffix swap only in the exact image of the forward swap:
+    # heads == 1 AND size == input width.
+    assert "suffix.4" in list(AttnDef(8, 1, 4, input_size=8).neighbors())
+    assert "suffix.4" not in list(AttnDef(8, 1, 4, input_size=6).neighbors())
+
+
+def test_msr_and_suffix_swap_to_attn():
+    from texmo.layers.msr import MsrDef
+    from texmo.layers.suffix import SuffixDef
+    assert "attn.8.2.16" in list(MsrDef(8, 2, input_size=6).neighbors())
+    # suffix.L at input width D -> attn.D.1.L (learned-soft wrap of the
+    # same span, sized to the suffix's input).
+    assert "attn.8.1.4" in list(SuffixDef(4, input_size=8).neighbors())
+
+
+def test_temporal_wrap_adjacency_invalid():
+    from texmo.precision import Precision
+    from texmo.spec_parser import parse_model2
+
+    def ok(s):
+        return parse_model2(s, Precision.FP32).is_valid()
+    assert not ok("bytes|dense.8.gelu-attn.8.1.4-attn.8.1.4")   # attn-attn
+    assert not ok("bytes|dense.8.gelu-attn.8.2.4-msr.8.1")      # attn-msr
+    assert not ok("bytes|dense.8.gelu-suffix.2-attn.16.1.4")    # suffix-attn
+    assert not ok("bytes|dense.8.gelu-attn.8.1.4-conv.4")       # attn-conv
+    # Separated by a non-wrap layer -> fine.
+    assert ok("bytes|dense.8.gelu-attn.8.2.4-dense.8.gelu-msr.8.1")
+
+
+def test_append_attn_uses_running_width():
+    from texmo.precision import Precision
+    from texmo.spec_parser import parse_model2
+    # bits.1+bp has output_size 1; the generic appends use
+    # min(width, output) = 1, but attn is seeded at the running width 8.
+    m = parse_model2("bits.1+bp|dense.8.gelu", Precision.FP32)
+    specs = {nb.spec for nb in m.neighbors()}
+    assert "bits.1+bp|dense.8.gelu-attn.8.1.16" in specs
+
+
+def test_predictors_handle_attn():
+    from texmo.configuration import Configuration
+    from texmo.precision import Precision
+    from texmo.predict import timing
+    from texmo.predict.loss_rnn import _layer_features, _model_layers
+    from texmo.spec_parser import parse_model2
+    model = parse_model2("bytes|dense.8.gelu-attn.8.2.16", Precision.FP32)
+    conf = Configuration(model, lr=0.01, length=32, batch=4, steps=1,
+                         decay=1.0)
+    assert any(c.type_id == "attn" for c in timing.featurize(conf))
+    attn_layer = next(l for l in _model_layers(conf) if l.name == "attn")
+    feat = _layer_features(attn_layer, {"attn": 0}, n_simple=1)
+    assert feat[3] == 1.0            # simple-type one-hot
+    assert feat[3 + 1 + 9] == 1.0    # shared slot: log2(heads=2)
+    assert feat[3 + 1 + 10] == 4.0   # attn window: log2(16)

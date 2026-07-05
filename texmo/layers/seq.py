@@ -20,6 +20,12 @@ from ..layer import LayerDef, LayerState
 from ..layer_jax import LayerJax, LayerWeights
 from .dense import DenseDef
 
+# Layers that fold a span of previous positions into the current one
+# (attention-like or windowed). Two of them directly adjacent -- in any
+# combination -- duplicate that role with nothing in between, so
+# is_valid rejects the pair.
+_TEMPORAL_WRAP_LAYERS = ("msr", "attn", "conv", "suffix")
+
 
 class LayerSeqJax(LayerJax):
     """Runtime counterpart of LayerSeqDef.
@@ -164,9 +170,14 @@ class LayerSeqDef(LayerDef):
             # A normalization can't follow a suffix.
             if l1.name == "suffix" and l2.name in ("norm", "rmsnorm"):
                 return False
-            # Two msr layers can't be adjacent -- both maintain matrix
-            # state and serve the same architectural role.
-            if l1.name == "msr" and l2.name == "msr":
+            # No two adjacent temporal-wrap layers -- msr / attn / conv
+            # / suffix all fold a span of previous positions into the
+            # current one; stacking two directly (in any combination)
+            # duplicates that role with nothing in between. Generalizes
+            # the old msr-msr rule; conv/suffix pairs were already
+            # covered by the length>1 rule above.
+            if (l1.name in _TEMPORAL_WRAP_LAYERS
+                    and l2.name in _TEMPORAL_WRAP_LAYERS):
                 return False
 
         last = len(self.layers) - 1

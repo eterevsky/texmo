@@ -39,6 +39,7 @@ import numpy as np
 from scipy.optimize import nnls
 
 from ..configuration import Configuration
+from ..layers.attn import AttnDef
 from ..layers.conv import ConvDef
 from ..layers.dense import DenseDef
 from ..layers.gru import GruDef, MgruDef, MinGruDef
@@ -125,6 +126,20 @@ def _features_rglru(
         isize * block_width,
         isize * block_width * length,
         isize * block_width * length * batch,
+    ]
+
+
+def _features_attn(
+    isize: int, osize: int, batch: int, length: int, window: int,
+) -> list[float]:
+    # Dense matmul features cover the q/k/v/o projections (NNLS picks
+    # the coefficient). The window terms cover the banded score and
+    # value-mix matmuls: per token ~ window * size each, over the
+    # sequence ~ length * window * size.
+    return _features_dense(isize, osize, batch, length) + [
+        osize * window,
+        osize * window * length,
+        osize * window * length * batch,
     ]
 
 
@@ -245,6 +260,9 @@ def _layer_component(layer, batch: int, length: int) -> Component:
     elif isinstance(layer, RglruDef):
         features = _features_rglru(
             layer.input_size, layer.block_width, batch, length)
+    elif isinstance(layer, AttnDef):
+        features = _features_attn(
+            layer.input_size, layer.size, batch, length, layer.window)
     elif isinstance(layer, _MATMUL_LAYER_TYPES):
         features = _features_dense(layer.input_size, layer.size, batch, length)
     elif isinstance(layer, (NormDef, RmsNormDef)):

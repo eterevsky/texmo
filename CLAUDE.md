@@ -21,6 +21,12 @@ Detailed docs live in [`docs/`](docs/):
 - [`skip.md`](docs/skip.md) — **legacy** residual connections
   (`skip.X.add` / `skip.X.cat`), superseded by `split`; kept for the
   merge semantics Split inherits.
+- [`io.md`](docs/io.md) — how models turn token ids into logits: the
+  model contract and the three IO kinds (one-hot bit chunks, embedded
+  bit chunks, tokenized), what/how/why for each.
+- [`tied_io.md`](docs/tied_io.md) — design record for the tied
+  InputOutput migration: decision log, rejected alternatives, mutation
+  consequences, Gemma fidelity mapping. Agreed, not yet implemented.
 - [`timing.md`](docs/timing.md) — training-step time prediction
   model (features, fit, and use).
 - [`loss_prediction.md`](docs/loss_prediction.md) — RNN loss

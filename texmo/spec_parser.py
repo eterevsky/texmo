@@ -22,10 +22,7 @@ enforces 2-way for now. Multi-way is a one-character relaxation.
 """
 
 from .layer import LayerDef
-from .layers.dense import DenseDef
-from .layers.input_bits import InputBitsDef
-from .layers.input_bytes import InputBytesDef
-from .layers.input_tokens import TokensInputDef
+from .layers.one_hot_codec import OneHotCodecDef
 from .layers.seq import LayerSeqDef
 from .layers.skip import SkipDef
 from .layers.split import SplitDef
@@ -33,14 +30,17 @@ from .model import _apply_merges, _build_layer_def
 from .precision import Precision
 
 
-def parse_model2(spec: str, precision: Precision):
+def parse_model2(spec: str, precision: Precision, cap: bool = False):
     """Top-level spec parser. Returns a `Model2Def`.
 
-    Splits the spec on `|` into the input encoding and the layer
+    Splits the spec on `|` into the codec's input spec and the layer
     chain, builds each part, and stitches them together. Legacy
     `skip.D.op` syntax in the layer chain is translated to the
     equivalent `split.op(...)` form at parse time, recursively at
     every nesting level. The runtime sees a skip-free tree.
+
+    `cap` enables logit soft-capping (see layers/codec.py). Off by
+    default until its effect is validated against the result DB.
     """
     # Imported here to break the circular module dependency:
     # model2.py imports the parser indirectly via downstream code
@@ -49,25 +49,22 @@ def parse_model2(spec: str, precision: Precision):
     from .model2 import Model2Def
 
     input_spec, layers_spec = _split_input_and_layers(spec)
-    input_layer = _parse_input(input_spec, precision)
-    layers = parse_layer_list(layers_spec, input_layer.size)
+    codec = OneHotCodecDef.from_spec(input_spec, precision, cap=cap)
+    layers = parse_layer_list(layers_spec, codec.size)
 
-    layer_seq = LayerSeqDef(layers, input_size=input_layer.size)
-    last_shape = layers[-1].size if layers else input_layer.size
-    output_size = (
-        input_layer.ntokens if input_layer.ntokens > 2 else 1)
-    output = DenseDef(output_size, input_size=last_shape)
+    layer_seq = LayerSeqDef(layers, input_size=codec.size)
+    codec.set_head_width(layers[-1].size if layers else codec.size)
 
     # Canonical spec is rebuilt from the parsed tree -- so callers
     # see split.op(...) form whether the user wrote split.op or the
     # legacy skip.D.op (which gets translated in parse_layer_list).
     # Parsing the canonical spec round-trips to an equivalent
     # Model2Def.
-    canonical = f'{input_layer}|{layer_seq}'
+    canonical = f'{codec}|{layer_seq}'
 
     return Model2Def(
         spec=canonical, precision=precision,
-        input=input_layer, layer_seq=layer_seq, output=output,
+        codec=codec, layer_seq=layer_seq,
     )
 
 
@@ -78,18 +75,6 @@ def _split_input_and_layers(spec: str) -> tuple[str, str]:
     if len(parts) == 2:
         return parts[0], parts[1]
     raise ValueError("Model spec can't contain more than one |")
-
-
-def _parse_input(input_spec: str, precision: Precision):
-    if input_spec == '' or input_spec == 'bytes':
-        return InputBytesDef(precision=precision)
-    if input_spec.startswith('bits.'):
-        return InputBitsDef.from_spec(
-            input_spec, precision=precision)
-    if input_spec.startswith('tokens.'):
-        return TokensInputDef.from_spec(
-            input_spec, precision=precision)
-    raise ValueError(f"Unknown input type: '{input_spec}'")
 
 
 def _translate_skips(

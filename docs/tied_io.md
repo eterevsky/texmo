@@ -1,9 +1,14 @@
 # Tied input/output embeddings — design record
 
-Status: **design agreed, not yet implemented.** This is the decision
-log and migration plan from the 2026-07 design discussions; the
-user-facing description of how texmo IO works (including the parts
-designed here) lives in [`io.md`](io.md). The
+Status: **design agreed; the plain class is implemented, tying is
+not.** Implementation naming settled after this record was written:
+the component is called the **codec** — `OneHotCodec`
+(`layers/one_hot_codec.py`, the plain class below, shipped with the
+soft-cap opt-in pending DB validation) and `EmbeddingCodec` (both
+tied rows of the table below, upcoming), sharing `layers/codec.py`.
+This is the decision log and migration plan from the 2026-07 design
+discussions; the user-facing description of how texmo IO works
+(including the parts designed here) lives in [`io.md`](io.md). The
 immediate driver is RecurrentGemma (its LM head is the embedding table
 transposed); the larger prize is the search: input + output layers
 dominate the weight budget of small models (`bytes|dense.1.tanh` spends

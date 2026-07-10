@@ -9,13 +9,14 @@ is the parser's job -- by the time anything reaches Model2Jax, the
 spec is split-form (or skip-free).
 
 Weights layout: `[input_weights, layer_seq_weights, output_weights]`.
-All input layers share the weighted signature (weights first, like
-regular layers): the byte/bit encodings are parameter-free and return
-None from init_weights / ignore the argument, while tokens.*.emb puts
-its embedding table in slot 0. `layer_seq_weights` is itself a list
-(one entry per child layer in the LayerSeqJax), so the full pytree is
-`[input_or_None, [w_layer_0, w_layer_1, ...], w_output]` -- JAX treats
-nested lists/dicts uniformly.
+Slots 0 and 2 belong to the codec (see layers/codec.py): OneHotCodec's
+fixed codebooks are parameter-free and keep None in slot 0,
+EmbeddingCodec will put its table there, and slot 2 holds the head.
+`layer_seq_weights` is itself a list (one entry per child layer in the
+LayerSeqJax), so the full pytree is
+`[input_or_None, [w_layer_0, w_layer_1, ...], w_head]` -- JAX treats
+nested lists/dicts uniformly. Keeping the codec's two ends in separate
+slots preserves the layout of existing pickled checkpoints.
 
 States layout: `[input_state, layer_seq_state]` where
 `layer_seq_state` is a list of per-layer states.
@@ -27,8 +28,7 @@ import jax
 import jax.numpy as jnp
 import optax
 
-from .layers.dense import DenseJax
-from .layers.input_bits import InputBitsJax
+from .layers.one_hot_codec import OneHotCodecJax
 from .layers.seq import LayerSeqJax
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
@@ -37,25 +37,20 @@ _1_BY_LOG2 = 1.0 / math.log(2.0)
 class Model2Jax:
     def __init__(
         self,
-        input_layer: InputBitsJax,
+        codec: OneHotCodecJax,
         layer_seq: LayerSeqJax,
-        output: DenseJax,
-        ntokens: int,
         total_padding: int = 1,
     ):
-        self.input = input_layer
+        self.codec = codec
         self.layer_seq = layer_seq
-        self.output = output
-        self.ntokens = ntokens
-        self._pad_output = ntokens <= 2
         self._total_padding = total_padding
 
     def init_weights(self, rng: jax.Array):
         k_in, k_seq, k_out = jax.random.split(rng, 3)
         return [
-            self.input.init_weights(k_in),
+            self.codec.init_input_weights(k_in),
             self.layer_seq.init_weights(k_seq),
-            self.output.init_weights(k_out),
+            self.codec.init_head_weights(k_out),
         ]
 
     def initial_step(self, weights) -> tuple[list, jax.Array]:
@@ -65,40 +60,33 @@ class Model2Jax:
         vectors through the chain to warm up stateful sub-layers,
         then projects the last activation through the output dense.
         """
-        input_state = self.input.init_state()
+        input_state = self.codec.init_state()
         layer_seq_state = self.layer_seq.init_state()
 
         p = self._total_padding
         v = None
         for i in range(p):
-            v = self.input._initial_vector(weights[0], position=-p + i)
+            v = self.codec.initial_vector(weights[0], position=-p + i)
             layer_seq_state, v = self.layer_seq.step(
                 weights[1], layer_seq_state, v)
 
-        _, logits = self.output.step(weights[-1], None, v)
-        if self._pad_output:
-            logits = jnp.pad(logits, (0, 1))
+        logits = self.codec.logits_step(weights[-1], v)
         return [input_state, layer_seq_state], logits
 
     def step(
         self, weights, states, token,
     ) -> tuple[list, jax.Array]:
-        input_state, v = self.input.step(weights[0], states[0], token)
+        input_state, v = self.codec.encode_step(weights[0], states[0], token)
         layer_seq_state, v = self.layer_seq.step(
             weights[1], states[1], v)
-        _, logits = self.output.step(weights[-1], None, v)
-        if self._pad_output:
-            logits = jnp.pad(logits, (0, 1))
+        logits = self.codec.logits_step(weights[-1], v)
         return [input_state, layer_seq_state], logits
 
     def forward(self, weights, batch: jax.Array) -> jax.Array:
-        v = self.input.forward(
+        v = self.codec.encode(
             weights[0], batch[:, :-1], padding=self._total_padding)
         v = self.layer_seq.forward(weights[1], v)
-        logits = self.output.forward(weights[-1], v)
-        if self._pad_output:
-            logits = jnp.pad(logits, ((0, 0), (0, 0), (0, 1)))
-        return logits
+        return self.codec.logits(weights[-1], v)
 
     def loss_batch(self, weights, batch: jax.Array) -> jax.Array:
         logits = self.forward(weights, batch)

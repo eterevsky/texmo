@@ -3,20 +3,25 @@
 A texmo model is a next-token predictor. Its input is a stream of
 integer token indices; its output is a vector of logits over the same
 token set at every position. Everything in between — the layer chain
-written in the spec — operates on dense vectors. The input/output
-machinery (IO) converts between the two worlds: ids to vectors at the
-front, vectors to logits at the back.
+written in the spec — operates on dense vectors. The **codec** — a
+coder/decoder pair owning both ends of the model — converts between
+the two worlds: it encodes ids to vectors at the front and decodes
+hidden activations to logits at the back. Two implementations share
+one API (`layers/codec.py` holds the common pieces):
+`OneHotCodec` for the fixed-codebook kinds (kind 1 below, plus
+`tokens.*.oh`) and `EmbeddingCodec` (upcoming) for the tied embedded
+kinds (2 and 3).
 
 In a spec like `bits.4+bp|rnn.8.gelu`, the part before `|` names the
-IO; the part after names the hidden chain. The **output head** is the
+codec; the part after names the hidden chain. The **output head** is the
 final transformation that turns the last hidden layer's vector into
 the logits — one score per token in the set. In the simplest case it
 is a dense projection from the last hidden layer's activations to
 `ntokens` scores; in the tied kinds below it scores the hidden state
 against the embedding table instead. The head is **implicit**: it is fully determined by the
-IO kind (which knows the token set) plus the width of the last hidden
+codec kind (which knows the token set) plus the width of the last hidden
 layer, so it never appears in the spec. Logits are always produced by
-the IO — a chain layer's output is never used as logits directly.
+the codec — a chain layer's output is never used as logits directly.
 
 ## The model contract
 
@@ -26,7 +31,7 @@ the IO — a chain layer's output is never used as logits directly.
   2 to 256,000.
 - **Autoregression.** To predict the token at position t, the model
   sees tokens up to t-1 (inputs are shifted right). At position 0
-  there is no history: the model receives the IO's *initial vector* —
+  there is no history: the model receives the codec's *initial vector* —
   the encoding of "uniform distribution over tokens" — and its output
   there is the unconditional prior. This convention is
   tokenset-independent: training always uses the shift-pad shape, and
@@ -38,8 +43,8 @@ the IO — a chain layer's output is never used as logits directly.
 - **Loss.** Softmax cross-entropy over the logits. Training optimizes
   the mean loss **per token**, in bits. Evaluation reports the loss
   **per byte**, dividing by the tokenset's average bytes per token —
-  which makes scores comparable across IO kinds with wildly different
-  token granularities.
+  which makes scores comparable across codec kinds with wildly
+  different token granularities.
 - **Binary special case.** When `ntokens <= 2` (bits.1) the head
   produces a single logit x, treated as `[x, 0]` — the log-odds /
   sigmoid trick.
@@ -47,11 +52,18 @@ the IO — a chain layer's output is never used as logits directly.
   This is infrastructure, not a modeling knob: it is invisible to the
   loss at equilibrium and monotone (greedy sampling unchanged), but it
   bounds the maximum loss and kills gradients on runaway logits, so
-  fewer runs diverge.
+  fewer runs diverge. *Status: implemented but opt-in
+  (`parse_model2(..., cap=True)`) until its effect is measured against
+  the uncapped result DB; the end state is always-on.*
 
 ## Kind 1: bit chunks, one-hot family — `bits.N[.oh][+bp]`, `bytes`
 
-*Status: implemented; the current default for search models.*
+*Status: implemented as `OneHotCodec` (`layers/one_hot_codec.py`); the
+current default for search models. Only the specs in actual use are
+valid — `bytes`, `bits.1+bp`, `bits.2.oh+bp`, `bits.4.oh+bp` (and
+`tokens.*.oh`); the other bits variants still parse and run for manual
+experiments but `is_valid` rejects them, so search never proposes
+them.*
 
 Each byte is split into 8/N chunks of N bits (N in {1, 2, 4, 8};
 `bytes` = `bits.8.oh`), so `ntokens = 2^N`. The input vector is either
@@ -74,7 +86,7 @@ weights, in large part because of exactly this overhead.
 
 ## Kind 2: embedded bit chunks — `bits.N.emb.d`, `bytes.emb.d`
 
-*Status: designed, not yet implemented — see
+*Status: designed as `EmbeddingCodec`, not yet implemented — see
 [`tied_io.md`](tied_io.md) for the full rationale.*
 
 Instead of one-hot vectors, chunk values get **learned embeddings**: a
@@ -106,7 +118,9 @@ absorbing the difference in scale between the two roles.
 
 ## Kind 3: tokenized — `tokens.N.variation.emb.d[.direct]`
 
-*Status: input layer and tokenizers implemented; tied head designed.*
+*Status: tokenizers and the one-hot mode (`tokens.*.oh`, part of
+`OneHotCodec`) implemented; the embedded/tied mode belongs to
+`EmbeddingCodec` and is designed, not yet implemented.*
 
 For learned tokensets: `N.variation` names the tokenset file
 `tokens{N}_{variation}.json`, resolved through the registry — e.g.
@@ -136,8 +150,8 @@ If the head were an explicit spec layer, every spec would end with a
 projection to `ntokens`: `bits.4+bp|rnn.8.gelu` would be written
 `bits.4+bp|rnn.8.gelu-dense.16`, with the trailing `dense.16`
 producing the 16 logits. This was considered and rejected twice. It
-adds no expressiveness (the IO must own the token-set width anyway),
+adds no expressiveness (the codec must own the token-set width anyway),
 it would let degenerate forms parse (`bits.4+bp|rnn.16.gelu` — a
 recurrent cell whose state doubles as the logit vector), and it would
-rename every conf in the results DB. The IO kind determines the head;
+rename every conf in the results DB. The codec kind determines the head;
 the spec stays a description of the *hidden* computation.

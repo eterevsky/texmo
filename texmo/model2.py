@@ -17,32 +17,30 @@ from collections.abc import Iterable
 from typing import Self
 
 from .layer import LayerDef, _ATTN_SWAP_WINDOW
+from .layers.one_hot_codec import OneHotCodecDef
 from .layers.dense import DenseDef
-from .layers.input_bits import InputBitsDef
-from .layers.input_bytes import InputBytesDef
-from .layers.input_tokens import TokensInputDef
 from .layers.seq import LayerSeqDef
 from .layers.split import SplitDef
 from .model2_jax import Model2Jax
 from .precision import Precision
 from .spec_parser import parse_model2
 
-# Type alias for the input layers parse_model2 can produce -- kept
-# loose because the input-layer hierarchy doesn't have a single
-# base class today.
-InputLayer = InputBytesDef | InputBitsDef | TokensInputDef
-
 
 class Model2Def:
     """Model spec descriptor built on LayerSeqDef.
 
-    Stores already-parsed pieces (`input`, `layer_seq`, `output`)
-    plus the original spec string for round-tripping. Use
-    `spec_parser.parse_model2(spec, precision)` to construct from a
-    string.
+    Stores already-parsed pieces (the `codec` owning both model ends
+    and `layer_seq`) plus the original spec string for round-tripping.
+    Use `spec_parser.parse_model2(spec, precision)` to construct from
+    a string.
 
     Mirrors ModelDef's public surface (spec / num_weights /
-    num_mults / is_valid / build_jax / equality / hashing).
+    num_mults / is_valid / build_jax / equality / hashing). The
+    `input` / `output` properties delegate into the codec so existing
+    consumers (managers, predictors, neighbor generation) are
+    unaffected: `input` is the codec itself, which exposes the input
+    metadata surface (size / ntokens / tokens_name / neighbors /
+    the pre-`|` spec as str()), and `output` is its dense head.
     """
 
     def __init__(
@@ -50,20 +48,26 @@ class Model2Def:
         *,
         spec: str,
         precision: Precision,
-        input: InputLayer,
+        codec: OneHotCodecDef,
         layer_seq: LayerSeqDef,
-        output: DenseDef,
     ):
         self.spec = spec
         self.precision = precision
-        self.input = input
+        self.codec = codec
         self.layer_seq = layer_seq
-        self.output = output
-        self.ntokens = input.ntokens
+        self.ntokens = codec.ntokens
         # 1 for the autoregressive shift + extras consumed by the
         # layer chain. layer_seq.length is already 1 + sum(extras),
         # so it doubles as the model's total padding requirement.
         self.total_padding = layer_seq.length
+
+    @property
+    def input(self) -> OneHotCodecDef:
+        return self.codec
+
+    @property
+    def output(self) -> DenseDef:
+        return self.codec.head
 
     def __str__(self) -> str:
         return self.spec
@@ -80,19 +84,11 @@ class Model2Def:
 
     @property
     def num_weights(self) -> int:
-        return (
-            self.input.num_weights
-            + self.layer_seq.num_weights
-            + self.output.num_weights
-        )
+        return self.codec.num_weights + self.layer_seq.num_weights
 
     @property
     def num_mults(self) -> int:
-        return (
-            self.input.num_mults
-            + self.layer_seq.num_mults
-            + self.output.num_mults
-        )
+        return self.codec.num_mults + self.layer_seq.num_mults
 
     @property
     def num_layers(self) -> int:
@@ -104,12 +100,10 @@ class Model2Def:
         return self.layer_seq.num_layers
 
     def is_valid(self) -> bool:
-        # The output readout is a bare linear (no activation) built
-        # internally with the right shape, so it's valid by
-        # construction -- we don't run it through DenseDef.is_valid
-        # (which requires an activation). ModelDef.is_valid skips its
-        # output dense the same way.
-        return self.input.is_valid() and self.layer_seq.is_valid()
+        # The codec validates its input encoding; the head is valid
+        # by construction (bare linear readout, like the old implicit
+        # output dense).
+        return self.codec.is_valid() and self.layer_seq.is_valid()
 
     def _gen_neighbor_specs(self) -> Iterable[str]:
         """Yield raw spec strings for single-mutation neighbors."""
@@ -132,8 +126,9 @@ class Model2Def:
         mutations that normalize to the same model are yielded once, and
         self is excluded.
         """
+        cap = self.codec.cap
         for p in self.precision.neighbors:
-            yield parse_model2(self.spec, p)
+            yield parse_model2(self.spec, p, cap=cap)
 
         raw_seen: set[str] = set()
         seen: set[str] = {self.spec}
@@ -141,7 +136,7 @@ class Model2Def:
             if raw in raw_seen:
                 continue
             raw_seen.add(raw)
-            model = parse_model2(raw, self.precision)
+            model = parse_model2(raw, self.precision, cap=cap)
             if model.spec in seen:
                 continue
             seen.add(model.spec)
@@ -150,10 +145,8 @@ class Model2Def:
 
     def build_jax(self) -> Model2Jax:
         return Model2Jax(
-            self.input.build_jax(),
+            self.codec.build_jax(),
             self.layer_seq.build_jax(self.precision.jax_dtype),
-            self.output.build_jax(self.precision.jax_dtype),
-            ntokens=self.ntokens,
             total_padding=self.total_padding,
         )
 

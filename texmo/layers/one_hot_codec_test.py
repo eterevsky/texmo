@@ -1,0 +1,149 @@
+"""Tests for OneHotCodec (fixed codebooks + head + optional cap)."""
+import jax
+import jax.numpy as jnp
+import numpy as np
+import pytest
+
+from texmo.layers.codec import _LOGIT_CAP, cap_logits
+from texmo.precision import Precision
+from texmo.spec_parser import parse_model2
+
+
+def _tiny_model(spec="bytes|dense.8.gelu", cap=False):
+    md = parse_model2(spec, Precision.FP32, cap=cap)
+    model = md.build_jax()
+    weights = model.init_weights(jax.random.PRNGKey(0))
+    return md, model, weights
+
+
+def test_cap_logits_shape_and_bounds():
+    x = jnp.array([-1e6, -10.0, -1.0, 0.0, 1.0, 10.0, 1e6])
+    y = np.asarray(cap_logits(x))
+    # <=: tanh saturates to exactly 1.0 in fp32 for huge inputs.
+    assert np.all(np.abs(y) <= _LOGIT_CAP)
+    # Near-identity for small logits, saturating for huge ones.
+    assert abs(y[2] - (-1.0)) < 1e-3 and abs(y[4] - 1.0) < 1e-3
+    assert y[0] < -29.99 and y[6] > 29.99
+    # Monotone (greedy sampling unchanged).
+    assert np.all(np.diff(y) > 0)
+
+
+def test_logits_uncapped_by_default():
+    _, model, weights = _tiny_model()
+    # Blown-up head weights: raw logits far beyond the cap must
+    # survive, since capping is opt-in for now.
+    weights[2]['w'] = weights[2]['w'] * 1e5
+    batch = jax.random.randint(
+        jax.random.PRNGKey(1), (2, 8), 0, 256).astype(jnp.int32)
+    logits = np.asarray(model.forward(weights, batch))
+    assert np.max(np.abs(logits)) > _LOGIT_CAP
+
+
+def test_forward_logits_capped_when_enabled():
+    _, model, weights = _tiny_model(cap=True)
+    weights[2]['w'] = weights[2]['w'] * 1e5
+    batch = jax.random.randint(
+        jax.random.PRNGKey(1), (2, 8), 0, 256).astype(jnp.int32)
+    logits = np.asarray(model.forward(weights, batch))
+    assert np.all(np.abs(logits) <= _LOGIT_CAP)
+    assert np.max(np.abs(logits)) > _LOGIT_CAP * 0.9  # cap actually bit
+    # Loss stays finite even with a pathological head.
+    assert np.isfinite(float(model.loss_batch(weights, batch)))
+
+
+@pytest.mark.parametrize("cap", (False, True))
+def test_step_matches_forward(cap):
+    _, model, weights = _tiny_model("bits.1+bp|rnn.4.tanh", cap=cap)
+    batch = jax.random.randint(
+        jax.random.PRNGKey(2), (1, 10), 0, 2).astype(jnp.int32)
+    fwd = np.asarray(model.forward(weights, batch))
+    states, logits0 = model.initial_step(weights)
+    assert np.allclose(np.asarray(logits0), fwd[0, 0], atol=1e-5)
+    for t in range(9):
+        states, logits = model.step(weights, states, batch[0, t])
+        assert np.allclose(np.asarray(logits), fwd[0, t + 1], atol=1e-5), t
+
+
+def test_binary_head_pads_after_cap():
+    _, model, weights = _tiny_model("bits.1+bp|dense.4.tanh", cap=True)
+    batch = jnp.zeros((1, 6), dtype=jnp.int32)
+    logits = np.asarray(model.forward(weights, batch))
+    assert logits.shape[-1] == 2
+    assert np.all(logits[..., 1] == 0.0)  # the padded reference logit
+    assert np.all(np.abs(logits[..., 0]) <= _LOGIT_CAP)
+
+
+def test_num_weights_unchanged_by_pairing():
+    # The codec must not change any conf's weight count: the head is
+    # the same tensor as the old separate output dense, the codebook
+    # is parameter-free.
+    md, _, weights = _tiny_model("bytes|dense.8.gelu")
+    # dense.8.gelu: 256*8+8; head: 8*256+256; input: 0.
+    assert md.num_weights == (256 * 8 + 8) + (8 * 256 + 256)
+    total = sum(int(np.asarray(x).size) for x in jax.tree.leaves(weights))
+    assert total == md.num_weights
+
+
+def test_properties_delegate():
+    md, _, _ = _tiny_model("bytes|dense.8.gelu")
+    assert md.input is md.codec
+    assert md.output is md.codec.head
+    assert md.codec.tokens_name == "bytes"
+    assert str(md.input) == "bytes"
+    assert md.input.size == 256
+    assert md.output.input_size == 8
+
+
+def test_input_whitelist_validity():
+    for good in ("bytes", "bits.1+bp", "bits.2.oh+bp", "bits.4.oh+bp"):
+        md = parse_model2(f"{good}|dense.8.gelu", Precision.FP32)
+        assert md.input.is_valid(), good
+    # Off-whitelist variants parse and run but count as invalid.
+    for bad in ("bits.2+bp", "bits.4+bp", "bits.1.oh+bp", "bits.2.oh",
+                "bits.4", "bits.8"):
+        md = parse_model2(f"{bad}|dense.8.gelu", Precision.FP32)
+        assert not md.input.is_valid(), bad
+        assert not md.is_valid(), bad
+
+
+def test_bits8_oh_canonicalizes_to_bytes():
+    md = parse_model2("bits.8.oh|dense.8.gelu", Precision.FP32)
+    assert md.spec.startswith("bytes|")
+    assert md.codec.tokens_name == "bytes"
+    assert md.is_valid()
+
+
+def test_empty_input_spec_means_bytes():
+    md = parse_model2("|dense.8.gelu", Precision.FP32)
+    assert md.spec.startswith("bytes|")
+
+
+def test_input_neighbors_ladder():
+    md = parse_model2("bits.2.oh+bp|dense.8.gelu", Precision.FP32)
+    assert md.input.neighbors() == ("bits.1+bp", "bits.4.oh+bp")
+    md = parse_model2("bytes|dense.8.gelu", Precision.FP32)
+    assert md.input.neighbors() == ("bits.4.oh+bp",)
+
+
+def test_tokens_oh_parses_and_encodes():
+    md = parse_model2("tokens.16.test.oh|dense.4.tanh", Precision.FP32)
+    assert md.input.tokens_name == "tokens16_test"
+    assert md.input.size == 16
+    assert md.input.is_valid()
+    assert md.input.neighbors() == ()
+    codec = md.codec.build_jax()
+    enc = np.asarray(codec.encode(None, jnp.array([[3, 5]]), padding=0))
+    expected = np.zeros((1, 2, 16), dtype=np.float32)
+    expected[0, 0, 3] = 1.0
+    expected[0, 1, 5] = 1.0
+    assert np.array_equal(enc, expected)
+    # Step mode agrees and needs no state.
+    assert codec.init_state() is None
+    _, v = codec.encode_step(None, None, 3)
+    assert np.array_equal(np.asarray(v), expected[0, 0])
+
+
+def test_tokens_emb_rejected_for_now():
+    # *.emb.X belongs to EmbeddingCodec, which isn't implemented yet.
+    with pytest.raises(ValueError, match="EmbeddingCodec"):
+        parse_model2("tokens.16.test.emb.8|dense.4.tanh", Precision.FP32)

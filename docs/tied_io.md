@@ -1,11 +1,54 @@
 # Tied input/output embeddings — design record
 
-Status: **design agreed; the plain class is implemented, tying is
-not.** Implementation naming settled after this record was written:
-the component is called the **codec** — `OneHotCodec`
+Status: **implemented.** Naming settled after this record was
+written: the component is called the **codec** — `OneHotCodec`
 (`layers/one_hot_codec.py`, the plain class below; the soft-cap is on
-by default after DB validation) and `EmbeddingCodec` (both
-tied rows of the table below, upcoming), sharing `layers/codec.py`.
+by default after DB validation) and `EmbeddingCodec`
+(`layers/embedding_codec.py`, both tied rows of the table below;
+learned `exp(y)` input scale initialized to sqrt(d)), sharing
+`layers/codec.py`. Still pending: `oh <-> emb` mode-swap neighbors
+(search reachability) and the Gemma end-to-end validation.
+**See the 2026-07-11 addendum below: the adapter default recorded in
+this document was reversed before the class ever reached the DB —
+emb is always direct.**
+
+## Addendum (2026-07-11): always direct, the adapter is gone
+
+The "adapter added by default + explicit `.direct`" decision below
+was reversed (before any emb conf existed in the DB, so at zero
+migration cost). Three realizations, the first two due to Oleg:
+
+1. **Mutation continuity doesn't need the adapter.** The original
+   argument was that direct mode is hard to mutate because the last
+   layer can't freely resize. Resolution: the table width d is not an
+   independent parameter — it *follows the chain's final width*.
+   Keeping them in sync is the structure-mutation step's job, not the
+   parser's: when the search-facing pass lets neighbor generation
+   resize an emb model's last layer, that mutation emits the matching
+   d as part of the same edit. The parser stays a faithful reader — a
+   spec whose d disagrees with its chain is invalid, as are chains
+   with no consistent width at all (suffix-scaled passthrough).
+   Width-preserving chains — the Gemma shape, whose stack inherits
+   its width FROM the input — keep d load-bearing in the spec. No
+   power-of-2 check on the slaved d beyond the usual search rule.
+2. **The state/query conflict is the model's choice, not ours.** A
+   recurrent last layer scoring directly against the table can
+   allocate orthogonal state subspaces for the query and carry roles;
+   whether that beats an explicit projection is a weights/loss
+   trade-off the search should price, not a default we should force.
+3. **The adapter was redundant anyway.** An implicit adapter is a
+   bias-linear map; a trailing bare `dense.d` is the same bias-linear
+   map with the same weight count. Two spellings of one architecture
+   violate canonicalization — so the adapter and the `.direct` suffix
+   were deleted rather than re-defaulted. Consequences: EmbeddingCodec
+   has no head parameters at all (slot 2 is always None), adapters are
+   explicit trailing denses handled by the existing dense mutations,
+   the empty chain (`bytes.emb.4|`) is legal (the symmetric bigram),
+   and the smallest byte model improves 261 -> 259 weights
+   (`bytes.emb.1|dense.1.tanh`, the chain dense doubling as the
+   adapter). `OneHotCodec` keeps its implicit dense head — a fixed
+   codebook has nothing to score against, so there the head remains
+   the only learnable output map.
 This is the decision log and migration plan from the 2026-07 design
 discussions; the user-facing description of how texmo IO works
 (including the parts designed here) lives in [`io.md`](io.md). The

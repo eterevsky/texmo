@@ -200,8 +200,12 @@ class OneHotCodecJax:
         return state, out
 
     # -- output side ------------------------------------------------------
+    #
+    # Both logits methods take the input-side weights first (unused
+    # here) so the call is uniform across codecs: EmbeddingCodec's
+    # tied head scores against the slot-0 table.
 
-    def logits(self, weights, h: jax.Array) -> jax.Array:
+    def logits(self, input_weights, weights, h: jax.Array) -> jax.Array:
         """(..., K) hidden activations -> (..., ntokens) logits."""
         out = self.head.forward(weights, h)
         if self.cap:
@@ -211,7 +215,7 @@ class OneHotCodecJax:
             out = jnp.pad(out, pad_widths)
         return out
 
-    def logits_step(self, weights, h: jax.Array) -> jax.Array:
+    def logits_step(self, input_weights, weights, h: jax.Array) -> jax.Array:
         _, out = self.head.step(weights, None, h)
         if self.cap:
             out = cap_logits(out)

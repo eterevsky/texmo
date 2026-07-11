@@ -17,13 +17,17 @@ from collections.abc import Iterable
 from typing import Self
 
 from .layer import LayerDef, _ATTN_SWAP_WINDOW
-from .layers.one_hot_codec import OneHotCodecDef
 from .layers.dense import DenseDef
+from .layers.embedding_codec import EmbeddingCodecDef, TiedHead
+from .layers.one_hot_codec import OneHotCodecDef
 from .layers.seq import LayerSeqDef
 from .layers.split import SplitDef
 from .model2_jax import Model2Jax
 from .precision import Precision
 from .spec_parser import parse_model2
+
+# The two codec implementations share one API (layers/codec.py).
+CodecDef = OneHotCodecDef | EmbeddingCodecDef
 
 
 class Model2Def:
@@ -48,7 +52,7 @@ class Model2Def:
         *,
         spec: str,
         precision: Precision,
-        codec: OneHotCodecDef,
+        codec: CodecDef,
         layer_seq: LayerSeqDef,
     ):
         self.spec = spec
@@ -62,11 +66,11 @@ class Model2Def:
         self.total_padding = layer_seq.length
 
     @property
-    def input(self) -> OneHotCodecDef:
+    def input(self) -> CodecDef:
         return self.codec
 
     @property
-    def output(self) -> DenseDef:
+    def output(self) -> DenseDef | TiedHead:
         return self.codec.head
 
     def __str__(self) -> str:

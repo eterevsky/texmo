@@ -9,8 +9,8 @@ the two worlds: it encodes ids to vectors at the front and decodes
 hidden activations to logits at the back. Two implementations share
 one API (`layers/codec.py` holds the common pieces):
 `OneHotCodec` for the fixed-codebook kinds (kind 1 below, plus
-`tokens.*.oh`) and `EmbeddingCodec` (upcoming) for the tied embedded
-kinds (2 and 3).
+`tokens.*.oh`) and `EmbeddingCodec` for the tied embedded kinds
+(2 and 3).
 
 In a spec like `bits.4+bp|rnn.8.gelu`, the part before `|` names the
 codec; the part after names the hidden chain. The **output head** is the
@@ -94,7 +94,9 @@ weights, in large part because of exactly this overhead.
 
 ## Kind 2: embedded bit chunks — `bits.N.emb.d`, `bytes.emb.d`
 
-*Status: designed as `EmbeddingCodec`, not yet implemented — see
+*Status: implemented as `EmbeddingCodec`
+(`layers/embedding_codec.py`); not yet search-reachable (the
+`oh <-> emb` mode-swap neighbors come with a later pass). See
 [`tied_io.md`](tied_io.md) for the full rationale.*
 
 Instead of one-hot vectors, chunk values get **learned embeddings**: a
@@ -102,33 +104,45 @@ table with one d-wide row per value plus one per within-byte position
 (positions are *added* to values; the `+bp` flag disappears because
 positions are always embedded).
 
-The same table is **tied** into the output: the head scores the
-(adapted) hidden state against the value rows,
-`logits = cap*tanh((W_a h + b_a) @ E.T / cap)`. The adapter `W_a` — an
-implicit dense from the last hidden width to d — is added by default:
-it decouples the memory width from the embedding width
-(`bytes.emb.2|rnn.8.tanh`: 8-dim state, 2-dim table) and frees the
-last layer's output from doubling as the logit query. The explicit
-`.direct` mode (`bytes.emb.8.direct`) omits the adapter and scores the
-hidden state against the table directly — this requires the last
-width to equal d, and is the exact shape used by tied transformer
-LMs (Gemma ends its stack with a norm and scores against the table).
+The same table is **tied** into the output, and scoring is always
+**direct**: the chain's last activation is scored against the value
+rows, `logits = cap*tanh(h @ E.T / cap)`, which requires the chain's
+final width to equal d. There is no implicit adapter and no `.direct`
+mode: a model that wants a projection before the table spells it as
+an explicit trailing bare `dense.d` — the exact same bias-linear map
+an implicit adapter would be, but visible in the spec and mutated by
+the ordinary dense machinery (`bytes.emb.2|rnn.8.tanh-dense.2`:
+8-dim state, 2-dim table). Direct scoring off a wider recurrent
+output also works — the model can allocate orthogonal state subspaces
+for the query and carry roles — so which form wins is the search's
+question, not a baked-in default. The d in the spec must equal the
+chain's final width — a spec that disagrees is invalid, exactly like
+any other inconsistent spec (the parser never rewrites it; when the
+search-facing pass lets mutations resize an emb model's last layer,
+the mutation emits the matching d as part of the same edit). Chains
+with no consistent width (suffix-scaled passthrough) are invalid.
+Width-preserving chains — the Gemma shape, where the whole stack
+inherits its width *from* the input — keep the spec's d load-bearing.
+The empty chain (`bytes.emb.4|`) is the symmetric bigram
+(`logits_j ∝ (E_t + P_p)·E_j`): handicapped on real text, but legal.
 
 Why tying: the head is the single largest parameter block in a small
 model, and it is largely redundant with the input table — both encode
 "what does token v look like as a vector". Sharing them roughly halves
 IO cost: the smallest byte model drops from 769 weights (untied) to
-261. Because the same table now serves two roles that prefer
+259 (`bytes.emb.1|dense.1.tanh` — the chain dense doubles as the
+adapter). Because the same table now serves two roles that prefer
 different magnitudes — the output role sets the row scale via loss
 pressure on the logits, while the input side wants activation-scale
 vectors — a single learned scalar multiplies the input lookup,
 absorbing the difference in scale between the two roles.
 
-## Kind 3: tokenized — `tokens.N.variation.emb.d[.direct]`
+## Kind 3: tokenized — `tokens.N.variation.emb.d`
 
-*Status: tokenizers and the one-hot mode (`tokens.*.oh`, part of
-`OneHotCodec`) implemented; the embedded/tied mode belongs to
-`EmbeddingCodec` and is designed, not yet implemented.*
+*Status: implemented — tokenizers, the one-hot mode (`tokens.*.oh`,
+part of `OneHotCodec`), and the embedded/tied mode
+(`EmbeddingCodec`). Off-grid widths like `emb.2560` parse and run but
+are load-only (`is_valid` requires a power of 2).*
 
 For learned tokensets: `N.variation` names the tokenset file
 `tokens{N}_{variation}.json`, resolved through the registry — e.g.
@@ -139,7 +153,7 @@ actual tokenizer.
 
 Input is an embedding lookup (a one-hot mode exists for small custom
 sets, but embedding is the default — a 256k one-hot would be absurd).
-Output follows the same tied adapter/direct scheme as kind 2, minus
+Output follows the same direct tied scoring as kind 2, minus
 position embeddings (tokens are whole units; npositions = 1).
 A tokenset may define a beginning-of-sequence token; when it does, the
 tokenizer can prepend it to prompts (`add_bos`), so sequence starts
@@ -148,7 +162,7 @@ models like Gemma rely on, alongside the synthetic initial vector that
 training always uses.
 
 This is the kind that runs pretrained RecurrentGemma:
-`tokens.256000.gemma.emb.2560.direct` with a final `rmsnorm` in the
+`tokens.256000.gemma.emb.2560` with a final `rmsnorm` in the
 chain reproduces the reference head exactly (inputs scaled by
 sqrt(2560), `logits = 30*tanh(h @ E.T / 30)`, no biases).
 

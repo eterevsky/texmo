@@ -5,14 +5,19 @@ trained on in-memory random bytes. Verifies the end-to-end pipeline
 doesn't blow up, not the quality of training.
 """
 
+import json
+import math
+
 import jax
 import pytest
 
+from texmo import manager_jax
 from texmo.configuration import Configuration
 from texmo.dataset import DataSet
 from texmo.manager import create_manager
 from texmo.model import build_model_def
 from texmo.precision import Precision
+from texmo.spec_parser import parse_model2
 
 
 def _make_dataset():
@@ -96,7 +101,6 @@ def test_train_via_parse_model2_jax(spec):
     cli/train.py now takes. Exercises Manager init, train_step,
     eval (which triggers the FP32 rebuild dispatch in
     manager_jax)."""
-    from texmo.spec_parser import parse_model2
     conf = Configuration(
         parse_model2(spec, precision=Precision.FP32),
         lr=0.01, length=32, batch=4, steps=2, decay=1.0,
@@ -110,6 +114,45 @@ def test_train_via_parse_model2_jax(spec):
     run, _ = manager.train_and_eval(steps=2, time_limit=None)
     assert run.steps == 2
     assert run.loss is not None
+
+
+def test_emb_scale_logged(tmp_path, monkeypatch):
+    """Tied-embedding runs append (X, exp(y)) to the local scale log;
+    plain-codec runs don't."""
+    log = tmp_path / 'emb_scale.jsonl'
+    monkeypatch.setattr(manager_jax, '_EMB_SCALE_LOG', str(log))
+    conf = Configuration(
+        parse_model2('bytes.emb.2|dense.2.tanh', precision=Precision.FP32),
+        lr=0.01, length=32, batch=4, steps=2, decay=1.0,
+    )
+    manager = create_manager(
+        'jax', conf=conf, system='test',
+        dataset=_make_dataset(),
+        test_sample_len=32, test_batch=2,
+        verbose=False,
+    )
+    manager.train_and_eval(steps=2, time_limit=None)
+    lines = log.read_text().splitlines()
+    assert len(lines) == 1
+    rec = json.loads(lines[0])
+    assert rec['x'] == 2
+    assert abs(rec['scale'] - math.exp(rec['y'])) < 1e-9
+    assert rec['spec'].startswith('bytes.emb.2|')
+    assert rec['system'] == 'test'
+
+    # A OneHotCodec model must not log.
+    conf = Configuration(
+        parse_model2('bits.1+bp|dense.4.gelu', precision=Precision.FP32),
+        lr=0.01, length=32, batch=4, steps=2, decay=1.0,
+    )
+    manager = create_manager(
+        'jax', conf=conf, system='test',
+        dataset=_make_dataset(),
+        test_sample_len=32, test_batch=2,
+        verbose=False,
+    )
+    manager.train_and_eval(steps=2, time_limit=None)
+    assert len(log.read_text().splitlines()) == 1
 
 
 @pytest.mark.parametrize('spec', [

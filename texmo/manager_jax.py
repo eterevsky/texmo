@@ -1,5 +1,9 @@
+import json
 import logging
+import math
+import os
 import random
+from datetime import datetime
 from time import perf_counter
 from typing import Optional
 
@@ -31,6 +35,13 @@ _CHUNK_SIZE = 256
 # Minimum wall-clock seconds between progress logs in quiet mode.
 # Verbose mode still prints every chunk.
 _QUIET_PROGRESS_INTERVAL = 30.0
+
+# Local log of the learned tied-embedding input scale, appended after
+# every completed run of an EmbeddingCodec model. One JSON object per
+# line: {time, system, spec, lr, steps, x, y, scale, loss}. Collected
+# manually across machines for the X-vs-exp(y) analysis -- deliberately
+# no client/server protocol.
+_EMB_SCALE_LOG = 'results/emb_scale.jsonl'
 
 
 class ManagerJax(Manager):
@@ -193,6 +204,44 @@ class ManagerJax(Manager):
         total_time = perf_counter() - start_time
         logging.info(f'Trained for {self.step} steps in {ttoa3(total_time)}')
         return total_time, self.conf.replace(steps=self.step)
+
+    def train_and_eval(
+        self,
+        steps: Optional[int],
+        time_limit: Optional[float],
+    ):
+        run, final_conf = super().train_and_eval(steps, time_limit)
+        self._log_emb_scale()
+        return run, final_conf
+
+    def _log_emb_scale(self) -> None:
+        """Append the learned input scale of tied-embedding models to
+        `_EMB_SCALE_LOG`. Best-effort: a logging failure must never
+        fail the run."""
+        w0 = self.weights[0]
+        if not isinstance(w0, dict) or 'y' not in w0:
+            return  # not an EmbeddingCodec model
+        try:
+            y = float(w0['y'])
+            loss = self.run.loss
+            rec = {
+                'time': datetime.now().isoformat(timespec='seconds'),
+                'system': self.system,
+                'spec': str(self.model_def),
+                'lr': self.conf.lr,
+                'steps': self.run.steps,
+                'x': int(w0['emb'].shape[-1]),
+                'y': y,
+                'scale': math.exp(y),
+                'loss': loss if math.isfinite(loss) else None,
+            }
+            log_dir = os.path.dirname(_EMB_SCALE_LOG)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+            with open(_EMB_SCALE_LOG, 'a') as f:
+                f.write(json.dumps(rec) + '\n')
+        except Exception:
+            logging.exception('emb-scale logging failed (ignored)')
 
     def eval(self) -> float:
         """Evaluate the model on a random test batch in fp32.

@@ -28,6 +28,7 @@ import jax
 import jax.numpy as jnp
 import optax
 
+from .layers.embedding_codec import EmbeddingCodecJax
 from .layers.one_hot_codec import OneHotCodecJax
 from .layers.seq import LayerSeqJax
 
@@ -37,7 +38,7 @@ _1_BY_LOG2 = 1.0 / math.log(2.0)
 class Model2Jax:
     def __init__(
         self,
-        codec: OneHotCodecJax,
+        codec: OneHotCodecJax | EmbeddingCodecJax,
         layer_seq: LayerSeqJax,
         total_padding: int = 1,
     ):
@@ -70,7 +71,7 @@ class Model2Jax:
             layer_seq_state, v = self.layer_seq.step(
                 weights[1], layer_seq_state, v)
 
-        logits = self.codec.logits_step(weights[-1], v)
+        logits = self.codec.logits_step(weights[0], weights[-1], v)
         return [input_state, layer_seq_state], logits
 
     def step(
@@ -79,14 +80,14 @@ class Model2Jax:
         input_state, v = self.codec.encode_step(weights[0], states[0], token)
         layer_seq_state, v = self.layer_seq.step(
             weights[1], states[1], v)
-        logits = self.codec.logits_step(weights[-1], v)
+        logits = self.codec.logits_step(weights[0], weights[-1], v)
         return [input_state, layer_seq_state], logits
 
     def forward(self, weights, batch: jax.Array) -> jax.Array:
         v = self.codec.encode(
             weights[0], batch[:, :-1], padding=self._total_padding)
         v = self.layer_seq.forward(weights[1], v)
-        return self.codec.logits(weights[-1], v)
+        return self.codec.logits(weights[0], weights[-1], v)
 
     def loss_batch(self, weights, batch: jax.Array) -> jax.Array:
         logits = self.forward(weights, batch)

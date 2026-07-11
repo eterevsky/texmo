@@ -5,6 +5,8 @@ import numpy as np
 import pytest
 
 from texmo.layers.codec import _LOGIT_CAP, cap_logits
+from texmo.layers.embedding_codec import EmbeddingCodecDef
+from texmo.layers.one_hot_codec import OneHotCodecDef
 from texmo.precision import Precision
 from texmo.spec_parser import parse_model2
 
@@ -180,7 +182,12 @@ def test_tokens_oh_parses_and_encodes():
     assert np.array_equal(np.asarray(v), expected[0, 0])
 
 
-def test_tokens_emb_rejected_for_now():
-    # *.emb.X belongs to EmbeddingCodec, which isn't implemented yet.
+def test_emb_specs_dispatch_to_embedding_codec():
+    # *.emb.X belongs to EmbeddingCodec; the parser dispatches on it.
+    md = parse_model2("tokens.16.test.emb.8|dense.8.tanh", Precision.FP32)
+    assert isinstance(md.codec, EmbeddingCodecDef)
+    md = parse_model2("bytes|dense.8.gelu", Precision.FP32)
+    assert isinstance(md.codec, OneHotCodecDef)
+    # Direct OneHotCodec parsing still rejects emb specs.
     with pytest.raises(ValueError, match="EmbeddingCodec"):
-        parse_model2("tokens.16.test.emb.8|dense.4.tanh", Precision.FP32)
+        OneHotCodecDef.from_spec("tokens.16.test.emb.8")

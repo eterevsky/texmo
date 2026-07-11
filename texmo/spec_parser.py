@@ -22,6 +22,7 @@ enforces 2-way for now. Multi-way is a one-character relaxation.
 """
 
 from .layer import LayerDef
+from .layers.embedding_codec import EmbeddingCodecDef
 from .layers.one_hot_codec import OneHotCodecDef
 from .layers.seq import LayerSeqDef
 from .layers.skip import SkipDef
@@ -50,7 +51,12 @@ def parse_model2(spec: str, precision: Precision, cap: bool = True):
     from .model2 import Model2Def
 
     input_spec, layers_spec = _split_input_and_layers(spec)
-    codec = OneHotCodecDef.from_spec(input_spec, precision, cap=cap)
+    # `.emb.` selects the tied-embedding codec; everything else is a
+    # fixed codebook. Same API either way.
+    if '.emb.' in input_spec:
+        codec = EmbeddingCodecDef.from_spec(input_spec, precision, cap=cap)
+    else:
+        codec = OneHotCodecDef.from_spec(input_spec, precision, cap=cap)
     layers = parse_layer_list(layers_spec, codec.size)
 
     layer_seq = LayerSeqDef(layers, input_size=codec.size)

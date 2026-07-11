@@ -85,6 +85,17 @@ see at scalar state carries over to matrix state.
   with-input-dependent-gates. Revisit after S4D so we have a
   baseline structured-recurrence to compare against.
 
+## Infrastructure
+
+* **Split `is_valid` into invalid vs search-ineligible.** Today one
+  flag conflates "this model cannot run / makes no sense" with "this
+  model runs fine but search shouldn't propose it" (off-whitelist
+  bits variants, non-power-of-2 embedding widths like the load-only
+  `tokens.256000.gemma.emb.2560`). Two predicates — `is_valid` and
+  something like `in_search_space` — would let reports/eval treat
+  load-only models as first-class while keeping the search grammar
+  tight.
+
 ## Training procedures
 
 * **Progressive layer-wise training.** For an N-hidden-layer model,

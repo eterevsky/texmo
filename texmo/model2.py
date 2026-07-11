@@ -114,8 +114,10 @@ class Model2Def:
         input_spec = str(self.input)
         top = self.layer_seq.layers
         top_str = "-".join(_strs(top))
-        # Input-layer mutations (keep the layer chain fixed).
-        for in_nb in self.input.neighbors():
+        # Input-layer mutations (keep the layer chain fixed). The
+        # chain's final width rides along so oh -> emb mode swaps can
+        # spell the slaved table width.
+        for in_nb in self.input.neighbors(self.output.input_size):
             yield f"{in_nb}|{top_str}"
         # Layer-chain mutations (recurse into the tree).
         for variant in _seq_variants(top, self.input.size, self.output.size):
@@ -141,11 +143,30 @@ class Model2Def:
                 continue
             raw_seen.add(raw)
             model = parse_model2(raw, self.precision, cap=cap)
+            model = self._sync_emb_width(model, cap)
             if model.spec in seen:
                 continue
             seen.add(model.spec)
             if model.is_valid():
                 yield model
+
+    def _sync_emb_width(self, model: Self, cap: bool) -> Self:
+        """Structure mutations own the emb-width sync: a variant that
+        resized the chain's last layer arrives with a stale X, because
+        the parser never repairs specs (see embedding_codec.py).
+        Re-spell the input at the mutated chain's final width and
+        re-parse. Chains with no consistent width (suffix-scaled
+        passthrough) still disagree afterwards and get filtered by
+        the caller's is_valid check like any other invalid neighbor."""
+        codec = model.codec
+        if not isinstance(codec, EmbeddingCodecDef):
+            return model
+        if codec.last_width in (None, codec.emb_size):
+            return model
+        layers_spec = model.spec.split('|', 1)[1]
+        input_spec = str(codec.with_emb_size(codec.last_width))
+        return parse_model2(
+            f'{input_spec}|{layers_spec}', self.precision, cap=cap)
 
     def build_jax(self) -> Model2Jax:
         return Model2Jax(

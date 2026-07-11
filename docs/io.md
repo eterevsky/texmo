@@ -95,9 +95,10 @@ weights, in large part because of exactly this overhead.
 ## Kind 2: embedded bit chunks — `bits.N.emb.d`, `bytes.emb.d`
 
 *Status: implemented as `EmbeddingCodec`
-(`layers/embedding_codec.py`); not yet search-reachable (the
-`oh <-> emb` mode-swap neighbors come with a later pass). See
-[`tied_io.md`](tied_io.md) for the full rationale.*
+(`layers/embedding_codec.py`) and search-reachable: every blessed
+one-hot input has an `emb` mode-swap neighbor at the chain's final
+width (and back), plus an emb domain ladder mirroring the one-hot
+one. See [`tied_io.md`](tied_io.md) for the full rationale.*
 
 Instead of one-hot vectors, chunk values get **learned embeddings**: a
 table with one d-wide row per value plus one per within-byte position

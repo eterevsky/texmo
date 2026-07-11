@@ -236,8 +236,14 @@ class Component:
 
 
 def _input_component(input_def, batch: int, length: int) -> Component:
+    type_id = str(input_def)
+    # One key per token domain for embedded inputs: 'bytes.emb.4' and
+    # 'bytes.emb.8' are the same lookup cost-wise, and per-width keys
+    # would each need their own runs to fit.
+    if '.emb.' in type_id:
+        type_id = type_id[:type_id.index('.emb.') + len('.emb')]
     return Component(
-        type_id=str(input_def),
+        type_id=type_id,
         features=np.array(_features_input(batch, length)),
     )
 

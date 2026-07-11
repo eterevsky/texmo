@@ -162,21 +162,30 @@ def _model_layers(conf: Configuration) -> list:
     return model.layers
 
 
-# init_globals: output_size + 5 log training knobs + cosine flag.
-# The cosine flag is the only non-log feature (binary).
+# init_globals: output_size + 5 log training knobs + cosine flag +
+# 2 codec features. `is_tied` is duck-typed off the head: a tied-
+# embedding head has no parameters of its own (its matrix is the
+# input table), while the one-hot dense head and the legacy ModelDef
+# output always do. The IO budget is `model.input.num_weights` -- the
+# codec's parameters (one-hot: the implicit head; tied: table+scale;
+# legacy ModelDef: 0, its parameter-free input) -- which the per-layer
+# features never see (they only cover the hidden chain).
 def _init_global_features(conf: Configuration) -> np.ndarray:
+    model = conf.model
     return np.array([
-        np.log2(conf.model.output.size),
+        np.log2(model.output.size),
         np.log2(conf.batch),
         np.log2(conf.length),
         np.log2(conf.steps),
         np.log2(conf.lr),
         np.log2(conf.decay),
         1.0 if conf.cosine else 0.0,
+        1.0 if model.output.num_weights == 0 else 0.0,
+        np.log2(1 + model.input.num_weights),
     ], dtype=np.float32)
 
 
-N_INIT_GLOBAL = 7
+N_INIT_GLOBAL = 9
 
 
 def discover_simple_types(

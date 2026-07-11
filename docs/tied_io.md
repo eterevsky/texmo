@@ -6,8 +6,9 @@ written: the component is called the **codec** — `OneHotCodec`
 by default after DB validation) and `EmbeddingCodec`
 (`layers/embedding_codec.py`, both tied rows of the table below;
 learned `exp(y)` input scale initialized to sqrt(d)), sharing
-`layers/codec.py`. Still pending: `oh <-> emb` mode-swap neighbors
-(search reachability) and the Gemma end-to-end validation.
+`layers/codec.py`. Mode-swap neighbors, emb width sync on structure
+mutations, and predictor featurization landed 2026-07-11; still
+pending: the Gemma end-to-end validation.
 **See the 2026-07-11 addendum below: the adapter default recorded in
 this document was reversed before the class ever reached the DB —
 emb is always direct.**

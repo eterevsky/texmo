@@ -13,7 +13,9 @@ from texmo.configuration import Configuration
 from texmo.model import build_model_def
 from texmo.precision import Precision
 from texmo.predict.loss_rnn import (
+    N_INIT_GLOBAL,
     LossModel,
+    _init_global_features,
     _is_simple_type,
     _layer_features,
     _model_layers,
@@ -124,3 +126,22 @@ def test_fit_predict_on_mixed_model_and_model2():
     ).predict(confs)
     assert preds.shape == (3,)
     assert np.all(np.isfinite(preds))
+
+
+def test_init_globals_codec_features():
+    tied = _m2("bytes.emb.4|dense.4.tanh")
+    g = _init_global_features(tied)
+    assert g.shape == (N_INIT_GLOBAL,)
+    assert g[7] == 1.0  # tied head: no parameters of its own
+    assert abs(g[8] - np.log2(1 + 256 * 4 + 1)) < 1e-6  # table + scale
+
+    plain = _m2("bytes|dense.4.gelu")
+    g = _init_global_features(plain)
+    assert g[7] == 0.0
+    # One-hot codec weights = the implicit dense head (4*256+256).
+    assert abs(g[8] - np.log2(1 + 4 * 256 + 256)) < 1e-6
+
+    legacy = _md("bytes|dense.4.gelu")
+    g = _init_global_features(legacy)
+    assert g[7] == 0.0
+    assert g[8] == 0.0  # legacy input is parameter-free

@@ -344,9 +344,22 @@ class OneHotCodecDef:
             return self.ntokens >= 2
         return str(self) in _VALID_INPUTS
 
-    def neighbors(self) -> tuple[str, ...]:
-        """Input-spec strings one mutation away (the search ladder)."""
-        return _INPUT_NEIGHBORS.get(str(self), ())
+    def neighbors(self, last_width: int) -> tuple[str, ...]:
+        """Input-spec strings one mutation away: the fixed-codebook
+        ladder plus the mode swap to the tied codec. The swap's table
+        width is `last_width` (the chain's final width) -- X is slaved
+        to it, so that is the only consistent emb spelling; a
+        non-power-of-2 width just makes an invalid neighbor that gets
+        filtered like any other."""
+        nbs = list(_INPUT_NEIGHBORS.get(str(self), ()))
+        if self.nbits is None:
+            nbs.append(
+                f'tokens.{self.ntokens}.{self.variation}.emb.{last_width}')
+        elif self.nbits == 8:
+            nbs.append(f'bytes.emb.{last_width}')
+        else:
+            nbs.append(f'bits.{self.nbits}.emb.{last_width}')
+        return tuple(nbs)
 
     def build_jax(self) -> OneHotCodecJax:
         return OneHotCodecJax(

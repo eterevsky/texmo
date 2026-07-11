@@ -377,3 +377,17 @@ def test_predict_batch_matches_predict():
     for i, c in enumerate(confs):
         assert batch_pred[i] == pytest.approx(
             model.predict("test", c), rel=1e-9, abs=1e-9)
+
+
+def test_emb_input_component_type_id():
+    """Embedded inputs get one timing key per token domain: the table
+    width doesn't change the lookup cost enough for per-width keys."""
+    comps = featurize(_conf2("bytes.emb.4|dense.4.tanh"))
+    assert comps[0].type_id == "bytes.emb"
+    assert comps[-1].type_id == "output"
+    comps8 = featurize(_conf2("bytes.emb.8|dense.8.tanh"))
+    assert comps8[0].type_id == "bytes.emb"
+    # The tied head's scoring matmul reuses the shared 'output' key
+    # with the dense-shaped features (last width -> ntokens).
+    comps_oh = featurize(_conf2("bits.4.emb.8|rnn.8.tanh"))
+    assert comps_oh[0].type_id == "bits.4.emb"

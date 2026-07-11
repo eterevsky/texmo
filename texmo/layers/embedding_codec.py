@@ -28,12 +28,12 @@ chain's LAST ACTIVATION is scored against the same rows directly,
 The X == final-width constraint is checked by `is_valid`, not
 repaired by the parser: a spec whose X disagrees with its chain is
 simply an invalid model, the same as any other inconsistent spec.
-Keeping X in sync belongs to structure MUTATIONS: when the future
-search-facing pass lets neighbor generation resize an emb model's
-last layer, that mutation emits the matching X as part of the same
-edit. Width-preserving chains (the Gemma shape: the whole stack
-inherits its width FROM the input) satisfy the constraint for any X,
-so X is load-bearing exactly where it must be.
+Keeping X in sync belongs to structure MUTATIONS:
+`Model2Def._sync_emb_width` re-spells the input at the mutated
+chain's final width when neighbor generation resizes the last layer.
+Width-preserving chains (the Gemma shape: the whole stack inherits
+its width FROM the input) satisfy the constraint for any X, so X is
+load-bearing exactly where it must be.
 
 Input specs (X >= 1; power of 2 required only for search validity,
 so e.g. tokens.256000.gemma.emb.2560 parses and runs but is
@@ -63,6 +63,25 @@ import jax.numpy as jnp
 from ..common import is_power2_int
 from ..precision import Precision
 from .codec import cap_logits
+
+# Mode swaps back to the blessed fixed-codebook inputs, per chunk
+# width. Input swaps carry the chain unchanged, so the final width --
+# and hence the emb X -- is carried unchanged too.
+_OH_SWAPS = {
+    1: ('bits.1+bp', 'bits.1+bm'),
+    2: ('bits.2.oh+bp',),
+    4: ('bits.4.oh+bp',),
+    8: ('bytes',),
+}
+# The emb domain ladder, mirroring the one-hot 1 <-> 2 <-> 4 <-> 8
+# ladder at the same table width.
+_DOMAIN_LADDER = {1: (2,), 2: (1, 4), 4: (2, 8), 8: (4,)}
+
+
+def _domain_spec(nbits: int, emb_size: int) -> str:
+    if nbits == 8:
+        return f'bytes.emb.{emb_size}'
+    return f'bits.{nbits}.emb.{emb_size}'
 
 
 class TiedHead:
@@ -204,7 +223,7 @@ class EmbeddingCodecDef:
         self.cap = cap
         self.size = emb_size  # width fed to the layer chain
         self.head: TiedHead | None = None
-        self._last_width: int | None = None
+        self.last_width: int | None = None
 
         if nbits is None:
             self.npositions = 1
@@ -244,8 +263,17 @@ class EmbeddingCodecDef:
             nbits=nbits, ntokens=2 ** nbits, emb_size=emb_size,
             precision=precision, cap=cap)
 
+    def with_emb_size(self, emb_size: int) -> 'EmbeddingCodecDef':
+        """Copy with a different table width. Used by neighbor
+        generation to re-spell the input when a structure mutation
+        changed the chain's final width."""
+        return EmbeddingCodecDef(
+            nbits=self.nbits, ntokens=self.ntokens, emb_size=emb_size,
+            variation=self.variation, precision=self.precision,
+            cap=self.cap)
+
     def set_head_width(self, last_width: int) -> None:
-        self._last_width = last_width
+        self.last_width = last_width
         self.head = TiedHead(size=self.ntokens, input_size=last_width)
 
     def __str__(self) -> str:
@@ -275,15 +303,21 @@ class EmbeddingCodecDef:
         if not is_power2_int(self.emb_size):
             return False
         # Direct scoring: the chain must end at the table width.
-        # After parser canonicalization a mismatch survives only for
-        # chains with no consistent width (suffix-scaled passthrough).
-        return self._last_width == self.emb_size
+        return self.last_width == self.emb_size
 
-    def neighbors(self) -> tuple[str, ...]:
-        # Input-level mutations (and the oh <-> emb mode swaps) come
-        # with the search-facing pass; X follows the chain's width, so
-        # it has no independent mutations at all.
-        return ()
+    def neighbors(self, last_width: int) -> tuple[str, ...]:
+        """Input-spec strings one mutation away: the mode swap back to
+        the fixed-codebook input(s) and the emb domain ladder at the
+        same table width. X itself has no independent mutations -- it
+        follows the chain's final width (`last_width` equals
+        `emb_size` on any valid model, so it isn't consulted here;
+        the parameter keeps the codec API uniform)."""
+        if self.nbits is None:
+            return (f'tokens.{self.ntokens}.{self.variation}.oh',)
+        nbs = list(_OH_SWAPS[self.nbits])
+        nbs += [_domain_spec(n, self.emb_size)
+                for n in _DOMAIN_LADDER[self.nbits]]
+        return tuple(nbs)
 
     def build_jax(self) -> EmbeddingCodecJax:
         return EmbeddingCodecJax(

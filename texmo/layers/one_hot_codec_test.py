@@ -122,15 +122,19 @@ def test_empty_input_spec_means_bytes():
 
 
 def test_input_neighbors_ladder():
+    # neighbors() takes the chain's final width; the last entry is
+    # the mode swap to the tied codec at that width.
     md = parse_model2("bits.2.oh+bp|dense.8.gelu", Precision.FP32)
-    assert md.input.neighbors() == ("bits.1+bp", "bits.4.oh+bp")
+    assert md.input.neighbors(8) == (
+        "bits.1+bp", "bits.4.oh+bp", "bits.2.emb.8")
     md = parse_model2("bytes|dense.8.gelu", Precision.FP32)
-    assert md.input.neighbors() == ("bits.4.oh+bp",)
+    assert md.input.neighbors(8) == ("bits.4.oh+bp", "bytes.emb.8")
     # bm <-> bp is a mutual edge.
     md = parse_model2("bits.1+bm|dense.8.gelu", Precision.FP32)
-    assert md.input.neighbors() == ("bits.1+bp",)
+    assert md.input.neighbors(8) == ("bits.1+bp", "bits.1.emb.8")
     md = parse_model2("bits.1+bp|dense.8.gelu", Precision.FP32)
-    assert "bits.1+bm" in md.input.neighbors()
+    assert "bits.1+bm" in md.input.neighbors(8)
+    assert "bits.1.emb.8" in md.input.neighbors(8)
 
 
 def test_bm_encoding():
@@ -169,7 +173,7 @@ def test_tokens_oh_parses_and_encodes():
     assert md.input.tokens_name == "tokens16_test"
     assert md.input.size == 16
     assert md.input.is_valid()
-    assert md.input.neighbors() == ()
+    assert md.input.neighbors(4) == ("tokens.16.test.emb.4",)
     codec = md.codec.build_jax()
     enc = np.asarray(codec.encode(None, jnp.array([[3, 5]]), padding=0))
     expected = np.zeros((1, 2, 16), dtype=np.float32)

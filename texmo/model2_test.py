@@ -712,3 +712,38 @@ def test_bare_dense_neighbors_well_formed():
     assert "dense.4" in nbs and "dense.16" in nbs
     # ...and no cross-type swap or ".None" artifacts appear.
     assert not any("None" in s or s.startswith("rnn") for s in nbs)
+
+
+# --- codec mode swaps + emb width sync in neighbor generation --------
+
+
+def test_emb_mode_swap_neighbors_both_ways():
+    md = parse_model2("bytes|dense.8.gelu", Precision.FP32)
+    specs = {n.spec for n in md.neighbors()}
+    assert "bytes.emb.8|dense.8.gelu" in specs
+
+    back = parse_model2("bytes.emb.8|dense.8.gelu", Precision.FP32)
+    specs_back = {n.spec for n in back.neighbors()}
+    assert "bytes|dense.8.gelu" in specs_back
+    # Domain ladder at the same table width.
+    assert "bits.4.emb.8|dense.8.gelu" in specs_back
+
+
+def test_emb_width_syncs_on_last_layer_resize():
+    md = parse_model2("bytes.emb.4|dense.4.tanh", Precision.FP32)
+    specs = {n.spec for n in md.neighbors()}
+    # The dense.4 -> dense.8 resize mutation must arrive with the
+    # matching table width (X is slaved to the chain's final width;
+    # the sync happens in neighbor generation, not the parser).
+    assert "bytes.emb.8|dense.8.tanh" in specs
+    assert "bytes.emb.4|dense.8.tanh" not in specs
+    # All produced neighbors are valid models (X consistent).
+    for n in md.neighbors():
+        assert n.is_valid(), n.spec
+
+
+def test_emb_neighbors_two_hop_wellformed():
+    base = parse_model2("bits.2.emb.4|rnn.4.tanh", Precision.FP32)
+    for n in base.neighbors():
+        for nn in n.neighbors():  # raises if any 2-hop spec is malformed
+            assert nn.is_valid(), nn.spec

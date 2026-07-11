@@ -171,9 +171,17 @@ def test_gradients_reach_table_and_scale():
     assert float(jnp.abs(grads[1][0]['w']).sum()) > 0  # chain dense
 
 
-def test_no_input_level_neighbors_yet():
-    md = parse_model2("bits.4.emb.8|rnn.8.tanh", Precision.FP32)
-    assert md.input.neighbors() == ()
+def test_input_neighbors_mode_swaps_and_domain_ladder():
+    md = parse_model2("bits.2.emb.4|dense.4.tanh", Precision.FP32)
+    assert md.input.neighbors(4) == (
+        "bits.2.oh+bp", "bits.1.emb.4", "bits.4.emb.4")
+    md = parse_model2("bytes.emb.8|dense.8.tanh", Precision.FP32)
+    assert md.input.neighbors(8) == ("bytes", "bits.4.emb.8")
+    md = parse_model2("bits.1.emb.4|rnn.4.tanh", Precision.FP32)
+    assert md.input.neighbors(4) == (
+        "bits.1+bp", "bits.1+bm", "bits.2.emb.4")
+    md = parse_model2("tokens.16.test.emb.8|dense.8.tanh", Precision.FP32)
+    assert md.input.neighbors(8) == ("tokens.16.test.oh",)
 
 
 def test_output_metadata_for_consumers():

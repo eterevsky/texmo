@@ -11,8 +11,14 @@ rejects them.
 Input specs:
 
     ""|"bytes"                          one-hot over 256 (= bits.8.oh)
-    bits.{1|2|4|8}[.oh][+bp]            bit chunks, binary or one-hot
+    bits.{1|2|4|8}[.oh][+bp|+bm]        bit chunks, binary or one-hot
     tokens.{ntokens}.{variation}.oh     one-hot over a tokenset
+
+`+bp` appends the chunk's position within its byte in binary; `+bm`
+appends a single byte-start marker bit (1 on the first chunk of each
+byte) and leaves keeping the phase count to the model's own state --
+UART framing instead of a transmitted counter. Both are fixed position
+codebooks indexed by `t mod positions`, so they share all machinery.
 
 The binary special case (ntokens <= 2) produces a single logit x
 treated as [x, 0]; the padding happens after the cap (tanh(0) == 0, so
@@ -36,7 +42,8 @@ _BP = {1: 3, 2: 2, 4: 1, 8: 0}
 # count as invalid. The neighbor ladder is defined over the same set.
 _INPUT_NEIGHBORS = {
     'bytes': ('bits.4.oh+bp',),
-    'bits.1+bp': ('bits.2.oh+bp',),
+    'bits.1+bm': ('bits.1+bp',),
+    'bits.1+bp': ('bits.1+bm', 'bits.2.oh+bp'),
     'bits.2.oh+bp': ('bits.1+bp', 'bits.4.oh+bp'),
     'bits.4.oh+bp': ('bits.2.oh+bp', 'bytes'),
 }
@@ -70,6 +77,7 @@ class OneHotCodecJax:
         nbits: int | None,
         one_hot: bool,
         bp: bool,
+        bm: bool,
         ntokens: int,
         head: DenseJax,
         cap: bool,
@@ -78,11 +86,13 @@ class OneHotCodecJax:
         self.nbits = nbits
         self.one_hot = one_hot
         self.bp = bp
+        self.bm = bm
         self.ntokens = ntokens
         self.head = head
         self.cap = cap
         self.dtype = dtype
         self._pad_output = ntokens <= 2
+        self._pos = bp or bm
 
         if nbits is None:
             self.size = ntokens
@@ -98,13 +108,16 @@ class OneHotCodecJax:
                     row = _to_bit_array(i, nbits)
                 encodings.append(row)
             self.encodings = jnp.array(encodings, dtype=dtype)
-            if bp:
+            if self._pos:
                 self.positions = 8 // nbits
-                self.pos_encodings = jnp.array(
-                    [_to_bit_array(i, _BP[nbits])
-                     for i in range(self.positions)],
-                    dtype=dtype)
-                self.size += _BP[nbits]
+                if bp:
+                    pos_rows = [_to_bit_array(i, _BP[nbits])
+                                for i in range(self.positions)]
+                else:  # bm: byte-start marker only
+                    pos_rows = [[1.0 if i == 0 else 0.0]
+                                for i in range(self.positions)]
+                self.pos_encodings = jnp.array(pos_rows, dtype=dtype)
+                self.size += self.pos_encodings.shape[-1]
 
     # -- weights ----------------------------------------------------------
 
@@ -122,21 +135,21 @@ class OneHotCodecJax:
     def init_state(self) -> int | None:
         """Step-mode state: bit-chunk position within the byte, or
         None when position encoding is not used."""
-        if self.bp:
+        if self._pos:
             return 0
         return None
 
     def initial_vector(self, weights, position: int = -1) -> jax.Array:
         """Input vector for 'no token observed yet' (max entropy):
         uniform 1/n over one-hot codes, 0.5 per value bit otherwise.
-        `position` indexes the bp cycle and may be negative (padding
+        `position` indexes the bp/bm cycle and may be negative (padding
         counts down toward the first real chunk)."""
         if self.nbits is None or self.one_hot:
             v = jnp.full((self.ntokens,), 1.0 / self.ntokens,
                          dtype=self.dtype)
         else:
             v = jnp.full((self.nbits,), 0.5, dtype=self.dtype)
-        if self.bp:
+        if self._pos:
             v = jnp.concatenate(
                 [v, self.pos_encodings[position % self.positions]])
         return v
@@ -160,7 +173,7 @@ class OneHotCodecJax:
         else:
             out = self.encodings[tokens]
 
-        if self.bp:
+        if self._pos:
             reps = (seq_len + self.positions - 1) // self.positions
             pos = jnp.tile(self.pos_encodings, (reps, 1))[:seq_len]
             pos = jnp.broadcast_to(pos, (batch, seq_len, pos.shape[-1]))
@@ -181,7 +194,7 @@ class OneHotCodecJax:
             return state, jax.nn.one_hot(
                 token, self.ntokens, dtype=self.dtype)
         out = self.encodings[token]
-        if self.bp:
+        if self._pos:
             out = jnp.concatenate([out, self.pos_encodings[state]])
             state = (state + 1) % self.positions
         return state, out
@@ -227,6 +240,7 @@ class OneHotCodecDef:
         nbits: int | None,
         one_hot: bool,
         bp: bool,
+        bm: bool = False,
         ntokens: int,
         variation: str | None = None,
         precision: Precision = Precision.FP32,
@@ -235,6 +249,7 @@ class OneHotCodecDef:
         self.nbits = nbits
         self.one_hot = one_hot
         self.bp = bp
+        self.bm = bm
         self.ntokens = ntokens
         self.variation = variation
         self.precision = precision
@@ -248,6 +263,8 @@ class OneHotCodecDef:
             self.size = ntokens if one_hot else nbits
             if bp:
                 self.size += _BP[nbits]
+            elif bm:
+                self.size += 1
             self.tokens_name = 'bytes' if nbits == 8 else f'bits.{nbits}'
 
     @staticmethod
@@ -260,19 +277,20 @@ class OneHotCodecDef:
             spec = 'bits.8.oh'
         if spec.startswith('bits.'):
             parts = spec.split('+')
-            bp = False
+            bp = bm = False
             if len(parts) > 1:
-                if len(parts) != 2 or parts[1] != 'bp':
+                if len(parts) != 2 or parts[1] not in ('bp', 'bm'):
                     raise ValueError(f"bad input spec: '{spec}'")
-                bp = True
+                bp = parts[1] == 'bp'
+                bm = parts[1] == 'bm'
             main = parts[0].split('.')
             nbits = int(main[1])
             if nbits not in (1, 2, 4, 8):
                 raise ValueError(f"bad chunk width in '{spec}'")
             one_hot = len(main) > 2 and main[2] == 'oh'
             return OneHotCodecDef(
-                nbits=nbits, one_hot=one_hot, bp=bp, ntokens=2 ** nbits,
-                precision=precision, cap=cap)
+                nbits=nbits, one_hot=one_hot, bp=bp, bm=bm,
+                ntokens=2 ** nbits, precision=precision, cap=cap)
         if spec.startswith('tokens.'):
             parts = spec.split('.')
             if len(parts) != 4 or parts[3] != 'oh':
@@ -302,6 +320,8 @@ class OneHotCodecDef:
             s += '.oh'
         if self.bp:
             s += '+bp'
+        elif self.bm:
+            s += '+bm'
         return s
 
     @property
@@ -327,6 +347,6 @@ class OneHotCodecDef:
     def build_jax(self) -> OneHotCodecJax:
         return OneHotCodecJax(
             nbits=self.nbits, one_hot=self.one_hot, bp=self.bp,
-            ntokens=self.ntokens,
+            bm=self.bm, ntokens=self.ntokens,
             head=self.head.build_jax(self.precision.jax_dtype),
             cap=self.cap, dtype=self.precision.jax_dtype)

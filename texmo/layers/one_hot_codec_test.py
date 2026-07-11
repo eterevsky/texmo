@@ -95,12 +95,13 @@ def test_properties_delegate():
 
 
 def test_input_whitelist_validity():
-    for good in ("bytes", "bits.1+bp", "bits.2.oh+bp", "bits.4.oh+bp"):
+    for good in ("bytes", "bits.1+bp", "bits.1+bm", "bits.2.oh+bp",
+                 "bits.4.oh+bp"):
         md = parse_model2(f"{good}|dense.8.gelu", Precision.FP32)
         assert md.input.is_valid(), good
     # Off-whitelist variants parse and run but count as invalid.
     for bad in ("bits.2+bp", "bits.4+bp", "bits.1.oh+bp", "bits.2.oh",
-                "bits.4", "bits.8"):
+                "bits.4", "bits.8", "bits.2+bm", "bits.4+bm"):
         md = parse_model2(f"{bad}|dense.8.gelu", Precision.FP32)
         assert not md.input.is_valid(), bad
         assert not md.is_valid(), bad
@@ -123,6 +124,42 @@ def test_input_neighbors_ladder():
     assert md.input.neighbors() == ("bits.1+bp", "bits.4.oh+bp")
     md = parse_model2("bytes|dense.8.gelu", Precision.FP32)
     assert md.input.neighbors() == ("bits.4.oh+bp",)
+    # bm <-> bp is a mutual edge.
+    md = parse_model2("bits.1+bm|dense.8.gelu", Precision.FP32)
+    assert md.input.neighbors() == ("bits.1+bp",)
+    md = parse_model2("bits.1+bp|dense.8.gelu", Precision.FP32)
+    assert "bits.1+bm" in md.input.neighbors()
+
+
+def test_bm_encoding():
+    md = parse_model2("bits.1+bm|dense.4.tanh", Precision.FP32)
+    assert md.input.size == 2  # value bit + marker bit
+    assert md.input.tokens_name == "bits.1"
+    codec = md.codec.build_jax()
+    tokens = jnp.array([[1, 0, 1, 1, 0, 0, 0, 1, 1, 0]], dtype=jnp.int32)
+    enc = np.asarray(codec.encode(None, tokens, padding=0))
+    # Column 0: the value bits verbatim.
+    assert np.array_equal(enc[0, :, 0], np.asarray(tokens[0], np.float32))
+    # Column 1: marker fires on the first chunk of each byte (mod 8).
+    assert np.array_equal(
+        enc[0, :, 1], np.array([1, 0, 0, 0, 0, 0, 0, 0, 1, 0], np.float32))
+    # Padding continues the cycle in the negative direction:
+    # position -1 -> (-1 % 8) == 7 -> no marker, max-entropy value.
+    enc_p = np.asarray(codec.encode(None, tokens, padding=1))
+    assert np.array_equal(enc_p[0, 0], np.array([0.5, 0.0], np.float32))
+    assert np.array_equal(enc_p[0, 1:], enc[0])
+
+
+def test_bm_step_matches_forward():
+    _, model, weights = _tiny_model("bits.1+bm|rnn.4.tanh")
+    batch = jax.random.randint(
+        jax.random.PRNGKey(4), (1, 12), 0, 2).astype(jnp.int32)
+    fwd = np.asarray(model.forward(weights, batch))
+    states, logits0 = model.initial_step(weights)
+    assert np.allclose(np.asarray(logits0), fwd[0, 0], atol=1e-5)
+    for t in range(11):
+        states, logits = model.step(weights, states, batch[0, t])
+        assert np.allclose(np.asarray(logits), fwd[0, t + 1], atol=1e-5), t
 
 
 def test_tokens_oh_parses_and_encodes():

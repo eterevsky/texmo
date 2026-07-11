@@ -62,10 +62,16 @@ the codec — a chain layer's output is never used as logits directly.
 
 *Status: implemented as `OneHotCodec` (`layers/one_hot_codec.py`); the
 current default for search models. Only the specs in actual use are
-valid — `bytes`, `bits.1+bp`, `bits.2.oh+bp`, `bits.4.oh+bp` (and
-`tokens.*.oh`); the other bits variants still parse and run for manual
-experiments but `is_valid` rejects them, so search never proposes
-them.*
+valid — `bytes`, `bits.1+bp`, `bits.1+bm`, `bits.2.oh+bp`,
+`bits.4.oh+bp` (and `tokens.*.oh`); the other bits variants still
+parse and run for manual experiments but `is_valid` rejects them, so
+search never proposes them.*
+
+`+bm` is the minimal-width experiment: instead of transmitting the
+position counter (`+bp`), it appends a single byte-start marker bit
+(1 on the first chunk of each byte) and leaves the phase count to the
+model's own state — UART framing. One input dimension narrower than
+`bits.1+bp` (2 vs 4); a search neighbor of it in both directions.
 
 Each byte is split into 8/N chunks of N bits (N in {1, 2, 4, 8};
 `bytes` = `bits.8.oh`), so `ntokens = 2^N`. The input vector is either

@@ -116,7 +116,9 @@ class LayerSeqDef(LayerDef):
         # walks through Split branches automatically.
         return sum(l.num_layers for l in self.layers)
 
-    def is_valid(self, *, in_split_branch: bool = False) -> bool:
+    def is_valid(
+        self, *, in_split_branch: bool = False, bare_tail_ok: bool = False,
+    ) -> bool:
         """Validate this sequence.
 
         The same adjacency/first-layer rules that ModelDef enforced on
@@ -135,8 +137,14 @@ class LayerSeqDef(LayerDef):
             linear-conv-RG-LRU front-end. Applies at the top level too.
           - terminal in a split branch: allowed -- the consumer is the
             elementwise/concat merge (the GeGLU linear path).
-          - terminal at the top level: forbidden -- the consumer is the
-            model's implicit output dense, which absorbs it.
+          - terminal at the top level: depends on the codec, via
+            `bare_tail_ok` (set by Model2Def). For the one-hot codec
+            it is forbidden -- the consumer is the implicit output
+            dense, which absorbs it. For the tied codec it is allowed:
+            the head scores against the shared embedding table, whose
+            rows are not free head parameters, so the trailing linear
+            is the explicit adapter rather than a degenerate double
+            projection.
 
         A branch may also START with a normalization -- the pre-norm
         residual pattern, `split.add(rmsnorm-..., pass)`.
@@ -188,7 +196,7 @@ class LayerSeqDef(LayerDef):
                 if i < last:
                     allow_bare = not self.layers[i + 1].projects_input
                 else:
-                    allow_bare = in_split_branch
+                    allow_bare = in_split_branch or bare_tail_ok
                 if not l.is_valid(allow_bare=allow_bare):
                     return False
             elif not l.is_valid():

@@ -16,6 +16,7 @@ JAX only. No PyTorch counterpart.
 from collections.abc import Iterable
 from typing import Self
 
+from .common import floor_power2
 from .layer import LayerDef, _ATTN_SWAP_WINDOW
 from .layers.dense import DenseDef
 from .layers.embedding_codec import EmbeddingCodecDef, TiedHead
@@ -106,8 +107,11 @@ class Model2Def:
     def is_valid(self) -> bool:
         # The codec validates its input encoding; the head is valid
         # by construction (bare linear readout, like the old implicit
-        # output dense).
-        return self.codec.is_valid() and self.layer_seq.is_valid()
+        # output dense). A trailing bare dense is legal exactly for
+        # the tied codec, where it is the explicit adapter rather
+        # than a projection the head would absorb.
+        return self.codec.is_valid() and self.layer_seq.is_valid(
+            bare_tail_ok=isinstance(self.codec, EmbeddingCodecDef))
 
     def _gen_neighbor_specs(self) -> Iterable[str]:
         """Yield raw spec strings for single-mutation neighbors."""
@@ -120,7 +124,7 @@ class Model2Def:
         for in_nb in self.input.neighbors(self.output.input_size):
             yield f"{in_nb}|{top_str}"
         # Layer-chain mutations (recurse into the tree).
-        for variant in _seq_variants(top, self.input.size, self.output.size):
+        for variant in _seq_variants(top, self.input.size):
             yield f"{input_spec}|" + "-".join(variant)
 
     def neighbors(self) -> Iterable[Self]:
@@ -190,9 +194,6 @@ class Model2Def:
 _APPEND_ACTS = ("relu", "gelu", "tanh")
 _APPEND_RECURRENT = ("gru", "mgru", "mingru", "lstm", "slstm", "mullstm")
 _GATE_ACTS = (None, "gelu", "relu", "tanh")
-# Layers that don't define their own output size (pass the input dim
-# through); they affect the prepend/remove-first sizing heuristic.
-_PASSTHROUGH = ("suffix", "norm", "rmsnorm")
 
 
 def _strs(layers: list[LayerDef]) -> list[str]:
@@ -219,7 +220,7 @@ def _split_variants(split: SplitDef) -> Iterable[str]:
         for idx, br in enumerate(split.branches):
             if not br.layers:
                 continue
-            for variant in _seq_variants(br.layers, br.input_size, br.size):
+            for variant in _seq_variants(br.layers, br.input_size):
                 new = list(bsl)
                 new[idx] = variant
                 yield _split_str(split.op, new)
@@ -240,15 +241,24 @@ def _split_variants(split: SplitDef) -> Iterable[str]:
         # It's still reachable in a couple of hops (the invalid
         # intermediate's own neighbors resize the other side), which a
         # depth>=2 neighbor walk finds for free.
-        for variant in _seq_variants(main.layers, main.input_size, main.size):
+        for variant in _seq_variants(main.layers, main.input_size):
             yield _split_str("mul", [variant] + bsl[1:])
 
 
 def _seq_variants(
-    layers: list[LayerDef], input_size: int, output_size: int,
+    layers: list[LayerDef], input_size: int,
 ) -> Iterable[list[str]]:
     """Neighbor layer-string-lists for one sequence (top chain or a
-    split branch). The caller composes them into a full spec."""
+    split branch). The caller composes them into a full spec.
+
+    Sizing rule: appended and prepended layers are SIZE-PRESERVING,
+    snapped down to the power-of-2 grid (17 -> 16 for the odd one-hot
+    input widths; powers of 2 unchanged). Width exploration is the
+    job of the in-place resize mutations, not of appends -- and for
+    tied-codec models a size-preserving append leaves the table width
+    alone instead of dragging it around via the X sync. The output
+    head's size plays no role in chain mutations anymore.
+    """
     strs = _strs(layers)
     n = len(layers)
 
@@ -262,9 +272,13 @@ def _seq_variants(
                 yield strs[:i] + [nb] + strs[i + 1:]
 
     last_output = layers[-1].size if layers else input_size
-    new_size = min(last_output, output_size)
+    new_size = floor_power2(last_output)
 
-    # 2. Append a new layer (size matches the pipe's narrow point).
+    # 2. Append a new layer (size-preserving, snapped to the grid).
+    #    The bare dense is included: for tied-codec models it is the
+    #    explicit adapter (the sanctioned trailing linear); elsewhere
+    #    validity filters it like any other inapplicable append.
+    yield strs + [f"dense.{new_size}"]
     for act in _APPEND_ACTS:
         for name in ("dense", "rnn"):
             yield strs + [f"{name}.{new_size}.{act}"]
@@ -278,21 +292,20 @@ def _seq_variants(
     yield strs + ["rglru.1"]
     if last_output > 1:
         yield strs + [f"rglru.{last_output}"]
-    # Append a single-head attention seed sized to the running width
-    # (deliberately NOT min(width, output_size) like the other appends
-    # -- attention keeps the stream width). heads/window mutate from
-    # there; tiny widths (head_dim < 4) are filtered by is_valid.
+    # Attention keeps the exact stream width (no snap: heads/window
+    # mutate from there; tiny widths (head_dim < 4) are filtered by
+    # is_valid).
     yield strs + [f"attn.{last_output}.1.{_ATTN_SWAP_WINDOW}"]
     if new_size >= 2:
         yield strs + [f"matlstm.{new_size}"]
         yield strs + [f"msr.{new_size}.1"]
-    if last_output <= output_size:
-        yield strs + ["conv.2"]
+    yield strs + ["conv.2"]
 
-    # 3. Remove the last layer (symmetric with append).
+    # 3. Remove the last layer (symmetric with append: only a layer
+    #    an append could have produced is removable).
     if layers:
         prev_output = input_size if n == 1 else layers[-2].size
-        if last_output == min(prev_output, output_size):
+        if last_output == floor_power2(prev_output):
             yield strs[:-1]
 
     # 4./5. Insert / remove suffix.2 (no skip-distance bumps in a tree).
@@ -311,21 +324,15 @@ def _seq_variants(
         if s in ("norm", "rmsnorm"):
             yield strs[:i] + strs[i + 1:]
 
-    # 8./9. Prepend a dense lead-in / remove it (symmetric).
-    if not layers or layers[0].name not in _PASSTHROUGH:
-        prepend_size = min(input_size, output_size)
-    else:
-        prepend_size = input_size
+    # 8./9. Prepend a dense lead-in / remove it (symmetric). Same
+    #       sizing rule as appends: size-preserving on the grid.
+    prepend_size = floor_power2(input_size)
     for act in ("tanh", "gelu"):
         yield [f"dense.{prepend_size}.{act}"] + strs
     if layers and layers[0].name == "dense":
-        nxt = layers[1] if n >= 2 else None
-        if nxt is None or nxt.name not in _PASSTHROUGH:
-            expected = min(input_size, output_size)
-        else:
-            expected = input_size
         first = layers[0]
-        if first.size == expected and first._activation in ("tanh", "gelu"):
+        if (first.size == floor_power2(input_size)
+                and first._activation in ("tanh", "gelu")):
             yield strs[1:]
 
     # 10. Introduce a residual split around a 1- or 2-layer span.

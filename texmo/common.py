@@ -39,6 +39,12 @@ def ceil_power2(x: float) -> int:
     return 2 ** math.ceil(math.log2(x))
 
 
+def floor_power2(x: int) -> int:
+    """Returns the largest power of 2 that is less than or equal to x."""
+    assert x >= 1
+    return 1 << (x.bit_length() - 1)
+
+
 def total_size(shape):
     prod = 1
     for dim in shape:

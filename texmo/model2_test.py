@@ -747,3 +747,36 @@ def test_emb_neighbors_two_hop_wellformed():
     for n in base.neighbors():
         for nn in n.neighbors():  # raises if any 2-hop spec is malformed
             assert nn.is_valid(), nn.spec
+
+
+def test_bare_dense_tail_valid_for_tied_codec_only():
+    # The explicit adapter: legal exactly when the head scores against
+    # the tied table instead of absorbing the projection.
+    assert parse_model2(
+        "bytes.emb.4|rnn.8.tanh-dense.4", Precision.FP32).is_valid()
+    assert not parse_model2(
+        "bytes|rnn.8.tanh-dense.8", Precision.FP32).is_valid()
+
+
+def test_bare_dense_append_reaches_adapter_form():
+    md = parse_model2("bits.4.emb.8|rnn.8.tanh", Precision.FP32)
+    specs = {n.spec for n in md.neighbors()}
+    assert "bits.4.emb.8|rnn.8.tanh-dense.8" in specs
+    # One-hot models don't get the bare append (head absorbs it).
+    md = parse_model2("bytes|dense.8.gelu", Precision.FP32)
+    assert "bytes|dense.8.gelu-dense.8" not in {
+        n.spec for n in md.neighbors()}
+
+
+def test_appends_are_size_preserving_snapped():
+    # Binary one-hot: appends now match the running width instead of
+    # collapsing to the (1-logit) head size.
+    md = parse_model2("bits.1+bp|rnn.4.tanh", Precision.FP32)
+    specs = {n.spec for n in md.neighbors()}
+    assert "bits.1+bp|rnn.4.tanh-dense.4.gelu" in specs
+    assert "bits.1+bp|rnn.4.tanh-msr.4.1" in specs
+    assert "bits.1+bp|rnn.4.tanh-dense.1.gelu" not in specs
+    # Odd one-hot input width snaps down to the grid for prepends.
+    md = parse_model2("bits.4.oh+bp|rnn.8.tanh", Precision.FP32)
+    specs = {n.spec for n in md.neighbors()}
+    assert "bits.4.oh+bp|dense.16.tanh-rnn.8.tanh" in specs

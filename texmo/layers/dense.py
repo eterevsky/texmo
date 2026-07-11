@@ -94,10 +94,16 @@ class DenseDef(LayerDef):
         # gated unit (GeGLU/SwiGLU: `split.mul(dense.X.gelu,
         # dense.X)`), so SplitDef opts into `allow_bare` for a
         # branch's terminal layer. The power-of-two size discipline
-        # still applies either way.
+        # still applies either way. relu is retired (2026-07: almost
+        # strictly worse than gelu in the DB) -- relu confs still
+        # parse and run, but count as invalid like off-whitelist
+        # inputs, and their neighbors propose the surviving
+        # activations.
         if not is_power2_int(self.size):
             return False
-        return allow_bare or self._activation_fn is not None
+        if self._activation is None:
+            return allow_bare
+        return self._activation in ("tanh", "gelu")
 
     @property
     def num_weights(self) -> int:

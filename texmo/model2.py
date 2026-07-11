@@ -191,9 +191,9 @@ class Model2Def:
 #   - gate: split.mul with a dense (or pass) second path slaved to the
 #     main path's size -- GeGLU/SwiGLU/self-gating.
 
-_APPEND_ACTS = ("relu", "gelu", "tanh")
+_APPEND_ACTS = ("gelu", "tanh")  # relu retired 2026-07
 _APPEND_RECURRENT = ("gru", "mgru", "mingru", "lstm", "slstm", "mullstm")
-_GATE_ACTS = (None, "gelu", "relu", "tanh")
+_GATE_ACTS = (None, "gelu", "tanh")
 
 
 def _strs(layers: list[LayerDef]) -> list[str]:

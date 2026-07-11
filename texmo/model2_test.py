@@ -611,8 +611,10 @@ def test_neighbor_append_self_gate():
     activation -- reachable from the empty chain across the GLU
     activations -- and the unwrap removes it (the inverse)."""
     empty = _arch_neighbor_specs(parse_model2("bits.1+bp|", Precision.FP32))
-    for g in ("dense.4", "dense.4.gelu", "dense.4.relu", "dense.4.tanh"):
+    for g in ("dense.4", "dense.4.gelu", "dense.4.tanh"):
         assert f"bits.1+bp|split.mul(pass, {g})" in empty
+    # relu retired: not offered as a gate activation anymore.
+    assert "bits.1+bp|split.mul(pass, dense.4.relu)" not in empty
     chain = _arch_neighbor_specs(
         parse_model2("bits.1+bp|dense.4.gelu", Precision.FP32))
     assert "bits.1+bp|dense.4.gelu-split.mul(pass, dense.4)" in chain

@@ -23,7 +23,7 @@ def _conf(spec, lr=0.25, length=128, batch=256, steps=256, decay=1.0):
 
 def test_conf_neighbors():
     template = Template(
-        spec=r"bytes\|(dense|rnn)\.\d+\.relu(-suffix\.\d+)?",
+        spec=r"bytes\|(dense|rnn)\.\d+\.gelu(-suffix\.\d+)?",
         lr=None,
         length=(128, 128),
         batch=(128, 256),
@@ -32,12 +32,12 @@ def test_conf_neighbors():
         precision=[Precision.FP32],
     )
 
-    conf = _conf("bytes|dense.1.relu", decay=1 / 32)
+    conf = _conf("bytes|dense.1.gelu", decay=1 / 32)
     neighbors = set(conf_neighbors(conf, template))
     assert neighbors == {
-        conf.replace(model=_md("bytes|dense.2.relu")),
-        conf.replace(model=_md("bytes|rnn.1.relu")),
-        conf.replace(model=_md("bytes|dense.1.relu-suffix.2")),
+        conf.replace(model=_md("bytes|dense.2.gelu")),
+        conf.replace(model=_md("bytes|rnn.1.gelu")),
+        conf.replace(model=_md("bytes|dense.1.gelu-suffix.2")),
         conf.replace(lr=0.125),
         conf.replace(lr=0.5),
         conf.replace(decay=1 / 16),
@@ -60,11 +60,13 @@ def test_dense_layer_neighbor():
         decay_types=['none', 'cosine'],
     )
 
-    conf = _conf("bytes|dense.1.relu", batch=128, decay=1)
+    conf = _conf("bytes|dense.1.gelu", batch=128, decay=1)
     neighbors = set(conf_neighbors(conf, template))
     assert neighbors == {
-        conf.replace(model=_md("bytes|dense.2.relu")),
-        conf.replace(model=_md("bytes|rnn.1.relu")),
+        conf.replace(model=_md("bytes|dense.2.gelu")),
+        conf.replace(model=_md("bytes|rnn.1.gelu")),
+        # The activation toggle (relu retired; tanh <-> gelu <-> bare).
+        conf.replace(model=_md("bytes|dense.1.tanh")),
         conf.replace(cosine=True),
     }
 
@@ -140,7 +142,7 @@ def test_conf_neighbors_precision():
 
 def test_conf_neighbors_input():
     template = Template(
-        spec=r"(bytes|bits\.\d+[\w.+]*)\|dense\.\d+\.relu",
+        spec=r"(bytes|bits\.\d+[\w.+]*)\|dense\.\d+\.gelu",
         lr=(0.25, 0.25),
         length=(128, 128),
         batch=(128, 128),
@@ -150,10 +152,10 @@ def test_conf_neighbors_input():
         decay_types=['none', 'cosine'],
     )
 
-    conf = _conf("bytes|dense.1.relu", batch=128, decay=1)
+    conf = _conf("bytes|dense.1.gelu", batch=128, decay=1)
     neighbors = set(conf_neighbors(conf, template))
     specs = {str(n.model) for n in neighbors}
-    assert "bits.4.oh+bp|dense.1.relu" in specs
+    assert "bits.4.oh+bp|dense.1.gelu" in specs
 
 
 def test_template_exact_spec_match():

@@ -509,7 +509,7 @@ class ModelDef(object):
         )
         new_size = min(last_output, self.output.size)
         for name in ("dense", "rnn"):
-            for activation in ("relu", "gelu", "tanh"):
+            for activation in ("gelu", "tanh"):
                 yield _make_spec(chain(
                     layers_str, (f"{name}.{new_size}.{activation}",)))
         for name in ("gru", "mgru", "mingru", "lstm", "slstm", "mullstm"):

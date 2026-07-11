@@ -161,7 +161,10 @@ class RnnDef(LayerDef):
         return f"rnn.{self.size}"
 
     def is_valid(self) -> bool:
-        return is_power2_int(self.size) and self._activation is not None
+        # relu is retired (see DenseDef.is_valid): parses and runs,
+        # but no longer search-valid.
+        return (is_power2_int(self.size)
+                and self._activation in ("tanh", "gelu"))
 
     @property
     def num_weights(self) -> int:

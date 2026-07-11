@@ -272,7 +272,7 @@ def test_neighbors_append_remove_layer():
     neighbor_specs = [str(n) for n in md.neighbors()]
     # Appending: min(32, 256) = 32
     assert "bytes|dense.32.gelu-dense.32.tanh" in neighbor_specs
-    assert "bytes|dense.32.gelu-rnn.32.relu" in neighbor_specs
+    assert "bytes|dense.32.gelu-rnn.32.relu" not in neighbor_specs  # relu retired
 
     # Removing: symmetric — a 2-layer model should have the 1-layer as neighbor
     md2 = ModelDef("bytes|dense.32.gelu-dense.32.tanh", Precision.FP32)
@@ -806,7 +806,7 @@ def test_skip_neighbors_all_valid():
 
 @pytest.mark.parametrize('spec', [
     "bytes|dense.32.gelu",
-    "bits.2.oh+bp|dense.16.relu-dense.32.tanh",
+    "bits.2.oh+bp|dense.16.gelu-dense.32.tanh",
     "bits.1+bp|rnn.4.tanh",
     "bits.1+bp|gru.8-dense.4.gelu",
     "bits.1+bp|suffix.2-dense.8.tanh",

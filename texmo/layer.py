@@ -236,6 +236,20 @@ class LayerDef(object):
             act = f".{self._activation}" if self._activation else ""
             for s in power2_neighbors(self.size):
                 yield f"{self.name}.{s}{act}"
+            # Activation mutations at the same size. For dense the
+            # bare (linear) form is part of the cycle -- it is the
+            # tied-codec adapter and the gate/linear path, filtered by
+            # validity everywhere else. rnn has no bare form. A relu
+            # layer (retired, search-invalid) proposes the survivors,
+            # so existing relu lineages migrate instead of dying.
+            if self.name == "dense":
+                acts = (None, "tanh", "gelu")
+            else:
+                acts = ("tanh", "gelu")
+            for a in acts:
+                if a != self._activation:
+                    suffix = f".{a}" if a else ""
+                    yield f"{self.name}.{self.size}{suffix}"
         elif self.name in ("gru", "mgru", "mingru", "lstm", "slstm", "mullstm"):
             for s in power2_neighbors(self.size):
                 yield f"{self.name}.{s}"
@@ -261,7 +275,7 @@ class LayerDef(object):
             if self._activation == "tanh" and self.size > 1:
                 yield f"lrnn.{self.size}.2"
         elif self.name in _RECURRENT:
-            for act in ("relu", "gelu", "tanh"):
+            for act in ("gelu", "tanh"):
                 yield f"rnn.{self.size}.{act}"
             for other in _RECURRENT:
                 if other != self.name:

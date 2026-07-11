@@ -186,7 +186,7 @@ def test_gru_neighbors():
     assert "gru.16" in neighbors
     assert "gru.64" in neighbors
     # Swap to rnn with every activation
-    assert "rnn.32.relu" in neighbors
+    assert "rnn.32.relu" not in neighbors  # relu retired
     assert "rnn.32.gelu" in neighbors
     assert "rnn.32.tanh" in neighbors
     # Swap to other recurrent types
@@ -210,7 +210,7 @@ def test_mingru_neighbors():
     neighbors = list(d.neighbors())
     assert "mingru.4" in neighbors
     assert "mingru.16" in neighbors
-    assert "rnn.8.relu" in neighbors
+    assert "rnn.8.relu" not in neighbors  # relu retired
     assert "gru.8" in neighbors
     assert "mgru.8" in neighbors
 

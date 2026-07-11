@@ -3,8 +3,8 @@
 Status: **design agreed; the plain class is implemented, tying is
 not.** Implementation naming settled after this record was written:
 the component is called the **codec** — `OneHotCodec`
-(`layers/one_hot_codec.py`, the plain class below, shipped with the
-soft-cap opt-in pending DB validation) and `EmbeddingCodec` (both
+(`layers/one_hot_codec.py`, the plain class below; the soft-cap is on
+by default after DB validation) and `EmbeddingCodec` (both
 tied rows of the table below, upcoming), sharing `layers/codec.py`.
 This is the decision log and migration plan from the 2026-07 design
 discussions; the user-facing description of how texmo IO works

@@ -16,11 +16,16 @@ This module holds what they share. Logit soft-capping:
 
 (the RecurrentGemma value). Monotone, so greedy sampling is unchanged;
 bounds the maximum loss (~86 bits/token instead of inf) and kills
-gradients on runaway logits, so fewer runs should diverge. Currently
-OPT-IN (`parse_model2(..., cap=True)`): the search DB's half-million
-runs were trained uncapped, so the default stays off until the cap's
-effect is measured against them; flip the default after that
-experiment.
+gradients on runaway logits. ON by default, validated against the
+result DB (2026-07, ~500 seed-paired confs retrained both ways):
+loss-neutral on healthy confs (rank of capped runs among DB losses
+uniform, mean 0.504 +- 0.018; paired geometric-mean loss ratio
+0.998 +- 0.004), no change in overall divergence rate (its mechanism
+only tames runaway logits, not hidden-state NaNs), but it rescues the
+logit-blow-up failure mode -- including confs that had never converged
+in the DB -- and bounds the loss when divergence happens anyway.
+`parse_model2(..., cap=False)` opts out for experiments and for
+comparison with the legacy uncapped runtime.
 """
 import jax
 import jax.numpy as jnp

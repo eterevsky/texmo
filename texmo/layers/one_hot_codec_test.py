@@ -9,7 +9,7 @@ from texmo.precision import Precision
 from texmo.spec_parser import parse_model2
 
 
-def _tiny_model(spec="bytes|dense.8.gelu", cap=False):
+def _tiny_model(spec="bytes|dense.8.gelu", cap=True):
     md = parse_model2(spec, Precision.FP32, cap=cap)
     model = md.build_jax()
     weights = model.init_weights(jax.random.PRNGKey(0))
@@ -28,10 +28,10 @@ def test_cap_logits_shape_and_bounds():
     assert np.all(np.diff(y) > 0)
 
 
-def test_logits_uncapped_by_default():
-    _, model, weights = _tiny_model()
+def test_logits_uncapped_when_disabled():
+    _, model, weights = _tiny_model(cap=False)
     # Blown-up head weights: raw logits far beyond the cap must
-    # survive, since capping is opt-in for now.
+    # survive when the cap is explicitly turned off.
     weights[2]['w'] = weights[2]['w'] * 1e5
     batch = jax.random.randint(
         jax.random.PRNGKey(1), (2, 8), 0, 256).astype(jnp.int32)
@@ -39,8 +39,8 @@ def test_logits_uncapped_by_default():
     assert np.max(np.abs(logits)) > _LOGIT_CAP
 
 
-def test_forward_logits_capped_when_enabled():
-    _, model, weights = _tiny_model(cap=True)
+def test_forward_logits_capped_by_default():
+    _, model, weights = _tiny_model()
     weights[2]['w'] = weights[2]['w'] * 1e5
     batch = jax.random.randint(
         jax.random.PRNGKey(1), (2, 8), 0, 256).astype(jnp.int32)
@@ -65,7 +65,7 @@ def test_step_matches_forward(cap):
 
 
 def test_binary_head_pads_after_cap():
-    _, model, weights = _tiny_model("bits.1+bp|dense.4.tanh", cap=True)
+    _, model, weights = _tiny_model("bits.1+bp|dense.4.tanh")
     batch = jnp.zeros((1, 6), dtype=jnp.int32)
     logits = np.asarray(model.forward(weights, batch))
     assert logits.shape[-1] == 2

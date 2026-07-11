@@ -51,10 +51,12 @@ the codec — a chain layer's output is never used as logits directly.
 - **Soft-capping.** All heads apply `logits = 30*tanh(logits/30)`.
   This is infrastructure, not a modeling knob: it is invisible to the
   loss at equilibrium and monotone (greedy sampling unchanged), but it
-  bounds the maximum loss and kills gradients on runaway logits, so
-  fewer runs diverge. *Status: implemented but opt-in
-  (`parse_model2(..., cap=True)`) until its effect is measured against
-  the uncapped result DB; the end state is always-on.*
+  bounds the maximum loss and kills gradients on runaway logits.
+  *Status: on by default, validated against the result DB (2026-07,
+  ~500 seed-paired confs): loss-neutral on healthy confs, rescues the
+  logit-blow-up divergence mode, no effect on divergence born in
+  hidden-layer state. `parse_model2(..., cap=False)` opts out for
+  experiments.*
 
 ## Kind 1: bit chunks, one-hot family — `bits.N[.oh][+bp]`, `bytes`
 

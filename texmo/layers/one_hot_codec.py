@@ -230,7 +230,7 @@ class OneHotCodecDef:
         ntokens: int,
         variation: str | None = None,
         precision: Precision = Precision.FP32,
-        cap: bool = False,
+        cap: bool = True,
     ):
         self.nbits = nbits
         self.one_hot = one_hot
@@ -254,7 +254,7 @@ class OneHotCodecDef:
     def from_spec(
         spec: str,
         precision: Precision = Precision.FP32,
-        cap: bool = False,
+        cap: bool = True,
     ) -> 'OneHotCodecDef':
         if spec == '' or spec == 'bytes':
             spec = 'bits.8.oh'

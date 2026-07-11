@@ -30,7 +30,7 @@ from .model import _apply_merges, _build_layer_def
 from .precision import Precision
 
 
-def parse_model2(spec: str, precision: Precision, cap: bool = False):
+def parse_model2(spec: str, precision: Precision, cap: bool = True):
     """Top-level spec parser. Returns a `Model2Def`.
 
     Splits the spec on `|` into the codec's input spec and the layer
@@ -39,8 +39,9 @@ def parse_model2(spec: str, precision: Precision, cap: bool = False):
     equivalent `split.op(...)` form at parse time, recursively at
     every nesting level. The runtime sees a skip-free tree.
 
-    `cap` enables logit soft-capping (see layers/codec.py). Off by
-    default until its effect is validated against the result DB.
+    `cap` enables logit soft-capping (see layers/codec.py). On by
+    default; cap=False is for experiments and for comparing against
+    the legacy uncapped runtime.
     """
     # Imported here to break the circular module dependency:
     # model2.py imports the parser indirectly via downstream code

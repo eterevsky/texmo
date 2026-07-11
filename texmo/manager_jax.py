@@ -207,7 +207,8 @@ class ManagerJax(Manager):
         # layouts differ slightly).
         if isinstance(self.model_def, Model2Def):
             model32 = parse_model2(
-                self.model_def.spec, Precision.FP32).build_jax()
+                self.model_def.spec, Precision.FP32,
+                cap=self.model_def.codec.cap).build_jax()
         else:
             model32 = build_model_def(
                 self.model_def.spec, Precision.FP32).build_jax()

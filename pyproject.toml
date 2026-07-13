@@ -19,6 +19,7 @@ dependencies = [
     "jax[cuda13]; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "jax[cpu]; sys_platform != 'linux' or platform_machine != 'x86_64'",
     "optax",
+    "safetensors>=0.8.0",
 ]
 
 [[tool.uv.index]]

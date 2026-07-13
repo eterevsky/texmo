@@ -10,7 +10,7 @@ jax.config.update('jax_enable_x64', True)
 jax.config.update('jax_platforms', config.JAX_PLATFORMS)
 
 from texmo import latency
-from texmo.cli import client, db, loss, report, sample, server, train
+from texmo.cli import bench, client, db, loss, report, sample, server, train
 from texmo.cli import time as predict_time
 
 
@@ -46,6 +46,12 @@ def parse_args():
         "benchmark-dataset", help="benchmark sampling the training data"
     )
     sample.benchmark_init_args(parser_benchmark_dataset, config)
+
+    parser_benchmark_model = subparsers.add_parser(
+        "benchmark-model",
+        help="benchmark loading + greedy generation of a stored model",
+    )
+    bench.init_args(parser_benchmark_model, config)
 
     parser_updatedb = subparsers.add_parser(
         "db-update",

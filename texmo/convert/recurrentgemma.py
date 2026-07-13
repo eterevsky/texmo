@@ -247,7 +247,9 @@ def main():
     mapper = _Mapper(args.checkpoint, out_dir, weight_map)
     doc = {
         'spec': spec,
-        'precision': 'bf16',
+        # The published checkpoint is fp32 (config torch_dtype);
+        # loaders can override (e.g. Precision.BF16 to halve RAM).
+        'precision': 'fp32',
         'weights': build_weights(cfg, mapper),
     }
 

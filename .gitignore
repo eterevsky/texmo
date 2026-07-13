@@ -5,7 +5,6 @@
 /data/*
 !/data/pride*
 /gemma
-/models
 /log.txt
 /results
 /scratch

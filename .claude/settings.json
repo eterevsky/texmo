@@ -7,7 +7,6 @@
       "Bash(scp -q /tmp/iotest.py tower:/home/oleg/texmo/iotest.py)",
       "Bash(scp -q texmo/dataset.py tower:/home/oleg/texmo/texmo/dataset.py)",
       "Bash(scp -q texmo/cli/sample.py tower:/home/oleg/texmo/texmo/cli/sample.py)",
-      "Bash(git commit -m ' *)",
       "Bash(grep -B1 -E \"^\\\\S*-\\\\s*pass\\\\s*$\")",
       "Bash(uv --version)",
       "Bash(uv python *)",

@@ -18,7 +18,14 @@ its branches' weight lists, nested recursively). Leaves are one of:
                      the manifest's own directory first, then the
                      working directory. This is how converted
                      checkpoints (RecurrentGemma) reference the
-                     original shards without copying gigabytes.
+                     original shards without copying gigabytes. An
+                     optional "transform": [[op, arg], ...] applies
+                     in order after loading; ops: ["reshape", shape],
+                     ["transpose", perm], ["flip", axis].
+                     (RecurrentGemma's conv1d is stored (D, 1, L) in
+                     cross-correlation order; ours is (L, D) with
+                     w[0] as the newest tap -- a true convolution --
+                     so the converter reshapes, transposes AND flips.)
 
 Structural lists (layer lists, split branches) are distinguished
 from inline tensors by content: a list whose elements bottom out in
@@ -119,7 +126,17 @@ def _load_tensor(desc: dict, base: str, files: dict):
     p = os.path.abspath(p)
     if p not in files:
         files[p] = safe_open(p, framework='flax')
-    return files[p].get_tensor(desc['id'])
+    t = files[p].get_tensor(desc['id'])
+    for op, arg in desc.get('transform', ()):
+        if op == 'reshape':
+            t = t.reshape(arg)
+        elif op == 'transpose':
+            t = t.transpose(arg)
+        elif op == 'flip':
+            t = jnp.flip(t, axis=arg)
+        else:
+            raise ValueError(f'unknown transform op: {op!r}')
+    return t
 
 
 def _check_structure(md, weights) -> None:

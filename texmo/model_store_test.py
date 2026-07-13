@@ -92,6 +92,29 @@ def test_precision_cast_on_load(tmp_path):
     assert float(w[0]['emb'][0, 0]) == 1.5
 
 
+def test_descriptor_transform(tmp_path):
+    # Stored (D, 1, L) like RecurrentGemma's conv1d; loaded (L, D).
+    t = jnp.arange(12, dtype=jnp.float32).reshape(3, 1, 4)
+    save_file({'c': t}, str(tmp_path / "w.safetensors"))
+    manifest = {
+        'spec': 'bytes.emb.2|',
+        'precision': 'fp32',
+        'weights': [
+            {'emb': {'path': 'w.safetensors', 'id': 'c',
+                     'transform': [['reshape', [3, 4]],
+                                   ['transpose', [1, 0]]]},
+             'y': 0.0},
+            [],
+            None,
+        ],
+    }
+    path = tmp_path / "m.json"
+    path.write_text(pjson(manifest), encoding='utf-8')
+    _, w = load_model(str(path))
+    expected = np.arange(12, dtype=np.float32).reshape(3, 4).T
+    np.testing.assert_array_equal(np.asarray(w[0]['emb']), expected)
+
+
 def test_structure_mismatch_raises(tmp_path):
     manifest = {
         'spec': 'bytes.emb.2|',

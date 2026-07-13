@@ -46,4 +46,5 @@ select = ["I", "F401"]
 dev = [
     "pytest>=8.4.2",
     "ruff>=0.15.11",
+    "transformers>=5.13.1",
 ]

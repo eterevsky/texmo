@@ -782,3 +782,63 @@ def test_appends_are_size_preserving_snapped():
     md = parse_model2("bits.4.oh+bp|rnn.8.tanh", Precision.FP32)
     specs = {n.spec for n in md.neighbors()}
     assert "bits.4.oh+bp|dense.16.tanh-rnn.8.tanh" in specs
+
+
+# --- step == forward across every layer family -----------------------
+#
+# The invariant that would have caught the rglru step-reset bug: the
+# two execution paths must agree on every spec, whatever the layer's
+# internal state machinery. One sweep over all families so a new
+# layer type can't land without joining it.
+
+@pytest.mark.parametrize("spec", [
+    "bits.1+bp|dense.4.gelu",
+    "bits.1+bp|rnn.4.tanh",
+    "bits.1+bp|gru.4",
+    "bits.1+bp|mgru.4",
+    "bits.1+bp|mingru.4",
+    "bits.1+bp|lstm.4",
+    "bits.1+bp|slstm.4",
+    "bits.1+bp|mullstm.4",
+    "bits.1+bp|matlstm.4",
+    "bits.1+bp|latent.4.2",
+    "bits.1+bp|lrnn.4.2",
+    "bits.1+bp|lmgu.4.2",
+    "bits.1+bp|suffix.2-dense.4.gelu",
+    "bits.1+bp|conv.2",
+    "bits.1+bp|msr.4.1",
+    "bits.1+bp|attn.4.1.4",
+    "bits.1+bp|rglru.1",
+    "bits.1+bp|rglru.4",
+    "bytes.emb.4|rnn.4.tanh",
+    "bits.2.emb.4|dense.4.tanh",
+    # KNOWN GAP: a consuming layer (conv/suffix, valid-trim in
+    # forward) followed by a STATEFUL layer breaks parity -- forward
+    # drops the transient outputs, but step ticks synchronously, so
+    # the downstream state ingests them during warm-up. Affects
+    # train (forward) vs eval (forward_recurrent) consistency for
+    # every such model; discovered by this sweep, resolution TBD
+    # (candidate: causal-pad conv/suffix internally, Gemma-style).
+    pytest.param(
+        "bits.4.oh+bp|dense.8-conv.2-rglru.2",
+        marks=pytest.mark.xfail(
+            reason="conv->stateful transient pollution", strict=True)),
+    pytest.param(
+        "bits.1+bp|suffix.2-gru.4",
+        marks=pytest.mark.xfail(
+            reason="suffix->stateful transient pollution", strict=True)),
+])
+def test_step_matches_forward_all_families(spec):
+    _, model, weights = _build2(spec, seed=7)
+    ntokens = model.codec.ntokens
+    batch = jax.random.randint(
+        jax.random.PRNGKey(11), (1, 10), 0, ntokens).astype(jnp.int32)
+    fwd = np.asarray(model.forward(weights, batch))
+    states, logits0 = model.initial_step(weights)
+    np.testing.assert_allclose(
+        np.asarray(logits0), fwd[0, 0], atol=2e-5, rtol=1e-4)
+    for t in range(batch.shape[1] - 1):
+        states, logits = model.step(weights, states, batch[0, t])
+        np.testing.assert_allclose(
+            np.asarray(logits), fwd[0, t + 1], atol=2e-5, rtol=1e-4,
+            err_msg=f"{spec} at t={t}")

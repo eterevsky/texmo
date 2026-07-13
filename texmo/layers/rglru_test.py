@@ -71,9 +71,13 @@ def test_forward_matches_reference():
     assert np.allclose(out, ref, atol=1e-5, rtol=1e-4)
 
 
-def test_step_matches_no_reset_reference():
-    # `step` carries state with no first-position reset (its contract is
-    # a pure recurrence from the given state).
+def test_step_matches_reset_reference():
+    # `step` from a fresh init_state applies the position-0 reset
+    # (input multiplier 1), exactly like forward()'s t == 0 column and
+    # the HF reference. The old no-reset step made step and forward
+    # disagree at t=0 -- badly for long-memory channels, where
+    # sqrt(1 - a^2) is tiny -- which skewed every recurrent eval
+    # (loss_batch_masked_recurrent runs the step path).
     layer, w = _make(input_size=8, blocks=2)
     x = jax.random.normal(jax.random.PRNGKey(3), (2, 6, 8))
     # step is per-sample (size,) -> loop samples and time.
@@ -84,7 +88,7 @@ def test_step_matches_no_reset_reference():
             s, y = layer.step(w, s, x[b, t])
             outs[b, t] = np.asarray(y)
     ref = _ref_forward(np.asarray(x, np.float64), _np_weights(w),
-                       blocks=2, reset_first=False)
+                       blocks=2, reset_first=True)
     assert np.allclose(outs, ref, atol=1e-5, rtol=1e-4)
 
 

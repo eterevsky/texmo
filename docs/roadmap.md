@@ -87,6 +87,26 @@ see at scalar state carries over to matrix state.
 
 ## Infrastructure
 
+* **step/forward parity for consuming->stateful chains.** forward
+  drops the transient outputs of consuming layers (conv/suffix,
+  valid-trim), but step ticks all layers synchronously, so during the
+  total_padding warm-up any downstream STATEFUL layer ingests the
+  transients into its state (suffix.2-gru.4: |step-forward| ~0.33 at
+  position 0, decaying over the sample). Every conv/suffix->recurrent
+  model therefore trains (forward) on a slightly different function
+  than it evals (forward_recurrent = step path). Pinned as strict
+  xfails in model2_test's step==forward sweep. Candidate fixes,
+  decision pending:
+  (a) make conv/suffix causal-pad internally (Gemma-style, no
+      consumption, no total_padding extras) -- a semantics change
+      for existing models;
+  (b) drop the synthetic no-beginning convention entirely (Oleg,
+      2026-07-13): train and eval on fragments that HAVE a first
+      token, and for from-scratch generation prompt with "\n" or
+      "\n\n" -- removes the max-entropy padding altogether, making
+      step == forward trivial and the model contract match how
+      pretrained LMs (BOS) already work.
+
 * **Split `is_valid` into invalid vs search-ineligible.** Today one
   flag conflates "this model cannot run / makes no sense" with "this
   model runs fine but search shouldn't propose it" (off-whitelist

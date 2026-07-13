@@ -70,8 +70,14 @@ class RglruJax(LayerJax):
         }
 
     def init_state(self):
-        # State accumulates in float32 (matches the reference).
-        return jnp.zeros(self.size, dtype=jnp.float32)
+        # (h, first): h accumulates in float32 (matches the
+        # reference); `first` marks the position-0 reset -- the input
+        # multiplier is 1 instead of sqrt(1 - a^2) on the very first
+        # step, exactly like forward()'s t == 0 column. Without it,
+        # step and forward disagree at t=0 (badly for long-memory
+        # channels, where sqrt(1 - a^2) is tiny).
+        return (jnp.zeros(self.size, dtype=jnp.float32),
+                jnp.ones((), dtype=bool))
 
     def _gates(self, weights: LayerWeights, x):
         """Block-diagonal input + recurrence gates for x of shape
@@ -96,13 +102,17 @@ class RglruJax(LayerJax):
 
     def step(
         self, weights: LayerWeights, state, x: jax.Array
-    ) -> tuple[jax.Array, jax.Array]:
-        # x: (size,), state: (size,) float32.
+    ) -> tuple[tuple, jax.Array]:
+        # x: (size,), state: ((size,) float32, () bool).
+        h, first = state
         i, r = self._gates(weights, x)
         a, mult = self._decay(weights, r)
+        # Position-0 reset, mirroring forward(): multiplier 1 on the
+        # first step (the a-reset is a no-op since h starts at 0).
+        mult = jnp.where(first, 1.0, mult)
         normalized_x = (x * i) * mult
-        new_state = (a * state + normalized_x).astype(jnp.float32)
-        return new_state, new_state.astype(self.dtype)
+        new_h = (a * h + normalized_x).astype(jnp.float32)
+        return (new_h, jnp.zeros((), dtype=bool)), new_h.astype(self.dtype)
 
     def forward(
         self, weights: LayerWeights, inputs: jax.Array

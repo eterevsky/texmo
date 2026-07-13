@@ -7,6 +7,7 @@ import numpy as np
 from ..configuration import Configuration
 from ..dataset import DataSet
 from ..manager import Manager, create_manager
+from ..model_store import save_model
 from ..precision import Precision
 from ..spec_parser import parse_model2
 from ..tokens import set_tokens_dir
@@ -98,10 +99,17 @@ def train(args: argparse.Namespace):
         args.time,
     )
 
+    if args.output is not None:
+        if args.backend != 'jax':
+            raise SystemExit('--output requires the jax backend')
+        save_model(args.output, conf.model, manager.weights)
+        logging.info(f'Saved model to {args.output}')
+
     # Skip text sampling if training diverged or produced a nonsensical
     # loss — the model is likely broken and the sampler may crash on
-    # NaN probabilities.
-    if args.prefix is not None and 0 < run.loss < 10:
+    # NaN probabilities. An empty prefix also skips (there is no last
+    # token to continue from).
+    if args.prefix and 0 < run.loss < 10:
         temperatures = [
             float(t) for t in args.temperature.split(',') if t.strip()
         ]
@@ -159,6 +167,14 @@ def init_args(parser: argparse.ArgumentParser, config):
     )
     parser.add_argument(
         "--steps", type=int, default=None, help="number of training steps"
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        metavar="PATH",
+        default=None,
+        help="export the trained model (spec + inline weights) as a "
+             "model_store JSON, loadable by eval / benchmark-model",
     )
 
     # Configuration

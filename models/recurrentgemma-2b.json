@@ -1,3 +1,2948 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:c2bec039b63b66c0526bcdb83416b80668d65f29ce65da7ecd0a0984328844d9
-size 116729
+{
+  "spec": "tokens.256000.gemma.emb.2560|split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-attn.2560.10.2048, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-attn.2560.10.2048, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-attn.2560.10.2048, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-attn.2560.10.2048, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-attn.2560.10.2048, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-attn.2560.10.2048, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-attn.2560.10.2048, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-attn.2560.10.2048, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.2560-conv.4-rglru.10, dense.2560.gelu)-dense.2560, pass)-split.add(rmsnorm-split.mul(dense.7680.gelu, dense.7680)-dense.2560, pass)-rmsnorm",
+  "precision": "fp32",
+  "weights": [
+    {
+      "emb": {
+        "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+        "id": "model.embed_tokens.weight"
+      },
+      "y": 3.923881268736804
+    },
+    [
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.0.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.0.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.0.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.0.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.0.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.0.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.0.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.1.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.1.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.1.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.1.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.1.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.1.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.1.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.2.temporal_pre_norm.weight"
+            }
+          },
+          {
+            "w_q": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.2.temporal_block.q_proj.weight"
+            },
+            "w_k": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.2.temporal_block.k_proj.weight"
+            },
+            "w_v": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.2.temporal_block.v_proj.weight"
+            },
+            "w_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.2.temporal_block.o_proj.weight"
+            },
+            "b_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.2.temporal_block.o_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.2.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.2.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.2.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.2.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.2.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.2.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.2.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.3.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.3.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.3.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.3.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.3.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.3.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.3.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.4.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.4.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.4.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.4.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.4.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.4.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.4.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.5.temporal_pre_norm.weight"
+            }
+          },
+          {
+            "w_q": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.5.temporal_block.q_proj.weight"
+            },
+            "w_k": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.5.temporal_block.k_proj.weight"
+            },
+            "w_v": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.5.temporal_block.v_proj.weight"
+            },
+            "w_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.5.temporal_block.o_proj.weight"
+            },
+            "b_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.5.temporal_block.o_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.5.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.5.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.5.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.5.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.5.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.5.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.5.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.6.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.6.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.6.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.6.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.6.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.6.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.6.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.7.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.7.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.7.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.7.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.7.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.7.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.7.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.7.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.7.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.7.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.7.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.7.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.7.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.7.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+              "id": "model.layers.7.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.7.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00001-of-00003.safetensors",
+                  "id": "model.layers.7.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.7.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.7.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.7.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.7.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.8.temporal_pre_norm.weight"
+            }
+          },
+          {
+            "w_q": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.8.temporal_block.q_proj.weight"
+            },
+            "w_k": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.8.temporal_block.k_proj.weight"
+            },
+            "w_v": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.8.temporal_block.v_proj.weight"
+            },
+            "w_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.8.temporal_block.o_proj.weight"
+            },
+            "b_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.8.temporal_block.o_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.8.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.8.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.8.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.8.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.8.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.8.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.8.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.9.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.9.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.9.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.9.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.9.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.9.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.9.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.10.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.10.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.10.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.10.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.10.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.10.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.10.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.11.temporal_pre_norm.weight"
+            }
+          },
+          {
+            "w_q": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.11.temporal_block.q_proj.weight"
+            },
+            "w_k": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.11.temporal_block.k_proj.weight"
+            },
+            "w_v": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.11.temporal_block.v_proj.weight"
+            },
+            "w_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.11.temporal_block.o_proj.weight"
+            },
+            "b_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.11.temporal_block.o_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.11.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.11.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.11.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.11.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.11.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.11.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.11.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.12.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.12.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.12.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.12.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.12.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.12.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.12.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.13.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.13.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.13.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.13.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.13.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.13.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.13.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.14.temporal_pre_norm.weight"
+            }
+          },
+          {
+            "w_q": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.14.temporal_block.q_proj.weight"
+            },
+            "w_k": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.14.temporal_block.k_proj.weight"
+            },
+            "w_v": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.14.temporal_block.v_proj.weight"
+            },
+            "w_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.14.temporal_block.o_proj.weight"
+            },
+            "b_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.14.temporal_block.o_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.14.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.14.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.14.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.14.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.14.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.14.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.14.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.15.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.15.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.15.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.15.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.15.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.15.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.15.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.16.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.16.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.16.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.16.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.16.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.16.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.16.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.17.temporal_pre_norm.weight"
+            }
+          },
+          {
+            "w_q": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.17.temporal_block.q_proj.weight"
+            },
+            "w_k": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.17.temporal_block.k_proj.weight"
+            },
+            "w_v": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.17.temporal_block.v_proj.weight"
+            },
+            "w_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.17.temporal_block.o_proj.weight"
+            },
+            "b_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.17.temporal_block.o_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.17.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.17.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.17.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.17.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.17.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.17.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.17.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.18.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.18.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.18.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.18.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.18.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.18.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.18.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.19.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.19.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.19.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.19.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.19.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.19.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.19.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.20.temporal_pre_norm.weight"
+            }
+          },
+          {
+            "w_q": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.20.temporal_block.q_proj.weight"
+            },
+            "w_k": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.20.temporal_block.k_proj.weight"
+            },
+            "w_v": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.20.temporal_block.v_proj.weight"
+            },
+            "w_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.20.temporal_block.o_proj.weight"
+            },
+            "b_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.20.temporal_block.o_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.20.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.20.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.20.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.20.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.20.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.20.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.20.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.21.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.21.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.21.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.21.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.21.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.21.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.21.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.22.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.22.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.22.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.22.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.22.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.22.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.22.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.23.temporal_pre_norm.weight"
+            }
+          },
+          {
+            "w_q": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.23.temporal_block.q_proj.weight"
+            },
+            "w_k": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.23.temporal_block.k_proj.weight"
+            },
+            "w_v": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.23.temporal_block.v_proj.weight"
+            },
+            "w_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.23.temporal_block.o_proj.weight"
+            },
+            "b_o": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.23.temporal_block.o_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+              "id": "model.layers.23.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.23.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00002-of-00003.safetensors",
+                  "id": "model.layers.23.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.23.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.23.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+              "id": "model.layers.23.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+              "id": "model.layers.23.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+              "id": "model.layers.24.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+              "id": "model.layers.24.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+              "id": "model.layers.24.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+              "id": "model.layers.24.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.24.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+              "id": "model.layers.24.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+              "id": "model.layers.24.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+              "id": "model.layers.25.temporal_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.temporal_block.linear_x.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.temporal_block.linear_x.bias"
+                }
+              },
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.temporal_block.conv_1d.weight",
+                  "transform": [["reshape", [2560, 4]], ["transpose", [1, 0]], ["flip", 0]]
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.temporal_block.conv_1d.bias"
+                }
+              },
+              {
+                "lam": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.temporal_block.rg_lru.recurrent_param"
+                },
+                "w_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.temporal_block.rg_lru.input_gate_weight"
+                },
+                "b_ig": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.temporal_block.rg_lru.input_gate_bias"
+                },
+                "w_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.temporal_block.rg_lru.recurrent_gate_weight"
+                },
+                "b_rg": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.temporal_block.rg_lru.recurrent_gate_bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.temporal_block.linear_y.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.temporal_block.linear_y.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+              "id": "model.layers.25.temporal_block.linear_out.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+              "id": "model.layers.25.temporal_block.linear_out.bias"
+            }
+          }
+        ],
+        []
+      ],
+      [
+        [
+          {
+            "gamma": {
+              "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+              "id": "model.layers.25.channel_pre_norm.weight"
+            }
+          },
+          [
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.mlp_block.gate_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.mlp_block.gate_proj.bias"
+                }
+              }
+            ],
+            [
+              {
+                "w": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.mlp_block.up_proj.weight"
+                },
+                "b": {
+                  "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+                  "id": "model.layers.25.mlp_block.up_proj.bias"
+                }
+              }
+            ]
+          ],
+          {
+            "w": {
+              "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+              "id": "model.layers.25.mlp_block.down_proj.weight"
+            },
+            "b": {
+              "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+              "id": "model.layers.25.mlp_block.down_proj.bias"
+            }
+          }
+        ],
+        []
+      ],
+      {
+        "gamma": {
+          "path": "../gemma/recurrentgemma-2b/model-00003-of-00003.safetensors",
+          "id": "model.final_norm.weight"
+        }
+      }
+    ],
+    null
+  ]
+}

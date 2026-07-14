@@ -39,15 +39,22 @@ _BP = {1: 3, 2: 2, 4: 1, 8: 0}
 # The blessed input set: exactly these participate in search, and
 # exactly these are valid. Other bits variants (non-oh bits.2/bits.4,
 # oh-less combos, ...) still parse and run for manual experiments but
-# count as invalid. The neighbor ladder is defined over the same set.
+# count as invalid.
+_VALID_INPUTS = frozenset(
+    {'bytes', 'bits.1+bp', 'bits.2.oh+bp', 'bits.4.oh+bp'})
+
+# The neighbor ladder. bits.1+bm (byte-start marker) is retired
+# (2026-07: search verdict -- practically never beat bits.1+bp), so
+# it has no incoming edges and is invalid; its outgoing edge remains
+# as a migration bridge for the DB population, like the retired relu
+# activations.
 _INPUT_NEIGHBORS = {
     'bytes': ('bits.4.oh+bp',),
     'bits.1+bm': ('bits.1+bp',),
-    'bits.1+bp': ('bits.1+bm', 'bits.2.oh+bp'),
+    'bits.1+bp': ('bits.2.oh+bp',),
     'bits.2.oh+bp': ('bits.1+bp', 'bits.4.oh+bp'),
     'bits.4.oh+bp': ('bits.2.oh+bp', 'bytes'),
 }
-_VALID_INPUTS = frozenset(_INPUT_NEIGHBORS)
 
 
 def _to_bit_array(n: int, nbits: int) -> list[float]:

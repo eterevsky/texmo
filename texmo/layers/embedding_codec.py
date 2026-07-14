@@ -68,7 +68,7 @@ from .codec import cap_logits
 # width. Input swaps carry the chain unchanged, so the final width --
 # and hence the emb X -- is carried unchanged too.
 _OH_SWAPS = {
-    1: ('bits.1+bp', 'bits.1+bm'),
+    1: ('bits.1+bp',),  # bits.1+bm retired
     2: ('bits.2.oh+bp',),
     4: ('bits.4.oh+bp',),
     8: ('bytes',),

@@ -97,13 +97,15 @@ def test_properties_delegate():
 
 
 def test_input_whitelist_validity():
-    for good in ("bytes", "bits.1+bp", "bits.1+bm", "bits.2.oh+bp",
-                 "bits.4.oh+bp"):
+    for good in ("bytes", "bits.1+bp", "bits.2.oh+bp", "bits.4.oh+bp"):
         md = parse_model2(f"{good}|dense.8.gelu", Precision.FP32)
         assert md.input.is_valid(), good
-    # Off-whitelist variants parse and run but count as invalid.
+    # Off-whitelist variants parse and run but count as invalid --
+    # including the retired bits.1+bm (2026-07: practically never
+    # beat bits.1+bp in search).
     for bad in ("bits.2+bp", "bits.4+bp", "bits.1.oh+bp", "bits.2.oh",
-                "bits.4", "bits.8", "bits.2+bm", "bits.4+bm"):
+                "bits.4", "bits.8", "bits.1+bm", "bits.2+bm",
+                "bits.4+bm"):
         md = parse_model2(f"{bad}|dense.8.gelu", Precision.FP32)
         assert not md.input.is_valid(), bad
         assert not md.is_valid(), bad
@@ -129,12 +131,12 @@ def test_input_neighbors_ladder():
         "bits.1+bp", "bits.4.oh+bp", "bits.2.emb.8")
     md = parse_model2("bytes|dense.8.gelu", Precision.FP32)
     assert md.input.neighbors(8) == ("bits.4.oh+bp", "bytes.emb.8")
-    # bm <-> bp is a mutual edge.
+    # bits.1+bm is retired: no incoming edges, but its own outgoing
+    # edge remains as a migration bridge for the DB population.
     md = parse_model2("bits.1+bm|dense.8.gelu", Precision.FP32)
     assert md.input.neighbors(8) == ("bits.1+bp", "bits.1.emb.8")
     md = parse_model2("bits.1+bp|dense.8.gelu", Precision.FP32)
-    assert "bits.1+bm" in md.input.neighbors(8)
-    assert "bits.1.emb.8" in md.input.neighbors(8)
+    assert md.input.neighbors(8) == ("bits.2.oh+bp", "bits.1.emb.8")
 
 
 def test_bm_encoding():

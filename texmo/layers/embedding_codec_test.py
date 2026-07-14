@@ -178,8 +178,7 @@ def test_input_neighbors_mode_swaps_and_domain_ladder():
     md = parse_model2("bytes.emb.8|dense.8.tanh", Precision.FP32)
     assert md.input.neighbors(8) == ("bytes", "bits.4.emb.8")
     md = parse_model2("bits.1.emb.4|rnn.4.tanh", Precision.FP32)
-    assert md.input.neighbors(4) == (
-        "bits.1+bp", "bits.1+bm", "bits.2.emb.4")
+    assert md.input.neighbors(4) == ("bits.1+bp", "bits.2.emb.4")
     md = parse_model2("tokens.16.test.emb.8|dense.8.tanh", Precision.FP32)
     assert md.input.neighbors(8) == ("tokens.16.test.oh",)
 

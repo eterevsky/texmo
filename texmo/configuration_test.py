@@ -426,3 +426,39 @@ def test_template_from_form_decay_types_checkboxes():
     }
     t = Template.from_form(params)
     assert t.decay_types == [DecayType.NONE, DecayType.COSINE]
+
+
+def test_default_from_template_finds_emb_models():
+    """A template that only matches tied-codec specs gets a tied
+    default -- the candidate sweep includes emb inputs with chains
+    sized to the table width."""
+    t = Template(
+        spec=r"bits\.\d+\.emb\.\d+\|.*",
+        precision=[Precision.FP32],
+        lr=None, length=None, batch=None, steps=None,
+        max_weights=(2, INF),
+    )
+    conf = default_from_template(t, spec=None)
+    assert str(conf.model).startswith("bits.1.emb.1|")
+    assert conf.model.is_valid()
+
+    # Width-specific template: the sweep reaches larger tables too.
+    t = Template(
+        spec=r"bytes\.emb\.16\|.*",
+        precision=[Precision.FP32],
+        lr=None, length=None, batch=None, steps=None,
+        max_weights=(2, INF),
+    )
+    conf = default_from_template(t, spec=None)
+    assert str(conf.model).startswith("bytes.emb.16|")
+
+    # One-hot templates keep their historical default (one-hot
+    # candidates come first).
+    t = Template(
+        spec=None,
+        precision=[Precision.FP32],
+        lr=None, length=None, batch=None, steps=None,
+        max_weights=(2, INF),
+    )
+    conf = default_from_template(t, spec=None)
+    assert str(conf.model) == "bits.1+bp|"

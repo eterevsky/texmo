@@ -500,12 +500,13 @@ def default_from_template(
         if template.spec is not None:
             spec = template.spec
         else:
-            found = False
-            # Same restricted input set as the search neighbors.
+            candidates = []
+            # Same restricted input set as the search neighbors. The
+            # one-hot candidates come first so templates that match
+            # both codecs keep their historical default.
             for input_spec in (
                 'bits.1+bp', 'bits.2.oh+bp', 'bits.4.oh+bp', 'bytes',
             ):
-                if found: break
                 for layer in (
                     '',
                     'dense.1.tanh',
@@ -515,14 +516,28 @@ def default_from_template(
                     'mingru.1',
                     'mgru.1',
                 ):
-                    if found: break
-                    full_spec = input_spec + '|' + layer
-                    model = parse_model2(full_spec, precision)
-                    if not model.is_valid():
-                        continue
-                    if template.match_model(model):
-                        spec = str(model)
-                        found = True
+                    candidates.append(f'{input_spec}|{layer}')
+            # Tied-codec candidates: the table width X follows the
+            # chain's final width, so the chains are sized to X.
+            for domain in ('bits.1', 'bits.2', 'bits.4', 'bytes'):
+                for x in (1, 2, 4, 8, 16):
+                    for layer in (
+                        '',
+                        f'dense.{x}.tanh',
+                        f'rnn.{x}.tanh',
+                        f'gru.{x}',
+                        f'lstm.{x}',
+                        f'mingru.{x}',
+                        f'mgru.{x}',
+                    ):
+                        candidates.append(f'{domain}.emb.{x}|{layer}')
+            for full_spec in candidates:
+                model = parse_model2(full_spec, precision)
+                if not model.is_valid():
+                    continue
+                if template.match_model(model):
+                    spec = str(model)
+                    break
 
     if spec is not None:
         model = parse_model2(spec, precision)

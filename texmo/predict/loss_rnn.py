@@ -131,12 +131,16 @@ def _jump_length(layer) -> int:
 
 
 # init_globals: output_size + 5 log training knobs + cosine flag +
-# 2 codec features. `is_tied` is duck-typed off the head: a tied-
-# embedding head has no parameters of its own (its matrix is the
-# input table), while the one-hot dense head always does. The IO
-# budget is `model.input.num_weights` -- the codec's parameters
-# (one-hot: the implicit head; tied: table+scale) -- which the
-# per-layer features never see (they only cover the hidden chain).
+# 2 codec features + the total weight budget. `is_tied` is duck-typed
+# off the head: a tied-embedding head has no parameters of its own
+# (its matrix is the input table), while the one-hot dense head
+# always does. The IO budget is `model.input.num_weights` -- the
+# codec's parameters (one-hot: the implicit head; tied: table+scale)
+# -- which the per-layer features never see (they only cover the
+# hidden chain). log2(num_weights) is also the RF baseline's single
+# best feature; the scan can't reconstruct it from the per-layer
+# log-weights (sum of logs != log of sum), so it goes in directly
+# (2026-07 sweep: -0.0008 val L1; nbits and log-num-mults were nulls).
 def _init_global_features(conf: Configuration) -> np.ndarray:
     model = conf.model
     return np.array([
@@ -149,10 +153,11 @@ def _init_global_features(conf: Configuration) -> np.ndarray:
         1.0 if conf.cosine else 0.0,
         1.0 if model.output.num_weights == 0 else 0.0,
         np.log2(1 + model.input.num_weights),
+        np.log2(max(model.num_weights, 1)),
     ], dtype=np.float32)
 
 
-N_INIT_GLOBAL = 9
+N_INIT_GLOBAL = 10
 
 
 def discover_simple_types(

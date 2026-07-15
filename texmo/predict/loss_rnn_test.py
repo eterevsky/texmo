@@ -138,6 +138,8 @@ def test_init_globals_codec_features():
     assert g.shape == (N_INIT_GLOBAL,)
     assert g[7] == 1.0  # tied head: no parameters of its own
     assert abs(g[8] - np.log2(1 + 256 * 4 + 1)) < 1e-6  # table + scale
+    # Total weight budget: the whole model, codec included.
+    assert abs(g[9] - np.log2(tied.model.num_weights)) < 1e-6
 
     plain = _m2("bytes|dense.4.gelu")
     g = _init_global_features(plain)

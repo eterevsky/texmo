@@ -154,3 +154,37 @@ batch_size=2048,
 Wired into `train_loss_model`. Persisted models from the previous
 config still load — `out_hidden=0` is the dataclass default and
 disables the new head.
+
+## Round 3 — 2026-07 (908k labeled runs)
+
+Global-feature sweep at ~3.3× the Round-2 data, after the tied-codec
+rollout. Context (see loss_prediction.md): every predictor drifted
+worse on the diversified conf space (RNN 0.0494 → 0.0596) while the
+oracle improved (0.030 → 0.0228), so the model↔noise gap roughly
+doubled — but the fix wasn't in the globals.
+
+3 seeds per variant, median + range, production config:
+
+| variant (globals added)     | val L1 | range  |
+|-----------------------------|--------|--------|
+| base (9 globals)            | 0.0597 | 0.0008 |
+| **+ log2(total num_weights)** | **0.0589** | 0.0011 |
+| + nbits (= log2 ntokens)    | 0.0595 | 0.0012 |
+| + log2(num_mults)           | 0.0592 | 0.0005 |
+| + total_weights + nbits     | 0.0588 | 0.0006 |
+| + all three                 | 0.0590 | 0.0006 |
+
+Take-aways:
+
+- **log2(total num_weights) wired in** (10th global). Small but
+  consistent: all nine tw-containing fits (mean 0.0589) beat all nine
+  others (mean 0.0594). It's the RF baseline's single best feature,
+  and the scan can't reconstruct it from per-layer log-weights (sum
+  of logs ≠ log of sum).
+- **Null results**: nbits (bits-per-token) — the tokens↔bytes data
+  volume conversion is apparently already inferable from
+  out_size/io-budget; log2(num_mults) — too correlated with weights.
+- The globals are saturated: best combined gain ~0.0009 against a
+  0.037 gap to the oracle. The rest of the gap is elsewhere (per-run
+  noise tail, per-layer/topology structure) — see the error
+  decomposition in loss_prediction.md.

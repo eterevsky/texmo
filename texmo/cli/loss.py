@@ -399,9 +399,12 @@ def main(args: argparse.Namespace):
         # RandomForestBigPredictor(),  # slow; re-enable for comparisons.
         HistGBRPredictor(),
         HistGBRPredictor(with_second_layer=True),
+        # The production config (train_loss_model) -- keep in sync.
         RnnPredictor(
             cell_activation='tanh', hidden=32,
             lr=0.02, steps=8000, lr_schedule='cosine',
+            feat_proj=32, out_hidden=32, out_activation='gelu',
+            batch_size=2048,
         ),
     ]
     for p in predictors:

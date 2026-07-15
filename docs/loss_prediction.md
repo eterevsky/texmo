@@ -107,21 +107,28 @@ experiment log.
 
 ## Performance
 
-On a recent snapshot (~276k labeled runs):
+2026-07 snapshot (908k labeled runs, 499k confs — post tied-codec
+rollout):
 
-| Predictor                          | val L1 | ~typical |
-|------------------------------------|--------|----------|
-| constant (train median)            | 0.133  | 9.7%     |
-| RandomForest (log_weights, log_data) | 0.070  | 5.0%     |
-| HistGradientBoosting (big features)| 0.053  | 3.7%     |
-| **RNN (tanh, h=32, proj=32, head=32.gelu, lr=0.02 cos, 8k, bs=2048)** | **0.0494** | **3.5%** |
-| oracle (per-conf val median)       | 0.030  | 2.1%     |
+| Predictor                          | val L1 | ~typical | at 276k |
+|------------------------------------|--------|----------|---------|
+| constant (train median)            | 0.264  | 20.1%    | 0.133   |
+| RandomForest (log_weights, log_data) | 0.079 | 5.7%     | 0.070   |
+| HistGradientBoosting (big features)| 0.064  | 4.5%     | 0.053   |
+| **RNN (production config)**        | **0.0596** | **4.2%** | 0.0494 |
+| oracle (per-conf val median)       | 0.0228 | 1.6%     | 0.030   |
 
-The oracle predicts each conf's val median from its own runs — its
-2.1% is the typical run-to-run deviation around the per-conf median,
-i.e. the irreducible noise floor for any predictor that doesn't see
-training-time randomness. The remaining ~1.4pp gap is what
-generalization across architectures buys us.
+The oracle predicts each conf's val median from its own runs — the
+typical run-to-run deviation around the per-conf median, i.e. the
+irreducible noise floor for any predictor that doesn't see
+training-time randomness. Note the drift between snapshots: every
+predictor got worse as the conf space diversified (the constant
+doubled — the loss distribution itself is much wider now), while the
+oracle *improved* — runs got more repeatable. The predictor↔oracle
+gap roughly doubled, which is the motivation for the Round-3 feature
+work. The run-level spread has a heavy tail: median deviation is only
+~0.6%, but ~2% of runs diverge (loss clipped at MAX_LOSS), and p99
+deviation is ~0.48.
 
 ## Use in search
 
@@ -140,10 +147,13 @@ before scoring, since `steps` is the cheapest dimension to vary.
 ## Persistence and refit
 
 The fitted `LossModel` (a small dataclass holding params, simple-type
-list, and max_layers) is pickled into the `model` table of the DB
-under the key `'loss'` so the server doesn't have to retrain on
-restart. The model-training thread refits it whenever the total run
-count crosses `_LOSS_REFIT_EVERY = 200`.
+list, and max_layers) is pickled to `<db_dir>/loss_model.pickle`
+(`predict/persist.py`; rotation keeps 3 timestamped backups) so the
+server doesn't have to retrain on restart. On load the server
+sanity-probes the model with a trivial predict and refits on any
+error, so feature-schema changes just cost one refit. The
+model-training thread refits whenever the total run count crosses
+`_LOSS_REFIT_EVERY = 200`.
 
 The training takes ~30 s on a modern CPU and ~6 min on a Raspberry Pi 4.
 

@@ -10,35 +10,16 @@ Given a parameter budget N and compute budget T, answer:
 
 ## Architectures to add
 
-### LSTM-family bake-off
+### LSTM-family bake-off — layers done, verdict pending
 
-Goal: figure out which modern LSTM tricks (matrix state,
-exponential gating, multiplicative recurrent transitions) are
-actually useful at small weight budgets. All three become layer-
-type-swap neighbours of `lstm.X`.
-
-* **matLSTM** (Beck et al. 2024, xLSTM paper, "mLSTM" in the
-  paper — renamed here to disambiguate from the unrelated Krause-
-  2016 mLSTM). LSTM with a matrix-valued cell state, covariance /
-  outer-product write, and exponential input/forget gates (both
-  input-dependent). Strict generalisation of vector LSTM. Tests
-  whether content-dependent gating + matrix state work at small
-  weight budgets where MSR didn't.
-* **sLSTM** (Beck et al. 2024, xLSTM paper). Scalar-state companion
-  to matLSTM — keeps the exponential gating + stabilisation tricks
-  without the matrix cell. Tests whether the "modern LSTM tricks"
-  alone (without matrix state) help at our scale.
-* **mLSTM (multiplicative)** (Krause, Murray, Renals & Lu 2016).
-  Input-modulated recurrent transitions — the recurrent transition
-  function is per-input. Scalar state. Different family from the
-  xLSTM mLSTM; the name collision is unfortunate.
-
-Decision point after the three are on the board: if matLSTM beats
-LSTM at our parameter budgets, follow up with **matGRU** — same
-matrix-state machinery but with mGRU's single input-dependent
-forget gate instead of LSTM-style input/forget pair. Novel; not in
-any paper. Tests whether the GRU-beats-LSTM observation we already
-see at scalar state carries over to matrix state.
+matLSTM, sLSTM and the multiplicative mLSTM (`mullstm`, Krause
+2016) are implemented and search-integrated as lstm-family swap
+neighbours. Remaining: read the verdict off the search data, and if
+matLSTM beats LSTM at our budgets, follow up with **matGRU** — the
+same matrix-state machinery with mGRU's single input-dependent
+forget gate instead of the LSTM input/forget pair. Novel; not in
+any paper. Tests whether the GRU-beats-LSTM observation at scalar
+state carries over to matrix state.
 
 ### Other
 
@@ -64,13 +45,6 @@ see at scalar state carries over to matrix state.
   ~1000-weight budgets, in-place adaptation may matter more than at
   scale.
 
-* **Attention / Transformer layer.** Use PyTorch's built-in
-  `nn.MultiheadAttention` or `nn.TransformerEncoderLayer`. Key
-  decisions: causal masking, position encoding (RoPE?), head count
-  as a search axis. Deferred until at least one matrix-state
-  layer is on the Pareto front — comparing attention against MSR
-  alone isn't useful.
-
 ### Candidates to revisit
 
 * **HGRN2** (Qin et al. 2024, "Hierarchically Gated Recurrent
@@ -84,6 +58,72 @@ see at scalar state carries over to matrix state.
   complex eigenvalues + input-dependent gating — essentially S4D-
   with-input-dependent-gates. Revisit after S4D so we have a
   baseline structured-recurrence to compare against.
+
+## Tiny chatbot program (2026-07 ideas)
+
+Context: with the tied codec in search, embedded models win over
+one-hot starting around w~100 (searched up to w~200). Long-term
+goal: the smallest model that is minimally coherent as a chatbot —
+answers "Hi / Who are you? / Do you prefer dogs or cats?" style
+exchanges sensibly; stretch goal: copy-from-context ("I'm Oleg.
+What's my name?" -> "Oleg"), which likely needs attention/suffix
+copying and is probably the capability that decides the weight
+budget. Dream target: 32-64K weights.
+
+* **Save weights of Pareto-optimal models.** When a run's eval score
+  is Pareto-optimal for its weight count (the server already
+  computes `changed_winner` at add_run), export the model as a
+  model_store JSON — a few KB inline at search sizes. Especially for
+  w>1000 where retraining costs minutes. Also enables inspecting
+  learned weights (embedding scale, table geometry), warm starts,
+  and chat demos.
+
+* **Rudimentary chat command.** REPL over the step path: "User: " /
+  "Bot: " line prefixes, stop on newline or a character cap,
+  temperature knob. The chat format lives in the model JSON (an
+  optional "chat" section) so customized formats (Gemma few-shot
+  prompting — note our conversion is the base model, not instruct)
+  ride with the model.
+
+* **32-token ambiguous letter set with honest entropy accounting.**
+  Tokens may represent several characters ("a" covers "Aa"); at eval
+  the ambiguity is charged as extra bits — the surprisal of the
+  actual character under the within-class distribution (static
+  corpus unigram to start). This keeps bits/byte comparable across
+  lossy and lossless tokensets. The extra bits are data-dependent
+  constants computed at tokenization time: no gradient impact,
+  training untouched, only eval reporting adds the term. Set sketch:
+  a-z (case-folded), space, newline, apostrophe, ":" (chat!), digits
+  fold to "x", the rest folds to space; possibly "  " <-> ". "
+  processing tricks. Decode policy for generation TBD (sample within
+  class vs canonical).
+
+* **64-token set.** Sibling of the above with capswords processing
+  to reduce (but still support) capitals: all letters + digits +
+  punctuation. Lower risk, reuses existing processing.
+
+* **Coherency eval.** Working assumption to start: cross-entropy
+  over the dialog training distribution is a workable proxy for
+  coherency (possibly too optimistic). If it proves insufficient,
+  escalate to a fixed script of probe dialogs scored automatically
+  (exact/fuzzy answer match) so search/training can see progress
+  toward the chatbot goal directly.
+
+* **Synthetic dialog data from a big open model.** Generate the
+  narrow dialog training distribution with the best locally-runnable
+  open-weights model (30B-class, quantized, llama.cpp/vLLM — outside
+  texmo infra; a texmo path is a bonus). Output-permissive licenses
+  (Gemma-style terms) keep the data provenance clean, unlike
+  API-generated text with no-train clauses. Tiny models want narrow,
+  heavily repeated data — the generation budget is small.
+
+* **Open-model survey (do before the synthetic-data step).** Review
+  the top open-weights models beyond Gemma — DeepSeek, GLM, current
+  HF leaderboard — for (a) the synthetic-data generator pick, (b)
+  architecture worth porting down (DeepSeek's latent attention /
+  KV compression; the SmolLM/MobileLLM small-model tricks like layer
+  sharing), (c) the next full-fidelity port candidate (Llama-class
+  needs SiLU + a GQA knob + full rotary).
 
 ## Infrastructure
 
@@ -132,17 +172,9 @@ see at scalar state carries over to matrix state.
   small-model joint optimisation gets stuck in local minima that
   layer-wise training avoids.
 
-## Run an off-the-shelf open-source LLM
-
-(e.g. Gemma, Llama). Not a search target — purely about
-exercising the runtime on a real model. Roughly half the
-necessary building blocks already exist; what's missing:
-
-- Attention (see above).
-- Model load/save in the upstream checkpoint formats (HF
-  safetensors at minimum; possibly GGUF).
-- Adapt the existing Rust/Python tokenizer (DP-optimal,
-  custom tokenset format) to consume the upstream model's
-  SentencePiece/BPE vocab — mostly a format-conversion job.
-- Model-specific quirks: RoPE variants, RMSNorm, SwiGLU, GQA,
-  sliding-window attention, etc. Accumulate as we go.
+(A former "run an off-the-shelf open-source LLM" section lived here;
+accomplished 2026-07 — RecurrentGemma-2B runs end-to-end on texmo:
+sliding-window attention with partial RoPE, RG-LRU, dependency-free
+BPE tokenizer conversion, safetensors-referencing model manifests,
+bench/eval/chat-ready generation. Next-port candidates are covered
+by the open-model survey bullet above.)

@@ -10,26 +10,13 @@ Given a parameter budget N and compute budget T, answer:
 
 ## Architectures to add
 
-### LSTM-family bake-off — layers done, verdict pending
-
-matLSTM, sLSTM and the multiplicative mLSTM (`mullstm`, Krause
-2016) are implemented and search-integrated as lstm-family swap
-neighbours. Remaining: read the verdict off the search data, and if
-matLSTM beats LSTM at our budgets, follow up with **matGRU** — the
-same matrix-state machinery with mGRU's single input-dependent
-forget gate instead of the LSTM input/forget pair. Novel; not in
-any paper. Tests whether the GRU-beats-LSTM observation at scalar
-state carries over to matrix state.
-
-### Other
-
 * **DeltaNet.** Linear-attention with delta-rule updates:
   `S_t = S_{t-1}·(I − β k_t k_t^T) + β k_t v_t^T`, with `β_t` learned
   per token. Content-dependent forgetting in key-space; equivalent
   to online L2 regression of values against keys (i.e. a closed-form
   flavour of test-time training). Parallel-trainable via the
   Yang-et-al 2024 scan. Tests the "MSR's fixed γ is what hurt"
-  hypothesis directly. Do after the LSTM-family bake-off.
+  hypothesis directly.
 
 * **S4D.** Simplest structured-state-space model: diagonal linear
   recurrence with complex eigenvalues, HiPPO initialisation.
@@ -124,6 +111,24 @@ budget. Dream target: 32-64K weights.
   KV compression; the SmolLM/MobileLLM small-model tricks like layer
   sharing), (c) the next full-fidelity port candidate (Llama-class
   needs SiLU + a GQA knob + full rotary).
+
+## Analysis
+
+* **Layer audit: what works and what doesn't.** Mine the results DB
+  for which layer types and motifs actually show up on or near the
+  Pareto frontier (per weight bucket), which only ever ride along,
+  and which never win at all. Outcomes: retire the losers (the
+  relu / bits.1+bm precedent — parse-but-invalid with migration
+  edges), promote the winners in append/swap priors, and settle
+  pending conditionals (matGRU if matLSTM earns it).
+
+* **Embedding scale spread.** Every tied-codec run logs
+  (x, y, scale=exp(y), loss, spec) to results/emb_scale.jsonl on its
+  machine. Collect the files from the fleet and analyze the spread
+  of the learned input/output scale: does exp(y) stay near the
+  sqrt(X) init, does it depend on domain (bits vs bytes vs tokens),
+  width, or chain depth — and should the init (or a prior) change
+  accordingly.
 
 ## Infrastructure
 

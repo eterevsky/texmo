@@ -225,5 +225,5 @@ anywhere in the IO. Exact.
    re-expressed (+ cap).
 2. Embedded bit-chunks class + the mode-swap neighbors — search
    facing; separate commits.
-3. Legacy Model/ModelDef retirement remains a prerequisite for
-   deleting the old input plumbing (tracked separately).
+3. Legacy Model/ModelDef retirement — done 2026-07 (the JAX-side
+   legacy is deleted; per-layer torch Modules stay).

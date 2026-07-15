@@ -11,23 +11,36 @@ The full Model2 grammar:
     op          := "mul" | "add" | "cat"
     branch      := layer_list | "pass"
 
-`simple_layer` covers everything still parsed by
-`model._build_layer_def` (dense, gru, suffix, conv, ...). Skip
-syntax flows through too -- it returns a SkipDef which
-`parse_model2` rejects until parser-level skip-to-split
-translation lands (TODO item 3).
+`simple_layer` covers everything parsed by `_build_layer_def`
+below (dense, gru, suffix, conv, ...). The legacy `skip.D.op`
+syntax was retired in 2026-07 after the result DB was migrated to
+split form; residuals are spelled `split.op(span, pass)` directly.
 
 Branch arity is unbounded at parse level; `SplitDef.is_valid`
 enforces 2-way for now. Multi-way is a one-character relaxation.
 """
 
 from .layer import LayerDef
+from .layers.attn import AttnDef
+from .layers.conv import ConvDef
+from .layers.dense import DenseDef
 from .layers.embedding_codec import EmbeddingCodecDef
+from .layers.gru import GruDef, MgruDef, MinGruDef
+from .layers.latent import LatentDef, LrnnDef
+from .layers.lmgu import LmguDef
+from .layers.lstm import LstmDef
+from .layers.matlstm import MatLstmDef
+from .layers.msr import MsrDef
+from .layers.mullstm import MulLstmDef
+from .layers.norm import NormDef
 from .layers.one_hot_codec import OneHotCodecDef
+from .layers.rglru import RglruDef
+from .layers.rmsnorm import RmsNormDef
+from .layers.rnn import RnnDef
 from .layers.seq import LayerSeqDef
-from .layers.skip import SkipDef
+from .layers.slstm import SLstmDef
 from .layers.split import SplitDef
-from .model import _apply_merges, _build_layer_def
+from .layers.suffix import SuffixDef
 from .precision import Precision
 
 
@@ -35,10 +48,7 @@ def parse_model2(spec: str, precision: Precision, cap: bool = True):
     """Top-level spec parser. Returns a `Model2Def`.
 
     Splits the spec on `|` into the codec's input spec and the layer
-    chain, builds each part, and stitches them together. Legacy
-    `skip.D.op` syntax in the layer chain is translated to the
-    equivalent `split.op(...)` form at parse time, recursively at
-    every nesting level. The runtime sees a skip-free tree.
+    chain, builds each part, and stitches them together.
 
     `cap` enables logit soft-capping (see layers/codec.py). On by
     default; cap=False is for experiments and for comparing against
@@ -62,11 +72,8 @@ def parse_model2(spec: str, precision: Precision, cap: bool = True):
     layer_seq = LayerSeqDef(layers, input_size=codec.size)
     codec.set_head_width(layers[-1].size if layers else codec.size)
 
-    # Canonical spec is rebuilt from the parsed tree -- so callers
-    # see split.op(...) form whether the user wrote split.op or the
-    # legacy skip.D.op (which gets translated in parse_layer_list).
-    # Parsing the canonical spec round-trips to an equivalent
-    # Model2Def.
+    # Canonical spec is rebuilt from the parsed tree. Parsing the
+    # canonical spec round-trips to an equivalent Model2Def.
     canonical = f'{codec}|{layer_seq}'
 
     return Model2Def(
@@ -84,90 +91,6 @@ def _split_input_and_layers(spec: str) -> tuple[str, str]:
     raise ValueError("Model spec can't contain more than one |")
 
 
-def _translate_skips(
-    layers: list[LayerDef],
-) -> list[LayerDef]:
-    """Rewrite SkipDef pseudo-layers as SplitDefs, recursively.
-
-    Each `skip.D.op` at position `i` spans the next D layers
-    (positions i+1 ... i+D) and merges the source (input at
-    position i) with the output of layer i+D via `op`. The
-    equivalent split is:
-
-        layers[i] = split.op(
-            translate(layers[i+1]-...-layers[i+D]), pass)
-
-    and the consumed positions i+1 ... i+D are dropped from the
-    rewritten list. The main branch is translated recursively, so a
-    skip nested inside another skip's span becomes a nested split.
-    The merge target (layer i+D+1) consumes the split's output
-    directly -- its input_size already accounts for the merged shape
-    because the original parser set it that way.
-
-    Two failure modes:
-      - Crossing skip spans: a partial overlap where neither span
-        contains the other. Can't be expressed as a tree. ValueError.
-      - Span overshoots the end of the layer list. ValueError.
-
-    Nested (laminar) spans are fine -- they form a forest and
-    translate into nested splits.
-    """
-    if not any(isinstance(l, SkipDef) for l in layers):
-        return layers
-
-    n = len(layers)
-    skips: list[tuple[int, int, str]] = [
-        (i, layer.distance, layer.op)
-        for i, layer in enumerate(layers)
-        if isinstance(layer, SkipDef)
-    ]
-    # Overshoot check: a skip at i with distance D claims positions
-    # [i, i+D+1); that range must fit within the list.
-    for i, d, _ in skips:
-        if i + d + 1 > n:
-            raise ValueError(
-                f"skip at position {i} (distance {d}) overshoots "
-                f"the layer list of length {n}")
-
-    # Laminar check: sorted by start, any two spans must be disjoint
-    # or nested, never crossing (partial overlap). Nested skips become
-    # nested splits via the recursion below; crossing ones can't be a
-    # tree.
-    spans = sorted((i, i + d + 1) for i, d, _ in skips)
-    for a, (lo1, hi1) in enumerate(spans):
-        for lo2, hi2 in spans[a + 1:]:
-            if lo2 >= hi1:
-                break  # disjoint -- and so are all later spans
-            if hi2 > hi1:
-                raise ValueError(
-                    f"crossing skip spans can't be expressed as a "
-                    f"tree: [{lo1}, {hi1}) crosses [{lo2}, {hi2})")
-
-    # Walk the list. The walk only lands on outermost skips: a nested
-    # skip lives inside some outer skip's [i+1, i+D+1) range, which is
-    # consumed -- and recursively translated -- when the outer skip is
-    # reached.
-    skip_at = {i: (d, op) for i, d, op in skips}
-    out: list[LayerDef] = []
-    pos = 0
-    while pos < n:
-        if pos in skip_at:
-            d, op = skip_at[pos]
-            source_size = layers[pos].input_size
-            main_seq = LayerSeqDef(
-                _translate_skips(list(layers[pos + 1: pos + d + 1])),
-                input_size=source_size,
-            )
-            side_seq = LayerSeqDef([], input_size=source_size)
-            out.append(SplitDef(
-                op, [main_seq, side_seq], input_size=source_size))
-            pos += d + 1
-        else:
-            out.append(layers[pos])
-            pos += 1
-    return out
-
-
 def parse_layer_list(
     layers_spec: str, input_size: int,
 ) -> list[LayerDef]:
@@ -176,36 +99,23 @@ def parse_layer_list(
     `layers_spec` is the string AFTER the `|` (or the whole spec if
     there's no input layer). `input_size` is the channel dim coming
     into the first layer. Returns the parsed `LayerDef`s; channel
-    sizes are threaded through automatically. Any `skip.D.op`
-    pseudo-layers in the parsed list are rewritten as the
-    equivalent `split.op(...)` before return, so callers see a
-    skip-free tree. Recurses naturally into split branches because
-    `_parse_split` calls back into this function for each branch.
+    sizes are threaded through automatically. Recurses naturally
+    into split branches because `_parse_split` calls back into this
+    function for each branch.
     """
     if not layers_spec.strip():
         return []
     layers: list[LayerDef] = []
     shape = input_size
-    # Track pending skip merges per target position so the merge-
-    # target layer's input_size reflects the post-merge shape (the
-    # original `model.py` parser does the same).
-    pending_merges: dict[int, list[tuple[int, str, int]]] = {}
-    pieces = list(_split_at_depth_0(layers_spec, '-'))
-    for i, piece in enumerate(pieces):
+    for piece in _split_at_depth_0(layers_spec, '-'):
         piece = piece.strip()
         if not piece:
             raise ValueError(
                 f"empty layer in spec: {layers_spec!r}")
-        if i in pending_merges:
-            shape = _apply_merges(shape, pending_merges.pop(i))
         layer = _parse_layer(piece, shape)
         layers.append(layer)
-        if isinstance(layer, SkipDef):
-            target = i + layer.distance + 1
-            pending_merges.setdefault(target, []).append(
-                (shape, layer.op, i))
         shape = layer.size
-    return _translate_skips(layers)
+    return layers
 
 
 def _parse_layer(spec: str, input_size: int) -> LayerDef:
@@ -250,6 +160,83 @@ def _parse_split(spec: str, input_size: int) -> SplitDef:
     # SplitDef constructor validates `op`. Branch arity is checked
     # at is_valid time, not here.
     return SplitDef(op, branches, input_size=input_size)
+
+
+def _build_layer_def(spec: str, input_size: int) -> LayerDef:
+    """Parse a layer spec string and return a LayerDef."""
+    parts = spec.split(".")
+    name = parts[0]
+
+    if name == "dense":
+        size = int(parts[1])
+        activation = parts[2] if len(parts) > 2 else None
+        return DenseDef(size, activation=activation, input_size=input_size)
+
+    if name == "rnn":
+        size = int(parts[1])
+        activation = parts[2] if len(parts) > 2 else None
+        return RnnDef(size, activation=activation, input_size=input_size)
+
+    if name == "gru":
+        return GruDef(int(parts[1]), input_size=input_size)
+
+    if name == "mgru":
+        return MgruDef(int(parts[1]), input_size=input_size)
+
+    if name == "mingru":
+        return MinGruDef(int(parts[1]), input_size=input_size)
+
+    if name == "lstm":
+        return LstmDef(int(parts[1]), input_size=input_size)
+
+    if name == "matlstm":
+        return MatLstmDef(int(parts[1]), input_size=input_size)
+
+    if name == "mullstm":
+        return MulLstmDef(int(parts[1]), input_size=input_size)
+
+    if name == "slstm":
+        return SLstmDef(int(parts[1]), input_size=input_size)
+
+    if name == "msr":
+        return MsrDef(
+            int(parts[1]), int(parts[2]), input_size=input_size)
+
+    if name == "norm":
+        return NormDef(input_size=input_size)
+
+    if name == "rmsnorm":
+        return RmsNormDef(input_size=input_size)
+
+    if name == "latent":
+        return LatentDef(
+            int(parts[1]), int(parts[2]), input_size=input_size)
+
+    if name == "lrnn":
+        return LrnnDef(
+            int(parts[1]), int(parts[2]), input_size=input_size)
+
+    if name == "lmgu":
+        return LmguDef(
+            int(parts[1]), int(parts[2]), input_size=input_size)
+
+    if name == "suffix":
+        length = int(parts[1])
+        return SuffixDef(length, input_size=input_size)
+
+    if name == "conv":
+        kernel = int(parts[1])
+        return ConvDef(kernel, input_size=input_size)
+
+    if name == "rglru":
+        return RglruDef(int(parts[1]), input_size=input_size)
+
+    if name == "attn":
+        return AttnDef(
+            int(parts[1]), int(parts[2]), int(parts[3]),
+            input_size=input_size)
+
+    raise ValueError(f"Unknown layer type: {name}")
 
 
 def _split_at_depth_0(s: str, delim: str) -> list[str]:

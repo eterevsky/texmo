@@ -1,20 +1,19 @@
 # Skip layers (residual connections) — legacy
 
-> **Legacy / historical.** Skips have been superseded by the recursive
-> [`split`](split.md) layer. The search no longer emits skips and the
-> result DB has been migrated to split-form; `skip.D.op` syntax still
-> parses, but `spec_parser.parse_model2` immediately translates it to
-> `split.op(span, pass)` — recursively, so nested skips become nested
-> splits and only crossing spans are rejected. This doc is kept as the
-> design reference for the original mechanism and the `.add` / `.cat`
-> merge semantics that Split inherits. The runtime below (`Model` /
-> `ModelJax` save-and-merge) is the legacy `ModelDef` path; Model2
+> **Retired / historical.** Skips were superseded by the recursive
+> [`split`](split.md) layer. The result DB was migrated to split form
+> (each `skip.D.op` rewritten to `split.op(span, pass)`), and the
+> `skip.D.op` syntax itself was retired in 2026-07 — it no longer
+> parses. This doc is kept as the design reference for the original
+> mechanism and the `.add` / `.cat` merge semantics that Split
+> inherits. The `Model` / `ModelJax` save-and-merge runtime described
+> below was deleted with the legacy `ModelDef` (2026-07); Model2
 > handles merges inside `SplitJax` instead.
 
 A `skip.X.add` or `skip.X.cat` is a pseudo-layer that marks the start
 of a residual connection spanning `X` layers. It has no learned
-weights. The `Model` / `ModelJax` orchestrator stashes the source
-activation and merges it back at the end of the skip.
+weights. The legacy `Model` / `ModelJax` orchestrator stashed the
+source activation and merged it back at the end of the skip.
 
 See [`layers.md`](layers.md) for the one-paragraph summary and
 [`split.md`](split.md) for the current design.

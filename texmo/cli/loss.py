@@ -16,7 +16,7 @@ from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegresso
 
 from ..configuration import Configuration
 from ..db import DbReader
-from ..layers.skip import SkipDef
+from ..layers.split import SplitDef
 from ..tokens import set_tokens_dir
 from ..predict import loss_rnn
 from ..predict.predict_common import (
@@ -24,6 +24,7 @@ from ..predict.predict_common import (
     MIN_LOSS,
     discover_type_ids,
     layer_type_id,
+    model_layers,
 )
 
 
@@ -95,47 +96,53 @@ def _rf_big_features(
 ) -> list[float]:
     log_decay = np.log2(conf.decay)
     out_size = conf.model.output.size
+    # Flattened marker-plus-main-branch sequence -- the same layer
+    # walk the loss RNN featurizes.
+    layers = model_layers(conf)
 
-    # First and second non-skip layers.
-    non_skip = [l for l in conf.model.layers if not isinstance(l, SkipDef)]
-    first_non_skip = non_skip[0] if len(non_skip) > 0 else None
-    second_non_skip = non_skip[1] if len(non_skip) > 1 else None
+    def _span(layer) -> int:
+        return len(layer.branches[0].layers)
+
+    # First and second non-marker layers.
+    non_marker = [l for l in layers if not isinstance(l, SplitDef)]
+    first_non_marker = non_marker[0] if len(non_marker) > 0 else None
+    second_non_marker = non_marker[1] if len(non_marker) > 1 else None
 
     counts = {t: 0 for t in type_ids}
     first_size = {t: missing_sentinel for t in type_ids}
     second_size = {t: missing_sentinel for t in type_ids}
-    for layer in conf.model.layers:
+    for layer in layers:
         t = layer_type_id(layer)
         if t in counts:
             counts[t] += 1
-    if first_non_skip is not None:
-        t = layer_type_id(first_non_skip)
+    if first_non_marker is not None:
+        t = layer_type_id(first_non_marker)
         if t in first_size:
-            first_size[t] = float(np.log2(max(first_non_skip.size, 1)))
-    if second_non_skip is not None:
-        t = layer_type_id(second_non_skip)
+            first_size[t] = float(np.log2(max(first_non_marker.size, 1)))
+    if second_non_marker is not None:
+        t = layer_type_id(second_non_marker)
         if t in second_size:
-            second_size[t] = float(np.log2(max(second_non_skip.size, 1)))
+            second_size[t] = float(np.log2(max(second_non_marker.size, 1)))
 
-    skip_add_sum = sum(
-        layer.distance
-        for layer in conf.model.layers
-        if isinstance(layer, SkipDef) and layer.op == 'add'
+    split_add_sum = sum(
+        _span(layer)
+        for layer in layers
+        if isinstance(layer, SplitDef) and layer.op == 'add'
     )
-    skip_cat_sum = sum(
-        layer.distance
-        for layer in conf.model.layers
-        if isinstance(layer, SkipDef) and layer.op == 'cat'
+    split_cat_sum = sum(
+        _span(layer)
+        for layer in layers
+        if isinstance(layer, SplitDef) and layer.op == 'cat'
     )
 
-    # Distance of skip.X.{add,cat} at raw positions 0 and 1, or 0 if
-    # that position isn't a skip (or doesn't exist).
-    def _skip_at(pos: int, op: str) -> float:
-        if pos >= len(conf.model.layers):
+    # Main-branch span of a split.{add,cat} at raw positions 0 and 1,
+    # or 0 if that position isn't such a split (or doesn't exist).
+    def _split_at(pos: int, op: str) -> float:
+        if pos >= len(layers):
             return 0.0
-        layer = conf.model.layers[pos]
-        if isinstance(layer, SkipDef) and layer.op == op:
-            return float(layer.distance)
+        layer = layers[pos]
+        if isinstance(layer, SplitDef) and layer.op == op:
+            return float(_span(layer))
         return 0.0
 
     base = [
@@ -147,15 +154,15 @@ def _rf_big_features(
         np.log2(conf.lr),
         log_decay,
         np.log2(max(out_size, 1)),
-        float(skip_add_sum),
-        float(skip_cat_sum),
+        float(split_add_sum),
+        float(split_cat_sum),
     ]
     if with_second_layer:
         base.extend([
-            _skip_at(0, 'add'),
-            _skip_at(0, 'cat'),
-            _skip_at(1, 'add'),
-            _skip_at(1, 'cat'),
+            _split_at(0, 'add'),
+            _split_at(0, 'cat'),
+            _split_at(1, 'add'),
+            _split_at(1, 'cat'),
         ])
     for t in type_ids:
         base.append(first_size[t])
@@ -169,7 +176,7 @@ class RandomForestBigPredictor(Predictor):
     """Random forest with per-layer-type features in addition to shape.
 
     Feature set: log of shape params (weights, batch, length, steps,
-    lr, decay, output_size, batch*length*steps), skip-distance sums by
+    lr, decay, output_size, batch*length*steps), residual-span sums by
     op, and per-layer-type pairs (first-layer-size-or-sentinel, count).
     """
     name = "random forest (big features)"
@@ -200,10 +207,10 @@ class HistGBRPredictor(Predictor):
     eval metric.
 
     `with_second_layer=True` extends the feature set with:
-      * second-non-skip-layer size per type (like first_size, but for
-        the second non-skip layer);
-      * skip.add / skip.cat distance at raw positions 0 and 1
-        (4 extra slots — X or 0 if that position isn't a skip of that op).
+      * second-non-marker-layer size per type (like first_size, but
+        for the second non-marker layer);
+      * split.add / split.cat span at raw positions 0 and 1 (4 extra
+        slots — the span or 0 if that position isn't such a split).
     """
 
     def __init__(self, with_second_layer: bool = False):

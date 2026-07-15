@@ -6,7 +6,7 @@ from flask import Flask, render_template
 from texmo.common import INF
 from texmo.configuration import Configuration, Template
 from texmo.db import DbReader, DbWriter
-from texmo.model import build_model_def
+from texmo.spec_parser import parse_model2
 from texmo.precision import Precision
 from texmo.run import Run
 from texmo.server import SearchServer
@@ -166,7 +166,7 @@ def test_search_server_add_run_writes_median_estimate(tmp_path):
         train_time=(1.0, 16.0), default_spec=None,
     )
 
-    model = build_model_def(
+    model = parse_model2(
         "bytes|dense.32.gelu", precision=Precision.FP32)
     conf = Configuration(
         model=model, lr=0.1, length=128, batch=32, steps=256, decay=1.0,
@@ -263,7 +263,7 @@ def test_search_server_add_run_does_not_overwrite_median_with_prediction(tmp_pat
     path = str(tmp_path / "test.db")
 
     # Pre-seed a 'predicted' estimate for the conf we're about to run.
-    model = build_model_def(
+    model = parse_model2(
         "bytes|dense.32.gelu", precision=Precision.FP32)
     conf = Configuration(
         model=model, lr=0.1, length=128, batch=32, steps=256, decay=1.0,
@@ -344,7 +344,7 @@ def test_load_predictor_ignores_deserialization_failure(tmp_path):
 
 def test_probe_timing_runs_only_on_matching_precision():
     conf = Configuration(
-        build_model_def('bytes|dense.8.gelu', precision=Precision.FP32),
+        parse_model2('bytes|dense.8.gelu', precision=Precision.FP32),
         lr=0.01, length=64, batch=16, steps=128, decay=1.0)
     calls = []
 

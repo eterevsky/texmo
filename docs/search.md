@@ -139,8 +139,7 @@ Two layers:
   mutations (wrap/unwrap residual and gate Splits, `add↔cat` op-swap,
   grow/shrink a residual span, append a self-gate). Each mutation is a
   spec string re-parsed via `parse_model2` and `is_valid`-filtered. See
-  [`split.md`](split.md). (The legacy flat `ModelDef.neighbors` is no
-  longer the search path.)
+  [`split.md`](split.md).
 
 Neighbors are generated **at runtime** (in-memory). No neighbor table in
 the DB. `DbReader.get_conf_id()` is cached (Configuration → id) so

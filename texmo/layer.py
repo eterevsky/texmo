@@ -104,8 +104,9 @@ class LayerDef(object):
         """Count of layers contributed by this LayerDef. Leaf layers
         report 1; structural layers (LayerSeqDef holds N children;
         SplitDef holds itself plus its branches) override to recurse
-        through their contents so the total matches `len(layers)` on
-        the equivalent flat-list ModelDef representation."""
+        through their contents so the total matches the flat count on
+        the spec (a skip pseudo-layer and each spanned layer counted
+        1 apiece in the retired flat-list representation)."""
         return 1
 
     def is_valid(self) -> bool:

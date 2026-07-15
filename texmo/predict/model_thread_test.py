@@ -16,7 +16,7 @@ import pytest
 from texmo.configuration import Configuration
 from texmo.db import DbReader, DbWriter
 from texmo.db.writer import Stop as WriterStop, WriterThread
-from texmo.model import build_model_def
+from texmo.spec_parser import parse_model2
 from texmo.precision import Precision
 from texmo.predict import model_thread
 from texmo.predict.loss_rnn import LossModelHolder
@@ -37,7 +37,7 @@ def _conf(
     steps=100,
     precision=Precision.FP32,
 ):
-    model = build_model_def(spec, precision=precision)
+    model = parse_model2(spec, precision=precision)
     return Configuration(
         model=model, lr=0.01, length=length, batch=batch, steps=steps,
         decay=1,

@@ -3,8 +3,8 @@ import numpy as np
 import torch
 
 from texmo.layers.norm import NormDef
-from texmo.model import ModelDef
 from texmo.precision import Precision
+from texmo.spec_parser import parse_model2
 
 
 def test_def_properties():
@@ -74,7 +74,7 @@ def test_forward_matches_step():
 # -- Model-level validity constraints --
 
 def _md(spec):
-    return ModelDef(spec, Precision.FP32)
+    return parse_model2(spec, Precision.FP32)
 
 
 def test_norm_first_layer_invalid():

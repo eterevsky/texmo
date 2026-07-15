@@ -8,7 +8,7 @@ import numpy as np
 
 from texmo.layers.attn import (
     AttnDef, AttnJax, _ROPE_BASE, _ROTARY_FRACTION)
-from texmo.model import _build_layer_def
+from texmo.spec_parser import _build_layer_def
 
 
 def _ref_rope(x, positions, rd):
@@ -204,13 +204,14 @@ def test_predictors_handle_attn():
     from texmo.configuration import Configuration
     from texmo.precision import Precision
     from texmo.predict import timing
-    from texmo.predict.loss_rnn import _layer_features, _model_layers
+    from texmo.predict.loss_rnn import _layer_features
+    from texmo.predict.predict_common import model_layers
     from texmo.spec_parser import parse_model2
     model = parse_model2("bytes|dense.8.gelu-attn.8.2.16", Precision.FP32)
     conf = Configuration(model, lr=0.01, length=32, batch=4, steps=1,
                          decay=1.0)
     assert any(c.type_id == "attn" for c in timing.featurize(conf))
-    attn_layer = next(l for l in _model_layers(conf) if l.name == "attn")
+    attn_layer = next(l for l in model_layers(conf) if l.name == "attn")
     feat = _layer_features(attn_layer, {"attn": 0}, n_simple=1)
     assert feat[3] == 1.0            # simple-type one-hot
     assert feat[3 + 1 + 9] == 1.0    # shared slot: log2(heads=2)

@@ -24,70 +24,51 @@ not a straight line — e.g. `bytes|split.add(dense.64.gelu, pass)`. See
 
 See [`layers.md`](layers.md) for the full list of available layers.
 
-## Two backends
+## Backends
 
-Most layers have both a PyTorch implementation and a JAX implementation,
-selectable via `--backend torch|jax`. Layer definitions (specs, weight
-counts, neighbor rules) are shared. Some newer pieces are **JAX-only** —
-`split` (and the `Model2Def` layer-DAG that hosts it) plus several xLSTM
-variants (`slstm`, `matlstm`, `mullstm`) — so the architecture search
-runs on JAX. See [`backends.md`](backends.md) for the trade-offs.
+The **full-model runtime is JAX**. Most individual layers also keep a
+PyTorch `nn.Module` implementation (maintained and tested per-layer),
+but there is no torch full-model runtime: the legacy `Model` /
+`ModelDef` flat representation and its two backends were retired in
+2026-07, and `ManagerTorch` is a parked stub that raises
+`NotImplementedError`. Reviving the torch backend means writing a
+Model2-shaped runtime on top of the `*Module` classes. See
+[`backends.md`](backends.md) for the trade-offs that led here.
 
 ## Key abstractions
 
-### ModelDef / Model / ModelJax (`model.py`, `model_jax.py`)
+### Model2Def (`model2.py`) — the model representation
 
-**ModelDef** parses a spec string and builds a lightweight descriptor (no
-weights). It holds:
+**Model2Def** is a lightweight descriptor (no weights): a recursive
+**layer-DAG** where the hidden chain is a `LayerSeqDef` (a sequence of
+`LayerDef`s) and a `SplitDef` hosts two `LayerSeqDef` branches for
+fork-and-merge. This subsumes the retired flat representation's
+`skip.D.op` pseudo-layers (residuals are `split.op(span, pass)`; the
+skip syntax itself is retired) and adds gating (`split.mul`). See
+[`split.md`](split.md). It holds:
 
-- An input def (`InputBytesDef` or `InputBitsDef`)
-- A list of `LayerDef`s for hidden layers
-- An output `DenseDef` projecting to the token vocabulary
+- A codec (`OneHotCodecDef` or `EmbeddingCodecDef`) owning both model
+  ends — input encoding and logit head (see [`io.md`](io.md))
+- The `LayerSeqDef` hidden chain
 - A `precision` (Precision enum; `precision.py`)
 
-It has two factory methods:
-- `build_model()` — returns a PyTorch `Model` (`nn.Module`) that owns its
-  weights.
-- `build_jax()` — returns a `ModelJax` with the functional JAX layer
-  implementations; weights are returned separately by `init_weights(rng)`
-  and passed explicitly to each call.
+Key surface: `spec`, `num_weights`, `num_mults`, `num_layers`,
+`is_valid`, `neighbors`, equality/hashing. Constructed only via
+`spec_parser.parse_model2(spec, precision)`, which owns every
+string→tree decision (the `|`-split, codec dispatch, and the
+recursive layer grammar). `Model2Def.__init__` just stores the
+already-parsed pieces.
 
-Both support two modes:
+`build_jax()` returns a **Model2Jax**: functional JAX implementations
+with weights returned separately by `init_weights(rng)` and passed
+explicitly to each call. It supports two modes:
 
 - **Full-sequence forward** for training. The input is shifted right and
-  padded at position 0 with the input module's initial vector (uniform
+  padded at position 0 with the codec's initial vector (uniform
   distribution over tokens).
-- **Single-timestep `step`** for inference. States are a list aligned with
-  layers: `states[0]` is the input module's state, `states[1:]` are hidden
-  layer states.
-
-Factory: `build_model_def(spec, precision)` is cached by `(spec, precision)`.
-
-### Model2Def (`model2.py`) — the search representation
-
-`ModelDef` above is the **legacy flat** representation: a `list[LayerDef]`
-with `skip.D.op` pseudo-layers for residuals, and both a PyTorch and a
-JAX backend. The architecture **search now builds `Model2Def`** instead —
-a recursive **layer-DAG** where the hidden chain is a `LayerSeqDef`
-(a sequence of `LayerDef`s) and a `SplitDef` hosts two `LayerSeqDef`
-branches for fork-and-merge. This subsumes skips (`skip.D.op` →
-`split.op(span, pass)`) and adds gating (`split.mul`). See
-[`split.md`](split.md).
-
-- Constructed only via `spec_parser.parse_model2(spec, precision)`, which
-  owns every string→tree decision (the `|`-split, input dispatch, the
-  recursive layer grammar, and the legacy skip→split rewrite).
-  `Model2Def.__init__` just stores the already-parsed pieces.
-- Mirrors `ModelDef`'s public surface — `spec`, `num_weights`,
-  `num_mults`, `num_layers`, `is_valid`, `neighbors`, equality/hashing —
-  so search, timing, and loss code stay backend-agnostic. `num_layers` is
-  recursive and matches the legacy count for any skip-translated spec.
-- **JAX only**: `build_jax()` → `Model2Jax`; there is no PyTorch
-  `Model2`, and `SplitDef` has no `build_module`.
-
-`ModelDef` is retained for the few non-search call sites (the PyTorch
-FP32 fallback, `cli/time`, num-layers backfill) and is slated for
-retirement once those move over.
+- **Single-timestep `step`** for inference. States are a list aligned
+  with layers: `states[0]` is the input state, `states[1]` the layer-
+  sequence states.
 
 ### LayerDef / LayerModule / LayerJax (`layer.py`, `layer_jax.py`)
 
@@ -110,19 +91,19 @@ Base classes for hidden layers.
   Xavier uniform for matrices and zeros for biases (see
   `layer_jax.xavier_uniform`).
 
-### Manager / ManagerTorch / ManagerJax (`manager.py`, `manager_torch.py`, `manager_jax.py`)
+### Manager / ManagerJax (`manager.py`, `manager_jax.py`)
 
 `Manager` is the base class defining the backend-agnostic interface:
 `__init__(conf, system, dataset, …)`, `train(steps, time_limit)`,
-`eval()`, `train_and_eval(…)`, `continue_prefix(…)`. Subclasses
-`ManagerTorch` and `ManagerJax` handle the backend-specific bits:
-building the model and optimizer, training loop mechanics, eval, and
-text generation.
+`eval()`, `train_and_eval(…)`, `continue_prefix(…)`. `ManagerJax`
+handles the backend-specific bits: building the model and optimizer,
+training loop mechanics, eval, and text generation.
 
-Use `create_manager(backend, **kwargs)` to build one for the selected
-backend. The shared `train()` and `train_and_eval()` loops live on
-`Manager`; subclasses supply `_get_batch()`, `train_step(batch)`, and
-`eval()`.
+Use `create_manager(backend, **kwargs)` to build one. The shared
+`train()` and `train_and_eval()` loops live on `Manager`; the backend
+supplies `_get_batch()`, `train_step(batch)`, and `eval()`.
+`ManagerTorch` (`manager_torch.py`) is a parked stub — see
+**Backends** above.
 
 ### Precision (`precision.py`)
 

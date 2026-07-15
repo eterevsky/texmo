@@ -4,8 +4,8 @@ import numpy as np
 import torch
 
 from texmo.layers.suffix import SuffixDef
-from texmo.model import ModelDef
 from texmo.precision import Precision
+from texmo.spec_parser import parse_model2
 
 
 def test_neighbors():
@@ -19,7 +19,7 @@ def test_neighbors():
 def test_neighbors_min():
     d = SuffixDef(2, input_size=4)
     neighbors = list(d.neighbors())
-    # suffix.1 is invalid but still generated (ModelDef filters);
+    # suffix.1 is invalid but still generated (Model2Def filters);
     # conv.2 is the same-L type swap, attn.4.1.2 the soft-wrap swap.
     assert neighbors == ["suffix.1", "suffix.4", "conv.2", "attn.4.1.2"]
 
@@ -131,83 +131,6 @@ def test_suffix4_forward():
     torch.testing.assert_close(out[0, 3], inputs[0, 3:7].reshape(-1))
 
 
-# -- model integration --
-
-def test_model_with_suffix():
-    md = ModelDef("bytes|suffix.2-dense.64.gelu", Precision.FP32)
-    assert md.total_padding == 2  # 1 base + (2-1)
-    model = md.build_model()
-
-    batch = torch.randint(0, 256, (4, 16))
-    logits = model(batch)
-    assert logits.shape == (4, 16, 256)
-
-
-def test_model_suffix_step_matches_forward():
-    md = ModelDef("bytes|suffix.2-dense.32.tanh", Precision.FP32)
-    model = md.build_model()
-    model.eval()
-
-    tokens = [10, 20, 30, 40, 50]
-    batch = torch.tensor([tokens], dtype=torch.long)
-
-    with torch.no_grad():
-        fwd_logits = model(batch)
-
-        states, step_logits_0 = model.initial_step()
-        step_logits = [step_logits_0]
-        for t in tokens[:-1]:
-            states, logits_t = model.step(states, t)
-            step_logits.append(logits_t)
-
-    for i in range(len(tokens)):
-        assert torch.allclose(fwd_logits[0, i], step_logits[i], atol=1e-5)
-
-
-def test_model_suffix_only():
-    """Model with suffix and no other hidden layers."""
-    md = ModelDef("bytes|suffix.4", Precision.FP32)
-    assert md.total_padding == 4  # 1 + 3
-    model = md.build_model()
-
-    batch = torch.randint(0, 256, (2, 32))
-    logits = model(batch)
-    assert logits.shape == (2, 32, 256)
-
-
-
-def test_model_suffix_loss():
-    md = ModelDef("bytes|suffix.2-dense.64.gelu", Precision.FP32)
-    model = md.build_model()
-
-    batch = torch.randint(0, 256, (4, 16))
-    loss = model.loss_batch(batch)
-    assert loss.shape == ()
-    assert loss.item() > 0
-
-
-def test_model_bits_with_suffix():
-    md = ModelDef("bits.1+bp|suffix.4-dense.16.gelu", Precision.FP32)
-    model = md.build_model()
-    model.eval()
-
-    tokens = [0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0]
-    batch = torch.tensor([tokens], dtype=torch.long)
-
-    with torch.no_grad():
-        fwd_logits = model(batch)
-        assert fwd_logits.shape == (1, 16, 2)
-
-        states, step_logits_0 = model.initial_step()
-        step_logits = [step_logits_0]
-        for t in tokens[:-1]:
-            states, logits_t = model.step(states, t)
-            step_logits.append(logits_t)
-
-    for i in range(len(tokens)):
-        assert torch.allclose(fwd_logits[0, i], step_logits[i], atol=1e-5)
-
-
 # -- JAX --
 
 def test_jax_forward():
@@ -254,7 +177,8 @@ def test_jax_suffix4_forward():
 
 
 def test_jax_model_with_suffix():
-    md = ModelDef("bits.1+bp|suffix.4-dense.4.gelu", Precision.FP32)
+    md = parse_model2("bits.1+bp|suffix.4-dense.4.gelu", Precision.FP32)
+    assert md.total_padding == 4  # 1 base + (4-1)
     model = md.build_jax()
     weights = model.init_weights(jax.random.PRNGKey(0))
 
@@ -264,7 +188,8 @@ def test_jax_model_with_suffix():
 
 
 def test_jax_model_suffix_step_matches_forward():
-    md = ModelDef("bits.1+bp|suffix.2-dense.8.tanh", Precision.FP32)
+    md = parse_model2("bits.1+bp|suffix.2-dense.8.tanh", Precision.FP32)
+    assert md.total_padding == 2  # 1 base + (2-1)
     model = md.build_jax()
     weights = model.init_weights(jax.random.PRNGKey(0))
 

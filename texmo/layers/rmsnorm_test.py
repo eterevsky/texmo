@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from texmo.layers.rmsnorm import RmsNormDef, RmsNormJax, _EPS
-from texmo.model import _build_layer_def
+from texmo.spec_parser import _build_layer_def
 
 
 def _ref(x, gamma, eps=_EPS):
@@ -118,7 +118,8 @@ def test_predictors_handle_rmsnorm():
     from texmo.configuration import Configuration
     from texmo.precision import Precision
     from texmo.predict import timing
-    from texmo.predict.loss_rnn import _layer_features, _model_layers
+    from texmo.predict.loss_rnn import _layer_features
+    from texmo.predict.predict_common import model_layers
     from texmo.spec_parser import parse_model2
     model = parse_model2("bytes|dense.8.gelu-rmsnorm", Precision.FP32)
     conf = Configuration(model, lr=0.01, length=32, batch=4, steps=1,
@@ -127,7 +128,7 @@ def test_predictors_handle_rmsnorm():
     assert any(c.type_id == "rmsnorm" for c in timing.featurize(conf))
     # Loss: rmsnorm is a simple type, and its weights (size) show up in
     # feat[0] = log2(num_weights) -- unlike the parameter-free norm (0).
-    rm = next(l for l in _model_layers(conf) if l.name == "rmsnorm")
+    rm = next(l for l in model_layers(conf) if l.name == "rmsnorm")
     feat = _layer_features(rm, {"rmsnorm": 0}, n_simple=1)
     assert feat[0] > 0      # log2(size) > 0
     assert feat[3] == 1.0   # one-hot for the simple type "rmsnorm"

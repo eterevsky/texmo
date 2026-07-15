@@ -14,10 +14,9 @@ import optax
 
 from .common import ttoa3
 from .configuration import Configuration
+from .layer_jax import LayerWeights
 from .manager import Manager
-from .model import build_model_def
-from .model2 import Model2Def
-from .model_jax import ModelJax, Weights
+from .model2_jax import Model2Jax
 from .precision import Precision
 from .predict import LossTrend
 from .run import Run
@@ -52,9 +51,9 @@ class ManagerJax(Manager):
         self.dtype = self.conf.precision.jax_dtype
 
         logging.info(f'{self.conf}')
-        self.model: ModelJax = self.model_def.build_jax()
+        self.model: Model2Jax = self.model_def.build_jax()
         rng = jax.random.PRNGKey(random.randrange(2**32))
-        self.weights: Weights = self.model.init_weights(rng)
+        self.weights: list[LayerWeights] = self.model.init_weights(rng)
 
         if self.verbose:
             logging.info('Creating optimizer')
@@ -251,16 +250,9 @@ class ManagerJax(Manager):
         """
         weights32 = jax.tree.map(
             lambda x: x.astype(jnp.float32), self.weights)
-        # Rebuild via the same factory the original used so the
-        # weights pytree matches (Model2Jax and ModelJax weight
-        # layouts differ slightly).
-        if isinstance(self.model_def, Model2Def):
-            model32 = parse_model2(
-                self.model_def.spec, Precision.FP32,
-                cap=self.model_def.codec.cap).build_jax()
-        else:
-            model32 = build_model_def(
-                self.model_def.spec, Precision.FP32).build_jax()
+        model32 = parse_model2(
+            self.model_def.spec, Precision.FP32,
+            cap=self.model_def.codec.cap).build_jax()
 
         batch, lengths = self.dataset.sample_bytes(
             nbytes=self.test_sample_len,

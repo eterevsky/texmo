@@ -6,12 +6,12 @@ from texmo.configuration import (
     conf_neighbors,
     default_from_template,
 )
-from texmo.model import build_model_def
 from texmo.precision import Precision
+from texmo.spec_parser import parse_model2
 
 
 def _md(spec):
-    return build_model_def(spec, Precision.FP32)
+    return parse_model2(spec, Precision.FP32)
 
 
 def _conf(spec, lr=0.25, length=128, batch=256, steps=256, decay=1.0):
@@ -132,11 +132,11 @@ def test_conf_neighbors_precision():
     neighbors = set(conf_neighbors(conf, template))
     # Should include FP16 precision neighbor
     fp16_conf = conf.replace(
-        model=build_model_def("bytes|dense.1.relu", Precision.FP16))
+        model=parse_model2("bytes|dense.1.relu", Precision.FP16))
     assert fp16_conf in neighbors
     # FP64 not in template precision list, should be excluded
     fp64_conf = conf.replace(
-        model=build_model_def("bytes|dense.1.relu", Precision.FP64))
+        model=parse_model2("bytes|dense.1.relu", Precision.FP64))
     assert fp64_conf not in neighbors
 
 

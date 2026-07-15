@@ -3,7 +3,7 @@ from copy import deepcopy
 from .common import INF
 from .configuration import Configuration, Precision, Template
 from .db import DbReader, DbWriter
-from .model import build_model_def
+from .spec_parser import parse_model2
 from .predict.loss_rnn import LossModelHolder
 from .predict.timing import TrainTimingModel
 from .run import Run
@@ -17,7 +17,7 @@ from .search import (
 
 
 def _make_conf(steps=1024, batch=32, spec="bytes|dense.8.gelu"):
-    model = build_model_def(spec, precision=Precision.FP32)
+    model = parse_model2(spec, precision=Precision.FP32)
     return Configuration(
         model=model, lr=0.01, length=128, batch=batch, steps=steps, decay=1,
     )

@@ -3,7 +3,7 @@ import pytest
 
 from texmo.configuration import Configuration
 from texmo.db import DbReader, DbWriter
-from texmo.model import build_model_def
+from texmo.spec_parser import parse_model2
 from texmo.precision import Precision
 from texmo.predict import build_loss_trend
 from texmo.run import Run
@@ -45,7 +45,7 @@ class _RW:
 def _make_conf_run(
     spec="bytes|dense.64.gelu", batch=32, loss=3.123, system="test",
 ):
-    model = build_model_def(spec, precision=Precision.FP32)
+    model = parse_model2(spec, precision=Precision.FP32)
     conf = Configuration(
         model=model,
         lr=0.25,
@@ -396,7 +396,7 @@ def test_upsert_predicted_inserts_when_missing(db):
 
 def test_iter_confs_by_precision(db):
     conf_fp32, run_fp32 = _make_conf_run(system="rpi")
-    model_fp16 = build_model_def("bytes|dense.64.gelu", precision=Precision.FP16)
+    model_fp16 = parse_model2("bytes|dense.64.gelu", precision=Precision.FP16)
     conf_fp16 = Configuration(
         model=model_fp16, lr=0.25, length=128, batch=32, steps=256, decay=1)
     db.add_run(conf_fp32, run_fp32)
@@ -667,7 +667,7 @@ def test_top_confs_global_system_filter(db):
 
 
 def _conf_with_steps(steps, batch=32):
-    model = build_model_def("bytes|dense.64.gelu", precision=Precision.FP32)
+    model = parse_model2("bytes|dense.64.gelu", precision=Precision.FP32)
     return Configuration(
         model=model, lr=0.25, length=128, batch=batch, steps=steps, decay=1,
     )
@@ -772,7 +772,7 @@ def test_fastest_near_best_segments_any_system_cross_system(db):
 
 
 def _pick_me_conf(spec="bytes|dense.32.gelu"):
-    model = build_model_def(spec, precision=Precision.FP32)
+    model = parse_model2(spec, precision=Precision.FP32)
     return Configuration(
         model=model, lr=0.1, length=128, batch=32, steps=256, decay=1.0,
     )

@@ -6,7 +6,7 @@ from typing import Iterable, Optional
 
 from . import latency
 from .common import INF, itoa3
-from .model import ModelDef
+from .model2 import Model2Def
 from .spec_parser import parse_model2
 from .precision import Precision
 from .tokens.tokenizer import Tokenizer
@@ -30,7 +30,7 @@ class Configuration(object):
 
     def __init__(
         self,
-        model: ModelDef,
+        model: Model2Def,
         lr: float,
         length: int,
         batch: int,
@@ -56,10 +56,8 @@ class Configuration(object):
 
     @staticmethod
     def from_dict(d) -> Configuration:
-        # Model2 is the live representation. parse_model2 also accepts
-        # legacy skip.* specs (translating them to split form), so old
-        # DB rows and API payloads load fine; the resulting model's spec
-        # is canonical split form.
+        # DB rows and API payloads carry canonical split-form specs
+        # (the result DB was migrated off legacy skip.* in 2026-07).
         model = parse_model2(d['spec'], Precision(d['precision']))
         # `d` may be a plain dict (from JSON) or a sqlite3.Row. Row
         # raises IndexError on a missing column; dict raises KeyError.
@@ -86,11 +84,7 @@ class Configuration(object):
             and self.steps == other.steps
             and self.decay == other.decay
             and self.cosine == other.cosine
-            # Compare by canonical spec string (what __hash__ uses), not
-            # `self.model == other.model` -- the latter is type-sensitive
-            # (ModelDef vs Model2Def never compare equal), which would
-            # split identity across the representation switch even for
-            # the same architecture.
+            # Compare by canonical spec string, matching __hash__.
             and str(self.model) == str(other.model)
         )
 
@@ -102,7 +96,7 @@ class Configuration(object):
 
     def replace(
         self,
-        model: Optional[ModelDef] = None,
+        model: Optional[Model2Def] = None,
         lr: Optional[float] = None,
         length: Optional[int] = None,
         batch: Optional[int] = None,
@@ -317,10 +311,9 @@ class Template(object):
             self.spec = None
         else:
             try:
-                # Store the canonical (split-form) spec so the literal
-                # match in `match_model` lines up with `str(model)` for
-                # confs built via parse_model2 -- a legacy skip.* filter
-                # still matches its split-form models.
+                # Store the canonical spec so the literal match in
+                # `match_model` lines up with `str(model)` for confs
+                # built via parse_model2.
                 model = parse_model2(spec, Precision.FP32)
                 self.regex = None
                 self.spec = str(model)
@@ -331,7 +324,7 @@ class Template(object):
         self.max_weights = Bounds(max_weights, 16)
         # num_layers bounds the count of intermediate layers in the
         # pipeline (everything between input and output dense; counts
-        # suffix/norm/skip too, matching what's visible in the spec).
+        # suffix/norm/split too, matching what's visible in the spec).
         # min default 0 -- specs like 'bits.1+bp|' (no hidden layers)
         # are valid.
         self.num_layers = Bounds(num_layers, 0)
@@ -411,7 +404,7 @@ class Template(object):
             + f'decay_types=\'{decay_types}\')'
         )
 
-    def match_model(self, model: ModelDef) -> bool:
+    def match_model(self, model: Model2Def) -> bool:
         if model.num_weights > self.max_weights.max:
             return False
         if not self.num_layers.match(model.num_layers):

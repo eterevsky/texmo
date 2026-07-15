@@ -1,7 +1,11 @@
 # Training backends: PyTorch vs JAX
 
-TexMo supports two training backends, selectable via `--backend torch|jax`
-(default from `config.BACKEND`).
+Training runs on **JAX**. The PyTorch full-model backend was retired
+with the legacy `Model`/`ModelDef` representation (2026-07):
+`--backend torch` now hits a parked `ManagerTorch` stub, though the
+per-layer `nn.Module` implementations are still maintained and tested.
+The trade-offs below are the record of why JAX won for this workload
+— and what a revived torch backend would be up against.
 
 ## Why two backends?
 

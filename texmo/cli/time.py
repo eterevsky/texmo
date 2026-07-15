@@ -4,9 +4,9 @@ import logging
 from ..common import ttoa3
 from ..configuration import Configuration
 from ..db import DbReader
-from ..model import build_model_def
 from ..precision import Precision
 from ..predict.timing import TrainTimingModel
+from ..spec_parser import parse_model2
 from ..tokens import set_tokens_dir
 
 
@@ -48,7 +48,7 @@ def main(args: argparse.Namespace):
         return
 
     conf = Configuration(
-        build_model_def(args.spec, precision=Precision(args.precision)),
+        parse_model2(args.spec, precision=Precision(args.precision)),
         lr=args.lr,
         length=args.length,
         batch=args.batch,

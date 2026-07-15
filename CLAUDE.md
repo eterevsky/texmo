@@ -16,11 +16,11 @@ Detailed docs live in [`docs/`](docs/):
 - [`layers.md`](docs/layers.md) — the available layer types, their
   equations, parameter counts, and neighbor relations.
 - [`split.md`](docs/split.md) — design reference for the `split.op(...)`
-  fork-and-merge layer (residual + gate families, validity, skip→split
-  translation, search mutations). The current `Model2` representation.
-- [`skip.md`](docs/skip.md) — **legacy** residual connections
-  (`skip.X.add` / `skip.X.cat`), superseded by `split`; kept for the
-  merge semantics Split inherits.
+  fork-and-merge layer (residual + gate families, validity, search
+  mutations). The current `Model2` representation.
+- [`skip.md`](docs/skip.md) — **retired** residual connections
+  (`skip.X.add` / `skip.X.cat`), superseded by `split` and no longer
+  parsed; kept for the merge semantics Split inherits.
 - [`io.md`](docs/io.md) — how models turn token ids into logits: the
   model contract and the three IO kinds (one-hot bit chunks, embedded
   bit chunks, tokenized), what/how/why for each.
@@ -34,7 +34,7 @@ Detailed docs live in [`docs/`](docs/):
 - [`loss_rnn_experiments.md`](docs/loss_rnn_experiments.md) — RNN
   loss-predictor sweep results (best config, null results, open ideas).
 - [`backends.md`](docs/backends.md) — PyTorch vs JAX trade-offs and why
-  we support both.
+  JAX is the training runtime (the torch full-model backend is parked).
 - [`search.md`](docs/search.md) — distributed architecture search:
   server, client, result DB, neighbor generation.
 - [`decay_and_checkpoints.md`](docs/decay_and_checkpoints.md) — design
@@ -61,7 +61,7 @@ Each layer module contains three classes:
    passed explicitly).
 
 `{Name}Def` exposes both `build_module()` and `build_jax(dtype)`. New
-layers are registered in `model.py:_build_layer_def()`.
+layers are registered in `spec_parser.py:_build_layer_def()`.
 
 ### Tools
 

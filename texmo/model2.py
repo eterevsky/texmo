@@ -1,4 +1,5 @@
-"""Model2: layer-DAG-shaped reimplementation of ModelDef.
+"""Model2: the layer-DAG model representation (successor to the
+retired flat ModelDef).
 
 The layer chain is a `LayerSeqDef` rather than a flat
 `list[LayerDef]`. SplitDef plugs into this by holding two

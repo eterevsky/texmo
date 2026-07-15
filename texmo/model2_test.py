@@ -1,9 +1,10 @@
-"""Model2 tests: parse + forward/step parity with the existing Model.
+"""Model2 tests: parsing, weights, validity, neighbors, forward/step.
 
-Plain-sequence specs and split specs. The main correctness
-criterion is that Model2 produces the same logits as ModelDef on
-the same plain-sequence spec when given the same weights, and that
-split specs round-trip through parse + forward/step.
+Plain-sequence specs and split specs. Several expectations here were
+originally verified as parity against the legacy ModelDef (retired
+2026-07) and are now frozen as literal values -- weight counts,
+layer counts, validity verdicts, and the classic mutation moves the
+legacy neighbor generator defined.
 """
 import math
 
@@ -12,7 +13,6 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from texmo.model import ModelDef
 from texmo.precision import Precision
 from texmo.spec_parser import parse_model2
 
@@ -39,19 +39,18 @@ def test_def_properties():
     assert md.output.input_size == 16
 
 
-def test_def_num_weights_matches_model():
-    """Model2's weight count should match ModelDef's on the same spec."""
-    spec = "bits.1+bp|dense.8.gelu-dense.4.tanh"
-    md = ModelDef(spec, Precision.FP32)
-    md2 = parse_model2(spec, Precision.FP32)
-    assert md.num_weights == md2.num_weights
+def test_def_num_weights():
+    # bits.1+bp input width 4 (1 bit + 3 binary-position channels):
+    # dense.8: 8*4+8 = 40; dense.4: 4*8+4 = 36; binary head (1 logit):
+    # 1*4+1 = 5. Total 81 (matched the legacy ModelDef before its
+    # retirement).
+    md2 = parse_model2("bits.1+bp|dense.8.gelu-dense.4.tanh", Precision.FP32)
+    assert md2.num_weights == 81
 
 
-def test_def_num_mults_matches_model():
-    spec = "bits.1+bp|gru.8-dense.4.tanh"
-    md = ModelDef(spec, Precision.FP32)
-    md2 = parse_model2(spec, Precision.FP32)
-    assert md.num_mults == md2.num_mults
+def test_def_num_mults():
+    md2 = parse_model2("bits.1+bp|gru.8-dense.4.tanh", Precision.FP32)
+    assert md2.num_mults == 353
 
 
 def test_def_length_aware_total_padding():
@@ -71,64 +70,41 @@ def test_def_no_layers():
     assert md.total_padding == 1
 
 
-def test_skip_translated_to_split_at_top_level():
-    """Legacy skip syntax now parses -- it's translated to the
-    equivalent `split.op(...)` form. The runtime sees a skip-free
-    tree."""
-    from texmo.layers.skip import SkipDef
-    from texmo.layers.split import SplitDef
-    md = parse_model2(
-        "bytes|dense.16.gelu-skip.1.add-dense.16.gelu-dense.16.gelu",
-        Precision.FP32)
-    layers = md.layer_seq.layers
-    # No SkipDef should survive the translation.
-    assert not any(isinstance(l, SkipDef) for l in layers)
-    # The translated middle layer is a SplitDef with the in-skip
-    # layer in branch 0 and a pass branch in branch 1.
-    assert isinstance(layers[1], SplitDef)
-    assert layers[1].op == 'add'
-    assert len(layers[1].branches[0].layers) == 1  # the in-skip dense
-    assert layers[1].branches[1].layers == []      # pass
-
-
-def test_skip_translated_weight_count_matches_modeldef():
-    """ModelDef and translated Model2 should agree on num_weights
-    for a skip spec -- the skip pseudo-layer has 0 weights in both
-    forms (the translated SplitDef's branches hold the same dense
-    layers as the original skip's in-skip layers)."""
-    spec = "bytes|dense.16.gelu-skip.1.add-dense.16.gelu-dense.16.gelu"
-    m1 = ModelDef(spec, Precision.FP32)
+def test_split_residual_weight_count():
+    """The split marker has 0 weights of its own: 3x dense.16 over a
+    256-wide input/output. dense.16.gelu from bytes: 16*256+16 = 4112;
+    two dense.16 at width 16: 2 * (16*16+16) = 544; head:
+    256*16+256 = 4352. Total 9008."""
+    spec = "bytes|dense.16.gelu-split.add(dense.16.gelu, pass)-dense.16.gelu"
     m2 = parse_model2(spec, Precision.FP32)
-    assert m1.num_weights == m2.num_weights
-    assert m1.total_padding == m2.total_padding
+    assert m2.num_weights == 9008
+    assert m2.total_padding == 1
 
 
-# -- num_layers parity -------------------------------------------------
+# -- num_layers --------------------------------------------------------
 
 
-@pytest.mark.parametrize("spec", [
-    "bytes|dense.16.gelu",
-    "bytes|dense.16.gelu-dense.16.gelu",
-    "bytes|dense.16.gelu-gru.16-dense.16.gelu",
-    "bytes|dense.16.gelu-skip.1.add-dense.16.gelu-dense.16.gelu",
-    "bytes|dense.16.gelu-skip.3.add"
-    "-dense.16.gelu-dense.16.gelu-dense.16.gelu-dense.16.gelu",
-    "bytes|skip.1.cat-dense.16.gelu-dense.16.gelu",
-    # Nested (laminar) skips: skip.3@1 spans [1,5), skip.1@3 spans
-    # [3,5) -- inner nests in the outer's main branch.
-    "bytes|dense.16.gelu-skip.3.add-dense.16.gelu-skip.1.add"
-    "-dense.16.gelu-dense.16.gelu",
-    "bytes|skip.3.add-dense.16.gelu-skip.1.cat"
-    "-dense.16.gelu-dense.16.gelu",
+@pytest.mark.parametrize("spec, expected", [
+    ("bytes|dense.16.gelu", 1),
+    ("bytes|dense.16.gelu-dense.16.gelu", 2),
+    ("bytes|dense.16.gelu-gru.16-dense.16.gelu", 3),
+    # A split counts itself plus the layers in its branches -- the
+    # same count the retired flat representation gave the equivalent
+    # skip spec (skip marker 1 + each spanned layer 1).
+    ("bytes|dense.16.gelu-split.add(dense.16.gelu, pass)"
+     "-dense.16.gelu", 4),
+    ("bytes|dense.16.gelu-split.add(dense.16.gelu-dense.16.gelu"
+     "-dense.16.gelu, pass)-dense.16.gelu", 6),
+    ("bytes|split.cat(dense.16.gelu, pass)-dense.16.gelu", 3),
+    # Nested residual splits.
+    ("bytes|dense.16.gelu-split.add(dense.16.gelu"
+     "-split.add(dense.16.gelu, pass), pass)-dense.16.gelu", 6),
+    ("bytes|split.add(dense.16.gelu-split.cat(dense.16.gelu, pass),"
+     " pass)-dense.16.gelu", 5),
 ])
-def test_num_layers_matches_modeldef(spec):
-    """For any laminar skip spec (non-overlapping or nested), the
-    recursive count on Model2 matches the flat count on ModelDef --
-    the property is construction-invariant under skip-to-split
-    translation."""
-    m1 = ModelDef(spec, Precision.FP32)
+def test_num_layers_residual_splits(spec, expected):
     m2 = parse_model2(spec, Precision.FP32)
-    assert m1.num_layers == m2.num_layers
+    assert m2.num_layers == expected
 
 
 def test_num_layers_split_authored():
@@ -156,14 +132,12 @@ def test_num_layers_nested_splits():
 def test_num_layers_empty():
     md = parse_model2("bits.1+bp|", Precision.FP32)
     assert md.num_layers == 0
-    m1 = ModelDef("bits.1+bp|", Precision.FP32)
-    assert m1.num_layers == 0
 
 
-def test_skip_translated_spec_runs_forward():
-    """Sanity: a translated skip spec actually trains."""
+def test_residual_split_spec_runs_forward():
+    """Sanity: a residual split spec actually trains."""
     md = parse_model2(
-        "bits.1+bp|dense.4.gelu-skip.1.add-dense.4.gelu-dense.4.gelu",
+        "bits.1+bp|dense.4.gelu-split.add(dense.4.gelu, pass)-dense.4.gelu",
         Precision.FP32)
     model = md.build_jax()
     weights = model.init_weights(jax.random.PRNGKey(0))
@@ -253,23 +227,19 @@ def test_split_spec_loss_decreases():
     assert final < initial
 
 
-def test_skip_inside_split_branch_translated():
-    """Skip inside a split branch translates the same way --
-    recursion through `_parse_split` -> `parse_layer_list` ->
-    `_translate_skips` covers it without any branch-aware logic."""
-    from texmo.layers.skip import SkipDef
+def test_split_nested_inside_branch():
+    """A split nested inside another split's branch parses through
+    the `_parse_split` -> `parse_layer_list` recursion."""
     from texmo.layers.split import SplitDef
     md = parse_model2(
         "bits.1+bp|split.mul("
-        "dense.4.gelu-skip.1.add-dense.4.gelu-dense.4.gelu, "
+        "dense.4.gelu-split.add(dense.4.gelu, pass)-dense.4.gelu, "
         "pass)",
         Precision.FP32)
     outer = md.layer_seq.layers[0]
     assert isinstance(outer, SplitDef)
-    # The first branch must be skip-free after translation.
     inner_layers = outer.branches[0].layers
-    assert not any(isinstance(l, SkipDef) for l in inner_layers)
-    # It should now contain dense + nested split + dense.
+    # dense + nested split + dense.
     assert isinstance(inner_layers[1], SplitDef)
     assert inner_layers[1].op == 'add'
 
@@ -413,22 +383,21 @@ def test_forward_recurrent_matches_forward():
     np.testing.assert_allclose(np.asarray(par), np.asarray(rec), atol=1e-5)
 
 
-# --- validity rules: parity with ModelDef + the bare-dense carve-out --
+# --- validity rules: adjacency rules + bare-dense carve-out ----------
 #
-# The rules ModelDef enforced on its flat layer list now live in
-# LayerSeqDef / SplitDef. These check that a spec the old model
-# rejected is still rejected after skip->split translation, that the
-# new bare-dense carve-out for gated units is accepted, and that
-# adjacency rules apply inside branches too.
+# The adjacency rules the retired flat representation enforced live
+# in LayerSeqDef / SplitDef. These check that the classically-invalid
+# shapes stay rejected in split form, that the bare-dense carve-out
+# for gated units is accepted, and that adjacency rules apply inside
+# branches too.
 
 
-# Specs ModelDef rejects that must stay rejected once parsed into the
-# tree. Each has a skip form so it round-trips through translation.
 _INVALID_SPECS = [
     # Norm can't be the first layer (top-level).
     "bits.1+bp|norm-dense.4.gelu",
-    # Merge point right after a suffix -> branch ends in a suffix.
-    "bytes|skip.1.add-suffix.4-dense.32.gelu",
+    # A residual branch can't end in a suffix (the merge point would
+    # sit right after it).
+    "bytes|split.add(suffix.4, pass)-dense.32.gelu",
     # Two suffix-like layers adjacent.
     "bits.1+bp|suffix.2-suffix.2-dense.4.gelu",
     # Two norm adjacent.
@@ -439,33 +408,30 @@ _INVALID_SPECS = [
 
 
 @pytest.mark.parametrize("spec", _INVALID_SPECS)
-def test_invalid_specs_match_modeldef(spec):
-    """Both representations agree the spec is invalid."""
-    assert not ModelDef(spec, Precision.FP32).is_valid()
+def test_invalid_specs(spec):
     assert not parse_model2(spec, Precision.FP32).is_valid()
 
 
-def test_pre_norm_branch_diverges_from_legacy_modeldef():
-    """Intentional divergence: a skip source right before a norm
-    translates to a branch that STARTS with norm -- the pre-norm
-    residual pattern, which Model2 now allows (legacy ModelDef keeps
-    its old 'skip source before norm' rule until retirement)."""
-    spec = "bytes|dense.32.gelu-skip.1.add-norm-dense.32.gelu"
-    assert not ModelDef(spec, Precision.FP32).is_valid()
+def test_pre_norm_branch_valid():
+    """A residual branch that STARTS with norm -- the pre-norm
+    residual pattern. The retired flat representation rejected the
+    equivalent skip shape ('skip source before norm'); Model2
+    deliberately allows it."""
+    spec = "bytes|dense.32.gelu-split.add(norm, pass)-dense.32.gelu"
     assert parse_model2(spec, Precision.FP32).is_valid()
 
 
 _VALID_SPECS = [
     "bits.1+bp|dense.4.gelu-suffix.2-dense.4.tanh",
-    "bytes|dense.32.gelu-skip.1.add-dense.32.gelu-dense.32.gelu",
-    # Skip source before suffix is fine (start before, skip over).
-    "bytes|dense.32.gelu-skip.2.add-suffix.2-dense.32.gelu-dense.16.gelu",
+    "bytes|dense.32.gelu-split.add(dense.32.gelu, pass)-dense.32.gelu",
+    # A suffix at the start of a residual branch is fine.
+    "bytes|dense.32.gelu-split.add(suffix.2-dense.32.gelu, pass)"
+    "-dense.16.gelu",
 ]
 
 
 @pytest.mark.parametrize("spec", _VALID_SPECS)
-def test_valid_specs_match_modeldef(spec):
-    assert ModelDef(spec, Precision.FP32).is_valid()
+def test_valid_specs(spec):
     assert parse_model2(spec, Precision.FP32).is_valid()
 
 
@@ -548,18 +514,41 @@ def test_neighbor_specs_roundtrip(spec):
         assert parse_model2(n.spec, n.precision).spec == n.spec
 
 
-def test_neighbors_cover_modeldef_non_skip():
-    """Parity: every non-skip ModelDef neighbor is also a Model2
-    neighbor (Model2 adds split/gate moves on top)."""
-    spec = "bytes|dense.32.gelu-dense.16.gelu"
-    md = ModelDef(spec, Precision.FP32)
-    m2 = parse_model2(spec, Precision.FP32)
-    md_arch = {
-        n.spec for n in md.neighbors()
-        if n.precision == md.precision and "skip." not in n.spec
+def test_neighbors_cover_classic_moves():
+    """The classic mutation moves the legacy ModelDef generator
+    defined must stay reachable (frozen from the last parity run
+    before its retirement): per-layer size x2 / /2, activation swap,
+    dense<->rnn type swap, append, suffix/norm insert, and the
+    dense prepend."""
+    m2 = parse_model2("bytes|dense.32.gelu-dense.16.gelu", Precision.FP32)
+    expected = {
+        # size x2 / /2 on each layer
+        "bytes|dense.64.gelu-dense.16.gelu",
+        "bytes|dense.16.gelu-dense.16.gelu",
+        "bytes|dense.32.gelu-dense.32.gelu",
+        "bytes|dense.32.gelu-dense.8.gelu",
+        # activation swap
+        "bytes|dense.32.tanh-dense.16.gelu",
+        "bytes|dense.32.gelu-dense.16.tanh",
+        # dense <-> rnn type swap
+        "bytes|rnn.32.gelu-dense.16.gelu",
+        "bytes|dense.32.gelu-rnn.16.gelu",
+        # append (recurrent family + conv)
+        "bytes|dense.32.gelu-dense.16.gelu-gru.16",
+        "bytes|dense.32.gelu-dense.16.gelu-lstm.16",
+        "bytes|dense.32.gelu-dense.16.gelu-conv.2",
+        # suffix / norm inserts
+        "bytes|suffix.2-dense.32.gelu-dense.16.gelu",
+        "bytes|dense.32.gelu-suffix.2-dense.16.gelu",
+        "bytes|dense.32.gelu-dense.16.gelu-suffix.2",
+        "bytes|dense.32.gelu-norm-dense.16.gelu",
+        "bytes|dense.32.gelu-dense.16.gelu-norm",
+        # dense prepend at the input width
+        "bytes|dense.256.tanh-dense.32.gelu-dense.16.gelu",
+        "bytes|dense.256.gelu-dense.32.gelu-dense.16.gelu",
     }
     m2_arch = _arch_neighbor_specs(m2)
-    missing = md_arch - m2_arch
+    missing = expected - m2_arch
     assert not missing, f"Model2 neighbors miss: {sorted(missing)}"
 
 

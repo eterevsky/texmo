@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from texmo.layers.rglru import RglruDef, RglruJax
-from texmo.model import _build_layer_def
+from texmo.spec_parser import _build_layer_def
 
 
 def _sigmoid(x):
@@ -173,7 +173,8 @@ def test_predictors_handle_rglru():
     from texmo.configuration import Configuration
     from texmo.precision import Precision
     from texmo.predict import timing
-    from texmo.predict.loss_rnn import _layer_features, _model_layers
+    from texmo.predict.loss_rnn import _layer_features
+    from texmo.predict.predict_common import model_layers
     from texmo.spec_parser import parse_model2
 
     model = parse_model2("bytes|dense.8.gelu-rglru.2", Precision.FP32)
@@ -183,7 +184,7 @@ def test_predictors_handle_rglru():
     assert any(c.type_id == "rglru" for c in timing.featurize(conf))
     # Loss: rglru is a simple type (one-hot + log2(num_weights/in/out)).
     rglru_layer = next(
-        l for l in _model_layers(conf) if l.name == "rglru")
+        l for l in model_layers(conf) if l.name == "rglru")
     feat = _layer_features(rglru_layer, {"rglru": 0}, n_simple=1)
     assert feat[0] > 0             # log2(num_weights) > 0
     assert feat[3] == 1.0          # one-hot for the simple type "rglru"

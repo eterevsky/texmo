@@ -46,6 +46,10 @@ class Model2Jax:
         self.layer_seq = layer_seq
         self._total_padding = total_padding
 
+    @property
+    def ntokens(self) -> int:
+        return self.codec.ntokens
+
     def init_weights(self, rng: jax.Array):
         k_in, k_seq, k_out = jax.random.split(rng, 3)
         return [

@@ -34,7 +34,9 @@ from typing import Optional
 from .. import latency
 from ..common import INF
 from ..configuration import Configuration
+from ..precision import Precision
 from ..run import Run
+from ..spec_parser import parse_model2
 from .common import (
     FIND_CONF,
     _pack_ndarray,
@@ -403,9 +405,6 @@ class DbWriter(object):
         column was added. Returns the number of rows updated. Logs
         progress every batch.
         """
-        from ..model import build_model_def
-        from ..precision import Precision
-
         cur = self._db.cursor()
         cur.execute("SELECT COUNT(*) FROM conf WHERE num_layers IS NULL")
         total = cur.fetchone()[0]
@@ -427,7 +426,7 @@ class DbWriter(object):
             updates = []
             for row in rows:
                 try:
-                    model = build_model_def(
+                    model = parse_model2(
                         row['spec'], precision=Precision.FP32)
                     updates.append((model.num_layers, row['id']))
                 except Exception as exc:

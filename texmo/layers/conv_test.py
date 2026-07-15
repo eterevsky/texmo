@@ -174,7 +174,7 @@ def test_suffix_swap_to_conv():
 
 
 def test_neighbors_min_kernel_filtered_by_model():
-    # The Def yields conv.1 too (size mutation hits L=1) but ModelDef
+    # The Def yields conv.1 too (size mutation hits L=1) but Model2Def
     # filters it via `is_valid()`. Bare Def output includes the
     # invalid one -- that's how the framework's pattern works for
     # other layers (e.g. SuffixDef(2).neighbors() includes "suffix.1").

@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from texmo.configuration import Configuration
-from texmo.model import build_model_def
 from texmo.precision import Precision
 from texmo.predict.timing import (
     CHUNK_SIZE,
@@ -29,26 +28,12 @@ def _conf(
     precision: Precision = Precision.FP32,
 ) -> Configuration:
     return Configuration(
-        build_model_def(spec, precision=precision),
+        parse_model2(spec, precision=precision),
         lr=lr,
         length=length,
         batch=batch,
         steps=steps,
         decay=decay,
-    )
-
-
-def _conf2(
-    spec: str,
-    length: int = 64,
-    batch: int = 16,
-    steps: int = 100,
-    precision: Precision = Precision.FP32,
-) -> Configuration:
-    """Configuration built on a Model2Def (parse_model2)."""
-    return Configuration(
-        parse_model2(spec, precision),
-        lr=0.01, length=length, batch=batch, steps=steps, decay=1.0,
     )
 
 
@@ -73,7 +58,7 @@ def test_featurize_types():
 def test_featurize_feature_sizes():
     """Different types have different feature vector lengths."""
     conf = _conf(
-        "bits.1+bp|dense.8.gelu-suffix.2-skip.1.add-norm",
+        "bits.1+bp|dense.8.gelu-suffix.2-split.add(norm, pass)",
         batch=4, length=10,
     )
     comps = featurize(conf)
@@ -81,7 +66,7 @@ def test_featurize_feature_sizes():
     assert types["bits.1+bp"] == 3   # input
     assert types["dense.gelu"] == 12  # dense_matmul
     assert types["suffix"] == 10      # plain + suffix_length
-    assert types["skip.add"] == 4     # minimal
+    assert types["split.add"] == 4    # minimal merge component
     assert types["norm"] == 9         # plain
     assert types["output"] == 12      # dense_matmul
 
@@ -126,7 +111,7 @@ def test_featurize_msr_l2_features():
 def test_featurize_split_components_recurse_into_branches():
     """A split contributes a merge component plus the components of
     every layer in its branches (incl. the bare gate dense)."""
-    conf = _conf2(
+    conf = _conf(
         "bits.1+bp|dense.4.gelu-split.mul(dense.4.gelu, dense.4)-dense.4.tanh",
         batch=8, length=16)
     types = [c.type_id for c in featurize(conf)]
@@ -143,26 +128,12 @@ def test_featurize_split_components_recurse_into_branches():
 
 def test_featurize_split_merge_feature_values():
     """split merge features are [1, OS, OS*L, OS*B*L] (4, like skip)."""
-    conf = _conf2("bits.1+bp|split.add(dense.4.gelu, pass)", batch=4, length=10)
+    conf = _conf("bits.1+bp|split.add(dense.4.gelu, pass)", batch=4, length=10)
     split = next(c for c in featurize(conf) if c.type_id == "split.add")
     os_ = int(split.features[1])  # merged output size
     assert split.features.shape == (4,)
     np.testing.assert_array_equal(
         split.features, [1, os_, os_ * 10, os_ * 4 * 10])
-
-
-def test_skip_and_split_have_matching_compute_components():
-    """A skip-form ModelDef and its Model2 translation featurize to the
-    same per-layer compute components; only the merge type differs
-    (skip.add vs split.add)."""
-    spec = "bytes|dense.32.gelu-skip.1.add-dense.32.gelu-dense.32.gelu"
-
-    def compute(conf):
-        return sorted(
-            (c.type_id, tuple(c.features)) for c in featurize(conf)
-            if not c.type_id.startswith(("skip.", "split.")))
-
-    assert compute(_conf(spec)) == compute(_conf2(spec))
 
 
 def test_fit_and_predict_model2_split():
@@ -174,7 +145,7 @@ def test_fit_and_predict_model2_split():
         batch = int(rng.choice([8, 16, 32]))
         length = int(rng.choice([32, 64]))
         steps = int(rng.choice([64, 128, 256]))
-        conf = _conf2(spec, batch=batch, length=length, steps=steps)
+        conf = _conf(spec, batch=batch, length=length, steps=steps)
         comps = featurize(conf)
         total = 0.2 * len(comps) + steps * 1e-4 * len(comps)
         samples.append((conf, _fake_run("m2sys", total)))
@@ -182,7 +153,7 @@ def test_fit_and_predict_model2_split():
     model = TrainTimingModel()
     model.fit(samples)
     assert ("m2sys", Precision.FP32) in model.keys()
-    pred = model.predict("m2sys", _conf2(spec, batch=12, length=48, steps=128))
+    pred = model.predict("m2sys", _conf(spec, batch=12, length=48, steps=128))
     assert pred is not None and pred > 0
 
 
@@ -382,12 +353,12 @@ def test_predict_batch_matches_predict():
 def test_emb_input_component_type_id():
     """Embedded inputs get one timing key per token domain: the table
     width doesn't change the lookup cost enough for per-width keys."""
-    comps = featurize(_conf2("bytes.emb.4|dense.4.tanh"))
+    comps = featurize(_conf("bytes.emb.4|dense.4.tanh"))
     assert comps[0].type_id == "bytes.emb"
     assert comps[-1].type_id == "output"
-    comps8 = featurize(_conf2("bytes.emb.8|dense.8.tanh"))
+    comps8 = featurize(_conf("bytes.emb.8|dense.8.tanh"))
     assert comps8[0].type_id == "bytes.emb"
     # The tied head's scoring matmul reuses the shared 'output' key
     # with the dense-shaped features (last width -> ntokens).
-    comps_oh = featurize(_conf2("bits.4.emb.8|rnn.8.tanh"))
+    comps_oh = featurize(_conf("bits.4.emb.8|rnn.8.tanh"))
     assert comps_oh[0].type_id == "bits.4.emb"

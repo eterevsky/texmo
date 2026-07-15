@@ -53,7 +53,6 @@ from ..layers.norm import NormDef
 from ..layers.rglru import RglruDef
 from ..layers.rmsnorm import RmsNormDef
 from ..layers.rnn import RnnDef
-from ..layers.skip import SkipDef
 from ..layers.slstm import SLstmDef
 from ..layers.split import SplitDef
 from ..layers.suffix import SuffixDef
@@ -172,10 +171,6 @@ def _features_msr(
     ]
 
 
-def _features_skip(isize: int, batch: int, length: int) -> list[float]:
-    return [1.0, isize, isize * length, isize * batch * length]
-
-
 def _features_split(osize: int, batch: int, length: int) -> list[float]:
     # The merge itself: an elementwise op (add/mul) or a concat copy
     # over the merged channels per position. Same cheap shape as the
@@ -256,8 +251,6 @@ def _layer_component(layer, batch: int, length: int) -> Component:
     elif isinstance(layer, ConvDef):
         features = _features_conv(
             layer.input_size, batch, length, layer.kernel)
-    elif isinstance(layer, SkipDef):
-        features = _features_skip(layer.input_size, batch, length)
     elif isinstance(layer, MatLstmDef):
         features = _features_matlstm(
             layer.input_size, layer.size, batch, length)
@@ -327,15 +320,8 @@ def featurize(conf: Configuration) -> list[Component]:
     components: list[Component] = [
         _input_component(model_def.input, batch, length)
     ]
-    # ModelDef exposes a flat `.layers`; Model2Def a recursive layer
-    # tree under `.layer_seq`. Duck-typed so the predictor doesn't have
-    # to import Model2Def (and drag its JAX backend in).
-    layers = (
-        model_def.layer_seq.layers
-        if hasattr(model_def, "layer_seq")
-        else model_def.layers
-    )
-    _collect_layer_components(layers, batch, length, components)
+    _collect_layer_components(
+        model_def.layer_seq.layers, batch, length, components)
     components.append(_output_component(model_def.output, batch, length))
     return components
 

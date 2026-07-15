@@ -2,7 +2,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from texmo.configuration import Configuration
 from texmo.layers.matlstm import MatLstmDef
+from texmo.precision import Precision
+from texmo.predict.timing import featurize
+from texmo.spec_parser import parse_model2
 
 
 def _make_jax(size=4, input_size=4, seed=0, dtype=jnp.float32):
@@ -123,13 +127,8 @@ def test_matlstm_neighbors_min_size_clamped():
 
 def test_matlstm_features_include_os2():
     """matlstm features extend dense_matmul with [OS^2, OS^2*L, OS^2*B*L]."""
-    from texmo.configuration import Configuration
-    from texmo.model import build_model_def
-    from texmo.precision import Precision
-    from texmo.predict.timing import featurize
-
     conf = Configuration(
-        build_model_def("bits.1+bp|matlstm.4-dense.4.gelu", Precision.FP32),
+        parse_model2("bits.1+bp|matlstm.4-dense.4.gelu", Precision.FP32),
         lr=0.01, length=10, batch=4, steps=100, decay=1.0,
     )
     comps = featurize(conf)

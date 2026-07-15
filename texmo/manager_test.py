@@ -1,4 +1,4 @@
-"""Light integration tests for ManagerTorch and ManagerJax.
+"""Light integration tests for ManagerJax.
 
 Uses a minimal 'bits.1+bp|' model (no hidden layers, binary tokens)
 trained on in-memory random bytes. Verifies the end-to-end pipeline
@@ -15,7 +15,6 @@ from texmo import manager_jax
 from texmo.configuration import Configuration
 from texmo.dataset import DataSet
 from texmo.manager import create_manager
-from texmo.model import build_model_def
 from texmo.precision import Precision
 from texmo.spec_parser import parse_model2
 
@@ -26,7 +25,7 @@ def _make_dataset():
 
 def _make_conf(steps: int = 3):
     return Configuration(
-        build_model_def('bits.1+bp|', precision=Precision.FP32),
+        parse_model2('bits.1+bp|', precision=Precision.FP32),
         lr=0.01,
         length=32,
         batch=8,
@@ -35,10 +34,9 @@ def _make_conf(steps: int = 3):
     )
 
 
-@pytest.mark.parametrize('backend', ['torch', 'jax'])
-def test_train_and_eval(backend):
+def test_train_and_eval():
     manager = create_manager(
-        backend, conf=_make_conf(), system='test',
+        'jax', conf=_make_conf(), system='test',
         dataset=_make_dataset(),
         test_sample_len=128, test_batch=4,
         verbose=False,
@@ -51,7 +49,16 @@ def test_train_and_eval(backend):
     assert final_conf.steps == 3
 
 
-@pytest.mark.parametrize('backend', ['torch', 'jax'])
+def test_torch_backend_is_parked():
+    with pytest.raises(NotImplementedError):
+        create_manager(
+            'torch', conf=_make_conf(), system='test',
+            dataset=_make_dataset(),
+            test_sample_len=128, test_batch=4,
+            verbose=False,
+        )
+
+
 @pytest.mark.parametrize('spec', [
     'bits.1+bp|suffix.2',
     'bits.1+bp|suffix.4-dense.4.gelu',
@@ -65,18 +72,18 @@ def test_train_and_eval(backend):
     'bits.1+bp|lstm.4',
     'bits.1+bp|latent.4.2',
     'bits.1+bp|lrnn.4.2',
-    'bits.1+bp|skip.1.add-dense.4.gelu-dense.8.gelu',
-    'bits.1+bp|skip.2.cat-dense.4.gelu-dense.4.gelu-dense.8.gelu',
-    'bits.1+bp|skip.2.cat-suffix.4-dense.4.tanh',
+    'bits.1+bp|split.add(dense.4.gelu, pass)-dense.8.gelu',
+    'bits.1+bp|split.cat(dense.4.gelu-dense.4.gelu, pass)-dense.8.gelu',
+    'bits.1+bp|split.cat(suffix.4-dense.4.tanh, pass)',
 ])
-def test_train_various_specs(backend, spec):
+def test_train_various_specs(spec):
     """Consistency check: model builds and trains without shape errors."""
     conf = Configuration(
-        build_model_def(spec, precision=Precision.FP32),
+        parse_model2(spec, precision=Precision.FP32),
         lr=0.01, length=32, batch=4, steps=2, decay=1.0,
     )
     manager = create_manager(
-        backend, conf=conf, system='test',
+        'jax', conf=conf, system='test',
         dataset=_make_dataset(),
         test_sample_len=32, test_batch=2,
         verbose=False,
@@ -86,21 +93,19 @@ def test_train_various_specs(backend, spec):
 
 
 @pytest.mark.parametrize('spec', [
-    # Plain specs the parser handles unchanged.
+    # Plain specs.
     'bits.1+bp|dense.4.gelu',
     'bits.1+bp|gru.4-dense.2.tanh',
-    # Skip specs that get translated to split.op(...) form at parse
-    # time -- the manager should see no SkipDef.
-    'bits.1+bp|skip.1.add-dense.4.gelu-dense.4.gelu',
-    'bits.1+bp|skip.2.cat-dense.4.gelu-dense.4.gelu-dense.4.gelu',
-    # Hand-authored split spec.
+    # Residual splits.
+    'bits.1+bp|split.add(dense.4.gelu, pass)-dense.4.gelu',
+    'bits.1+bp|split.cat(dense.4.gelu-dense.4.gelu, pass)-dense.4.gelu',
+    # A gate split.
     'bits.1+bp|dense.4.gelu-split.mul(dense.4.gelu, pass)-dense.4.gelu',
 ])
 def test_train_via_parse_model2_jax(spec):
     """End-to-end smoke for the Model2 train path -- the same path
-    cli/train.py now takes. Exercises Manager init, train_step,
-    eval (which triggers the FP32 rebuild dispatch in
-    manager_jax)."""
+    cli/train.py takes. Exercises Manager init, train_step, eval
+    (which triggers the FP32 rebuild in manager_jax)."""
     conf = Configuration(
         parse_model2(spec, precision=Precision.FP32),
         lr=0.01, length=32, batch=4, steps=2, decay=1.0,
@@ -169,19 +174,20 @@ def test_emb_scale_logged(tmp_path, monkeypatch):
     'bits.1+bp|lstm.4',
     'bits.1+bp|latent.4.2',
     'bits.1+bp|lrnn.4.2',
-    'bits.1+bp|skip.1.add-dense.4.gelu-dense.8.gelu',
-    'bits.1+bp|skip.2.cat-dense.4.gelu-dense.4.gelu-dense.8.gelu',
-    'bits.1+bp|skip.2.cat-suffix.4-dense.4.tanh',
-    # Two overlapping skips with mixed add and cat landing at the same
-    # merge point (just before the output dense).
-    'bits.1+bp|skip.3.add-dense.4.gelu-skip.1.cat-dense.4.gelu-dense.8.gelu',
+    'bits.1+bp|split.add(dense.4.gelu, pass)-dense.8.gelu',
+    'bits.1+bp|split.cat(dense.4.gelu-dense.4.gelu, pass)-dense.8.gelu',
+    'bits.1+bp|split.cat(suffix.4-dense.4.tanh, pass)',
+    # Nested splits with mixed add and cat merging at the same point
+    # (just before the output dense).
+    'bits.1+bp|split.add(dense.4.gelu-split.cat(dense.4.gelu, pass), pass)'
+    '-dense.8.gelu',
 ])
 def test_jax_num_weights_matches_def(spec):
-    """ModelDef.num_weights should equal the total element count of the
-    JAX weight pytree produced by the manager.
+    """Model2Def.num_weights should equal the total element count of
+    the JAX weight pytree produced by the manager.
     """
     conf = Configuration(
-        build_model_def(spec, precision=Precision.FP32),
+        parse_model2(spec, precision=Precision.FP32),
         lr=0.01, length=32, batch=4, steps=1, decay=1.0,
     )
     manager = create_manager(
@@ -194,10 +200,9 @@ def test_jax_num_weights_matches_def(spec):
     assert actual == conf.model.num_weights
 
 
-@pytest.mark.parametrize('backend', ['torch', 'jax'])
-def test_continue_prefix(backend):
+def test_continue_prefix():
     manager = create_manager(
-        backend, conf=_make_conf(steps=2), system='test',
+        'jax', conf=_make_conf(steps=2), system='test',
         dataset=_make_dataset(),
         test_sample_len=64, test_batch=2,
         verbose=False,

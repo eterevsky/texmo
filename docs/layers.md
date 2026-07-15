@@ -228,8 +228,8 @@ window requires `length - 1` padding tokens, supplied by the model's
 `total_padding` machinery).
 
 - State: `(length - 1, input_size)` — the recent history buffer.
-- `length` attribute on the def is > 1; ModelDef enforces that two
-  adjacent suffix-like layers are invalid.
+- `length` attribute on the def is > 1; `LayerSeqDef.is_valid` enforces
+  that two adjacent suffix-like layers are invalid.
 - `num_weights = 0`.
 
 ## Norm (`norm`)
@@ -358,18 +358,17 @@ only (`SplitJax`; no PyTorch module). Example:
     bytes|dense.32.gelu-split.add(dense.32.gelu-dense.32.gelu, pass)-dense.64.tanh
 
 See [`split.md`](split.md) for the full design: merge semantics, the
-residual/gate families, canonical form + validity, skip→split
-translation, and the search mutations.
+residual/gate families, canonical form + validity, and the search
+mutations.
 
-### Skip (`skip.<X>.<add|cat>`) — legacy residual
+### Skip (`skip.<X>.<add|cat>`) — retired residual
 
-`skip.X.add` / `skip.X.cat` is the **legacy** residual marker — a
+`skip.X.add` / `skip.X.cat` was the original residual marker — a
 pseudo-layer spanning `X` layers, merged at the end (same `.add` /
-`.cat` size semantics Split inherits). The search no longer emits skips
-and the result DB has been migrated to split-form, but skip syntax still
-parses: `spec_parser.parse_model2` translates `skip.D.op-A₁-…-A_D` to
-`split.op(A₁-…-A_D, pass)`, recursively, so nested skips become nested
-splits. See [`skip.md`](skip.md) for the historical design.
+`.cat` size semantics Split inherits). The syntax was retired in
+2026-07 after the result DB was migrated to split form; a `skip.*`
+spec now fails to parse like any unknown layer. See
+[`skip.md`](skip.md) for the historical design.
 
 ## Neighbor relations (search)
 

@@ -36,8 +36,8 @@ channel-wise:
 | `mul` | multiply the overlapping channels; longer tail passes through | `max(d₁, d₂)` |
 
 The `add` / `cat` merge functions are byte-for-byte the legacy
-`_merge_add` / `_merge_cat` from `model_jax.py`, so a skip-form conf
-translated to split-form preserves its loss exactly.
+`_merge_add` / `_merge_cat` from the retired `model_jax.py`, so a
+skip-form conf translated to split-form preserves its loss exactly.
 
 ### Sequence-length alignment
 
@@ -91,23 +91,18 @@ cross-mutate into each other:
    commutative GeGLU pair `mul(dense.X.gelu, dense.X)` /
    `mul(dense.X, dense.X.gelu)` to one canonical spelling.
 
-## Skip → split translation
+## Skip → split translation (historical)
 
-The parser rewrites legacy `skip.D.op` syntax to split form, recursively
-at every nesting level (`spec_parser._translate_skips`):
+During the migration the parser rewrote legacy `skip.D.op` syntax to
+split form, recursively at every nesting level:
 
     skip.D.op-A₁-A₂-…-A_D-Y   ⇒   split.op(A₁-A₂-…-A_D, pass)-Y
 
-- **Nested (laminar) skips** — one span fully inside another — become
-  **nested splits**; the main branch is translated recursively.
-- **Crossing spans** (partial overlap, neither contains the other) can't
-  be expressed as a tree → `ValueError`.
-- **Overshoot** (span runs past the chain end) → `ValueError`.
-
-`parse_model2` rebuilds the canonical spec from the parsed tree, so a
-legacy skip spec and its split form round-trip identically. The result
-DB has been fully migrated to split-form (see the split-layer migration
-notes), but skip syntax in a template or on the CLI still parses.
+Nested (laminar) skips became nested splits; crossing spans (which
+can't be expressed as a tree) and overshooting spans were rejected.
+The result DB was fully migrated to split form with this rewrite, and
+the `skip.*` syntax (with the translation pass) was then retired in
+2026-07 — a skip spec now fails to parse like any unknown layer.
 
 ## Neighbor mutations
 
@@ -147,8 +142,8 @@ branch *and* the top chain. The Split-specific moves:
 
 - `num_weights` = Σ over branches (Split itself is weightless).
 - `num_mults` = Σ over branches + a small merge term `size · (n − 1)`.
-- `num_layers` = `1` (the Split, the structural analog of the old
-  `SkipDef` pseudo-layer) + Σ branch `num_layers`. This makes a
+- `num_layers` = `1` (the Split, the structural analog of the retired
+  `SkipDef` pseudo-layer) + Σ branch `num_layers`. This made a
   skip-translated spec match the legacy `ModelDef.num_layers` exactly —
   e.g. `dense-skip.1.add-dense-dense` (4) → `dense-split.add(dense,
   pass)-dense`, where the split contributes `1 + 1 + 0 = 2`, total 4.
@@ -179,8 +174,8 @@ passed in, so the runtime never inspects heterogeneous branch internals.
   `is_valid(allow_terminal_bare_dense=…)`, recursive `neighbors`.
 - **`Model2Def`** (`model2.py`) — the model descriptor that hosts the
   top `LayerSeqDef`; `neighbors()` generates and `is_valid`-filters.
-- **`parse_model2` / `_translate_skips`** (`spec_parser.py`) — the single
-  construction entry point and the skip-to-split rewrite.
+- **`parse_model2`** (`spec_parser.py`) — the single construction
+  entry point.
 
 ## Deferred / open
 
@@ -194,7 +189,8 @@ passed in, so the runtime never inspects heterogeneous branch internals.
   `bits.2.oh+bp` (width 6) / `bits.4.oh+bp` (17). Add a carve-out only if
   it proves valuable.
 - **v2 loss predictor with real branching.** The current predictor
-  flattens the tree skip-style: `split.add` / `split.cat` reuse the
-  `skip_add` / `cat_dist` feature slots (so all legacy skip data
-  transfers), and `split.mul` gets its own slot. A faithful tree-shaped
-  predictor would use real "split" features.
+  flattens the tree marker-plus-main-branch style: `split.add` /
+  `split.cat` live in what were the skip feature slots (so all data
+  labeled before the representation switch transferred), and
+  `split.mul` gets its own slot. A faithful tree-shaped predictor
+  would use real "split" features.

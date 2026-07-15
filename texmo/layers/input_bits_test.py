@@ -3,7 +3,6 @@ import numpy as np
 import torch
 
 from texmo.layers.input_bits import InputBitsDef
-from texmo.model import ModelDef
 from texmo.precision import Precision
 
 # -- bits.1 (raw bit, no position) --
@@ -328,71 +327,6 @@ def test_dtype_fp16():
     tokens = torch.tensor([[0, 1]], dtype=torch.long)
     out = module(tokens)
     assert out.dtype == torch.float16
-
-
-# -- model integration --
-
-def test_model_bits1():
-    """Verify bits.1 input works end-to-end with Model."""
-    md = ModelDef("bits.1|", Precision.FP32)
-    assert md.ntokens == 2
-    model = md.build_model()
-
-    # forward with bit tokens
-    batch = torch.randint(0, 2, (4, 16))
-    logits = model(batch)
-    assert logits.shape == (4, 16, 2)
-
-
-def test_model_bits1_bp():
-    md = ModelDef("bits.1+bp|", Precision.FP32)
-    assert md.ntokens == 2
-    model = md.build_model()
-
-    batch = torch.randint(0, 2, (4, 16))
-    logits = model(batch)
-    assert logits.shape == (4, 16, 2)
-
-
-def test_model_bits4_oh():
-    md = ModelDef("bits.4.oh|", Precision.FP32)
-    assert md.ntokens == 16
-    model = md.build_model()
-
-    batch = torch.randint(0, 16, (4, 32))
-    logits = model(batch)
-    assert logits.shape == (4, 32, 16)
-
-
-def test_model_bits1_step_matches_forward():
-    md = ModelDef("bits.1+bp|dense.8.gelu", Precision.FP32)
-    model = md.build_model()
-    model.eval()
-
-    tokens = [0, 1, 1, 0, 1, 0, 0, 1]
-    batch = torch.tensor([tokens], dtype=torch.long)
-
-    with torch.no_grad():
-        fwd_logits = model(batch)  # (1, 8, 2)
-
-        states, step_logits_0 = model.initial_step()
-        step_logits = [step_logits_0]
-        for t in tokens[:-1]:
-            states, logits_t = model.step(states, t)
-            step_logits.append(logits_t)
-
-    for i in range(len(tokens)):
-        assert torch.allclose(fwd_logits[0, i], step_logits[i], atol=1e-5)
-
-
-def test_model_bits4_oh_loss():
-    md = ModelDef("bits.4.oh|dense.16.gelu", Precision.FP32)
-    model = md.build_model()
-
-    batch = torch.randint(0, 16, (4, 32))
-    loss = model.loss_batch(batch)
-    assert loss.shape == ()
-    assert loss.item() > 0
 
 
 # -- JAX --

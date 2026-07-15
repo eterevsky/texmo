@@ -130,6 +130,51 @@ work. The run-level spread has a heavy tail: median deviation is only
 ~0.6%, but ~2% of runs diverge (loss clipped at MAX_LOSS), and p99
 deviation is ~0.48.
 
+## Where the error lives (2026-07 decomposition)
+
+Per-run |err| on the val split, model vs oracle, by bucket:
+
+| bucket | share of runs | model L1 | oracle L1 | share of total L1 |
+|---|---|---|---|---|
+| diverged (loss ≥ MAX)  | 2.1%  | 1.06  | 0.18  | **38%** |
+| loss ∈ [4, MAX)        | 79.3% | 0.042 | 0.022 | 57% |
+| loss ∈ [2, 4)          | 18.6% | 0.015 | 0.010 | 5% |
+| weights < 100          | 66.9% | 0.050 | 0.025 | 57% |
+| weights ∈ [100, 1k)    | 20.6% | 0.041 | 0.011 | 15% |
+| weights ∈ [1k, 10k)    | 11.3% | **0.127** | 0.028 | 25% |
+| weights ≥ 10k          | 1.2%  | **0.191** | 0.023 | 4% |
+
+Splitting each weight bucket by divergence settles where the gap
+lives (share = fraction of total val L1):
+
+| bucket | n | model L1 | share |
+|---|---|---|---|
+| w < 100, converged        | 59,872 | 0.046 | 50.8% |
+| w ∈ [100, 1k), converged  | 18,401 | 0.020 | 7.0%  |
+| w ∈ [1k, 10k), converged  | 9,580  | **0.020** | 3.6% |
+| w ≥ 10k, converged        | 979    | 0.054 | 1.0%  |
+| diverged (all weights)    | 1,912  | 0.45–1.7 | **37.5%** |
+
+Structural findings:
+
+- **Converged big models predict fine** — [1k, 10k) converged is
+  0.020, *better* than tiny models. The apparent big-model gap was
+  divergence concentration in disguise (upweighting big-model
+  training examples was correspondingly a null — see
+  loss_rnn_experiments.md).
+- **The divergence tail is ~38% of all L1** from 2.1% of runs. Much
+  of it is irreducible for a point predictor: many bad confs are
+  *bimodal* (some runs converge, some diverge; the model correctly
+  predicts the conditional median and pays for the diverged half
+  anyway). The worst-conf list is dominated by one motif:
+  `bits.4.oh+bp|rnn.N.gelu` chains at high step counts. Predicting
+  the *probability* of divergence (a second head, or quantile
+  outputs) is the highest-leverage architecture change — candidate
+  for the v2 predictor.
+- The remaining half of the L1 is diffuse small errors on sub-100-
+  weight models, at ~1.8× their oracle floor — the closest-to-
+  saturated regime.
+
 ## Use in search
 
 Two strategies in [`texmo/search.py`](../texmo/search.py) call the

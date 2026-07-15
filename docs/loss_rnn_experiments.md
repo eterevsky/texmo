@@ -188,3 +188,21 @@ Take-aways:
   0.037 gap to the oracle. The rest of the gap is elsewhere (per-run
   noise tail, per-layer/topology structure) — see the error
   decomposition in loss_prediction.md.
+
+### Upweighting big models — null
+
+The decomposition shows weights ∈ [1k, 10k) at L1 0.127 vs oracle
+0.028. Hypothesis: data imbalance (~12% of runs). Test: replicate
+the w ≥ 1000 training examples K times (2 seeds each):
+
+| K | overall | [1k, 10k) | ≥ 10k |
+|---|---------|-----------|-------|
+| 1 | 0.0588  | 0.128     | 0.19  |
+| 2 | 0.0588  | 0.126     | 0.18  |
+| 4 | 0.0596  | 0.126     | 0.18  |
+
+Sampling frequency is not the bottleneck — K=2 buys ~0.002 in the
+bucket, K=4 starts hurting overall. The big-model gap overlaps
+heavily with the divergence tail (the worst-conf list is almost
+entirely w ≥ 1000 bimodal `rnn.gelu` confs), pointing at
+divergence-awareness rather than sample weighting.

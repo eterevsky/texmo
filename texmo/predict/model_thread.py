@@ -43,6 +43,7 @@ from ..db.writer import DbWriterProxy
 from ..precision import Precision
 from . import loss_rnn
 from .loss_rnn import LossModelHolder
+from .persist import save_predictor
 from .timing import TrainTimingModel
 
 
@@ -163,7 +164,7 @@ def bootstrap(
     for system in reader.get_systems():
         for precision in Precision:
             _refit_pair(reader, writer, timing_model, system, precision)
-    writer.save_model('timing', timing_model.snapshot())
+    save_predictor(reader.path, 'timing', timing_model.snapshot())
 
 
 class ModelThread(threading.Thread):
@@ -223,7 +224,8 @@ class ModelThread(threading.Thread):
         if self._run_counter[key] >= _REFIT_EVERY:
             self._run_counter[key] = 0
             _refit_pair(reader, writer, self._timing_model, system, precision)
-            writer.save_model('timing', self._timing_model.snapshot())
+            save_predictor(
+                self._db_path, 'timing', self._timing_model.snapshot())
         self._total_run_counter += 1
         if self._total_run_counter >= _LOSS_REFIT_EVERY:
             self._total_run_counter = 0
@@ -232,7 +234,9 @@ class ModelThread(threading.Thread):
     def _refit_loss(self, reader: DbReader, writer: DbWriterProxy):
         loss_model = loss_rnn.train_loss_model(reader)
         if loss_model is not None:
-            writer.save_model('loss', loss_model)
+            # Predictors persist as files next to the DB, not through
+            # the writer queue (see predict/persist.py).
+            save_predictor(self._db_path, 'loss', loss_model)
             self._loss_model.set_model(loss_model)
             logging.info(
                 f"Published new loss model "

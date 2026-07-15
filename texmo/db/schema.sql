@@ -76,11 +76,10 @@ CREATE TABLE run (
     -- Final loss per byte on the eval sample.
     loss REAL NOT NULL,
 
-    -- A 1D array of training losses after each step, encoded as
-    -- ndarray(dtype=np.float32) and converted to bytes by ndarray.tobytes().
-    -- Can be converted back to an array by np.frombuffer().
-    step_loss BLOB,  -- for SQLite
-    -- step_loss BYTEA,  -- for PostgreSQL
+    -- NOTE: a step_loss BLOB column (the full per-step training-loss
+    -- history) lived here until 2026-07: it dominated the DB size and
+    -- went unused. The fitted trend params below carry the useful
+    -- summary.
 
     -- Loss model version.
     loss_model_v INTEGER,
@@ -137,11 +136,7 @@ CREATE INDEX conf_time_estimate_conf_time
 -- known not to improve the running Pareto best.
 CREATE INDEX conf_weights_score ON conf(weights, median_score);
 
--- Serialized trained models (pickled). `name` is a short key like
--- 'timing' or 'loss'. Saved by ModelTrainingThread after each refit
--- so restarts don't have to redo minutes of training.
-CREATE TABLE model (
-    name TEXT NOT NULL PRIMARY KEY,
-    data BLOB NOT NULL,
-    updated_at TIMESTAMP NOT NULL
-);
+-- NOTE: the fitted timing/loss predictors lived in a `model` table
+-- (pickled blobs) until 2026-07; they now live as pickle files next
+-- to the DB (see texmo/predict/persist.py) so DB backups don't carry
+-- refittable artifacts.

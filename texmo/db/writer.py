@@ -22,12 +22,11 @@ they don't need the queue indirection.
 
 import logging
 import math
-import pickle
 import sqlite3
 import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from queue import Queue
 from statistics import StatisticsError, median
 from typing import Optional
@@ -54,9 +53,9 @@ VALUES (:spec, :weights, :lr, :length, :batch, :steps, :precision,
 """
 
 INSERT_RUN = """
-INSERT INTO run(conf_id, system, train_time, timestamp, loss, step_loss,
+INSERT INTO run(conf_id, system, train_time, timestamp, loss,
                 loss_model_v, loss_model, strategy, changed_winner)
-VALUES (:conf_id, :system, :train_time, :timestamp, :loss, :step_loss,
+VALUES (:conf_id, :system, :train_time, :timestamp, :loss,
         :loss_model_v, :loss_model, :strategy, :changed_winner)
 """
 
@@ -114,12 +113,6 @@ ON CONFLICT(conf_id, system) DO UPDATE
   SET time_s = excluded.time_s
   WHERE conf_time_estimate.source = 'predicted'
 """
-
-UPSERT_MODEL = """
-INSERT OR REPLACE INTO model(name, data, updated_at)
-VALUES (:name, :data, :updated_at)
-"""
-
 
 class DbWriter(object):
     """Read-write handle to the results DB. Owns write transactions."""
@@ -325,7 +318,10 @@ class DbWriter(object):
             'train_time': run.train_time or 0,
             'timestamp': timestamp,
             'loss': loss,
-            'step_loss': _pack_ndarray(run.step_loss),
+            # The per-step loss history is deliberately NOT stored: it
+            # dominated the DB size and went unused for months. The
+            # fitted trend params (loss_model, 3 floats) reconstruct
+            # the LossTrend without it.
             'loss_model_v': loss_model_v,
             'loss_model': loss_model,
             'strategy': strategy,
@@ -512,20 +508,6 @@ class DbWriter(object):
         ])
         cur.execute('COMMIT')
 
-    def save_model(self, name: str, obj) -> None:
-        """Pickle `obj` and upsert into the model table under `name`."""
-        data = pickle.dumps(obj)
-        cur = self._db.cursor()
-        cur.execute('BEGIN IMMEDIATE')
-        cur.execute(UPSERT_MODEL, {
-            'name': name,
-            'data': data,
-            'updated_at': datetime.now(timezone.utc).isoformat(),
-        })
-        cur.execute('COMMIT')
-        logging.info(f"Saved model '{name}' ({len(data)} bytes)")
-
-
 # --- WriterThread + queued writes -------------------------------------------
 
 
@@ -550,12 +532,6 @@ class UpsertPredictedTimeEstimates:
 
 
 @dataclass
-class SaveModel:
-    name: str
-    obj: object
-
-
-@dataclass
 class UpdateAllScores:
     pass
 
@@ -568,7 +544,6 @@ class Stop:
 WriteMessage = (
     AddRun
     | UpsertPredictedTimeEstimates
-    | SaveModel
     | UpdateAllScores
     | Stop
 )
@@ -609,9 +584,6 @@ class DbWriterProxy:
             for (cid, s, t) in rows
         ]))
 
-    def save_model(self, name: str, obj) -> None:
-        self._queue.put(SaveModel(name=name, obj=obj))
-
     def update_all_scores(self) -> None:
         self._queue.put(UpdateAllScores())
 
@@ -647,8 +619,6 @@ class WriterThread(threading.Thread):
                     case UpsertPredictedTimeEstimates(rows=rows):
                         writer.upsert_predicted_time_estimates(
                             (r.conf_id, r.system, r.time_s) for r in rows)
-                    case SaveModel(name=name, obj=obj):
-                        writer.save_model(name, obj)
                     case UpdateAllScores():
                         writer.update_all_scores()
                     case Stop():

@@ -3,7 +3,7 @@
 `DbReader` opens the SQLite file in read-only mode and exposes the
 query methods used by Search threads, report handlers, and any
 read-only CLI. `DbWriter` opens read-write and owns the write
-transactions (`add_run`, `save_model`, the predicted-estimate
+transactions (`add_run`, the predicted-estimate
 upserts, etc.). The two classes share helpers / SQL constants /
 return-value dataclasses out of `texmo.db.common`.
 

@@ -103,7 +103,10 @@ class LossTrend(LossTrendBase):
 def build_loss_trend(step_loss, model_version, params):
     if params is None or model_version != 1:
         predictor = LossTrend()
-        predictor.fit(step_loss)
+        # The DB no longer stores the per-step history, so rows
+        # without fitted params come back as an unfitted trend.
+        if step_loss is not None and len(step_loss) > 0:
+            predictor.fit(step_loss)
         return predictor
     c1, c2, eps = params
     return LossTrend(c1, c2, eps)

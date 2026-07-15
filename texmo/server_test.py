@@ -296,43 +296,50 @@ def test_search_server_add_run_does_not_overwrite_median_with_prediction(tmp_pat
 
 # -- graceful predictor loading (Model2 transition prep) --------------
 
+from texmo.predict.persist import predictor_path, save_predictor
 from texmo.server import _load_predictor, _probe_timing
 
 
 class _FakeReader:
-    def __init__(self, model=None, raise_load=False):
-        self._model = model
-        self._raise_load = raise_load
+    """Predictors live as files next to the DB; the reader only
+    contributes its path."""
 
-    def load_model(self, name):
-        if self._raise_load:
-            raise ValueError("corrupt pickle")
-        return self._model
+    def __init__(self, path: str):
+        self.path = path
 
 
-def test_load_predictor_none_when_absent():
+def _fake_db(tmp_path) -> _FakeReader:
+    return _FakeReader(str(tmp_path / 'db.sqlite'))
+
+
+def test_load_predictor_none_when_absent(tmp_path):
     assert _load_predictor(
-        _FakeReader(model=None), 'loss', lambda m: None) is None
+        _fake_db(tmp_path), 'loss', lambda m: None) is None
 
 
-def test_load_predictor_returns_model_when_probe_ok():
-    sentinel = object()
-    assert _load_predictor(
-        _FakeReader(model=sentinel), 'loss', lambda m: None) is sentinel
+def test_load_predictor_returns_model_when_probe_ok(tmp_path):
+    reader = _fake_db(tmp_path)
+    save_predictor(reader.path, 'loss', {'sentinel': 42})
+    loaded = _load_predictor(reader, 'loss', lambda m: None)
+    assert loaded == {'sentinel': 42}
 
 
-def test_load_predictor_ignores_incompatible_model():
+def test_load_predictor_ignores_incompatible_model(tmp_path):
     """An old model deserializes but raises on first use (e.g. a
     feature-dim change) -> ignored so the caller refits."""
+    reader = _fake_db(tmp_path)
+    save_predictor(reader.path, 'loss', {'old': 'layout'})
+
     def probe(_):
         raise RuntimeError("shape mismatch")
-    assert _load_predictor(
-        _FakeReader(model=object()), 'loss', probe) is None
+    assert _load_predictor(reader, 'loss', probe) is None
 
 
-def test_load_predictor_ignores_deserialization_failure():
-    assert _load_predictor(
-        _FakeReader(raise_load=True), 'loss', lambda m: None) is None
+def test_load_predictor_ignores_deserialization_failure(tmp_path):
+    reader = _fake_db(tmp_path)
+    with open(predictor_path(reader.path, 'loss'), 'wb') as f:
+        f.write(b'not a pickle')
+    assert _load_predictor(reader, 'loss', lambda m: None) is None
 
 
 def test_probe_timing_runs_only_on_matching_precision():

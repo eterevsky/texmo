@@ -123,7 +123,10 @@ def test_get_confs_runs(db):
     }
 
 
-def test_step_loss(db):
+def test_step_loss_not_stored(db):
+    """The per-step training-loss history is deliberately NOT
+    persisted (it dominated the DB size and went unused); only the
+    final loss and the fitted trend params survive the round trip."""
     conf1, run1 = _make_conf_run(loss=1)
     run1.add_step(1)
     run1.add_step(2)
@@ -132,7 +135,9 @@ def test_step_loss(db):
 
     conf_runs = list(db.get_confs_runs())
     assert len(conf_runs) == 1
-    np.testing.assert_array_equal(conf_runs[0][2].step_loss, [1, 2, 3])
+    stored = conf_runs[0][2]
+    assert stored.loss == 1
+    assert stored.step_loss is None or len(stored.step_loss) == 0
 
 
 def test_total_runs(db):

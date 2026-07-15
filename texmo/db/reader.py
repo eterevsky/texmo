@@ -7,7 +7,6 @@ is single-connection by construction; concurrent readers in the same
 process get separate `DbReader` instances.
 """
 
-import pickle
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -98,7 +97,6 @@ SELECT conf.id AS conf_id,
         NULLIF(train_time, 0) AS train_time,
         timestamp,
         loss,
-        step_loss,
         loss_model_v,
         loss_model
 FROM conf, run
@@ -789,16 +787,17 @@ class DbReader(object):
                 conf_id = row['conf_id']
                 conf = Configuration.from_dict(row)
 
-                step_loss = _unpack_ndarray(row['step_loss'])
+                # The per-step history is no longer stored; the trend
+                # rebuilds from its fitted params alone (or stays
+                # unfitted for rows without params).
                 loss_trend = _build_loss_trend(
-                    step_loss,
+                    None,
                     row['loss_model_v'],
                     _unpack_ndarray(row['loss_model']),
                 )
 
                 run = Run(
                     id=row['run_id'],
-                    step_loss=step_loss,
                     loss=row['loss'],
                     loss_trend=loss_trend,
                     train_time=row['train_time'],
@@ -907,17 +906,6 @@ class DbReader(object):
         return out
 
     # --- single-row lookups -------------------------------------------------
-
-    def load_model(self, name: str):
-        """Return the unpickled model stored under `name`, or None."""
-        cur = self._db.execute(
-            'SELECT data FROM model WHERE name = :name',
-            {'name': name},
-        )
-        row = cur.fetchone()
-        if row is None:
-            return None
-        return pickle.loads(row['data'])
 
     def get_time_estimate(
         self, conf_id: int, system: str

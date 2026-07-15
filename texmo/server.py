@@ -35,6 +35,7 @@ from .db import ConfScore, DbReader, DbWriter
 from .db.writer import DbWriterProxy, Stop as WriterStop, WriterThread
 from .latency import get_report, report, timer
 from .predict.loss_rnn import LossModelHolder
+from .predict.persist import load_predictor
 from .predict.model_thread import (
     BootstrapTiming,
     LossRefit,
@@ -290,8 +291,9 @@ def _probe_timing(model: TrainTimingModel, conf: Configuration) -> None:
 
 
 def _load_predictor(reader, name: str, probe):
-    """Load the persisted predictor stored under `name`, returning it
-    only if it both deserializes and survives `probe` (a trivial use).
+    """Load the persisted predictor file for `name` (stored next to
+    the DB; see predict/persist.py), returning it only if it both
+    deserializes and survives `probe` (a trivial use).
 
     A feature-schema change (e.g. the loss model's new split slot) makes
     an old model unpickle fine but raise a shape mismatch on the first
@@ -299,7 +301,7 @@ def _load_predictor(reader, name: str, probe):
     On any failure we log and return None, leaving the caller to refit.
     """
     try:
-        model = reader.load_model(name)
+        model = load_predictor(reader.path, name)
         if model is None:
             return None
         probe(model)

@@ -9,6 +9,7 @@ from texmo.predict.timing import (
     CHUNK_SIZE,
     TrainTimingModel,
     Weights,
+    _dot,
     _fit,
     chunk_structure,
     featurize,
@@ -362,3 +363,62 @@ def test_emb_input_component_type_id():
     # with the dense-shaped features (last width -> ntokens).
     comps_oh = featurize(_conf("bits.4.emb.8|rnn.8.tanh"))
     assert comps_oh[0].type_id == "bits.4.emb"
+
+
+# -- Registry coverage --------------------------------------------------
+
+
+def test_featurize_covers_every_layer_type():
+    """Every layer type in the spec registry featurizes without an
+    unknown-layer error, under its expected timing key. Guards against
+    a new layer (or codec) silently missing from the dispatch."""
+    specs = [
+        "bytes|dense.8.gelu-norm-gru.8-mgru.8-mingru.8-lstm.8",
+        "bytes|rnn.8.tanh-rmsnorm-slstm.8-mullstm.8-matlstm.8",
+        "bits.1+bp|suffix.2-dense.8.gelu-conv.2-msr.8.1-rglru.2",
+        "bits.2.oh+bp|latent.8.2-lrnn.8.2-lmgu.8.2",
+        "bytes.emb.8|dense.8.tanh",
+        "bits.1+bp|attn.8.2.16-split.add(dense.8.gelu, pass)"
+        "-split.mul(dense.8.gelu, dense.8)-split.cat(dense.8.gelu, pass)",
+    ]
+    seen = set()
+    for spec in specs:
+        for c in featurize(_conf(spec, batch=4, length=16)):
+            seen.add(c.type_id)
+    expected = {
+        # inputs
+        "bytes", "bits.1+bp", "bits.2.oh+bp", "bytes.emb",
+        # matmul family
+        "dense.gelu", "dense.tanh", "dense", "rnn.tanh",
+        "gru", "mgru", "mingru", "lstm", "slstm", "mullstm",
+        # dedicated feature shapes
+        "matlstm", "msr", "rglru", "attn", "suffix", "conv",
+        "latent", "lrnn", "lmgu",
+        # elementwise + markers + head
+        "norm", "rmsnorm",
+        "split.add", "split.cat", "split.mul",
+        "output",
+    }
+    assert expected <= seen, f"missing: {sorted(expected - seen)}"
+
+
+def test_reps_layers_scale_with_reps():
+    """latent/lrnn/lmgu compute scales with `reps` (their inner
+    recurrence fires reps times per token) -- the features must
+    distinguish latent.8.2 from latent.8.8."""
+    for name in ("latent", "lrnn", "lmgu"):
+        comps2 = featurize(_conf(f"bits.1+bp|{name}.8.2", batch=4, length=16))
+        comps8 = featurize(_conf(f"bits.1+bp|{name}.8.8", batch=4, length=16))
+        f2 = next(c for c in comps2 if c.type_id == name).features
+        f8 = next(c for c in comps8 if c.type_id == name).features
+        assert f2.shape == (15,)  # 12 dense + 3 reps-scaled
+        # The reps-scaled tail grows 4x; the dense prefix is unchanged.
+        np.testing.assert_array_equal(f2[:12], f8[:12])
+        np.testing.assert_array_equal(f8[12:], 4 * f2[12:])
+
+
+def test_dot_ignores_stale_weight_lengths():
+    """Weights fitted before a feature-schema change have the wrong
+    length for that type; they must contribute zero, not crash."""
+    assert _dot({"latent": np.ones(12)}, "latent", [1.0] * 15) == 0.0
+    assert _dot({"latent": np.ones(15)}, "latent", [1.0] * 15) == 15.0

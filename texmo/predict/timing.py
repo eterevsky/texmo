@@ -171,6 +171,21 @@ def _features_msr(
     ]
 
 
+def _features_reps_recurrent(
+    isize: int, osize: int, batch: int, length: int, reps: int
+) -> list[float]:
+    # latent/lrnn/lmgu iterate their internal (size x size) recurrence
+    # `reps` times per token while the input projection fires once.
+    # The dense features cover the projection; the extra terms carry
+    # the reps-scaled inner matmuls (lmgu's 4 inner matrices vs
+    # latent's 1 are absorbed by the per-type NNLS coefficient).
+    return _features_dense(isize, osize, batch, length) + [
+        float(reps * osize * osize),
+        float(reps * osize * osize * length),
+        float(reps * osize * osize * batch * length),
+    ]
+
+
 def _features_split(osize: int, batch: int, length: int) -> list[float]:
     # The merge itself: an elementwise op (add/mul) or a concat copy
     # over the merged channels per position. Same cheap shape as the
@@ -214,12 +229,12 @@ _MATMUL_LAYER_TYPES = (
     MgruDef,
     MinGruDef,
     LstmDef,
-    LatentDef,
-    LrnnDef,
-    LmguDef,
     SLstmDef,
     MulLstmDef,
 )
+
+# Layers whose inner recurrence fires `reps` times per token.
+_REPS_LAYER_TYPES = (LatentDef, LrnnDef, LmguDef)
 
 
 @dataclass
@@ -262,6 +277,9 @@ def _layer_component(layer, batch: int, length: int) -> Component:
     elif isinstance(layer, AttnDef):
         features = _features_attn(
             layer.input_size, layer.size, batch, length, layer.window)
+    elif isinstance(layer, _REPS_LAYER_TYPES):
+        features = _features_reps_recurrent(
+            layer.input_size, layer.size, batch, length, layer.reps)
     elif isinstance(layer, _MATMUL_LAYER_TYPES):
         features = _features_dense(layer.input_size, layer.size, batch, length)
     elif isinstance(layer, (NormDef, RmsNormDef)):
@@ -351,7 +369,10 @@ class Weights:
 
 def _dot(weights: dict[str, np.ndarray], type_id: str, features) -> float:
     w = weights.get(type_id)
-    if w is None:
+    if w is None or len(w) != len(features):
+        # A length mismatch means the weights predate a feature-schema
+        # change for this type; treat like an unseen type (zero
+        # contribution) until the next refit rather than crashing.
         return 0.0
     return float(np.dot(w, features))
 

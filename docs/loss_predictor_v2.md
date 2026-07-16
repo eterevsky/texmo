@@ -1,7 +1,40 @@
 # Loss predictor v2: structure-mirroring RNN (design, 2026-07-16)
 
-Oleg's proposal, recorded before prototyping. Status: idea + first
-experiments planned; nothing in production.
+Oleg's proposal. Status: prototyped in
+`scratch/loss_tree_20260716.py`; first ablations below say the idea
+works — val L1 0.0568 vs the production 0.0587 at untuned first-shot
+hyperparameters. Nothing in production yet.
+
+## First ablations (2026-07-16, 2 seeds each, production budget)
+
+The prototype compiles each conf to a register-machine tape (see
+sketch below) and toggles the three axes independently. `flat` uses
+the same architecture on the production flattened sequence — the
+topology-parity control.
+
+| variant                | flat tapes | tree tapes |
+|------------------------|-----------|------------|
+| base                   | 0.0587 (production model) | 0.0591 |
+| + skip0 (act0 → head)  | 0.0582    | **0.0570** |
+| + skip0 + per-type params | 0.0580 | **0.0568** |
+
+Reading:
+
+- **The win is real and decomposes**: ~0.0007 from the codec-mirror
+  head skip alone (it helps even on flat tapes) and a further
+  ~0.0012 from true fork/merge topology — but only in combination:
+  tree topology *without* the head skip is slightly worse than flat
+  (0.0591), presumably because branchy paths dilute the globals that
+  the head needs, and the skip restores them.
+- Per-type `Layer_params` adds a small, very consistent extra
+  (0.0568/0.0568 across seeds).
+- Total −0.0019 vs production at d=32/dp=16 with zero tuning — the
+  largest single improvement found in Round 3 (features topped out
+  at −0.0008).
+
+Pending: mutation-pair ranking eval (sign agreement / Spearman of
+predicted vs true single-mutation deltas), width/LR tuning, and the
+latent-recurrent `Layer_forward` variant.
 
 ## The idea
 

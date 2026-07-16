@@ -32,9 +32,23 @@ Reading:
   largest single improvement found in Round 3 (features topped out
   at −0.0008).
 
-Pending: mutation-pair ranking eval (sign agreement / Spearman of
-predicted vs true single-mutation deltas), width/LR tuning, and the
-latent-recurrent `Layer_forward` variant.
+**Mutation-pair ranking** (2,232 val conf pairs differing by one
+model mutation, both ends with ≥2 runs; scored on the 1,545 pairs
+with |Δmedian| ≥ 0.02; 1 seed each):
+
+| model | sign-acc | Spearman |
+|---|---|---|
+| production RNN | 0.824 | 0.721 |
+| tree + skip0 + per-type | **0.835** | **0.735** |
+
++1.1pp sign accuracy on the search-shaped metric — about 1σ for a
+single seed (binomial), so directional rather than conclusive, but
+consistent with the L1 gain. The pair miner and eval live in
+`scratch/loss_pairs_20260716.py`.
+
+Pending: multi-seed pair eval, width/LR tuning, the latent-recurrent
+`Layer_forward` variant, and promotion out of scratch if the
+direction is confirmed.
 
 ## The idea
 

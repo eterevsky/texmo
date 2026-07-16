@@ -13,14 +13,16 @@ import numpy as np
 from texmo.configuration import Configuration
 from texmo.precision import Precision
 from texmo.predict.loss_rnn import (
+    _LOG_MAX,
     N_INIT_GLOBAL,
     LossModel,
     _init_global_features,
     _is_simple_type,
     _layer_features,
-    model_layers,
     discover_simple_types,
     fit,
+    model_layers,
+    predict,
 )
 from texmo.predict.predict_common import layer_type_id
 from texmo.spec_parser import parse_model2
@@ -146,3 +148,25 @@ def test_init_globals_codec_features():
     assert g[7] == 0.0
     # One-hot codec weights = the implicit dense head (4*256+256).
     assert abs(g[8] - np.log2(1 + 4 * 256 + 256)) < 1e-6
+
+
+def test_gated_head_fits_and_bounds():
+    """The gated head trains and interpolates toward the divergence
+    clip: predictions stay below LOG_MAX and a diverged-labeled conf
+    pulls the gate open."""
+    confs = [
+        _m2('bits.1+bp|dense.4.gelu'),
+        _m2('bytes|gru.8'),
+    ]
+    # First conf converges (loss 1.5), second reliably diverges.
+    data = ([(confs[0], 1.5)] + [(confs[1], 12.0)]) * 30
+    st = discover_simple_types(data)
+    params, ml, _ = fit(
+        data, st, steps=200, seed=0, gated_head=True,
+        feat_proj=8, out_hidden=8)
+    assert 'W_gate' in params
+    preds = predict(
+        params, confs, st, ml, feat_proj=8, out_hidden=8,
+        gated_head=True)
+    assert preds[1] > preds[0]
+    assert preds[1] <= _LOG_MAX + 1e-3

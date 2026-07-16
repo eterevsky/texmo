@@ -155,25 +155,33 @@ lives (share = fraction of total val L1):
 | w ≥ 10k, converged        | 979    | 0.054 | 1.0%  |
 | diverged (all weights)    | 1,912  | 0.45–1.7 | **37.5%** |
 
-Structural findings:
+Structural findings (corrected after the ≥2-run-conf re-analysis —
+the raw oracle is flattered by single-run confs, 32% of val runs,
+where it predicts its own value for free):
 
-- **Converged big models predict fine** — [1k, 10k) converged is
-  0.020, *better* than tiny models. The apparent big-model gap was
-  divergence concentration in disguise (upweighting big-model
-  training examples was correspondingly a null — see
-  loss_rnn_experiments.md).
-- **The divergence tail is ~38% of all L1** from 2.1% of runs. Much
-  of it is irreducible for a point predictor: many bad confs are
-  *bimodal* (some runs converge, some diverge; the model correctly
-  predicts the conditional median and pays for the diverged half
-  anyway). The worst-conf list is dominated by one motif:
-  `bits.4.oh+bp|rnn.N.gelu` chains at high step counts. Predicting
-  the *probability* of divergence (a second head, or quantile
-  outputs) is the highest-leverage architecture change — candidate
-  for the v2 predictor.
-- The remaining half of the L1 is diffuse small errors on sub-100-
-  weight models, at ~1.8× their oracle floor — the closest-to-
-  saturated regime.
+- **On ≥2-run confs the model is ~1.4× the honest floor** (0.046 vs
+  oracle 0.034) — about the same ratio as the 276k snapshot. The
+  headline 0.059-vs-0.023 exaggerates the gap.
+- **Converged models predict near the floor at every size** — [1k,
+  10k) converged is 0.020, *better* than tiny models. The apparent
+  big-model gap was divergence concentration in disguise
+  (upweighting big-model training examples was correspondingly a
+  null — see loss_rnn_experiments.md).
+- **The divergence tail is mostly bimodal, i.e. irreducible.** Among
+  diverged runs in ≥2-run confs, minority-divergence runs (some runs
+  of the conf converge, some don't; model AND oracle both pay ~1)
+  carry 9.4% of total L1; consistently-diverging confs the model
+  genuinely misses are only 1.9%. The dominant bad motif is
+  `bits.4.oh+bp|rnn.N.gelu` chains at high step counts.
+- **A divergence head would improve L1 bookkeeping, not medians**:
+  even *perfect* knowledge of which confs' medians diverge moves
+  run-level L1 0.059 → 0.043 but the conf-level
+  `|pred − true median|` only 0.0358 → 0.0335 (~6%), and a real
+  classifier gets less. Its only genuine value is as a separate
+  stability signal for search ranking (a good median with 40%
+  divergence odds is information the median hides).
+- The rest of the L1 is diffuse small errors on sub-100-weight
+  models — the closest-to-saturated regime.
 
 ## Use in search
 

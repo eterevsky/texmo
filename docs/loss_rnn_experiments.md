@@ -206,3 +206,30 @@ bucket, K=4 starts hurting overall. The big-model gap overlaps
 heavily with the divergence tail (the worst-conf list is almost
 entirely w ≥ 1000 bimodal `rnn.gelu` confs), pointing at
 divergence-awareness rather than sample weighting.
+
+### Divergence-awareness — measured to a close (2026-07-16)
+
+Three escalating attempts, all against the conf-level
+`|pred − true median|` metric (0.0352 baseline; perfect divergence
+knowledge caps it at 0.0335):
+
+1. **Gated head** (`gated_head=True`: `y = m + σ(g)·(clip − m)`, the
+   step the median surface actually has, trained end-to-end by L1):
+   0.0582 vs 0.0587 overall (3 seeds) — diffuse; the med-diverged
+   bucket it was aimed at is unchanged (0.436 vs 0.440). The L1
+   objective can't drive a gate through 2%-positive imbalance.
+2. **Supervised classifier diagnostic**: HistGBR on the big features
+   reaches **AUC 0.974**, median p̂ = 0.995 on med-diverged runs —
+   the signal is in the features; (1) was an optimization failure,
+   not expressiveness.
+3. **Classifier override** (`p̂ ≥ t → predict the clip`): run-level
+   L1 0.0587 → 0.0571 at t=0.5, but **conf-median flat-to-worse at
+   every threshold** (0.0351–0.0356). Low thresholds override
+   bimodal confs whose median shouldn't move; high-precision
+   thresholds' gains are cancelled by residual false positives.
+
+Conclusion (Oleg's original argument, confirmed end-to-end):
+divergence-awareness improves L1 bookkeeping, not the median. The
+model is at the practical median-prediction ceiling; p̂'s remaining
+value is as a *separate stability signal* for search ranking. Not
+wired into production; `gated_head` stays available but off.

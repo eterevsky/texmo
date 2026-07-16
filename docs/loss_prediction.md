@@ -173,13 +173,15 @@ where it predicts its own value for free):
   carry 9.4% of total L1; consistently-diverging confs the model
   genuinely misses are only 1.9%. The dominant bad motif is
   `bits.4.oh+bp|rnn.N.gelu` chains at high step counts.
-- **A divergence head would improve L1 bookkeeping, not medians**:
-  even *perfect* knowledge of which confs' medians diverge moves
-  run-level L1 0.059 → 0.043 but the conf-level
-  `|pred − true median|` only 0.0358 → 0.0335 (~6%), and a real
-  classifier gets less. Its only genuine value is as a separate
-  stability signal for search ranking (a good median with 40%
-  divergence odds is information the median hides).
+- **A divergence head improves L1 bookkeeping, not medians** — now
+  measured, not just bounded: a supervised classifier separates
+  divergence extremely well (AUC 0.974), yet composing it with the
+  model (`p̂ ≥ t → clip`) moves run-level L1 0.0587 → 0.0571 while
+  the conf-level `|pred − true median|` stays flat at every
+  threshold. The genuine value of p̂ is as a separate stability
+  signal for search ranking (a good median with 40% divergence odds
+  is information the median hides). See loss_rnn_experiments.md for
+  the full three-step chase (gated head → classifier → override).
 - The rest of the L1 is diffuse small errors on sub-100-weight
   models — the closest-to-saturated regime.
 

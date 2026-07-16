@@ -265,6 +265,7 @@ class RnnPredictor(Predictor):
         out_hidden: int = 0,
         out_activation: str = 'gelu',
         batch_size: int = loss_rnn.BATCH_SIZE,
+        gated_head: bool = False,
         seed: int | None = None,
     ):
         self._cell_activation = cell_activation
@@ -279,6 +280,7 @@ class RnnPredictor(Predictor):
         self._out_hidden = out_hidden
         self._out_activation = out_activation
         self._batch_size = batch_size
+        self._gated_head = gated_head
         self._seed = seed
         sched = f" {lr_schedule}" if lr_schedule != 'constant' else ''
         proj = f" proj={feat_proj}" if feat_proj else ''
@@ -287,13 +289,14 @@ class RnnPredictor(Predictor):
         head = (
             f" head={out_hidden}.{out_activation}" if out_hidden > 0 else ''
         )
+        gate = " gated" if gated_head else ''
         bs = (
             f" bs={batch_size}"
             if batch_size != loss_rnn.BATCH_SIZE else ''
         )
         kind = cell_type if cell_type != 'elman' else cell_activation
         self.name = (
-            f"rnn ({kind}, h={hidden}{proj}{sub}{pool}{head}, "
+            f"rnn ({kind}, h={hidden}{proj}{sub}{pool}{head}{gate}, "
             f"lr={lr}{sched}, steps={steps}{bs})"
         )
 
@@ -313,6 +316,7 @@ class RnnPredictor(Predictor):
             out_hidden=self._out_hidden,
             out_activation=self._out_activation,
             batch_size=self._batch_size,
+            gated_head=self._gated_head,
             seed=self._seed,
         )
         logging.info(f"  {self.name} scan depth: {self._max_layers}")
@@ -331,6 +335,7 @@ class RnnPredictor(Predictor):
             pooling=self._pooling,
             out_hidden=self._out_hidden,
             out_activation=self._out_activation,
+            gated_head=self._gated_head,
         )
 
 

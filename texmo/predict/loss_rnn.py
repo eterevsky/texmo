@@ -35,6 +35,10 @@ if TYPE_CHECKING:
 HIDDEN = 8
 BATCH_SIZE = 1024
 
+# Log-space value of a clipped (diverged) run -- the upper mode of the
+# target distribution and the gated head's switch target.
+_LOG_MAX = float(np.log2(MAX_LOSS))
+
 
 @dataclasses.dataclass
 class LossModel:
@@ -55,6 +59,7 @@ class LossModel:
     pooling: str = 'last'
     out_hidden: int = 0
     out_activation: str = 'gelu'
+    gated_head: bool = False
 
     def predict(self, confs: list[Configuration]) -> np.ndarray:
         return predict(
@@ -66,6 +71,7 @@ class LossModel:
             pooling=self.pooling,
             out_hidden=self.out_hidden,
             out_activation=self.out_activation,
+            gated_head=self.gated_head,
         )
 
 
@@ -275,12 +281,12 @@ def _build_targets(
 def _init_params(
     rng, n_layer_feat: int, hidden: int,
     feat_proj: int, rnn_sub_steps: int, cell_type: str,
-    out_hidden: int,
+    out_hidden: int, gated_head: bool = False,
 ) -> dict:
     """Glorot-ish initialization for the dense blocks."""
     gate_mul = 3 if cell_type == 'gru' else 1  # reset, update, candidate
-    # Slots 0..3: W_glob, W_out, W_proj, W_pre_out. 4+: per-RNN-step.
-    keys = jax.random.split(rng, 4 + gate_mul * 3 * rnn_sub_steps)
+    # Slots 0..4: W_glob, W_out, W_proj, W_pre_out, W_gate. 5+: per-RNN-step.
+    keys = jax.random.split(rng, 5 + gate_mul * 3 * rnn_sub_steps)
 
     def init(key, fan_in: int, fan_out: int):
         scale = jnp.sqrt(1.0 / fan_in)
@@ -296,13 +302,18 @@ def _init_params(
     if out_hidden > 0:
         params['W_pre_out'] = init(keys[3], hidden, out_hidden)
         params['b_pre_out'] = jnp.zeros(out_hidden)
+    if gated_head:
+        params['W_gate'] = init(keys[4], out_in_dim, 1)
+        # Start the gate near the base divergence rate (~2%) so the
+        # head begins as the plain regressor and earns its sharpness.
+        params['b_gate'] = jnp.full((1,), -4.0)
     if feat_proj > 0:
         params['W_proj'] = init(keys[2], n_layer_feat, feat_proj)
         params['b_proj'] = jnp.zeros(feat_proj)
         x_in_dim = feat_proj
     else:
         x_in_dim = n_layer_feat
-    key_idx = 4
+    key_idx = 5
     for s in range(rnn_sub_steps):
         if cell_type == 'gru':
             for gate in ('r', 'z', 'c'):
@@ -329,7 +340,8 @@ _ACTIVATIONS = {
 
 def _forward(params, init_globals, layer_feats, masks, cell_activation,
              feat_proj: int, rnn_sub_steps: int, cell_type: str,
-             pooling: str, out_hidden: int, out_activation: str):
+             pooling: str, out_hidden: int, out_activation: str,
+             gated_head: bool = False):
     """Predict log-loss for each sample in the batch.
 
     init_globals: [B, N_INIT_GLOBAL]  (output_size + batch/len/steps/lr/decay)
@@ -391,18 +403,27 @@ def _forward(params, init_globals, layer_feats, masks, cell_activation,
         h_used = out_act(
             h_used @ params['W_pre_out'] + params['b_pre_out'])
 
-    out = h_used @ params['W_out'] + params['b_out']
-    return out.squeeze(-1)
+    base = (h_used @ params['W_out'] + params['b_out']).squeeze(-1)
+    if not gated_head:
+        return base
+    # Gated head: the median surface is discontinuous along the
+    # p(diverge)=0.5 boundary (below: convergent quantile; above: the
+    # clip). A sigmoid switch between the regressor and the known clip
+    # value expresses that step directly -- the gate is an implicit
+    # divergence classifier trained purely by the L1 objective.
+    g = (h_used @ params['W_gate'] + params['b_gate']).squeeze(-1)
+    return base + jax.nn.sigmoid(g) * (_LOG_MAX - base)
 
 
 def _loss_fn(params, init_globals, layer_feats, masks, targets,
              cell_activation, feat_proj: int, rnn_sub_steps: int,
              cell_type: str, pooling: str,
-             out_hidden: int, out_activation: str):
+             out_hidden: int, out_activation: str,
+             gated_head: bool):
     preds = _forward(
         params, init_globals, layer_feats, masks, cell_activation,
         feat_proj, rnn_sub_steps, cell_type, pooling,
-        out_hidden, out_activation)
+        out_hidden, out_activation, gated_head)
     return jnp.mean(jnp.abs(preds - targets))
 
 
@@ -422,6 +443,7 @@ def fit(
     out_hidden: int = 0,  # 0 = single dense head; >0 = hidden -> X -> 1
     out_activation: str = 'gelu',
     batch_size: int = BATCH_SIZE,
+    gated_head: bool = False,  # sigmoid switch to the divergence clip
 ) -> tuple[dict, int, np.ndarray]:
     """Fit RNN params on (conf, loss) pairs.
 
@@ -448,7 +470,7 @@ def fit(
     rng, init_key = jax.random.split(rng)
     params = _init_params(
         init_key, n_layer_feat, hidden, feat_proj, rnn_sub_steps, cell_type,
-        out_hidden,
+        out_hidden, gated_head,
     )
     if lr_schedule == 'cosine':
         schedule = optax.cosine_decay_schedule(
@@ -479,6 +501,7 @@ def fit(
             pooling,
             out_hidden,
             out_activation,
+            gated_head,
         )
         updates, opt_state = optimizer.update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
@@ -537,6 +560,7 @@ def predict(
     pooling: str = 'last',
     out_hidden: int = 0,
     out_activation: str = 'gelu',
+    gated_head: bool = False,
 ) -> np.ndarray:
     type_idx = {t: i for i, t in enumerate(simple_types)}
     ig_np, lf_np, m_np = _build_input_arrays(
@@ -544,5 +568,5 @@ def predict(
     preds = _forward(
         params, jnp.asarray(ig_np), jnp.asarray(lf_np), jnp.asarray(m_np),
         cell_activation, feat_proj, rnn_sub_steps, cell_type, pooling,
-        out_hidden, out_activation)
+        out_hidden, out_activation, gated_head)
     return np.asarray(preds)

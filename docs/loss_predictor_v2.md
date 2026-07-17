@@ -64,11 +64,17 @@ batched matmuls instead of gathered einsum), GPU/client refits (see
 roadmap — this workload is GPU-shaped, unlike the flat RNN), or fall
 back to tree+skip0 (0.0570) where refit cost matters.
 
-Pending: step-depth variants (stack2 / latentK with an untied
-separator dense — the separator breaks the aliasing between
-inner-convergence steps and genuinely repeated layers), 5-seed
-confirmation of per-type-fwd (+depth if it helps), multi-seed pair
-eval, width/LR tuning, promotion out of scratch.
+**Step depth — null to negative** (on the shared-step base, 2 seeds
+each): stack2 (second untied dense) 0.0571/0.0563 — inside the
+base's seed spread; latent2 (tied inner steps + untied separator)
+0.0572/0.0573 — null; latent4 0.0584/0.0604 — clearly worse. Echoes
+the flat model's `rnn_sub_steps=2` null: per-instruction depth isn't
+where the capacity is needed — the typed step is. (Depth on top of
+the typed step is untested; low prior given both single-axis
+results.)
+
+Pending: 5-seed confirmation of per-type-fwd + a d=64 width probe,
+multi-seed pair eval, promotion out of scratch.
 
 ## The idea
 

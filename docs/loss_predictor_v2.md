@@ -32,23 +32,26 @@ Reading:
   largest single improvement found in Round 3 (features topped out
   at −0.0008).
 
+**5-seed confirmation of tree+skip0 (everything shared)** — the
+promotion candidate after deciding to drop per-type params (keeps
+~90% of the win at ~old-model+20% refit cost): val L1
+0.0564/0.0566/0.0570/0.0572/0.0572, median **0.0570**, range 0.0008.
+
 **Mutation-pair ranking** (2,232 val conf pairs differing by one
 model mutation, both ends with ≥2 runs; scored on the 1,545 pairs
-with |Δmedian| ≥ 0.02; 1 seed each):
-
-| model | sign-acc | Spearman |
-|---|---|---|
-| production RNN | 0.824 | 0.721 |
-| tree + skip0 + per-type | **0.835** | **0.735** |
-
-+1.1pp sign accuracy on the search-shaped metric — about 1σ for a
-single seed (binomial), so directional rather than conclusive, but
-consistent with the L1 gain. The pair miner and eval live in
+with |Δmedian| ≥ 0.02): inconclusive. First run: production 0.824,
+tree(per-type) 0.835. Re-run a day later (live DB had grown, fresh
+fits): production 0.837, tree(shared) 0.829; Spearman ~0.72–0.74 for
+both throughout. Production's own score moved 1.3pp between runs, so
+the metric's run-to-run noise exceeds any model difference — needs a
+multi-seed paired design to resolve. The pair miner and eval live in
 `scratch/loss_pairs_20260716.py`.
 
-Pending: multi-seed pair eval, width/LR tuning, the latent-recurrent
-`Layer_forward` variant, and promotion out of scratch if the
-direction is confirmed.
+Pending: per-type `Layer_forward` grid cells, step-depth variants
+(stack2 / latentK with an untied separator dense — the separator
+breaks the aliasing between inner-convergence steps and genuinely
+repeated layers), multi-seed pair eval, width/LR tuning, promotion
+out of scratch.
 
 ## The idea
 

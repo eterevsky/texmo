@@ -18,7 +18,7 @@ from ..configuration import Configuration
 from ..db import DbReader
 from ..layers.split import SplitDef
 from ..tokens import set_tokens_dir
-from ..predict import loss_rnn
+from ..predict import loss_rnn, loss_tree
 from ..predict.predict_common import (
     MAX_LOSS,
     MIN_LOSS,
@@ -339,6 +339,30 @@ class RnnPredictor(Predictor):
         )
 
 
+class TreePredictor(Predictor):
+    """Structure-mirroring (tree) predictor -- see loss_tree.py and
+    docs/loss_predictor_v2.md."""
+
+    def __init__(self, per_type_fwd: bool = False,
+                 seed: int | None = None):
+        self._per_type_fwd = per_type_fwd
+        self._seed = seed
+        fwd = ' typed-step' if per_type_fwd else ''
+        self.name = f"tree (skip0{fwd}, lr=0.02 cosine, steps=8000)"
+
+    def fit(self, train_data):
+        self._simple_types = loss_tree.discover_simple_types(train_data)
+        self._params, trace = loss_tree.fit(
+            train_data, self._simple_types,
+            seed=self._seed, per_type_fwd=self._per_type_fwd)
+        logging.info(f"  {self.name} final train L1 = {trace[-1]:.4f}")
+
+    def predict(self, confs):
+        return loss_tree.predict(
+            self._params, confs, self._simple_types,
+            per_type_fwd=self._per_type_fwd)
+
+
 class RandomForestPredictor(Predictor):
     """Random forest on log-weights and log(batch*length*steps).
 
@@ -411,6 +435,9 @@ def main(args: argparse.Namespace):
             feat_proj=32, out_hidden=32, out_activation='gelu',
             batch_size=2048,
         ),
+        # The v2 candidates (docs/loss_predictor_v2.md).
+        TreePredictor(),
+        TreePredictor(per_type_fwd=True),
     ]
     for p in predictors:
         logging.info(f"Training {p.name}")

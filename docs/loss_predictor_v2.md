@@ -73,8 +73,28 @@ where the capacity is needed — the typed step is. (Depth on top of
 the typed step is untested; low prior given both single-axis
 results.)
 
-Pending: 5-seed confirmation of per-type-fwd + a d=64 width probe,
-multi-seed pair eval, promotion out of scratch.
+**Typed-step confirmation (5 seeds)**: 0.0548–0.0557, median
+**0.0551**, range 0.0009 — the −0.0036 vs production holds.
+**d=64 width probe**: 0.0553 (1 seed) at ~4.8× the fit cost — width
+is saturated at 32, as it always was for the flat model.
+
+## Bottom line (2026-07-18)
+
+| model | val L1 | refit cost (whitebox CPU) |
+|---|---|---|
+| production flat RNN | 0.0587 | ~3.5 min |
+| tree + skip0 (all shared) | 0.0570 | ~4 min |
+| **tree + skip0 + typed step** | **0.0551** | ~16 min |
+| ≥2-run-conf oracle floor | ~0.034 | — |
+
+Promoted to `texmo/predict/loss_tree.py` (register-machine compiler,
+`per_type_fwd` flag, tests) and wired into the `texmo loss` zoo as
+`TreePredictor` — production `train_loss_model` untouched pending
+review. The typed-step refit cost is the one open operational
+question; mitigations: type-sorted batched matmuls, GPU/client
+refits (roadmap), or the shared variant as the cheap fallback.
+Remaining evaluation debt: a multi-seed paired design for the
+mutation-pair metric (its run-to-run noise exceeds model deltas).
 
 ## The idea
 

@@ -47,11 +47,28 @@ the metric's run-to-run noise exceeds any model difference — needs a
 multi-seed paired design to resolve. The pair miner and eval live in
 `scratch/loss_pairs_20260716.py`.
 
-Pending: per-type `Layer_forward` grid cells, step-depth variants
-(stack2 / latentK with an untied separator dense — the separator
-breaks the aliasing between inner-convergence steps and genuinely
-repeated layers), multi-seed pair eval, width/LR tuning, promotion
-out of scratch.
+**Per-type `Layer_forward`** (typed weights on the step itself, the
+truest form of the per-type idea; 2 seeds each):
+
+| `Layer_params` \ `Layer_forward` | shared | per-type |
+|---|---|---|
+| shared   | 0.0570 (5 seeds) | **0.0554 / 0.0552** |
+| per-type | 0.0568 | 0.0565 / 0.0555 |
+
+Typed step + shared params is the clear winner: **~0.0553**, total
+−0.0034 vs production. Typed params on top of the typed step add
+nothing — the step subsumes them. Cost: the in-scan weight-bank
+gather makes fits ~4.5× slower (~950s vs ~210s on whitebox CPU);
+mitigations, in rising effort: sort instructions by type (per-type
+batched matmuls instead of gathered einsum), GPU/client refits (see
+roadmap — this workload is GPU-shaped, unlike the flat RNN), or fall
+back to tree+skip0 (0.0570) where refit cost matters.
+
+Pending: step-depth variants (stack2 / latentK with an untied
+separator dense — the separator breaks the aliasing between
+inner-convergence steps and genuinely repeated layers), 5-seed
+confirmation of per-type-fwd (+depth if it helps), multi-seed pair
+eval, width/LR tuning, promotion out of scratch.
 
 ## The idea
 

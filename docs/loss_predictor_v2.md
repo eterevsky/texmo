@@ -75,8 +75,9 @@ results.)
 
 **Typed-step confirmation (5 seeds)**: 0.0548–0.0557, median
 **0.0551**, range 0.0009 — the −0.0036 vs production holds.
-**d=64 width probe**: 0.0553 (1 seed) at ~4.8× the fit cost — width
-is saturated at 32, as it always was for the flat model.
+**d=64 width probe**: 0.0553/0.0563 (2 seeds) at ~4.8× the fit
+cost — no gain over d=32's 0.0551, width is saturated at 32, as it
+always was for the flat model.
 
 ## Bottom line (2026-07-18)
 

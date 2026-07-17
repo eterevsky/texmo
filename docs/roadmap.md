@@ -132,6 +132,18 @@ budget. Dream target: 32-64K weights.
 
 ## Infrastructure
 
+* **Predictor training off the server's critical path** (Oleg,
+  2026-07-16). The server currently runs on Windows directly, where
+  JAX is CPU-only, and refits the loss model in-process. Two options:
+  (a) run the server under WSL so the 5090 handles predictor
+  training (JAX+CUDA worked there for Gemma; the tree-structured v2
+  predictor with its weight-bank einsums would benefit more than the
+  tiny flat RNN does); (b) outsource predictor refits to a client
+  machine as a new job type in the existing client/server protocol —
+  speeds up refits AND unblocks the server regardless of host OS.
+  (b) composes with the file-based predictor store (rotation/backups
+  already in place); the client would ship back the pickle.
+
 * **step/forward parity for consuming->stateful chains.** forward
   drops the transient outputs of consuming layers (conv/suffix,
   valid-trim), but step ticks all layers synchronously, so during the

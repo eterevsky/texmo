@@ -29,7 +29,7 @@ def _type_idx(confs):
 def test_compile_plain_chain():
     c = _conf('bits.1+bp|dense.4.gelu-gru.8')
     st, ti = _type_idx([c])
-    p, s1, s2, d, r = compile_conf(c, ti, len(st))
+    p, s1, s2, d, bs, r = compile_conf(c, ti, len(st))
     assert p.shape[0] == 2 and r == 1
     np.testing.assert_array_equal(s1, [0, 0])
     np.testing.assert_array_equal(d, [0, 0])
@@ -39,7 +39,7 @@ def test_compile_plain_chain():
 def test_compile_split_forks_and_merges():
     c = _conf('bits.1+bp|split.mul(dense.4.gelu, dense.4)')
     st, ti = _type_idx([c])
-    p, s1, s2, d, r = compile_conf(c, ti, len(st))
+    p, s1, s2, d, bs, r = compile_conf(c, ti, len(st))
     # Two branch instructions off register 0, then the merge back
     # into register 0.
     assert r == 3
@@ -56,7 +56,7 @@ def test_compile_nested_split_preserves_fork_values():
         'bytes|dense.16.gelu-split.add(dense.16.gelu'
         '-split.cat(dense.16.gelu, pass), pass)-dense.16.gelu')
     st, ti = _type_idx([c])
-    p, s1, s2, d, r = compile_conf(c, ti, len(st))
+    p, s1, s2, d, bs, r = compile_conf(c, ti, len(st))
     # The outer pass branch reads register 0 at the final merge; the
     # only earlier write to 0 is the pre-split dense.
     merge_ts = [t for t in range(p.shape[0]) if p[t, -1] > 0.5]
@@ -69,7 +69,7 @@ def test_compile_nested_split_preserves_fork_values():
 def test_empty_chain_compiles():
     c = _conf('bits.1+bp|')
     st, ti = _type_idx([_conf('bits.1+bp|dense.4.gelu'), c])
-    p, s1, s2, d, r = compile_conf(c, ti, len(st))
+    p, s1, s2, d, bs, r = compile_conf(c, ti, len(st))
     assert p.shape[0] == 1 and r == 1
 
 
@@ -77,7 +77,7 @@ def test_build_arrays_pads_and_masks():
     confs = [_conf('bits.1+bp|dense.4.gelu'),
              _conf('bits.1+bp|dense.4.gelu-gru.8-dense.2.tanh')]
     st, ti = _type_idx(confs)
-    globs, p, s1, s2, d, m, R = build_arrays(confs, ti, len(st))
+    globs, p, s1, s2, d, bs, m, R = build_arrays(confs, ti, len(st))
     assert p.shape[:2] == (2, 3)
     np.testing.assert_array_equal(m, [[1, 0, 0], [1, 1, 1]])
 
@@ -123,3 +123,43 @@ def test_predict_handles_unseen_deeper_conf():
         '-split.add(dense.4.gelu, pass), pass)-dense.4.gelu')
     preds = predict(params, [deep], st)
     assert np.all(np.isfinite(preds))
+
+
+def test_bank_slots_distinguish_extra_dim_types_and_merge_ops():
+    """Every layer type gets its own step-weight slot -- suffix and
+    msr must not share, and merge ops are separated."""
+    confs = [
+        _conf('bits.1+bp|suffix.2-dense.4.gelu'),
+        _conf('bits.1+bp|msr.4.1-dense.4.gelu'),
+        _conf('bits.1+bp|split.add(dense.4.gelu, pass)'),
+        _conf('bits.1+bp|split.mul(dense.4.gelu, dense.4)'),
+    ]
+    st, ti = _type_idx(confs)
+    slots = {}
+    for c in confs:
+        p, s1, s2, d, bs, r = compile_conf(c, ti, len(st))
+        for t in range(p.shape[0]):
+            key = ('merge' if p[t, -1] > 0.5 else 'layer', int(bs[t]))
+            slots.setdefault(key[0], set()).add(key[1])
+    suffix_c, msr_c = confs[0], confs[1]
+    bs_suffix = compile_conf(suffix_c, ti, len(st))[4]
+    bs_msr = compile_conf(msr_c, ti, len(st))[4]
+    assert bs_suffix[0] != bs_msr[0]          # suffix vs msr slots
+    bs_add = compile_conf(confs[2], ti, len(st))[4]
+    bs_mul = compile_conf(confs[3], ti, len(st))[4]
+    assert bs_add[-1] != bs_mul[-1]           # merge.add vs merge.mul
+
+
+def test_fit_predict_latent_step():
+    """The latent-recurrent step (K tied inner iterations re-reading
+    the inputs + an untied separator) trains and predicts."""
+    confs = [_conf('bits.1+bp|dense.4.gelu'),
+             _conf('bytes|gru.8')]
+    data = [(c, l) for c, l in zip(confs, (1.0, 4.0))] * 10
+    st = discover_simple_types(data)
+    params, trace = fit(data, st, steps=200, seed=0, batch_size=8,
+                        per_type_fwd=True, latent_step=4)
+    assert 'W_complete' in params
+    preds = predict(params, confs, st, per_type_fwd=True, latent_step=4)
+    assert np.all(np.isfinite(preds))
+    assert preds[0] < preds[1]

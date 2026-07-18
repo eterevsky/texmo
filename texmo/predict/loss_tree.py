@@ -41,7 +41,7 @@ from .loss_rnn import (
     _layer_features,
     discover_simple_types,
 )
-from .predict_common import MAX_LOSS, MIN_LOSS
+from .predict_common import MAX_LOSS, MIN_LOSS, layer_type_id
 
 __all__ = [
     'TreeLossModel', 'compile_conf', 'build_arrays',
@@ -52,10 +52,25 @@ D_ACT = 32       # activation-vector width (one per register)
 D_PARAMS = 16    # digested layer-params width
 OUT_HIDDEN = 32  # head hidden width
 
-# One weight-bank slot per simple type, plus one shared slot for the
-# extra-dim types (suffix/conv/latent/...) and one for merges.
-_EXTRA_SLOT = 0  # index offsets added to n_simple below
-_MERGE_SLOT = 1
+# Weight-bank layout for the typed step: one slot per simple type
+# (indices from `simple_types`), then a named slot per extra-dim type,
+# one per merge op, and a fallback for anything unseen (e.g. the
+# empty-chain identity instruction).
+_EXTRA_ORDER = ('suffix', 'latent', 'lrnn', 'msr', 'lmgu', 'conv')
+_MERGE_ORDER = ('add', 'cat', 'mul')
+_N_BANK_EXTRA = len(_EXTRA_ORDER) + len(_MERGE_ORDER) + 1
+
+
+def _bank_slot(type_id: str, type_idx: dict[str, int],
+               n_simple: int) -> int:
+    if type_id.startswith('merge.'):
+        return (n_simple + len(_EXTRA_ORDER)
+                + _MERGE_ORDER.index(type_id.removeprefix('merge.')))
+    if type_id in type_idx:
+        return type_idx[type_id]
+    if type_id in _EXTRA_ORDER:
+        return n_simple + _EXTRA_ORDER.index(type_id)
+    return n_simple + len(_EXTRA_ORDER) + len(_MERGE_ORDER)  # fallback
 
 
 # -- Compilation -------------------------------------------------------
@@ -79,19 +94,22 @@ def _compile_seq(layers, src, dst, alloc, out, type_idx, n_simple):
             # gate weights (the gate branch is a real chain here).
             p = _layer_features(layer, type_idx, n_simple).copy()
             p[0] = 0.0
-            out.append((p, regs[0], regs[1], dst, True))
+            out.append((p, regs[0], regs[1], dst, True,
+                        f'merge.{layer.op}'))
         else:
             p = _layer_features(layer, type_idx, n_simple)
-            out.append((p, cur, cur, dst, False))
+            out.append((p, cur, cur, dst, False, layer_type_id(layer)))
         cur = dst
 
 
 def compile_conf(conf: Configuration, type_idx: dict[str, int],
                  n_simple: int):
-    """Compile a conf into (params [T, P+1], src1, src2, dst, n_regs).
+    """Compile a conf into
+    (params [T, P+1], src1, src2, dst, bank_sel, n_regs).
 
-    The last params column is the merge flag; it gates the second
-    activation input and selects the merge weight-bank slot."""
+    The last params column is the merge flag (gates the second
+    activation input); `bank_sel` is the per-instruction weight-bank
+    slot for the typed step, assigned from the layer's actual type."""
     out: list = []
     nregs = [1]
 
@@ -106,15 +124,19 @@ def compile_conf(conf: Configuration, type_idx: dict[str, int],
         # No hidden layers: one zero-feature instruction keeps the
         # tape non-empty (act[0] flows through a learned identity).
         out.append((np.zeros(_layer_feature_dim(n_simple),
-                             dtype=np.float32), 0, 0, 0, False))
+                             dtype=np.float32), 0, 0, 0, False,
+                    '<identity>'))
     params = np.stack([
         np.concatenate([p, [1.0 if merge else 0.0]])
-        for p, _, _, _, merge in out
+        for p, _, _, _, merge, _ in out
     ]).astype(np.float32)
     src1 = np.array([i[1] for i in out], dtype=np.int32)
     src2 = np.array([i[2] for i in out], dtype=np.int32)
     dst = np.array([i[3] for i in out], dtype=np.int32)
-    return params, src1, src2, dst, nregs[0]
+    bank_sel = np.array(
+        [_bank_slot(i[5], type_idx, n_simple) for i in out],
+        dtype=np.int32)
+    return params, src1, src2, dst, bank_sel, nregs[0]
 
 
 def build_arrays(confs: list[Configuration], type_idx: dict[str, int],
@@ -124,40 +146,32 @@ def build_arrays(confs: list[Configuration], type_idx: dict[str, int],
     Returns (globs, params, src1, src2, dst, mask, n_regs)."""
     tapes = [compile_conf(c, type_idx, n_simple) for c in confs]
     T = max(t[0].shape[0] for t in tapes)
-    R = max(t[4] for t in tapes)
+    R = max(t[5] for t in tapes)
     P = tapes[0][0].shape[1]
     n = len(confs)
     params = np.zeros((n, T, P), dtype=np.float32)
     src1 = np.zeros((n, T), dtype=np.int32)
     src2 = np.zeros((n, T), dtype=np.int32)
     dst = np.zeros((n, T), dtype=np.int32)
+    bank_sel = np.zeros((n, T), dtype=np.int32)
     mask = np.zeros((n, T), dtype=np.float32)
-    for i, (p, s1, s2, d, _) in enumerate(tapes):
+    for i, (p, s1, s2, d, bs, _) in enumerate(tapes):
         t = p.shape[0]
         params[i, :t] = p
         src1[i, :t] = s1
         src2[i, :t] = s2
         dst[i, :t] = d
+        bank_sel[i, :t] = bs
         mask[i, :t] = 1.0
     globs = np.stack([_init_global_features(c) for c in confs])
-    return globs, params, src1, src2, dst, mask, R
-
-
-def _type_selector(tape_params: np.ndarray, n_simple: int) -> np.ndarray:
-    """Weight-bank slot per instruction: the simple-type one-hot's
-    argmax, extra-dim types folded to a shared slot, merges to their
-    own."""
-    b = tape_params[..., 3:3 + n_simple]
-    s = np.argmax(b, axis=-1)
-    s = np.where(b.max(axis=-1) > 0.5, s, n_simple + _EXTRA_SLOT)
-    s = np.where(tape_params[..., -1] > 0.5, n_simple + _MERGE_SLOT, s)
-    return s.astype(np.int32)
+    return globs, params, src1, src2, dst, bank_sel, mask, R
 
 
 # -- Model -------------------------------------------------------------
 
 
-def _init_params(rng, n_feat: int, n_types: int, per_type_fwd: bool):
+def _init_params(rng, n_feat: int, n_types: int, per_type_fwd: bool,
+                 latent_step: int = 0):
     keys = jax.random.split(rng, 6)
 
     def init(key, fi, fo):
@@ -174,20 +188,29 @@ def _init_params(rng, n_feat: int, n_types: int, per_type_fwd: bool):
         'W_h2': init(keys[3], OUT_HIDDEN, 1),
         'b_h2': jnp.zeros(1),
     }
+    # With latent_step > 0 the step re-reads its inputs at every
+    # inner iteration with the latent state appended, then an untied
+    # separator dense completes the layer (keeping inner iterations
+    # distinguishable from genuinely repeated evaluated-model layers).
+    step_in = d_p + 2 * d + (d if latent_step else 0)
     if per_type_fwd:
         # Same shared init replicated per type; diverges in training.
-        w0 = init(keys[4], d_p + 2 * d, d)
+        w0 = init(keys[4], step_in, d)
         params['W_step'] = jnp.broadcast_to(
             w0[None], (n_types,) + w0.shape) * jnp.ones((n_types, 1, 1))
         params['b_step'] = jnp.zeros((n_types, d))
     else:
-        params['W_step'] = init(keys[4], d_p + 2 * d, d)
+        params['W_step'] = init(keys[4], step_in, d)
         params['b_step'] = jnp.zeros(d)
+    if latent_step:
+        params['W_complete'] = init(keys[5], d, d)
+        params['b_complete'] = jnp.zeros(d)
     return params
 
 
 def _forward(params, globs, tape_params, src1, src2, dst, mask,
-             n_regs: int, type_sel, per_type_fwd: bool):
+             n_regs: int, type_sel, per_type_fwd: bool,
+             latent_step: int = 0):
     B = globs.shape[0]
     d = params['b_glob'].shape[0]
     act0 = jax.nn.gelu(globs @ params['W_glob'] + params['b_glob'])
@@ -198,15 +221,29 @@ def _forward(params, globs, tape_params, src1, src2, dst, mask,
     p_all = jax.nn.gelu(feats @ params['W_p'] + params['b_p'])
     bi = jnp.arange(B)
 
+    def apply_step(x_parts, matvec):
+        # latent_step == 0: one application. Otherwise: K tied
+        # iterations re-reading the inputs with the latent state
+        # appended, then the untied separator dense.
+        if not latent_step:
+            return jnp.tanh(matvec(jnp.concatenate(x_parts, axis=-1)))
+        lat = jnp.zeros((x_parts[0].shape[0], d))
+        for _ in range(latent_step):
+            x = jnp.concatenate(x_parts + [lat], axis=-1)
+            lat = jnp.tanh(matvec(x))
+        return jnp.tanh(
+            lat @ params['W_complete'] + params['b_complete'])
+
     if per_type_fwd:
         def step(regs, inp):
             p, s1, s2, dt, m, mf, ts = inp
             a1 = regs[bi, s1]
             a2 = regs[bi, s2] * mf[:, None]
-            x = jnp.concatenate([p, a1, a2], axis=-1)
-            w = params['W_step'][ts]     # [B, d_p+2d, d]
+            w = params['W_step'][ts]     # [B, step_in, d] (one gather)
             b = params['b_step'][ts]     # [B, d]
-            new = jnp.tanh(jnp.einsum('bf,bfp->bp', x, w) + b)
+            new = apply_step(
+                [p, a1, a2],
+                lambda x: jnp.einsum('bf,bfp->bp', x, w) + b)
             upd = jnp.where(m[:, None] > 0.5, new, regs[bi, dt])
             return regs.at[bi, dt].set(upd), None
 
@@ -217,8 +254,9 @@ def _forward(params, globs, tape_params, src1, src2, dst, mask,
             p, s1, s2, dt, m, mf = inp
             a1 = regs[bi, s1]
             a2 = regs[bi, s2] * mf[:, None]
-            x = jnp.concatenate([p, a1, a2], axis=-1)
-            new = jnp.tanh(x @ params['W_step'] + params['b_step'])
+            new = apply_step(
+                [p, a1, a2],
+                lambda x: x @ params['W_step'] + params['b_step'])
             upd = jnp.where(m[:, None] > 0.5, new, regs[bi, dt])
             return regs.at[bi, dt].set(upd), None
 
@@ -239,6 +277,7 @@ def fit(
     seed: int | None = None,
     batch_size: int = 2048,
     per_type_fwd: bool = False,
+    latent_step: int = 0,
 ) -> tuple[dict, np.ndarray]:
     """Fit tree-predictor params on (conf, loss) pairs.
 
@@ -249,19 +288,19 @@ def fit(
     type_idx = {t: i for i, t in enumerate(simple_types)}
     n_simple = len(simple_types)
     confs = [c for c, _ in train_data]
-    globs, tape_params, src1, src2, dst, mask, R = build_arrays(
+    globs, tape_params, src1, src2, dst, bank_sel, mask, R = build_arrays(
         confs, type_idx, n_simple)
     targets = np.array(
         [float(np.log2(max(min(l, MAX_LOSS), MIN_LOSS)))
          for _, l in train_data], dtype=np.float32)
-    type_sel = (_type_selector(tape_params, n_simple)
-                if per_type_fwd else None)
+    type_sel = bank_sel if per_type_fwd else None
 
     n_feat = tape_params.shape[-1] - 1
-    n_types = n_simple + 2
+    n_types = n_simple + _N_BANK_EXTRA
     rng = jax.random.PRNGKey(seed)
     rng, init_key = jax.random.split(rng)
-    params = _init_params(init_key, n_feat, n_types, per_type_fwd)
+    params = _init_params(
+        init_key, n_feat, n_types, per_type_fwd, latent_step)
     schedule = optax.cosine_decay_schedule(lr, steps, alpha=0.01)
     optimizer = optax.adamw(schedule, weight_decay=0.0)
     opt_state = optimizer.init(params)
@@ -281,7 +320,8 @@ def fit(
         preds = _forward(
             params, globs_j[idx], tp_j[idx], s1_j[idx], s2_j[idx],
             d_j[idx], m_j[idx], R,
-            ts_j[idx] if ts_j is not None else None, per_type_fwd)
+            ts_j[idx] if ts_j is not None else None, per_type_fwd,
+            latent_step)
         return jnp.mean(jnp.abs(preds - t_j[idx]))
 
     def step_fn(carry, idx):
@@ -301,6 +341,7 @@ def predict(
     confs: list[Configuration],
     simple_types: list[str],
     per_type_fwd: bool = False,
+    latent_step: int = 0,
     chunk: int = 16384,
 ) -> np.ndarray:
     """Predict log2-loss for confs. Unlike the flat RNN there is no
@@ -310,14 +351,13 @@ def predict(
     n_simple = len(simple_types)
     outs = []
     for i in range(0, len(confs), chunk):
-        globs, tp, s1, s2, d, m, R = build_arrays(
+        globs, tp, s1, s2, d, bs, m, R = build_arrays(
             confs[i:i + chunk], type_idx, n_simple)
-        ts = (jnp.asarray(_type_selector(tp, n_simple))
-              if per_type_fwd else None)
+        ts = jnp.asarray(bs) if per_type_fwd else None
         outs.append(np.asarray(_forward(
             params, jnp.asarray(globs), jnp.asarray(tp),
             jnp.asarray(s1), jnp.asarray(s2), jnp.asarray(d),
-            jnp.asarray(m), R, ts, per_type_fwd)))
+            jnp.asarray(m), R, ts, per_type_fwd, latent_step)))
     return np.concatenate(outs)
 
 
@@ -331,8 +371,10 @@ class TreeLossModel:
     params: dict
     simple_types: list[str]
     per_type_fwd: bool = False
+    latent_step: int = 0
 
     def predict(self, confs: list[Configuration]) -> np.ndarray:
         return predict(
             self.params, confs, self.simple_types,
-            per_type_fwd=self.per_type_fwd)
+            per_type_fwd=self.per_type_fwd,
+            latent_step=self.latent_step)

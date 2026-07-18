@@ -91,11 +91,17 @@ always was for the flat model.
 Promoted to `texmo/predict/loss_tree.py` (register-machine compiler,
 `per_type_fwd` flag, tests) and wired into the `texmo loss` zoo as
 `TreePredictor` — production `train_loss_model` untouched pending
-review. The typed-step refit cost is the one open operational
-question; mitigations: type-sorted batched matmuls, GPU/client
-refits (roadmap), or the shared variant as the cheap fallback.
-Remaining evaluation debt: a multi-seed paired design for the
-mutation-pair metric (its run-to-run noise exceeds model deltas).
+review. **Deployment decision (Oleg, 2026-07-18): the typed-step
+refit cost is acceptable, but refits move to a client machine** —
+see the roadmap's predictor-refit-job item, now the next infra task.
+
+Known coarseness worth a follow-up: the step weight bank gives each
+simple type its own slot but folds all extra-dim types
+(suffix/conv/latent/lrnn/msr/lmgu) into one shared slot and all
+three merge ops into another (op identity only via features).
+
+Multi-seed paired mutation-pair eval: running (5 seeds both models,
+per-seed paired deltas).
 
 ## The idea
 

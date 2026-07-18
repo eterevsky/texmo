@@ -100,8 +100,21 @@ simple type its own slot but folds all extra-dim types
 (suffix/conv/latent/lrnn/msr/lmgu) into one shared slot and all
 three merge ops into another (op identity only via features).
 
-Multi-seed paired mutation-pair eval: running (5 seeds both models,
-per-seed paired deltas).
+**Multi-seed paired mutation-pair eval (2026-07-18)** — 5 seeds of
+both models on identical data, scored on the same freshly-mined pair
+set, per-seed paired deltas:
+
+| | production | tree (typed step) | paired Δ |
+|---|---|---|---|
+| median | 0.828 | **0.851** | **+0.024** |
+| range  | 0.003 | 0.009 | +0.016 … +0.024 |
+
+The tree wins mutation-ranking in **all 5 paired seeds** (+2.2pp
+median sign accuracy; 5/5 alone is p≈0.03). The earlier single-seed
+ambiguity was noise plus the weaker (non-typed-step) variant. This
+is the search-shaped metric — the structure-mirroring predictor is
+better at exactly the single-mutation deltas the search consumes,
+and by proportionally more than its L1 gain.
 
 ## The idea
 

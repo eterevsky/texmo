@@ -132,6 +132,15 @@ budget. Dream target: 32-64K weights.
 
 ## Infrastructure
 
+* **select_conf latency** (2026-07-18 report, pre-restart): avg
+  6.5 s at 76% of server wall time; `SearchServer.select` at 171%
+  (overlapping requests queue ~8 s on top). Worst inner offender:
+  `_select_uncovered_top` (avg 4.4 s, max 79 s), then
+  `_select_predicted_best` / `_select_top_neighbor` (~1.5–3 s each).
+  Also `timing._refresh_estimates.iter_confs` at ~1 min per refresh.
+  No action yet — revisit with caching / incremental candidate sets
+  when it starts hurting client utilization.
+
 * **Predictor training off the server's critical path** (Oleg,
   2026-07-16). The server currently runs on Windows directly, where
   JAX is CPU-only, and refits the loss model in-process. Two options:
@@ -142,7 +151,11 @@ budget. Dream target: 32-64K weights.
   machine as a new job type in the existing client/server protocol —
   speeds up refits AND unblocks the server regardless of host OS.
   (b) composes with the file-based predictor store (rotation/backups
-  already in place); the client would ship back the pickle.
+  already in place); the client would ship back the pickle. Note
+  from the 2026-07-18 latency report: loading the labeled runs cost
+  ~2m47s per refit — as much as the flat fit itself — so the job
+  design must cover shipping the training data (labeled-runs
+  snapshot), not just the fit.
 
 * **step/forward parity for consuming->stateful chains.** forward
   drops the transient outputs of consuming layers (conv/suffix,

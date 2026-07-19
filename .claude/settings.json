@@ -1,16 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ssh -o ConnectTimeout=10 -o BatchMode=yes tower 'echo CONNECTED; hostname; uname -a')",
-      "Bash(ssh tower *)",
-      "Bash(cat)",
-      "Bash(scp -q /tmp/iotest.py tower:/home/oleg/texmo/iotest.py)",
-      "Bash(scp -q texmo/dataset.py tower:/home/oleg/texmo/texmo/dataset.py)",
-      "Bash(scp -q texmo/cli/sample.py tower:/home/oleg/texmo/texmo/cli/sample.py)",
-      "Bash(grep -B1 -E \"^\\\\S*-\\\\s*pass\\\\s*$\")",
-      "Bash(uv --version)",
-      "Bash(uv python *)",
-      "Bash(grep -E \"\\\\.py$\")"
     ]
   }
 }

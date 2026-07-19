@@ -80,12 +80,16 @@ L1 on the clipped log2 target; adamw, lr 0.02 with cosine decay,
 fit is a single jitted `lax.scan`; tape compilation is a one-off
 Python pass (~1–2 min at 900k runs).
 
-**Cost** (whitebox CPU, 900k runs): ~16 min per fit — the per-
-instruction weight-bank gather dominates. This is why refits move to
-a client machine (decision 2026-07-18; roadmap: predictor-refit job
-type; the workload is GPU-shaped, unlike the flat RNN). The
-`per_type_fwd=False` variant (one shared step) fits in ~4 min at
-val L1 0.0570 and is the fallback where refit cost matters.
+**Cost** (~900k runs): the per-instruction weight-bank gather
+dominates, and the workload is GPU-shaped — measured in production
+client-refit jobs (2026-07-19): **4090 2m12s**, m5 8m36s, mini
+19m28s, whitebox in-process ~16m, pi5 2h27m (keep `REFIT = False`
+there — a 2.5h turnaround guarantees its submission arrives stale
+and the fit is wasted). Download is ~10s and the client's
+(spec, precision)-deduped parse 3–17s, vs ~2m50s for the old
+server-side load. The `per_type_fwd=False` variant (one shared step)
+fits in ~4 min on whitebox at val L1 0.0570 and is the fallback
+where refit cost matters.
 
 ## Performance
 
@@ -200,8 +204,12 @@ just cost one refit.
 **Refits run on clients** (2026-07-18). Every
 `server._LOSS_REFIT_EVERY = 1000` labeled runs, ONE refit job is
 handed to the next `/select` from a client advertising `refit=1`
-(worker-side eligibility: `config.REFIT` / `--no-refit`; set False
-on slow machines like the Pi) and forgotten — no reservation, no
+(worker-side eligibility: `config.REFIT` / `--no-refit`; note the
+default is True even for config.py files that predate the flag, so
+slow machines like the Pi must opt out explicitly — the criterion is
+that a worker's grant-to-publish turnaround must stay well under the
+typical grant interval, or its submissions lose the run-count race
+and the fit is wasted) and forgotten — no reservation, no
 timeout: a dead worker just means the next 1000-run boundary issues
 a fresh job (run-count cadence is the natural staleness clock), and
 overlapping fits resolve by run count at submission. The client

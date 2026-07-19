@@ -225,6 +225,13 @@ Per-slice accounting (charging each eval chunk's actual bytes via
 `FoldTokenizer.chunk_residual_bits`) is implemented but unused — the
 corpus constant is exact in expectation over books3 slices.
 
+Search-reachable (2026-07-19): the fold set hangs off the bit ladder
+at its nearest rung — `bits.4.oh+bp <-> tokens.32.raw_fold.oh` and
+`bits.4.emb.X <-> tokens.32.raw_fold.emb.X` — and the usual oh<->emb
+mode swap applies. The loss predictor carries the residual charge as
+a global feature; the timing model treats the input as just another
+type key.
+
 ## Why the head is implicit
 
 If the head were an explicit spec layer, every spec would end with a

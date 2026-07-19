@@ -63,8 +63,15 @@ Per instruction:
   model, and the predictor mirrors that. Without this skip the tree
   is *worse* than the flat model (globals wash out over deep paths).
 - Head: `gelu(dense 64→32) → dense → scalar`.
-- Globals (10): output size, batch, length, steps, lr, decay, cosine
-  flag, is_tied, codec IO budget, and log2(total num_weights).
+- Globals (12): output size, batch, length, steps, lr, decay, cosine
+  flag, is_tied, codec IO budget, log2(total num_weights), and two
+  tokenset features resolved via the tokenizer registry: the fold
+  residual charge (0 for lossless sets — the additive b/B offset a
+  fold conf's target carries) and log2(bytes per token) (the token
+  granularity; byte context = length × bpt, log-additive with the
+  length global). An earlier nbits feature was a null, but only
+  because bits/bytes sets tie granularity to output size; fold sets
+  (32 tokens, 1 byte each) break that correspondence.
 
 ## Training
 

@@ -27,6 +27,7 @@ from ..configuration import Configuration
 from ..db import DbReader
 from ..layers.split import SplitDef
 from ..layers.suffix import SuffixDef
+from ..tokens import get_tokenizer
 from .predict_common import MAX_LOSS, MIN_LOSS, layer_type_id, model_layers
 
 HIDDEN = 8
@@ -133,19 +134,44 @@ def _jump_length(layer) -> int:
     return len(layer.branches[0].layers)
 
 
+def _tokenset_features(conf: Configuration) -> tuple[float, float]:
+    """(residual charge, log2 bytes-per-token) of the input tokenset.
+
+    The residual (0 for lossless sets) is the additive b/B offset a
+    fold conf's target carries. log2(bytes/token) is the token
+    granularity: `length` is in tokens, so byte context and total
+    training bytes are length * bpt -- log-additive with the length
+    global. For bits/bytes sets bpt is implied by the output size
+    (which made an earlier nbits feature a null), but fold sets break
+    that correspondence: 32 tokens at 1 byte each. Resolved through
+    the tokenizer registry (cached); falls back to byte-equivalent
+    (0, 0) when the tokens dir isn't configured or the set is
+    unknown."""
+    tokenizer = get_tokenizer(conf.model.input.tokens_name)
+    if tokenizer is None:
+        return 0.0, 0.0
+    tokenset = tokenizer.tokenset
+    return (
+        getattr(tokenset, 'residual_bits_per_byte', 0.0),
+        float(np.log2(tokenset.avg_bytes_per_token)),
+    )
+
+
 # init_globals: output_size + 5 log training knobs + cosine flag +
-# 2 codec features + the total weight budget. `is_tied` is duck-typed
-# off the head: a tied-embedding head has no parameters of its own
-# (its matrix is the input table), while the one-hot dense head
-# always does. The IO budget is `model.input.num_weights` -- the
-# codec's parameters (one-hot: the implicit head; tied: table+scale)
-# -- which the per-layer features never see (they only cover the
-# hidden chain). log2(num_weights) is also the RF baseline's single
-# best feature; the scan can't reconstruct it from the per-layer
-# log-weights (sum of logs != log of sum), so it goes in directly
-# (2026-07 sweep: -0.0008 val L1; nbits and log-num-mults were nulls).
+# 2 codec features + the total weight budget + 2 tokenset features.
+# `is_tied` is duck-typed off the head: a tied-embedding head has no
+# parameters of its own (its matrix is the input table), while the
+# one-hot dense head always does. The IO budget is
+# `model.input.num_weights` -- the codec's parameters (one-hot: the
+# implicit head; tied: table+scale) -- which the per-layer features
+# never see (they only cover the hidden chain). log2(num_weights) is
+# also the RF baseline's single best feature; the scan can't
+# reconstruct it from the per-layer log-weights (sum of logs != log
+# of sum), so it goes in directly (2026-07 sweep: -0.0008 val L1;
+# nbits and log-num-mults were nulls).
 def _init_global_features(conf: Configuration) -> np.ndarray:
     model = conf.model
+    residual, log_bpt = _tokenset_features(conf)
     return np.array([
         np.log2(model.output.size),
         np.log2(conf.batch),
@@ -157,10 +183,12 @@ def _init_global_features(conf: Configuration) -> np.ndarray:
         1.0 if model.output.num_weights == 0 else 0.0,
         np.log2(1 + model.input.num_weights),
         np.log2(max(model.num_weights, 1)),
+        residual,
+        log_bpt,
     ], dtype=np.float32)
 
 
-N_INIT_GLOBAL = 10
+N_INIT_GLOBAL = 12
 
 
 def discover_simple_types(

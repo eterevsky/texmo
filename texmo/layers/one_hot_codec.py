@@ -53,7 +53,11 @@ _INPUT_NEIGHBORS = {
     'bits.1+bm': ('bits.1+bp',),
     'bits.1+bp': ('bits.2.oh+bp',),
     'bits.2.oh+bp': ('bits.1+bp', 'bits.4.oh+bp'),
-    'bits.4.oh+bp': ('bits.2.oh+bp', 'bytes'),
+    'bits.4.oh+bp': ('bits.2.oh+bp', 'bytes', 'tokens.32.raw_fold.oh'),
+    # Fold tokensets hang off the bit ladder at the nearest rung
+    # (32 tokens ~ bits.4's 16). Keep in sync with the emb-mode
+    # bridges in embedding_codec.
+    'tokens.32.raw_fold.oh': ('bits.4.oh+bp',),
 }
 
 

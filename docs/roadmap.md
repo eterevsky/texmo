@@ -79,11 +79,16 @@ budget. Dream target: 32-64K weights.
   the within-group knowledge is priced as **model weights** (one
   stored head-character frequency per token, +32), making the b/B
   comparison to bits/bytes exact rather than merely additive.
-  Remaining follow-ups: per-eval-slice residual accounting (the
-  corpus-average constant is used today; `chunk_residual_bits` is
-  ready), loss-predictor treatment for fold confs (needs a schema
-  extension — coordinate with client-refit rollout), and seeding the
-  search with fold confs (no ladder edges exist from bits/bytes).
+  Search integration DONE 2026-07-19: neighbor bridges
+  `bits.4.oh+bp <-> tokens.32.raw_fold.oh` and
+  `bits.4.emb.X <-> tokens.32.raw_fold.emb.X` (the oh<->emb swap was
+  already automatic), plus two loss-predictor globals (the tokenset's
+  residual charge and log2 bytes-per-token; timing needs nothing —
+  unseen input types contribute zero until the regular refit learns
+  them).
+  Remaining: per-eval-slice residual accounting (decided against for
+  now — the corpus-average constant is exact in expectation;
+  `chunk_residual_bits` is ready if a cross-corpus eval appears).
   Decode policy for generation TBD (sample within group vs
   canonical head character — currently head character).
 
@@ -146,12 +151,9 @@ budget. Dream target: 32-64K weights.
 * **Predictor training off the server's critical path** — DONE
   2026-07-18 for the loss model (option (b): refit jobs handed to
   clients via /select + /training_data + /submit_loss_model; see
-  loss_prediction.md). Remaining follow-ups: benchmark refit time on
-  the GPU clients (the typed-step einsum bank is GPU-shaped; if the
-  5090 fits in minutes, reconsider the pi5 denylist economics), and
-  consider the same treatment for timing-model refits (the other
-  ~40% of model-thread time — harder, since `_refresh_estimates`
-  writes predicted rows through the writer).
+  loss_prediction.md). Follow-ups dropped 2026-07-19 (Oleg):
+  distributed loss training is enough; no GPU refit benchmark, no
+  timing-model outsourcing.
 
 * **step/forward parity for consuming->stateful chains.** forward
   drops the transient outputs of consuming layers (conv/suffix,

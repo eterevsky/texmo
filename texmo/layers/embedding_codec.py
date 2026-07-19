@@ -77,6 +77,12 @@ _OH_SWAPS = {
 # ladder at the same table width.
 _DOMAIN_LADDER = {1: (2,), 2: (1, 4), 4: (2, 8), 8: (4,)}
 
+# Fold tokensets hang off the bit ladder at the nearest rung, at the
+# same table width, mirroring the one-hot bridge in
+# one_hot_codec._INPUT_NEIGHBORS. Keep the two directions in sync.
+_TOKENS_EMB_BRIDGES = {(32, 'raw_fold'): ('bits.4',)}
+_BITS_EMB_BRIDGES = {4: ('tokens.32.raw_fold',)}
+
 
 def _domain_spec(nbits: int, emb_size: int) -> str:
     if nbits == 8:
@@ -318,10 +324,16 @@ class EmbeddingCodecDef:
         `emb_size` on any valid model, so it isn't consulted here;
         the parameter keeps the codec API uniform)."""
         if self.nbits is None:
-            return (f'tokens.{self.ntokens}.{self.variation}.oh',)
+            nbs = [f'tokens.{self.ntokens}.{self.variation}.oh']
+            nbs += [f'{base}.emb.{self.emb_size}'
+                    for base in _TOKENS_EMB_BRIDGES.get(
+                        (self.ntokens, self.variation), ())]
+            return tuple(nbs)
         nbs = list(_OH_SWAPS[self.nbits])
         nbs += [_domain_spec(n, self.emb_size)
                 for n in _DOMAIN_LADDER[self.nbits]]
+        nbs += [f'{base}.emb.{self.emb_size}'
+                for base in _BITS_EMB_BRIDGES.get(self.nbits, ())]
         return tuple(nbs)
 
     def build_jax(self) -> EmbeddingCodecJax:

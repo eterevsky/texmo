@@ -206,3 +206,12 @@ def test_fold_tokenset_counts_frequency_weights():
     assert md.codec.num_weights == plain.codec.num_weights + 32
     # ...but cost no multiplies (they only price the eval loss).
     assert md.codec.num_mults == plain.codec.num_mults
+
+
+def test_fold_bridges_the_bit_ladder():
+    md = parse_model2("bits.4.oh+bp|rnn.4.tanh", Precision.FP32)
+    assert "tokens.32.raw_fold.oh" in md.input.neighbors(4)
+    md = parse_model2("tokens.32.raw_fold.oh|rnn.4.tanh", Precision.FP32)
+    assert md.input.is_valid()
+    assert md.input.neighbors(4) == (
+        "bits.4.oh+bp", "tokens.32.raw_fold.emb.4")

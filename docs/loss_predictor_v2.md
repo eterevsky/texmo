@@ -95,10 +95,27 @@ review. **Deployment decision (Oleg, 2026-07-18): the typed-step
 refit cost is acceptable, but refits move to a client machine** —
 see the roadmap's predictor-refit-job item, now the next infra task.
 
-Known coarseness worth a follow-up: the step weight bank gives each
-simple type its own slot but folds all extra-dim types
-(suffix/conv/latent/lrnn/msr/lmgu) into one shared slot and all
-three merge ops into another (op identity only via features).
+**Bank refinement (2026-07-18, landed)**: the step weight bank
+originally folded all extra-dim types (suffix/conv/latent/lrnn/msr/
+lmgu) into one shared slot and all merge ops into another — an
+artifact of reusing the flat model's one-hot encoding for the
+selector. Slots are now assigned from `layer_type_id` at compile
+time (every type its own step weights, per-op merges). Measured
+neutral on val L1 (0.0550 vs 0.0551, 3 seeds) — kept for
+correctness at zero cost.
+
+**Latent-recurrent step (2026-07-18) — measured no.** Oleg's
+input-re-injecting variant (K=4 tied iterations of
+`tanh(W_step[type] · [p ⊕ a1 ⊕ a2 ⊕ lat])` + an untied separator
+dense): val L1 0.0565/0.0632, median 0.0599 — clearly worse than
+the plain typed step (0.0550), with 4× the seed spread and ~1.7×
+the fit cost. The train losses (0.0609/0.0593 vs the plain step's
+~0.0517) say the inner recurrence hurt *optimization*, not
+generalization — unlike the earlier no-input latentK null, this one
+had the right structure and still lost. Per-instruction depth is
+now a thoroughly closed axis (stack2 null, blind-latent null,
+input-latent negative). The `latent_step` option stays in the code
+for reference.
 
 **Multi-seed paired mutation-pair eval (2026-07-18)** — 5 seeds of
 both models on identical data, scored on the same freshly-mined pair

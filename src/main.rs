@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use tempfile::NamedTempFile;
 
 mod batch_tokenize;
@@ -261,6 +261,44 @@ fn count_chars(filename: &str) {
     println!("Max char: {:?}", std::char::from_u32(max_c).unwrap());
 }
 
+fn count_bytes(filename: &str) {
+    let file = File::open(filename).unwrap();
+    let reader = BufReader::new(file);
+    let mut counts: [usize; 256] = [0; 256];
+
+    for b in reader.bytes() {
+        counts[b.unwrap() as usize] += 1;
+    }
+
+    for (c, count) in counts.iter().enumerate() {
+        if *count > 0 {
+            if c < 128 {
+                println!("{:?} {}", std::char::from_u32(c as u32).unwrap(), count);
+            } else {
+                println!("{:?} {}", c, count);
+            }
+        }
+    }
+
+    println!();
+
+    let mut bytes: Vec<_> = (0..=255).map(u8::from).collect();
+    bytes.sort_by_key(|b| counts[*b as usize]);
+
+    for b in bytes.iter() {
+        let count = counts[*b as usize];
+        if count > 0 {
+            if *b < 128 {
+                println!("{:?} {}", std::char::from_u32(*b as u32).unwrap(), count);
+            } else {
+                println!("{:?} {}", *b, count);
+            }
+        }
+    }
+
+
+}
+
 fn load_save_tokens(
     filename_raw: &str,
     filename_processed: Option<&str>,
@@ -414,6 +452,11 @@ enum Command {
         data: String,
     },
 
+    CountBytes {
+        #[arg(short, long)]
+        data: String,
+    },
+
     ConvertTokens {
         #[arg(short, long)]
         data: String,
@@ -520,5 +563,7 @@ fn main() {
         Command::Process { data, output } => process(data.as_str(), output.as_str()),
 
         Command::CountChars { data } => count_chars(data.as_str()),
+
+        Command::CountBytes { data } => count_bytes(data.as_str()),
     }
 }

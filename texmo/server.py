@@ -291,7 +291,7 @@ def _render_bounds(b: Bounds):
 # docs/loss_prediction.md). Eligibility is worker-side: clients
 # advertise refit=1 on /select (config.REFIT / --no-refit), so slow
 # machines simply don't volunteer.
-_LOSS_REFIT_EVERY = 1000
+_LOSS_REFIT_EVERY = 500
 
 
 def _probe_timing(model: TrainTimingModel, conf: Configuration) -> None:

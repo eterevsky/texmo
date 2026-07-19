@@ -16,7 +16,6 @@ through unchanged via jnp.where.
 import dataclasses
 import logging
 import random
-from typing import TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
@@ -25,12 +24,10 @@ import optax
 
 from .. import latency
 from ..configuration import Configuration
+from ..db import DbReader
 from ..layers.split import SplitDef
 from ..layers.suffix import SuffixDef
 from .predict_common import MAX_LOSS, MIN_LOSS, layer_type_id, model_layers
-
-if TYPE_CHECKING:
-    from ..db import DbReader
 
 HIDDEN = 8
 BATCH_SIZE = 1024

@@ -428,14 +428,17 @@ def main(args: argparse.Namespace):
         # RandomForestBigPredictor(),  # slow; re-enable for comparisons.
         HistGBRPredictor(),
         HistGBRPredictor(with_second_layer=True),
-        # The production config (train_loss_model) -- keep in sync.
+        # The previous production config (flat RNN), kept as the
+        # reference baseline.
         RnnPredictor(
             cell_activation='tanh', hidden=32,
             lr=0.02, steps=8000, lr_schedule='cosine',
             feat_proj=32, out_hidden=32, out_activation='gelu',
             batch_size=2048,
         ),
-        # The v2 candidates (docs/loss_predictor_v2.md).
+        # The tree predictor (docs/loss_prediction.md); the typed-step
+        # variant is the production config (train_loss_model) -- keep
+        # in sync.
         TreePredictor(),
         TreePredictor(per_type_fwd=True),
     ]

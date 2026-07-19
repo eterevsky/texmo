@@ -26,13 +26,16 @@ discovery with `loss_rnn`.
 """
 
 import dataclasses
+import logging
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
 
+from .. import latency
 from ..configuration import Configuration
+from ..db import DbReader
 from ..layers.split import SplitDef
 from .loss_rnn import (
     N_INIT_GLOBAL,
@@ -45,7 +48,7 @@ from .predict_common import MAX_LOSS, MIN_LOSS, layer_type_id
 
 __all__ = [
     'TreeLossModel', 'compile_conf', 'build_arrays',
-    'discover_simple_types', 'fit', 'predict',
+    'discover_simple_types', 'fit', 'predict', 'train_loss_model',
 ]
 
 D_ACT = 32       # activation-vector width (one per register)
@@ -378,3 +381,26 @@ class TreeLossModel:
             self.params, confs, self.simple_types,
             per_type_fwd=self.per_type_fwd,
             latent_step=self.latent_step)
+
+
+def train_loss_model(db: DbReader) -> TreeLossModel | None:
+    """Retrain the tree loss predictor on all labeled runs in `db`.
+
+    Production config: typed step (`per_type_fwd=True`) -- see
+    docs/loss_prediction.md for the measured trade-offs, including
+    the ~16 min CPU refit that motivates moving this call to a
+    client-side job. Returns None if there are no labeled runs.
+    """
+    with latency.timer('train_loss_model.load'):
+        train_data = [
+            (conf, loss) for _, conf, loss in db.iter_labeled_runs()
+        ]
+    if not train_data:
+        return None
+    simple_types = discover_simple_types(train_data)
+    with latency.timer('train_loss_model.fit'):
+        params, _trace = fit(train_data, simple_types, per_type_fwd=True)
+    logging.info(
+        f"Trained tree loss model on {len(train_data)} labeled runs")
+    return TreeLossModel(
+        params=params, simple_types=simple_types, per_type_fwd=True)

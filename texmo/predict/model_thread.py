@@ -41,7 +41,7 @@ from ..configuration import Configuration
 from ..db import DbReader, DbWriter
 from ..db.writer import DbWriterProxy
 from ..precision import Precision
-from . import loss_rnn
+from . import loss_tree
 from .loss_rnn import LossModelHolder
 from .persist import save_predictor
 from .timing import TrainTimingModel
@@ -54,7 +54,7 @@ _REFIT_EVERY = 100
 
 # Threshold of total new runs (any system/precision) that triggers a
 # retrain of the loss-prediction model.
-_LOSS_REFIT_EVERY = 200
+_LOSS_REFIT_EVERY = 1000
 
 
 @dataclass
@@ -232,14 +232,14 @@ class ModelThread(threading.Thread):
             self._refit_loss(reader, writer)
 
     def _refit_loss(self, reader: DbReader, writer: DbWriterProxy):
-        loss_model = loss_rnn.train_loss_model(reader)
+        loss_model = loss_tree.train_loss_model(reader)
         if loss_model is not None:
             # Predictors persist as files next to the DB, not through
             # the writer queue (see predict/persist.py).
             save_predictor(self._db_path, 'loss', loss_model)
             self._loss_model.set_model(loss_model)
             logging.info(
-                f"Published new loss model "
-                f"(max_layers={loss_model.max_layers}, "
-                f"{len(loss_model.simple_types)} simple types)"
+                f"Published new tree loss model "
+                f"({len(loss_model.simple_types)} simple types, "
+                f"typed_step={loss_model.per_type_fwd})"
             )

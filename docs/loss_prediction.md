@@ -8,10 +8,11 @@ spending compute on them.
 The predictor is the **structure-mirroring "tree" model**
 ([`texmo/predict/loss_tree.py`](../texmo/predict/loss_tree.py)),
 designed 2026-07 (Oleg) and validated against the previous flat RNN.
-**Status**: default-designate — `train_loss_model` still fits the
-flat RNN until predictor refits move to a client machine (see
-Training cost below and the roadmap); the switch lands with that
-change. The flat RNN
+**Status**: in production — `loss_tree.train_loss_model` (typed
+step) is what the server's model thread fits and publishes. Refits
+currently run in-process on the server (~16 min on whitebox CPU, an
+accepted interim cost); moving them to a client-side job is the next
+infrastructure task (roadmap). The flat RNN
 ([`texmo/predict/loss_rnn.py`](../texmo/predict/loss_rnn.py)) stays
 as the fast baseline and the source of the shared feature
 extraction.

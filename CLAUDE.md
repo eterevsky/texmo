@@ -64,6 +64,14 @@ Each layer module contains three classes:
 `{Name}Def` exposes both `build_module()` and `build_jax(dtype)`. New
 layers are registered in `spec_parser.py:_build_layer_def()`.
 
+### Style
+
+- No string type annotations: annotate with the real class name and
+  import it for real. Reserve `TYPE_CHECKING` (and the accompanying
+  quoted name) for genuine import cycles only — check that the cycle
+  actually exists before reaching for it.
+- Imports live in the file preamble, never inline in functions.
+
 ### Tools
 
 - Package manager: `uv`.

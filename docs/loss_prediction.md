@@ -91,16 +91,17 @@ val L1 0.0570 and is the fallback where refit cost matters.
 | flat RNN (previous default) | 0.0587 | 4.2%  |
 | tree, shared step           | 0.0570 | 4.0%  |
 | **tree, typed step**        | **0.0550** | **3.9%** |
-| tree, typed step (confs with ≥2 runs only) | *TODO* | *TODO* |
+| tree, typed step (confs with ≥2 runs only) | 0.0437 | 3.1% |
 | oracle (confs with ≥2 runs only)       | 0.0335 | 2.3% |
 | oracle (per-conf val median, all runs) | 0.0228 | 1.6% |
 
 The all-runs oracle is flattered by single-run confs (32% of val
 runs, where "the conf's median" is the run's own value — zero error
-by construction); the ≥2-run row is the honest noise floor. On that
-same ≥2-run population the flat RNN measured 0.0461; TODO: score the
-tree (and the rest of the zoo) on it too, so the "closed roughly a
-third of the remaining gap" claim rests on same-population numbers.
+by construction); the ≥2-run rows are the honest comparison. There
+the tree runs at 1.30× the noise floor (0.0437 vs 0.0335) against
+the flat RNN's 1.38× (0.0461, measured a few days earlier on the
+then-smaller live DB) — roughly 20% of the honest remaining gap
+closed. (An earlier "roughly a third" claim mixed populations.)
 
 **Mutation ranking** — the search-shaped metric: over 2.2k val conf
 pairs differing by exactly one model mutation, sign accuracy of the
@@ -134,10 +135,12 @@ Every axis measured at the production budget, multi-seed
   per-layer logs); bits-per-token and log2(num_mults) were nulls.
   Caveat (Oleg, 2026-07-18): the log-total is dominated by the
   largest layer, so a huge layer feeding a narrow bottleneck reads
-  like a balanced model in this global — potentially misleading via
-  the head skip. Kept for now; TODO: ablate it on the tree, where
-  per-layer weights already flow through the structure. Flat-model
-  sweep history lives in
+  like a balanced model in this global. Ablated on the tree
+  (2026-07-18): a complete null — with-tw 0.0562 vs no-tw 0.0562 on
+  identical data (3 seeds), so the structure already carries the
+  information and the bottleneck concern is moot there. Kept because
+  the feature set is shared with the flat baseline, which does use
+  it. Flat-model sweep history lives in
   [`loss_rnn_experiments.md`](loss_rnn_experiments.md).
 
 ## Where the error lives

@@ -170,6 +170,61 @@ This is the kind that runs pretrained RecurrentGemma:
 chain reproduces the reference head exactly (inputs scaled by
 sqrt(2560), `logits = 30*tanh(h @ E.T / 30)`, no biases).
 
+## Fold tokensets: lossy folding with honest accounting
+
+*Status: implemented 2026-07-19. First set:
+`tokens/tokens32_raw_fold.json` (`tokens.32.raw_fold.oh`, also valid
+as `.emb.d`). Generator: `scripts/make_fold32.py` computes the
+mapping, head frequencies, and residual from corpus byte counts
+(`freq.txt`, produced by the Rust `count-bytes` command).*
+
+A **fold** tokenset maps *every* byte to exactly one of its tokens —
+a many-to-one projection, not a code. The 32-token set folds capitals
+to lowercase, digits to `x`, quotes/brackets/underscore to `'`,
+`!`/`:` to `.`, `;`/`-`/`/` to `,`, control bytes to space, and
+everything else to `?`. Tokenization is a 256-entry table lookup
+(`FoldTokenizer`), one token per byte; decoding prints each group's
+head character.
+
+**The accounting problem**: a model over folded text sees an easier
+task, so its token cross-entropy is not comparable to a lossless
+model's b/B — and the gap depends on knowledge (byte frequencies)
+the model never had to learn. A trivial 1-token set scores 8 b/B
+against uniform bytes, but ~4.7 b/B if corpus byte frequencies are
+baked into the decode distribution: that knowledge has to be paid
+for.
+
+**The fix**: each fold set stores one number per token — the
+corpus frequency of the group's head character within its group
+(`head_freq`). Within a group, the head byte gets probability `p`
+and the other members split `1 − p` equally. Composing the model's
+token distribution with this within-group model yields a genuine
+distribution over all 256 bytes, whose cross-entropy decomposes
+exactly into the token loss plus a per-byte charge
+(`-log2 P(byte | group)`). Two consequences:
+
+- **Eval adds the charge**: `TokenSet.byte_loss` adds
+  `stats.residual_bits_per_byte` (the corpus-average charge, 0.344
+  b/B for the 32-token set; 0 for lossless sets) and every b/B
+  conversion goes through it. Training is untouched — the charge is
+  an additive constant with no gradients.
+- **The codec counts the table as weights**: `+ntokens` (32) in
+  `num_weights` for variations ending in `fold` — the only
+  non-learned knowledge in the composite byte model, priced in. No
+  `num_mults` cost.
+
+Storing 32 numbers instead of the full 256-frequency table costs
+only 0.03 b/B of accounting slack (0.344 vs 0.314 exact) because
+most groups are `{letter, capital}` pairs where head + equal-split is
+exact. The stored frequencies are deliberately *not* trainable: the
+cross-entropy optimum of trainable values is exactly the empirical
+frequency already baked in, and a static table keeps the charge a
+per-tokenset constant, leaving within-tokenset rankings untouched.
+
+Per-slice accounting (charging each eval chunk's actual bytes via
+`FoldTokenizer.chunk_residual_bits`) is implemented but unused — the
+corpus constant is exact in expectation over books3 slices.
+
 ## Why the head is implicit
 
 If the head were an explicit spec layer, every spec would end with a

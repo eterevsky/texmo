@@ -337,7 +337,14 @@ class OneHotCodecDef:
 
     @property
     def num_weights(self) -> int:
-        return self.head.num_weights
+        # Fold (forgetting) tokensets carry one stored head-character
+        # frequency per token; that corpus knowledge is charged as
+        # model weights so lossy sets compare honestly with bits/bytes.
+        # No num_mults cost: the table only prices the eval loss.
+        extra = (
+            self.ntokens
+            if self.variation and self.variation.endswith('fold') else 0)
+        return self.head.num_weights + extra
 
     @property
     def num_mults(self) -> int:

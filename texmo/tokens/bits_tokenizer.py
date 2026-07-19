@@ -3,6 +3,7 @@ import numpy as np
 
 class BitsTokenSet:
     processing = 'raw'
+    residual_bits_per_byte = 0.0  # bit chunks are lossless
 
     def __init__(self, nbits):
         self.nbits = nbits
@@ -13,6 +14,9 @@ class BitsTokenSet:
 
         self.avg_proc_bytes_per_token = nbits / 8
         self.avg_bytes_per_token = nbits / 8
+
+    def byte_loss(self, token_loss: float) -> float:
+        return token_loss / self.avg_bytes_per_token
 
 
 class BitsTokenizer1:

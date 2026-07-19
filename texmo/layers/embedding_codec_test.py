@@ -197,3 +197,9 @@ def test_bad_specs_rejected():
                 "bytes.emb.4.direct|dense.4.tanh"):
         with pytest.raises(ValueError):
             parse_model2(bad, Precision.FP32)
+
+
+def test_fold_tokenset_counts_frequency_weights():
+    md = parse_model2("tokens.32.raw_fold.emb.8|rnn.8.tanh", Precision.FP32)
+    plain = parse_model2("tokens.32.test.emb.8|rnn.8.tanh", Precision.FP32)
+    assert md.codec.num_weights == plain.codec.num_weights + 32

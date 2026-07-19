@@ -8,6 +8,7 @@ from .bits_tokenizer import (
     BytesTokenizer,
 )
 from .bpe_tokenizer import BpeTokenizer
+from .fold_tokenizer import FoldTokenizer
 from .tokenizer import Tokenizer
 from .tokenset import TokenSet
 
@@ -48,7 +49,12 @@ def get_tokenizer(name: str):
     try:
         token_set = TokenSet.from_json_file(path)
         logging.info(f"Loaded tokenset from {path}")
-        if token_set.algorithm == "bpe":
+        if token_set.type == "fold":
+            # Forgetting sets: byte -> token is a pure table lookup,
+            # and the generic Decoder can't represent many-to-one
+            # groups (length-1 sequences would shadow the head char).
+            tokenizer = FoldTokenizer(token_set)
+        elif token_set.algorithm == "bpe":
             # BPE sets (converted SentencePiece vocabs) use the merge
             # loop; the DP tokenizer's dense suffix automaton would
             # also be prohibitively large at 256k pieces.

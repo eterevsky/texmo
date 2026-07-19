@@ -73,17 +73,19 @@ budget. Dream target: 32-64K weights.
   ride with the model.
 
 * **32-token ambiguous letter set with honest entropy accounting.**
-  Tokens may represent several characters ("a" covers "Aa"); at eval
-  the ambiguity is charged as extra bits — the surprisal of the
-  actual character under the within-class distribution (static
-  corpus unigram to start). This keeps bits/byte comparable across
-  lossy and lossless tokensets. The extra bits are data-dependent
-  constants computed at tokenization time: no gradient impact,
-  training untouched, only eval reporting adds the term. Set sketch:
-  a-z (case-folded), space, newline, apostrophe, ":" (chat!), digits
-  fold to "x", the rest folds to space; possibly "  " <-> ". "
-  processing tricks. Decode policy for generation TBD (sample within
-  class vs canonical).
+  DONE 2026-07-19 as the *fold* tokenset kind — see the "Fold
+  tokensets" section in [`io.md`](io.md) and
+  `tokens/tokens32_raw_fold.json`. Key upgrade over the sketch here:
+  the within-group knowledge is priced as **model weights** (one
+  stored head-character frequency per token, +32), making the b/B
+  comparison to bits/bytes exact rather than merely additive.
+  Remaining follow-ups: per-eval-slice residual accounting (the
+  corpus-average constant is used today; `chunk_residual_bits` is
+  ready), loss-predictor treatment for fold confs (needs a schema
+  extension — coordinate with client-refit rollout), and seeding the
+  search with fold confs (no ladder edges exist from bits/bytes).
+  Decode policy for generation TBD (sample within group vs
+  canonical head character — currently head character).
 
 * **64-token set.** Sibling of the above with capswords processing
   to reduce (but still support) capitals: all letters + digits +

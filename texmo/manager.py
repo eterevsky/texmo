@@ -45,7 +45,9 @@ class Manager:
 
         self.model_def = conf.model
         tokenizer = get_tokenizer(self.model_def.input.tokens_name)
-        self.bytes_per_token = tokenizer.tokenset.avg_bytes_per_token
+        # All b/B conversion goes through tokenset.byte_loss so lossy
+        # (fold) tokensets add their residual charge uniformly.
+        self.tokenset = tokenizer.tokenset
         self.run: Optional[Run] = None
 
     @property

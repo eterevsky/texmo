@@ -129,7 +129,7 @@ class ManagerJax(Manager):
             grads, self._opt_state, self.weights)
         self.weights = optax.apply_updates(self.weights, updates)
 
-        loss_val = float(loss) / self.bytes_per_token
+        loss_val = self.tokenset.byte_loss(float(loss))
         self.run.add_step(loss_val)
         return loss_val
 
@@ -190,13 +190,13 @@ class ManagerJax(Manager):
                 self.weights, self._opt_state, batches)
             losses_host = np.asarray(losses)
             for loss_val in losses_host:
-                self.run.add_step(float(loss_val) / self.bytes_per_token)
+                self.run.add_step(self.tokenset.byte_loss(float(loss_val)))
             now = perf_counter()
             if (
                 self.verbose
                 or now - last_progress_log >= _QUIET_PROGRESS_INTERVAL
             ):
-                last = float(losses_host[-1]) / self.bytes_per_token
+                last = self.tokenset.byte_loss(float(losses_host[-1]))
                 logging.info(f'{self.step}  {last:.4f} b/B')
                 last_progress_log = now
 
@@ -264,7 +264,10 @@ class ManagerJax(Manager):
         # in 16 GB on systems with msr layers.
         total_loss = model32.loss_batch_masked_recurrent(
             weights32, batch, lengths)
-        return float(total_loss) / (self.test_sample_len * self.test_batch)
+        # Already per-byte (sampled by bytes); fold sets add their
+        # forgetting charge on top.
+        return (float(total_loss) / (self.test_sample_len * self.test_batch)
+                + self.tokenset.residual_bits_per_byte)
 
     def continue_prefix(
         self, prefix: str, length: int, temperature: float

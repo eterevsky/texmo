@@ -288,7 +288,12 @@ class EmbeddingCodecDef:
     def num_weights(self) -> int:
         pos = self.npositions if self.npositions > 1 else 0
         table = (self.ntokens + pos) * self.emb_size
-        return table + 1  # +1: the exp(y) input scale
+        # Fold tokensets: +1 stored head-character frequency per
+        # token (see OneHotCodecDef.num_weights).
+        extra = (
+            self.ntokens
+            if self.variation and self.variation.endswith('fold') else 0)
+        return table + 1 + extra  # +1: the exp(y) input scale
 
     @property
     def num_mults(self) -> int:

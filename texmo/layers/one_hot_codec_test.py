@@ -197,3 +197,12 @@ def test_emb_specs_dispatch_to_embedding_codec():
     # Direct OneHotCodec parsing still rejects emb specs.
     with pytest.raises(ValueError, match="EmbeddingCodec"):
         OneHotCodecDef.from_spec("tokens.16.test.emb.8")
+
+
+def test_fold_tokenset_counts_frequency_weights():
+    md = parse_model2("tokens.32.raw_fold.oh|dense.4.tanh", Precision.FP32)
+    plain = parse_model2("tokens.32.test.oh|dense.4.tanh", Precision.FP32)
+    # The fold set's 32 stored head frequencies count as weights...
+    assert md.codec.num_weights == plain.codec.num_weights + 32
+    # ...but cost no multiplies (they only price the eval loss).
+    assert md.codec.num_mults == plain.codec.num_mults

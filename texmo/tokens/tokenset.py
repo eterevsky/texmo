@@ -75,6 +75,9 @@ class TokenSet(object):
         token_set.specials = tokens_dict.get("specials", [])
         # Ids matched verbatim in text before the BPE bulk.
         token_set.priority_tokens = tokens_dict.get("priority_tokens", [])
+        # Fold sets: P(head byte | token), keyed by the token's
+        # character. See fold_tokenizer.py for the accounting model.
+        token_set.head_freq = tokens_dict.get("head_freq", {})
 
         for token_str in tokens_dict["tokens"]:
             token = _parse_token(token_str)
@@ -127,9 +130,18 @@ class TokenSet(object):
         self.merges: list = []
         self.specials: list = []
         self.priority_tokens: list = []
+        self.head_freq: dict[str, float] = {}
+
+    @property
+    def residual_bits_per_byte(self) -> float:
+        """Corpus-average charge for the information a lossy (fold)
+        tokenset destroys; 0 for lossless sets. Baked into the
+        tokenset at build time from corpus byte counts."""
+        return (self.stats or {}).get("residual_bits_per_byte", 0.0)
 
     def byte_loss(self, token_loss: float) -> float:
-        raise NotImplementedError()
+        return (token_loss / self.avg_bytes_per_token
+                + self.residual_bits_per_byte)
 
     @property
     def avg_bytes_per_token(self):

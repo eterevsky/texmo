@@ -11,7 +11,7 @@ conf_time_estimate for renamed confs (their timing changed by
 
 Run with the texmo server stopped to avoid lock contention:
 
-    uv run python migrate_norm_rename.py
+    uv run python scripts/migrate_norm_rename.py
 
 The DB at results/db.sqlite is mutated in place; back it up first.
 """

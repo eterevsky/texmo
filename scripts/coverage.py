@@ -5,11 +5,16 @@ of the active systems ({5060ti, m5, mini, pi5}) have a run on it.
 Summary at the end: how many confs are fully covered, and the total
 number of (conf, system) pairs that have ≥1 run.
 
-Run: `uv run python coverage.py [path/to/db.sqlite]`
+Run: `uv run python scripts/coverage.py [path/to/db.sqlite]`
 """
 
+import os
 import sys
 
+# texmo is not an installed package; scripts/ must put the repo root
+# on the path itself.
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from texmo.common import INF
 from texmo.configuration import Precision, Template
 from texmo.db import DbReader

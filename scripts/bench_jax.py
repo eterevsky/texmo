@@ -25,6 +25,7 @@ Reading the result:
 import argparse
 import math
 import os
+import sys
 from time import perf_counter
 
 import numpy as np
@@ -32,6 +33,10 @@ import jax
 import jax.numpy as jnp
 import optax
 
+# texmo is not an installed package; scripts/ must put the repo root
+# on the path itself.
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from texmo.dataset import DataSet, DataSetWrapper
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)

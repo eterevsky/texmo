@@ -176,14 +176,20 @@ def _features_reps_recurrent(
 ) -> list[float]:
     # latent/lrnn/lmgu iterate their internal (size x size) recurrence
     # `reps` times per token while the input projection fires once.
-    # The dense features cover the projection; the extra terms carry
-    # the reps-scaled inner matmuls (lmgu's 4 inner matrices vs
-    # latent's 1 are absorbed by the per-type NNLS coefficient).
-    return _features_dense(isize, osize, batch, length) + [
-        float(reps * osize * osize),
-        float(reps * osize * osize * length),
-        float(reps * osize * osize * batch * length),
+    # Base block: dense features + the OS^2 triple (the matlstm shape)
+    # covering the one-shot work. The same block reps-scaled lets NNLS
+    # apportion everything that repeats per iteration -- the OS^2
+    # matmul FLOPs *and* the per-iteration dispatch/elementwise
+    # overheads (dominant at small sizes), at every shape. Non-work
+    # members (reps-scaled IS terms, one-shot OS^2) get ~0 weights;
+    # lmgu's 4 inner matrices vs latent's 1 are absorbed by the
+    # per-type coefficient.
+    base = _features_dense(isize, osize, batch, length) + [
+        float(osize * osize),
+        float(osize * osize * length),
+        float(osize * osize * batch * length),
     ]
+    return base + [reps * f for f in base]
 
 
 def _features_split(osize: int, batch: int, length: int) -> list[float]:

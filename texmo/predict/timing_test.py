@@ -411,10 +411,13 @@ def test_reps_layers_scale_with_reps():
         comps8 = featurize(_conf(f"bits.1+bp|{name}.8.8", batch=4, length=16))
         f2 = next(c for c in comps2 if c.type_id == name).features
         f8 = next(c for c in comps8 if c.type_id == name).features
-        assert f2.shape == (15,)  # 12 dense + 3 reps-scaled
-        # The reps-scaled tail grows 4x; the dense prefix is unchanged.
-        np.testing.assert_array_equal(f2[:12], f8[:12])
-        np.testing.assert_array_equal(f8[12:], 4 * f2[12:])
+        # base15 (dense + OS^2 triple) + the same block reps-scaled.
+        assert f2.shape == (30,)
+        # One-shot base is reps-independent; the scaled copy grows 4x
+        # (reps 2 -> 8); and the scaled half is reps * the base half.
+        np.testing.assert_array_equal(f2[:15], f8[:15])
+        np.testing.assert_array_equal(f8[15:], 4 * f2[15:])
+        np.testing.assert_array_equal(f2[15:], 2 * f2[:15])
 
 
 def test_dot_ignores_stale_weight_lengths():

@@ -29,14 +29,11 @@ Detailed docs live in [`docs/`](docs/):
   consequences, Gemma fidelity mapping. Agreed, not yet implemented.
 - [`timing.md`](docs/timing.md) — training-step time prediction
   model (features, fit, and use).
-- [`loss_prediction.md`](docs/loss_prediction.md) — loss predictor
-  in production (architecture, training, current accuracy, use in
-  search).
-- [`loss_predictor_v2.md`](docs/loss_predictor_v2.md) — design record
-  for the structure-mirroring (tree) predictor: ablation grid,
-  measured wins/nulls, deployment decisions. Not yet in production.
-- [`loss_rnn_experiments.md`](docs/loss_rnn_experiments.md) — loss-
-  predictor sweep results (best configs, null results, open ideas).
+- [`loss_prediction.md`](docs/loss_prediction.md) — the
+  structure-mirroring (tree) loss predictor: architecture, measured
+  performance, ablation history, use in search, refit/persistence.
+- [`loss_rnn_experiments.md`](docs/loss_rnn_experiments.md) — flat-
+  RNN-era sweep results (best configs, null results, open ideas).
 - [`backends.md`](docs/backends.md) — PyTorch vs JAX trade-offs and why
   JAX is the training runtime (the torch full-model backend is parked).
 - [`search.md`](docs/search.md) — distributed architecture search:

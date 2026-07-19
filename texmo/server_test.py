@@ -1,4 +1,9 @@
+import csv
+import gzip
+import io
 import os
+import pickle
+import time
 
 import pytest
 from flask import Flask, render_template
@@ -9,6 +14,8 @@ from texmo.db import DbReader, DbWriter
 from texmo.spec_parser import parse_model2
 from texmo.precision import Precision
 from texmo.run import Run
+import texmo.server as server_mod
+from texmo.predict import loss_tree
 from texmo.server import SearchServer
 
 
@@ -365,3 +372,80 @@ def test_probe_timing_runs_only_on_matching_precision():
     calls.clear()
     _probe_timing(_M([('s', other)]), conf)
     assert calls == []  # no matching pair -> no-op, no exception
+
+
+def _tiny_tree_model(default_conf, run_count):
+    """A fast-fitted TreeLossModel whose probe covers `default_conf`."""
+    data = [(default_conf, 2.0)] * 8
+    st = loss_tree.discover_simple_types(data)
+    params, _ = loss_tree.fit(
+        data, st, steps=20, batch_size=4, seed=0, per_type_fwd=True)
+    return loss_tree.TreeLossModel(
+        params=params, simple_types=st, per_type_fwd=True,
+        run_count=run_count)
+
+
+def test_client_refit_grant_and_submit(tmp_path, monkeypatch):
+    path = str(tmp_path / "db.sqlite")
+    with DbWriter(path):
+        pass
+    monkeypatch.setattr(server_mod, "_LOSS_REFIT_EVERY", 1)
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        model = parse_model2(
+            "bytes|dense.32.gelu", precision=Precision.FP32)
+        conf = Configuration(
+            model=model, lr=0.1, length=128, batch=32, steps=256,
+            decay=1.0)
+        run = Run(system="tower", step_loss=None, loss=3.0,
+                  train_time=2.0)
+
+        # Below threshold: no job.
+        assert server._maybe_grant_refit("tower") is None
+
+        server.add_run({"conf": conf.to_dict(), "run": run.to_dict()})
+
+        # A client gets the job; fire-and-forget: no second grant
+        # until another _LOSS_REFIT_EVERY runs land, regardless of
+        # whether the first job ever reports back.
+        assert server._maybe_grant_refit("tower") is not None
+        assert server._maybe_grant_refit("whitebox") is None
+        server.add_run({"conf": conf.to_dict(), "run": run.to_dict()})
+        assert server._maybe_grant_refit("whitebox") is not None
+
+        # Training data round-trips through gzip + CSV. The runs
+        # land via the async writer queue, so poll briefly.
+        for _ in range(200):
+            payload, n = server.training_data()
+            if n == 2:
+                break
+            time.sleep(0.05)
+        assert n == 2
+        text = gzip.decompress(payload).decode()
+        rows = list(csv.reader(io.StringIO(text)))
+        assert rows[0][0] == "spec"
+        assert len(rows) == 3 and rows[1][0] == str(model)
+
+        # Garbage body: probe rejects.
+        d = server.submit_loss_model(
+            {"system": "tower"}, b"not a pickle")
+        assert not d["accepted"]
+
+        # A real model publishes; its freshness (run_count = training
+        # rows counted by the worker) travels inside the pickle.
+        tree = _tiny_tree_model(server.default, run_count=2)
+        d = server.submit_loss_model(
+            {"system": "tower", "fit_s": "1.0"}, pickle.dumps(tree))
+        assert d["accepted"]
+        assert server.loss_model.is_ready()
+        assert server._refit_published_count == 2
+
+        # The same (now stale) model again: rejected.
+        d = server.submit_loss_model(
+            {"system": "tower"}, pickle.dumps(tree))
+        assert not d["accepted"] and d["reason"] == "stale run_count"
+    finally:
+        server.join()

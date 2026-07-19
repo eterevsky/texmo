@@ -859,6 +859,27 @@ class DbReader(object):
         for row in cur:
             yield row['conf_id'], Configuration.from_dict(row), row['loss']
 
+    def iter_labeled_runs_raw(self) -> Iterable[tuple]:
+        """Yield raw (spec, precision, lr, length, batch, steps, decay,
+        cosine, loss) tuples for every run with a loss.
+
+        Unlike `iter_labeled_runs` this skips Configuration parsing --
+        used to stream training data to a client-side refit, where the
+        client parses (deduplicating by spec+precision on its end).
+        """
+        cur = self._db.execute(
+            """
+            SELECT spec, precision, lr, length, batch, steps, decay,
+                   cosine, run.loss AS loss
+            FROM conf JOIN run ON run.conf_id = conf.id
+            WHERE run.loss IS NOT NULL
+            """
+        )
+        for row in cur:
+            yield (row['spec'], row['precision'], row['lr'],
+                   row['length'], row['batch'], row['steps'],
+                   row['decay'], row['cosine'], row['loss'])
+
     def iter_confs_by_precision(
         self, precision: Precision
     ) -> Iterable[tuple[int, Configuration]]:

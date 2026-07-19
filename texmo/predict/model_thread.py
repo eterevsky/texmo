@@ -52,9 +52,10 @@ from .timing import TrainTimingModel
 # genuinely new points but not so frequent that fit cost dominates.
 _REFIT_EVERY = 100
 
-# Threshold of total new runs (any system/precision) that triggers a
-# retrain of the loss-prediction model.
-_LOSS_REFIT_EVERY = 1000
+# Loss-model refits are triggered by the SERVER, which hands them to
+# clients via /select (server._LOSS_REFIT_EVERY); this thread only
+# handles the explicit LossRefit message (startup with no persisted
+# model) as the in-process fallback.
 
 
 @dataclass
@@ -188,10 +189,9 @@ class ModelThread(threading.Thread):
         # `loss_model.set_model(...)` is a single pointer swap.
         self._timing_model = timing_model
         self._loss_model = loss_model
-        # Per-(system, precision) and total run counters. Private to
-        # this thread, so no locking needed.
+        # Per-(system, precision) run counters for timing refits.
+        # Private to this thread, so no locking needed.
         self._run_counter: dict[tuple[str, Precision], int] = defaultdict(int)
-        self._total_run_counter = 0
 
     def run(self):
         reader = DbReader(self._db_path)
@@ -226,10 +226,6 @@ class ModelThread(threading.Thread):
             _refit_pair(reader, writer, self._timing_model, system, precision)
             save_predictor(
                 self._db_path, 'timing', self._timing_model.snapshot())
-        self._total_run_counter += 1
-        if self._total_run_counter >= _LOSS_REFIT_EVERY:
-            self._total_run_counter = 0
-            self._refit_loss(reader, writer)
 
     def _refit_loss(self, reader: DbReader, writer: DbWriterProxy):
         loss_model = loss_tree.train_loss_model(reader)

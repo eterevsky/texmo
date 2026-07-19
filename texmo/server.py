@@ -1,8 +1,11 @@
 import base64
+import csv
+import gzip
 import hmac
 import io
 import logging
 import os
+import pickle
 import threading
 import time
 from datetime import datetime
@@ -13,6 +16,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from flask import (
     Flask,
+    Response,
     make_response,
     redirect,
     render_template,
@@ -35,7 +39,7 @@ from .db import ConfScore, DbReader, DbWriter
 from .db.writer import DbWriterProxy, Stop as WriterStop, WriterThread
 from .latency import get_report, report, timer
 from .predict.loss_rnn import LossModelHolder
-from .predict.persist import load_predictor
+from .predict.persist import load_predictor, save_predictor
 from .predict.model_thread import (
     BootstrapTiming,
     LossRefit,
@@ -278,6 +282,18 @@ def _render_bounds(b: Bounds):
         return f'{b.min}-{b.max}'
 
 
+# Every this-many new labeled runs, ONE loss-model refit job is
+# handed to the next eligible client (via /select with refit=1) and
+# forgotten: if the worker dies, the next boundary issues a fresh
+# job; if two fits overlap, the newer snapshot wins at
+# /submit_loss_model. The fit itself runs on the client; the server
+# just streams the training data and accepts the pickled result (see
+# docs/loss_prediction.md). Eligibility is worker-side: clients
+# advertise refit=1 on /select (config.REFIT / --no-refit), so slow
+# machines simply don't volunteer.
+_LOSS_REFIT_EVERY = 1000
+
+
 def _probe_timing(model: TrainTimingModel, conf: Configuration) -> None:
     """Exercise a loaded timing model's feature path on one conf, to
     surface a feature-schema mismatch. predict_batch returns early
@@ -379,8 +395,22 @@ class SearchServer(object):
                 self.loss_model.set_model(loaded_loss_model)
                 need_loss_refit = False
                 logging.info(
-                    "Loaded persisted loss model from DB "
-                    f"(max_layers={loaded_loss_model.max_layers})")
+                    "Loaded persisted loss model "
+                    f"({type(loaded_loss_model).__name__})")
+
+        # Client-side refit bookkeeping (see _maybe_grant_refit).
+        # The lock guards the counters below (touched from concurrent
+        # request handlers); held only for the few lines of
+        # arithmetic, never across any fitting or I/O. Freshness is
+        # measured by the model's own run_count (counted by whoever
+        # fit it, restored from the pickle across restarts); the
+        # grant cadence only needs a relative tally of new runs.
+        self._refit_lock = threading.Lock()
+        self._refit_runs_since_grant = 0
+        self._refit_published_count = getattr(
+            loaded_loss_model, 'run_count', 0) or 0
+        self._refit_published_at = time.time()
+        self._refit_granted_at = 0.0
 
         # Writer thread first: producers below post to its queue and
         # we want a consumer ready before that happens.
@@ -693,8 +723,31 @@ class SearchServer(object):
             top2=top2,
         )
 
+    def _maybe_grant_refit(self, system: str) -> Optional[dict]:
+        """Grant a loss-refit job to `system` if one is due.
+
+        Fire-and-forget cadence: one job per _LOSS_REFIT_EVERY new
+        labeled runs since the last GRANT (not publish). A dead
+        worker just means the next boundary issues a fresh job; an
+        overlap is resolved by the newer run_count at submit time."""
+        with self._refit_lock:
+            if self._refit_runs_since_grant < _LOSS_REFIT_EVERY:
+                return None
+            self._refit_runs_since_grant = 0
+            self._refit_granted_at = time.time()
+        logging.info(f"Granting loss-refit job to {system}")
+        return {
+            "system": system, "conf": None, "strategy": None,
+            "refit_loss": {},
+        }
+
     def select(self, args):
         system = args["system"]
+
+        if args.get("refit") == "1":
+            job = self._maybe_grant_refit(system)
+            if job is not None:
+                return job
 
         with self.confs_by_system_lock:
             if system not in self.confs_by_system:
@@ -726,8 +779,75 @@ class SearchServer(object):
         # ModelThread reading after `AddRun` commits sees the new row.
         self._writer.add_run(
             conf, run, strategy=strategy, track_winner_change=True)
+        with self._refit_lock:
+            self._refit_runs_since_grant += 1
         self.train_queue.put(
             RunAdded(system=run.system, precision=conf.precision))
+
+    def training_data(self) -> tuple[bytes, int]:
+        """Gzipped CSV of all labeled runs + the run count.
+
+        Streamed straight off a raw DB cursor -- no Configuration
+        parsing here; the client parses, deduplicating by
+        (spec, precision)."""
+        with timer('SearchServer.training_data'):
+            buf = io.BytesIO()
+            n = 0
+            with DbReader(self.path) as reader, \
+                    gzip.GzipFile(fileobj=buf, mode='wb') as gz:
+                text = io.TextIOWrapper(gz, encoding='utf-8', newline='')
+                w = csv.writer(text)
+                w.writerow(['spec', 'precision', 'lr', 'length', 'batch',
+                            'steps', 'decay', 'cosine', 'loss'])
+                for row in reader.iter_labeled_runs_raw():
+                    w.writerow(row)
+                    n += 1
+                text.flush()
+                text.detach()
+            logging.info(
+                f"Serving training data: {n} runs, "
+                f"{len(buf.getvalue()) / 1e6:.1f} MB gzipped")
+            return buf.getvalue(), n
+
+    def submit_loss_model(self, args, body: bytes) -> dict:
+        """Accept a client-fitted loss model (pickled in `body`).
+
+        The model carries its own freshness measure: `run_count`, the
+        number of training rows counted by the worker that fit it
+        (monotonic over the DB's life). Accept only if newer than the
+        published model, and only if it survives a probe-predict
+        (guards against a client running a different feature
+        schema)."""
+        system = args.get('system', '?')
+        fit_s = float(args.get('fit_s', 0))
+        try:
+            model = pickle.loads(body)
+            model.predict([self.default])
+        except Exception as e:
+            logging.warning(
+                f"Rejecting loss model from {system}: probe failed: {e!r}")
+            return {'accepted': False, 'reason': f'probe failed: {e!r}'}
+        run_count = getattr(model, 'run_count', 0)
+        now = time.time()
+        with self._refit_lock:
+            if run_count <= self._refit_published_count:
+                logging.info(
+                    f"Rejecting stale loss model from {system} "
+                    f"(run_count={run_count} <= "
+                    f"{self._refit_published_count})")
+                return {'accepted': False, 'reason': 'stale run_count'}
+            turnaround = now - self._refit_granted_at
+            interval = now - self._refit_published_at
+            self._refit_published_count = run_count
+            self._refit_published_at = now
+        save_predictor(self.path, 'loss', model)
+        self.loss_model.set_model(model)
+        logging.info(
+            f"Published client-fitted loss model from {system}: "
+            f"run_count={run_count}, fit={ttoa3(fit_s)}, "
+            f"turnaround={ttoa3(turnaround)}, "
+            f"interval since previous model={ttoa3(interval)}")
+        return {'accepted': True}
 
     def join(self):
         # Producers first so no more writes / refits land on the
@@ -837,6 +957,18 @@ class SearchServer(object):
         def _fastest():
             with timer("SearchServer.fastest"):
                 return self.fastest(request.args)
+
+        @app.route("/training_data", methods=["GET"])
+        def _training_data():
+            payload, n = self.training_data()
+            resp = Response(payload, mimetype='text/csv')
+            resp.headers['Content-Encoding'] = 'gzip'
+            resp.headers['X-Run-Count'] = str(n)
+            return resp
+
+        @app.route("/submit_loss_model", methods=["POST"])
+        def _submit_loss_model():
+            return self.submit_loss_model(request.args, request.get_data())
 
         @app.route("/select", methods=["GET"])
         def _select():

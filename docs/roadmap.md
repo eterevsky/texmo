@@ -141,21 +141,15 @@ budget. Dream target: 32-64K weights.
   No action yet — revisit with caching / incremental candidate sets
   when it starts hurting client utilization.
 
-* **Predictor training off the server's critical path** (Oleg,
-  2026-07-16). The server currently runs on Windows directly, where
-  JAX is CPU-only, and refits the loss model in-process. Two options:
-  (a) run the server under WSL so the 5090 handles predictor
-  training (JAX+CUDA worked there for Gemma; the tree-structured v2
-  predictor with its weight-bank einsums would benefit more than the
-  tiny flat RNN does); (b) outsource predictor refits to a client
-  machine as a new job type in the existing client/server protocol —
-  speeds up refits AND unblocks the server regardless of host OS.
-  (b) composes with the file-based predictor store (rotation/backups
-  already in place); the client would ship back the pickle. Note
-  from the 2026-07-18 latency report: loading the labeled runs cost
-  ~2m47s per refit — as much as the flat fit itself — so the job
-  design must cover shipping the training data (labeled-runs
-  snapshot), not just the fit.
+* **Predictor training off the server's critical path** — DONE
+  2026-07-18 for the loss model (option (b): refit jobs handed to
+  clients via /select + /training_data + /submit_loss_model; see
+  loss_prediction.md). Remaining follow-ups: benchmark refit time on
+  the GPU clients (the typed-step einsum bank is GPU-shaped; if the
+  5090 fits in minutes, reconsider the pi5 denylist economics), and
+  consider the same treatment for timing-model refits (the other
+  ~40% of model-thread time — harder, since `_refresh_estimates`
+  writes predicted rows through the writer).
 
 * **step/forward parity for consuming->stateful chains.** forward
   drops the transient outputs of consuming layers (conv/suffix,

@@ -375,6 +375,11 @@ class TreeLossModel:
     simple_types: list[str]
     per_type_fwd: bool = False
     latent_step: int = 0
+    # Number of labeled runs this model was trained on -- counted by
+    # whoever ran the fit (the worker counts its own training rows).
+    # Monotonic over the DB's life, so it doubles as the freshness
+    # measure when client-fitted models race (see server.py).
+    run_count: int = 0
 
     def predict(self, confs: list[Configuration]) -> np.ndarray:
         return predict(
@@ -383,18 +388,16 @@ class TreeLossModel:
             latent_step=self.latent_step)
 
 
-def train_loss_model(db: DbReader) -> TreeLossModel | None:
-    """Retrain the tree loss predictor on all labeled runs in `db`.
-
-    Production config: typed step (`per_type_fwd=True`) -- see
-    docs/loss_prediction.md for the measured trade-offs, including
-    the ~16 min CPU refit that motivates moving this call to a
-    client-side job. Returns None if there are no labeled runs.
+def train_from_data(
+    train_data: list[tuple[Configuration, float]],
+) -> TreeLossModel | None:
+    """Fit the production configuration -- typed step
+    (`per_type_fwd=True`) -- on (conf, loss) pairs. See
+    docs/loss_prediction.md for the measured trade-offs. Used both by
+    the in-process refit path and by client-side refit jobs (which
+    build `train_data` from the /training_data download). Returns
+    None on empty data.
     """
-    with latency.timer('train_loss_model.load'):
-        train_data = [
-            (conf, loss) for _, conf, loss in db.iter_labeled_runs()
-        ]
     if not train_data:
         return None
     simple_types = discover_simple_types(train_data)
@@ -403,4 +406,14 @@ def train_loss_model(db: DbReader) -> TreeLossModel | None:
     logging.info(
         f"Trained tree loss model on {len(train_data)} labeled runs")
     return TreeLossModel(
-        params=params, simple_types=simple_types, per_type_fwd=True)
+        params=params, simple_types=simple_types, per_type_fwd=True,
+        run_count=len(train_data))
+
+
+def train_loss_model(db: DbReader) -> TreeLossModel | None:
+    """Retrain the tree loss predictor on all labeled runs in `db`."""
+    with latency.timer('train_loss_model.load'):
+        train_data = [
+            (conf, loss) for _, conf, loss in db.iter_labeled_runs()
+        ]
+    return train_from_data(train_data)

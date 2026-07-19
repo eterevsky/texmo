@@ -188,9 +188,27 @@ the flat `LossModel` analogously) is pickled to
 `<db_dir>/loss_model.pickle` (`predict/persist.py`; rotation keeps 3
 timestamped backups). On load the server sanity-probes it with a
 trivial predict and refits on any error, so feature-schema changes
-just cost one refit. The model thread refits whenever the total run
-count crosses `_LOSS_REFIT_EVERY = 200` — with the tree this moves
-to a client-side job (see Training).
+just cost one refit.
+
+**Refits run on clients** (2026-07-18). Every
+`server._LOSS_REFIT_EVERY = 1000` labeled runs, ONE refit job is
+handed to the next `/select` from a client advertising `refit=1`
+(worker-side eligibility: `config.REFIT` / `--no-refit`; set False
+on slow machines like the Pi) and forgotten — no reservation, no
+timeout: a dead worker just means the next 1000-run boundary issues
+a fresh job (run-count cadence is the natural staleness clock), and
+overlapping fits resolve by run count at submission. The client
+downloads `GET /training_data` (gzipped CSV streamed off a raw
+cursor — no server-side parsing; the client dedups `parse_model2` by
+(spec, precision)), fits the production config, and POSTs the pickle
+to `/submit_loss_model` tagged with the snapshot's run count. The
+server accepts it only if newer than the published model *and* it
+survives a probe-predict (guarding schema drift from clients on
+older code), then persists + atomically swaps the holder. The
+publish log records fit time, grant-to-publish turnaround, interval
+since the previous model, and runs-behind — the numbers that say
+whether refit cadence is keeping up. The in-process fit remains only
+as the startup fallback when no persisted model exists.
 
 ## CLI
 

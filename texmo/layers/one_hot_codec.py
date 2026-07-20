@@ -30,7 +30,7 @@ import jax
 import jax.numpy as jnp
 
 from ..precision import Precision
-from .codec import cap_logits
+from .codec import cap_logits, fold_extra_weights
 from .dense import DenseDef, DenseJax
 
 # Number of bits used to encode the bit-chunk position within a byte.
@@ -341,14 +341,12 @@ class OneHotCodecDef:
 
     @property
     def num_weights(self) -> int:
-        # Fold (forgetting) tokensets carry one stored head-character
-        # frequency per token; that corpus knowledge is charged as
-        # model weights so lossy sets compare honestly with bits/bytes.
-        # No num_mults cost: the table only prices the eval loss.
-        extra = (
-            self.ntokens
-            if self.variation and self.variation.endswith('fold') else 0)
-        return self.head.num_weights + extra
+        # Fold (forgetting) tokensets may carry stored frequencies;
+        # that corpus knowledge is charged as model weights so lossy
+        # sets compare honestly with bits/bytes. No num_mults cost:
+        # the table only prices the eval loss.
+        return (self.head.num_weights
+                + fold_extra_weights(self.ntokens, self.variation))
 
     @property
     def num_mults(self) -> int:

@@ -1,3 +1,5 @@
+import os
+
 from texmo.tokens import Tokenizer, TokenSet
 
 
@@ -74,3 +76,43 @@ def test_overlapping_tokens_repeated():
         2, 0,
         b"a", b"bc", b"de", b"fg",
     ]
+
+
+def _load_shift64():
+    path = os.path.join(
+        os.path.dirname(__file__), "..", "..", "tokens",
+        "tokens64_shift.json")
+    return Tokenizer(TokenSet.from_json_file(path))
+
+
+def test_shift64_is_an_ordinary_tokenset():
+    tk = _load_shift64()
+    # Shift-marker pairs: caps, tab, shifted symbols.
+    ids = tk.tokenize_processed(b"Hi")
+    assert len(ids) == 3  # shift + h + i
+    assert tk.untokenize(ids) == b"Hi"
+    shifted = b"\tA + b [50%] `q\r`"
+    assert tk.untokenize(tk.tokenize_processed(shifted)) == shifted
+    # Hex escape: 3 tokens spelling the byte's hex code.
+    ids = tk.tokenize_processed(b"$")  # 0x24 -> esc + '2' + '4'
+    assert len(ids) == 3
+    assert tk.untokenize(ids) == b"$"
+    # The whole byte space round-trips exactly: the set is lossless,
+    # and every byte has exactly one covering span, so the DP has no
+    # choices and reproduces the fixed encoding.
+    data = bytes(range(256))
+    assert tk.untokenize(tk.tokenize_processed(data)) == data
+
+
+def test_shift64_untokenize_survives_sampled_garbage():
+    tk = _load_shift64()
+    valid = list(tk.tokenize_processed(b"ok"))
+    # Marker misuse a sampled stream can produce: shift before a
+    # non-letter, escape with non-hex followers, dangling markers.
+    for garbage in ([0, 0], [1, 0, 1], [0], [1], [1, 3, 3]):
+        decoded = tk.untokenize(valid + garbage + valid)
+        assert decoded.startswith(b"ok"), decoded
+        # A trailing dangling shift may legitimately capitalize the
+        # following text ([0, o, k] IS the encoding of "Ok"), so
+        # compare case-folded.
+        assert decoded.lower().count(b"ok") == 2, decoded

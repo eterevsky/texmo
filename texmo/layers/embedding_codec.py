@@ -62,7 +62,7 @@ import jax.numpy as jnp
 
 from ..common import is_power2_int
 from ..precision import Precision
-from .codec import cap_logits
+from .codec import cap_logits, fold_extra_weights
 
 # Mode swaps back to the blessed fixed-codebook inputs, per chunk
 # width. Input swaps carry the chain unchanged, so the final width --
@@ -294,11 +294,9 @@ class EmbeddingCodecDef:
     def num_weights(self) -> int:
         pos = self.npositions if self.npositions > 1 else 0
         table = (self.ntokens + pos) * self.emb_size
-        # Fold tokensets: +1 stored head-character frequency per
-        # token (see OneHotCodecDef.num_weights).
-        extra = (
-            self.ntokens
-            if self.variation and self.variation.endswith('fold') else 0)
+        # Fold tokensets: stored frequencies count as weights (see
+        # OneHotCodecDef.num_weights).
+        extra = fold_extra_weights(self.ntokens, self.variation)
         return table + 1 + extra  # +1: the exp(y) input scale
 
     @property

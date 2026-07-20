@@ -13,10 +13,16 @@ Usage:
 
 Without the output path it just prints the analysis, including the
 comparison of the two underscore-placement variants."""
-import json
 import math
+import os
 import re
 import sys
+
+# texmo is not an installed package; scripts/ must put the repo root
+# on the path itself.
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from texmo.pjson import save_json
 
 FREQ = sys.argv[1] if len(sys.argv) > 1 else "freq.txt"
 OUT = sys.argv[2] if len(sys.argv) > 2 else None
@@ -180,30 +186,6 @@ if OUT:
             "total_tokens": total,
         },
     }
-    # Compact style matching the existing tokenset files: one line
-    # per sequence / per head_freq entry.
     with open(OUT, "w", encoding="utf-8", newline="\n") as f:
-        f.write("{\n")
-        f.write('  "head_freq": {\n')
-        items = list(doc["head_freq"].items())
-        for i, (t, p) in enumerate(items):
-            comma = "," if i < len(items) - 1 else ""
-            f.write(f"    {json.dumps(t)}: {p}{comma}\n")
-        f.write("  },\n")
-        f.write(f'  "processing": {json.dumps(doc["processing"])},\n')
-        f.write('  "sequences": [\n')
-        for i, seq in enumerate(doc["sequences"]):
-            comma = "," if i < len(doc["sequences"]) - 1 else ""
-            f.write(f"    {json.dumps(seq)}{comma}\n")
-        f.write("  ],\n")
-        f.write('  "stats": ')
-        f.write(json.dumps(doc["stats"], indent=2, sort_keys=True)
-                .replace("\n", "\n  "))
-        f.write(",\n")
-        f.write('  "tokens": ')
-        f.write(json.dumps(doc["tokens"], indent=2)
-                .replace("\n", "\n  "))
-        f.write(",\n")
-        f.write(f'  "type": {json.dumps(doc["type"])}\n')
-        f.write("}\n")
+        save_json(doc, f)
     print(f"\nwrote {OUT}: {len(sequences)} sequences, 32 head freqs")

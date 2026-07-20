@@ -92,9 +92,17 @@ budget. Dream target: 32-64K weights.
   Decode policy for generation TBD (sample within group vs
   canonical head character — currently head character).
 
-* **64-token set.** Sibling of the above with capswords processing
-  to reduce (but still support) capitals: all letters + digits +
-  punctuation. Lower risk, reuses existing processing.
+* **64-token set.** DONE 2026-07-20 as `tokens64_shift` — went
+  with in-band marker tokens (raw processing) rather than the
+  capswords sibling sketched here: lowercase + digits + shift
+  marker (caps, tab, six shifted-symbol pairs) + 26 top bytes + a
+  hex escape for everything else. Fully lossless: residual 0, zero
+  extra weights, 1.038 tokens/byte, handled by the generic DP
+  tokenizer (no fold machinery). See the fold section in
+  [`io.md`](io.md). Not yet search-reachable (no neighbor edges);
+  wire bridges once fold-32 results justify it. Unicode-char-level
+  sibling (128 tokens, chars not bytes behind the same
+  shift/escape) discussed 2026-07-20, revisit later.
 
 * **Coherency eval.** Working assumption to start: cross-entropy
   over the dialog training distribution is a workable proxy for

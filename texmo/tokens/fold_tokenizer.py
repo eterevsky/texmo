@@ -7,17 +7,22 @@ from .tokenset import TokenSet
 class FoldTokenizer(object):
     """Tokenizer for "fold" (forgetting) tokensets.
 
-    Every byte maps to exactly one token (its group's head character),
-    so tokenization is a single table lookup and untokenization prints
-    head characters. The information the fold destroys is priced by
-    the head-frequency model stored in the tokenset: within a group,
-    the head byte has probability `head_freq[token]` and the remaining
-    members split the rest equally. `residual_entropy[b]` is the
-    resulting -log2 P(b | token) charge for byte b; its corpus average
-    is `stats.residual_bits_per_byte`, which `TokenSet.byte_loss` adds
+    Every byte maps to exactly one token, so tokenization is a table
+    lookup; untokenization prints each group's head character. This
+    class exists for LOSSY sets only — a set that instead encodes
+    rare bytes with marker/escape token sequences (tokens64_shift)
+    is lossless and just an ordinary `Tokenizer` set.
+
+    The information the fold destroys is priced by the per-byte
+    charge in `residual_entropy`: with a stored head frequency (the
+    tokenset's `head_freq`, one weight per token) the head byte has
+    probability p and the other group members split 1 - p equally;
+    a group without a stored frequency is charged uniformly at
+    log2(group size), which costs no weights. The corpus average is
+    `stats.residual_bits_per_byte`, which `TokenSet.byte_loss` adds
     to the per-token cross-entropy so fold models compare honestly
-    with lossless tokenizations. The tokenset itself counts
-    `stats.extra_weights` (one per stored frequency) toward the model.
+    with lossless tokenizations; `stats.extra_weights` counts the
+    stored frequencies toward the model.
     """
 
     def __init__(self, tokenset: TokenSet):
@@ -45,15 +50,20 @@ class FoldTokenizer(object):
         sizes = np.bincount(group_id, minlength=ntokens)
         charge = np.zeros(256)
         for token in tokenset.tokens:
-            p = float(tokenset.head_freq[token.string.decode("utf-8")])
+            n = int(sizes[token.id])
+            if n <= 1:
+                continue
             head = token.string[0]
+            members = np.flatnonzero(group_id == token.id)
+            p = tokenset.head_freq.get(token.string.decode("utf-8"))
+            if p is None:
+                charge[members] = np.log2(n)
+                continue
+            p = float(p)
             charge[head] = -np.log2(p) if p > 0 else np.inf
-            n_rest = sizes[token.id] - 1
-            if n_rest:
-                q = (1.0 - p) / n_rest
-                rest = -np.log2(q) if q > 0 else np.inf
-                members = np.flatnonzero(group_id == token.id)
-                charge[members[members != head]] = rest
+            q = (1.0 - p) / (n - 1)
+            rest = -np.log2(q) if q > 0 else np.inf
+            charge[members[members != head]] = rest
         self.residual_entropy = charge
 
     def tokenize(self, chunk: bytes) -> np.ndarray:

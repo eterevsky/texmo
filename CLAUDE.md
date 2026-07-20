@@ -77,3 +77,7 @@ layers are registered in `spec_parser.py:_build_layer_def()`.
 - Package manager: `uv`.
 - Run commands via: `uv run <command>`.
 - Config defaults: `config.py`.
+- When writing JSON files from Python, use `texmo.pjson`
+  (`save_json` / `pprint`) — adaptive pretty-printing (short values
+  inline, long ones expanded) matching the repo's JSON style. Don't
+  hand-roll `json.dumps` formatting.

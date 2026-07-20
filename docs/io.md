@@ -172,11 +172,13 @@ sqrt(2560), `logits = 30*tanh(h @ E.T / 30)`, no biases).
 
 ## Fold tokensets: lossy folding with honest accounting
 
-*Status: implemented 2026-07-19. First set:
+*Status: implemented 2026-07-19. Lossy set:
 `tokens/tokens32_raw_fold.json` (`tokens.32.raw_fold.oh`, also valid
-as `.emb.d`). Generator: `scripts/make_fold32.py` computes the
-mapping, head frequencies, and residual from corpus byte counts
-(`freq.txt`, produced by the Rust `count-bytes` command).*
+as `.emb.d`); its lossless successor `tokens/tokens64_shift.json`
+(2026-07-20) is an ordinary tokens+sequences set, described below.
+Generators: `scripts/make_fold32.py` / `make_shift64.py` compute the
+mapping, any stored frequencies, and the residual from corpus byte
+counts (`freq.txt`, produced by the Rust `count-bytes` command).*
 
 A **fold** tokenset maps *every* byte to exactly one of its tokens —
 a many-to-one projection, not a code. The 32-token set folds capitals
@@ -224,6 +226,34 @@ per-tokenset constant, leaving within-tokenset rankings untouched.
 Per-slice accounting (charging each eval chunk's actual bytes via
 `FoldTokenizer.chunk_residual_bits`) is implemented but unused — the
 corpus constant is exact in expectation over books3 slices.
+
+**The 64-token successor, `tokens64_shift`** (2026-07-20,
+`tokens.64.shift.oh`), abandons folding entirely and is **fully
+lossless** — the answer to fold-32's tax dominating at higher
+weight counts. Lowercase letters and digits get their own tokens; a
+**shift marker** (numbered ext token 0) encodes `A` as marker +
+`a`, `\t` as marker + space, and six shifted-symbol pairs
+(`% + [ ] `` \` → marker + `# - ( ) ' /`); 26 slots go to the most
+frequent remaining bytes; every other byte (161 of them, 0.35% of
+the corpus) spells its **hex code behind an escape** (numbered
+token 1) using the existing digit/letter tokens —
+`\xa0` = `[1, "a", "0"]`. Every byte round-trips exactly, so
+`residual = 0` and `extra_weights = 0`: the tail's information
+moves in-band, where a model can *learn* it (an ignorant model pays
+~8 bits per escaped byte, about what a uniform-bucket charge would
+have been; a good one beats it) — no accounting caveats at all. The
+cost is token inflation: 1.038 tokens/byte. Because every byte has
+exactly one encoding, it is a plain tokens+sequences set: `type` is
+`shift`, the generic DP `Tokenizer` handles it (the DP has no
+choices and reproduces the fixed encoding; measured identical on
+books3), and none of the fold machinery below applies. Numbered
+specials rather than marker characters: control chars belong to
+str→str *preprocessing* (capswords), numbered tokens to constructs
+inside the tokenizer. Sequences list every byte without its own
+token in increasing byte order, including bytes the corpus never
+contained. The lossy-group accounting — head-frequency and uniform
+charges, per-set weight surcharges via `codec.fold_extra_weights` —
+remains for fold-32 and any future lossy set.
 
 Search-reachable (2026-07-19): the fold set hangs off the bit ladder
 at its nearest rung — `bits.4.oh+bp <-> tokens.32.raw_fold.oh` and

@@ -103,3 +103,13 @@ def test_real_fold32_tokenset():
     # to well under a millibit on a typical english sentence scale.
     assert 0.3 < ts.residual_bits_per_byte < 0.4
     assert np.isfinite(tk.residual_entropy[ord("e")])
+
+
+def test_uniform_group_without_head_freq():
+    # A group missing from head_freq is charged uniformly, costing
+    # no stored weights.
+    ts = _make_tokenset()
+    del ts.head_freq["?"]
+    tk = FoldTokenizer(ts)
+    assert math.isclose(tk.residual_entropy[ord("?")], math.log2(251))
+    assert math.isclose(tk.residual_entropy[ord("x")], math.log2(251))

@@ -32,6 +32,19 @@ import jax.numpy as jnp
 
 _LOGIT_CAP = 30.0
 
+# Stored per-token corpus knowledge a fold tokenset carries, counted
+# as model weights so lossy sets compare honestly with bits/bytes
+# (docs/io.md, "Fold tokensets"). Keyed by (ntokens, variation) --
+# the codec never loads the tokenset file, so the count lives here.
+# Uniform-bucket fold sets (tokens64) store nothing and default to 0.
+_FOLD_EXTRA_WEIGHTS = {(32, 'raw_fold'): 32}
+
+
+def fold_extra_weights(ntokens: int, variation: str | None) -> int:
+    if variation is None:
+        return 0
+    return _FOLD_EXTRA_WEIGHTS.get((ntokens, variation), 0)
+
 
 def cap_logits(logits: jax.Array) -> jax.Array:
     """Soft-cap logits to (-CAP, CAP)."""

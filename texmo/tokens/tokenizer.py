@@ -84,9 +84,16 @@ class Decoder(object):
             if tuple(fragment) in self.has_longer:
                 continue
             tail = []
-            while tuple(fragment) not in self.tokens_to_string:
+            while fragment and tuple(fragment) not in self.tokens_to_string:
                 tail.append(fragment.pop())
-            out += self.tokens_to_string[tuple(fragment)]
+            if fragment:
+                out += self.tokens_to_string[tuple(fragment)]
+            else:
+                # A sampled stream can misuse a marker/escape token
+                # (e.g. a shift followed by a non-letter): nothing
+                # decodable starts here, so drop the head token and
+                # reprocess the rest.
+                tail.pop()
             fragment = tail
             fragment.reverse()
 

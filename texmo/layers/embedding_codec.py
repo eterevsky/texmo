@@ -77,10 +77,14 @@ _OH_SWAPS = {
 # ladder at the same table width.
 _DOMAIN_LADDER = {1: (2,), 2: (1, 4), 4: (2, 8), 8: (4,)}
 
-# Fold tokensets hang off the bit ladder at the nearest rung, at the
-# same table width, mirroring the one-hot bridge in
-# one_hot_codec._INPUT_NEIGHBORS. Keep the two directions in sync.
-_TOKENS_EMB_BRIDGES = {(32, 'raw_fold'): ('bits.4',)}
+# The tokenset ladder hangs off the bit ladder at the nearest rung
+# and continues 32 -> 64, all at the same table width, mirroring the
+# one-hot bridges in one_hot_codec._INPUT_NEIGHBORS. Keep the
+# directions in sync.
+_TOKENS_EMB_BRIDGES = {
+    (32, 'raw_fold'): ('bits.4', 'tokens.64.shift'),
+    (64, 'shift'): ('tokens.32.raw_fold',),
+}
 _BITS_EMB_BRIDGES = {4: ('tokens.32.raw_fold',)}
 
 

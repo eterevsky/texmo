@@ -255,12 +255,13 @@ contained. The lossy-group accounting — head-frequency and uniform
 charges, per-set weight surcharges via `codec.fold_extra_weights` —
 remains for fold-32 and any future lossy set.
 
-Search-reachable (2026-07-19): the fold set hangs off the bit ladder
-at its nearest rung — `bits.4.oh+bp <-> tokens.32.raw_fold.oh` and
-`bits.4.emb.X <-> tokens.32.raw_fold.emb.X` — and the usual oh<->emb
-mode swap applies. The loss predictor carries the residual charge as
-a global feature; the timing model treats the input as just another
-type key.
+Search-reachable (2026-07-19/20): the tokenset ladder hangs off the
+bit ladder at its nearest rung and continues upward —
+`bits.4.oh+bp <-> tokens.32.raw_fold.oh <-> tokens.64.shift.oh` and
+the same chain in emb mode at the shared table width — and the
+usual oh<->emb mode swap applies. The loss predictor carries the
+residual charge and log2(bytes/token) as global features; the
+timing model treats each input as just another type key.
 
 ## Why the head is implicit
 

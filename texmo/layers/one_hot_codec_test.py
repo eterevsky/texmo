@@ -214,7 +214,7 @@ def test_fold_bridges_the_bit_ladder():
     md = parse_model2("tokens.32.raw_fold.oh|rnn.4.tanh", Precision.FP32)
     assert md.input.is_valid()
     assert md.input.neighbors(4) == (
-        "bits.4.oh+bp", "tokens.32.raw_fold.emb.4")
+        "bits.4.oh+bp", "tokens.64.shift.oh", "tokens.32.raw_fold.emb.4")
 
 
 def test_shift64_counts_no_extra_weights():
@@ -223,3 +223,12 @@ def test_shift64_counts_no_extra_weights():
     # The shift set is lossless -- no stored frequencies, no weight
     # surcharge (only fold_extra_weights entries pay).
     assert md.codec.num_weights == plain.codec.num_weights
+
+
+def test_shift64_neighbors_fold32():
+    md = parse_model2("tokens.32.raw_fold.oh|rnn.4.tanh", Precision.FP32)
+    assert "tokens.64.shift.oh" in md.input.neighbors(4)
+    md = parse_model2("tokens.64.shift.oh|rnn.4.tanh", Precision.FP32)
+    assert md.input.is_valid()
+    assert md.input.neighbors(4) == (
+        "tokens.32.raw_fold.oh", "tokens.64.shift.emb.4")

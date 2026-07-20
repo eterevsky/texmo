@@ -99,10 +99,13 @@ budget. Dream target: 32-64K weights.
   hex escape for everything else. Fully lossless: residual 0, zero
   extra weights, 1.038 tokens/byte, handled by the generic DP
   tokenizer (no fold machinery). See the fold section in
-  [`io.md`](io.md). Not yet search-reachable (no neighbor edges);
-  wire bridges once fold-32 results justify it. Unicode-char-level
-  sibling (128 tokens, chars not bytes behind the same
-  shift/escape) discussed 2026-07-20, revisit later.
+  [`io.md`](io.md). Search-reachable 2026-07-20 as
+  `tokens.32.raw_fold <-> tokens.64.shift` neighbors (oh and emb, at
+  the same table width); predictors need nothing new — the loss
+  globals resolve residual 0 / log2(bpt) from the tokenset, the
+  timing model learns the input key at its next refit.
+  Unicode-char-level sibling (128 tokens, chars not bytes behind the
+  same shift/escape) discussed 2026-07-20, revisit later.
 
 * **Coherency eval.** Working assumption to start: cross-entropy
   over the dialog training distribution is a workable proxy for

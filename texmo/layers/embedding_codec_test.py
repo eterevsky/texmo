@@ -211,4 +211,14 @@ def test_fold_emb_bridges_the_bit_ladder():
     md = parse_model2("tokens.32.raw_fold.emb.8|rnn.8.tanh", Precision.FP32)
     assert md.codec.is_valid()
     assert md.codec.neighbors(8) == (
-        "tokens.32.raw_fold.oh", "bits.4.emb.8")
+        "tokens.32.raw_fold.oh", "bits.4.emb.8", "tokens.64.shift.emb.8")
+
+
+def test_shift64_emb_neighbors_fold32():
+    md = parse_model2(
+        "tokens.32.raw_fold.emb.8|rnn.8.tanh", Precision.FP32)
+    assert "tokens.64.shift.emb.8" in md.codec.neighbors(8)
+    md = parse_model2("tokens.64.shift.emb.8|rnn.8.tanh", Precision.FP32)
+    assert md.codec.is_valid()
+    assert md.codec.neighbors(8) == (
+        "tokens.64.shift.oh", "tokens.32.raw_fold.emb.8")

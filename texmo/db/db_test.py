@@ -1,8 +1,11 @@
+from queue import Queue
+
 import numpy as np
 import pytest
 
 from texmo.configuration import Configuration
 from texmo.db import DbReader, DbWriter
+from texmo.db.writer import DbWriterProxy, UpsertPredictedTimeEstimates
 from texmo.spec_parser import parse_model2
 from texmo.precision import Precision
 from texmo.predict import build_loss_trend
@@ -929,3 +932,34 @@ def test_top_confs_global_invalid_does_not_block_heavier_valid(db):
         for cs in db.top_confs_global(_make_template())
     }
     assert specs == {"bytes|dense.32.gelu"}
+
+
+def test_iter_confs_missing_estimate(db):
+    conf_a, run_a = _make_conf_run(system="rpi")
+    run_a.train_time = 5.0
+    db.add_run(conf_a, run_a)  # -> median estimate row for rpi
+    conf_b, _ = _make_conf_run(spec="bytes|dense.32.gelu")
+    conf_b_id = db.find_or_add_conf(conf_b)
+
+    # Only the run-less conf lacks an estimate row for rpi.
+    missing = list(db.iter_confs_missing_estimate("rpi", Precision.FP32))
+    assert [(i, c) for i, c in missing] == [(conf_b_id, conf_b)]
+    # A predicted upsert fills the gap.
+    db.upsert_predicted_time_estimates([(conf_b_id, "rpi", 1.0)])
+    assert list(db.iter_confs_missing_estimate("rpi", Precision.FP32)) == []
+    # A system with no estimates at all still sees both confs.
+    assert len(list(db.iter_confs_missing_estimate("m5", Precision.FP32))) == 2
+
+
+def test_writer_proxy_chunks_upserts():
+    q = Queue()
+    proxy = DbWriterProxy(q)
+    proxy._UPSERT_CHUNK = 2  # shadow the class constant for the test
+    proxy.upsert_predicted_time_estimates(
+        [(i, "rpi", 1.0) for i in range(5)])
+    sizes = []
+    while not q.empty():
+        m = q.get()
+        assert isinstance(m, UpsertPredictedTimeEstimates)
+        sizes.append(len(m.rows))
+    assert sizes == [2, 2, 1]

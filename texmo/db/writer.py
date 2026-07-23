@@ -573,15 +573,23 @@ class DbWriterProxy:
             track_winner_change=track_winner_change,
         ))
 
+    # A full estimate refresh posts ~350k rows; split into chunks so
+    # AddRun messages interleave between the writer's transactions
+    # instead of waiting behind one giant upsert.
+    _UPSERT_CHUNK = 20_000
+
     def upsert_predicted_time_estimates(
         self, rows: Iterable[tuple[int, str, float]]
     ) -> None:
         # Materialize before queueing — the producer's iterator may
         # close before the WriterThread gets to it.
-        self._queue.put(UpsertPredictedTimeEstimates([
+        rows = [
             PredictedTimeRow(conf_id=cid, system=s, time_s=t)
             for (cid, s, t) in rows
-        ]))
+        ]
+        for i in range(0, len(rows), self._UPSERT_CHUNK):
+            self._queue.put(UpsertPredictedTimeEstimates(
+                rows[i:i + self._UPSERT_CHUNK]))
 
     def update_all_scores(self) -> None:
         self._queue.put(UpdateAllScores())

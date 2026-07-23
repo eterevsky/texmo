@@ -894,6 +894,28 @@ class DbReader(object):
         for row in cur:
             yield row['id'], Configuration.from_dict(row)
 
+    def iter_confs_missing_estimate(
+        self, system: str, precision: Precision
+    ) -> Iterable[tuple[int, Configuration]]:
+        """Yield (conf_id, Configuration) for confs of this precision
+        with no estimate row at all (median or predicted) for this
+        system -- i.e. confs added since the last estimate refresh.
+        Parses only the matching rows, which keeps the incremental
+        refresh path cheap (the full sweep re-parses everything)."""
+        cur = self._db.execute(
+            """
+            SELECT id, spec, precision, lr, length, batch, steps, decay, cosine
+            FROM conf WHERE precision = :precision
+              AND NOT EXISTS (
+                SELECT 1 FROM conf_time_estimate ct
+                WHERE ct.conf_id = conf.id AND ct.system = :system
+              )
+            """,
+            {'system': system, 'precision': str(precision)},
+        )
+        for row in cur:
+            yield row['id'], Configuration.from_dict(row)
+
     def get_conf_ids_with_median_time(
         self, system: str, precision: Precision
     ) -> set[int]:

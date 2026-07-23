@@ -52,6 +52,15 @@ from .timing import TrainTimingModel
 # genuinely new points but not so frequent that fit cost dominates.
 _REFIT_EVERY = 100
 
+# Ordinary refits refresh estimates only for confs that have none yet
+# (a few hundred rows, sub-second); every Nth refit per pair re-predicts
+# everything, bounding the drift of old predictions against the updated
+# model. The full sweep parses + featurizes every conf of the precision
+# (~40 s of pure Python at 350k confs, 2026-07-23) and starves the
+# GIL, so it must stay rare -- during a backfill it used to run on
+# every refit and stalled all request handling for minutes.
+_FULL_REFRESH_EVERY = 10
+
 # Loss-model refits are triggered by the SERVER, which hands them to
 # clients via /select (server._LOSS_REFIT_EVERY); this thread only
 # handles the explicit LossRefit message (startup with no persisted
@@ -94,15 +103,26 @@ def _refresh_estimates(
     model: TrainTimingModel,
     system: str,
     precision: Precision,
+    full: bool = True,
 ):
-    with latency.timer('timing._refresh_estimates.median_ids'):
-        median_ids = reader.get_conf_ids_with_median_time(system, precision)
-    with latency.timer('timing._refresh_estimates.iter_confs'):
-        to_predict: list[tuple[int, Configuration]] = [
-            (conf_id, conf)
-            for conf_id, conf in reader.iter_confs_by_precision(precision)
-            if conf_id not in median_ids
-        ]
+    if full:
+        with latency.timer('timing._refresh_estimates.median_ids'):
+            median_ids = reader.get_conf_ids_with_median_time(
+                system, precision)
+        with latency.timer('timing._refresh_estimates.iter_confs'):
+            to_predict: list[tuple[int, Configuration]] = [
+                (conf_id, conf)
+                for conf_id, conf in reader.iter_confs_by_precision(precision)
+                if conf_id not in median_ids
+            ]
+    else:
+        # Incremental: only confs with no estimate row for this
+        # system yet. Their predictions come from the just-updated
+        # model; existing rows keep their (slightly stale)
+        # predictions until the next full sweep.
+        with latency.timer('timing._refresh_estimates.iter_missing'):
+            to_predict = list(
+                reader.iter_confs_missing_estimate(system, precision))
     if not to_predict:
         return
     with latency.timer('timing._refresh_estimates.predict_batch'):
@@ -124,7 +144,7 @@ def _refresh_estimates(
         writer.upsert_predicted_time_estimates(rows)
     logging.info(
         f"refreshed {len(rows)} predicted estimates "
-        f"for ({system!r}, {precision})"
+        f"for ({system!r}, {precision}, {'full' if full else 'incremental'})"
     )
 
 
@@ -134,6 +154,7 @@ def _refit_pair(
     model: TrainTimingModel,
     system: str,
     precision: Precision,
+    full_refresh: bool = True,
 ):
     with latency.timer('timing._refit_pair.get_runs'):
         runs = list(reader.get_runs_for_timing(system, precision))
@@ -141,7 +162,8 @@ def _refit_pair(
         return
     with latency.timer('timing._refit_pair.fit'):
         model.fit(runs, verbose=False)
-    _refresh_estimates(reader, writer, model, system, precision)
+    _refresh_estimates(
+        reader, writer, model, system, precision, full=full_refresh)
 
 
 def bootstrap(
@@ -192,6 +214,8 @@ class ModelThread(threading.Thread):
         # Per-(system, precision) run counters for timing refits.
         # Private to this thread, so no locking needed.
         self._run_counter: dict[tuple[str, Precision], int] = defaultdict(int)
+        # Refit counters driving the incremental/full refresh cadence.
+        self._refit_counter: dict[tuple[str, Precision], int] = defaultdict(int)
 
     def run(self):
         reader = DbReader(self._db_path)
@@ -223,7 +247,13 @@ class ModelThread(threading.Thread):
         self._run_counter[key] += 1
         if self._run_counter[key] >= _REFIT_EVERY:
             self._run_counter[key] = 0
-            _refit_pair(reader, writer, self._timing_model, system, precision)
+            self._refit_counter[key] += 1
+            full = self._refit_counter[key] >= _FULL_REFRESH_EVERY
+            if full:
+                self._refit_counter[key] = 0
+            _refit_pair(
+                reader, writer, self._timing_model, system, precision,
+                full_refresh=full)
             save_predictor(
                 self._db_path, 'timing', self._timing_model.snapshot())
 

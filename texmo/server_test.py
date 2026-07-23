@@ -4,6 +4,7 @@ import io
 import os
 import pickle
 import time
+from queue import Queue
 
 import pytest
 from flask import Flask, render_template
@@ -14,6 +15,7 @@ from texmo.db import DbReader, DbWriter
 from texmo.spec_parser import parse_model2
 from texmo.precision import Precision
 from texmo.run import Run
+import texmo.search as search_mod
 import texmo.server as server_mod
 from texmo.predict import loss_tree
 from texmo.server import SearchServer
@@ -449,3 +451,28 @@ def test_client_refit_grant_and_submit(tmp_path, monkeypatch):
         assert not d["accepted"] and d["reason"] == "stale run_count"
     finally:
         server.join()
+
+
+def test_stale_select_answered_with_none_instantly(tmp_path):
+    """A Select whose client read-timeout has expired is skipped (no
+    conf produced -- it would go to a closed socket) but still gets
+    exactly one None response, so queue accounting holds and live
+    requests behind it are served promptly."""
+    path = str(tmp_path / "test.db")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+
+    with server.confs_by_system_lock:
+        server.confs_by_system["ghost"] = Queue()
+    server.requests_queue.put(search_mod.Select(
+        system="ghost", enqueued_at=time.monotonic() - 999.0))
+    # Skipped without running select_conf: answered well before a
+    # real selection could complete on a cold server.
+    assert server.confs_by_system["ghost"].get(timeout=30) is None
+
+    # The thread keeps serving live requests afterwards.
+    result = server.select({"system": "live"})
+    assert result["system"] == "live"
+    server.join()

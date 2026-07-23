@@ -3,7 +3,7 @@ import logging
 import random
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import log2
 from queue import Queue
 from typing import Optional
@@ -52,6 +52,22 @@ class Select:
     """Ask `SearchThread` to pick a candidate for `system` and push the
     `SearchResult` onto `confs_by_system[system]`."""
     system: str
+    # Stamped at construction; lets the search thread recognize
+    # requests whose client has certainly timed out already.
+    enqueued_at: float = field(default_factory=time.monotonic)
+
+
+# Drop Select messages older than this instead of producing a conf
+# for them: the handler's client read-timeout (client._HTTP_TIMEOUT,
+# 120 s) has expired, so the conf would be delivered to a closed
+# connection. Without this, a transient stall leaves a backlog that
+# drains at select-conf speed while every result goes to a dead
+# handler -- and past N_clients * select_time > client timeout the
+# backlog never drains at all (a livelock: the server works at 100%
+# producing confs nobody receives). The stale request still gets a
+# None response -- exactly one response per Select, or its waiting
+# handler thread would block forever.
+_SELECT_STALE_S = 120.0
 
 
 @dataclass
@@ -988,6 +1004,14 @@ class SearchThread(threading.Thread):
                 m = self.requests_queue.get()
                 match m:
                     case Select(system=system):
+                        age = time.monotonic() - m.enqueued_at
+                        if age > _SELECT_STALE_S:
+                            logging.info(
+                                f'select_conf({system}) skipped: request '
+                                f'{age:.0f}s old, client timed out')
+                            with self.confs_by_system_lock:
+                                self.confs_by_system[system].put(None)
+                            continue
                         # A failure in select_conf must not kill the
                         # thread -- if it did, every client's /select
                         # would block forever on the response queue.

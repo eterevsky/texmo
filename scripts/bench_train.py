@@ -79,6 +79,23 @@ def _make_manager(entry: dict, args, steps: int):
     return conf, manager
 
 
+def _make_batches(manager, entry: dict, steps: int):
+    """`steps` batches as one device array, sampled and transferred up
+    front.
+
+    Both timed paths take their input from here, so neither pays for
+    sampling or the host->device copy inside the measurement. Timing
+    one path with the data hoisted out and the other without would
+    charge the per-step path for a transfer per step -- which on a GPU
+    is far more expensive than the dispatch it is meant to measure.
+    """
+    data = manager.dataset.sample_tokens(
+        ntokens=entry['length'], batch=steps * entry['batch'],
+        tokenset_name=manager.model_def.input.tokens_name)
+    return jax.numpy.asarray(data).reshape(
+        steps, entry['batch'], entry['length'])
+
+
 def _time_scan(manager, entry: dict, steps: int) -> tuple[float, float]:
     """(first-call seconds, seconds per step) for the chunked scan path.
 
@@ -86,11 +103,7 @@ def _time_scan(manager, entry: dict, steps: int) -> tuple[float, float]:
     chunk of a different step count is a different jit signature, so
     warming up on one would put the recompile inside the measurement.
     """
-    data = manager.dataset.sample_tokens(
-        ntokens=entry['length'], batch=steps * entry['batch'],
-        tokenset_name=manager.model_def.input.tokens_name)
-    data = jax.numpy.asarray(data).reshape(
-        steps, entry['batch'], entry['length'])
+    data = _make_batches(manager, entry, steps)
 
     t0 = time.perf_counter()
     w, opt, losses = manager._train_chunk(
@@ -105,15 +118,23 @@ def _time_scan(manager, entry: dict, steps: int) -> tuple[float, float]:
 
 
 def _time_noscan(manager, entry: dict, steps: int) -> tuple[float, float]:
-    """(first-call seconds, seconds per step) for the per-step path."""
+    """(first-call seconds, seconds per step) for the per-step path.
+
+    Batches come pre-sampled and already on the device (see
+    `_make_batches`), so what is timed is dispatch + compute + the
+    `float(loss)` host sync -- the same work the scan path is timed
+    on, once per step instead of once per chunk.
+    """
+    data = _make_batches(manager, entry, steps + 1)
+
     t0 = time.perf_counter()
-    manager.train_step(manager._get_batch())
+    manager.train_step(data[0])
     first_s = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    for _ in range(steps):
+    for i in range(1, steps + 1):
         # train_step syncs on float(loss), like the client's loop.
-        manager.train_step(manager._get_batch())
+        manager.train_step(data[i])
     return first_s, (time.perf_counter() - t0) / steps
 
 

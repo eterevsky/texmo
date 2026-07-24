@@ -103,8 +103,10 @@ def _run_thread(db_path: str, messages: list):
 def _lower_min_samples(monkeypatch):
     # Fit is expensive with MIN_SAMPLES=20; lower for fast tests.
     monkeypatch.setattr(TrainTimingModel, "MIN_SAMPLES", 5)
-    # A single RunAdded should drive a refit in tests.
+    # A single RunAdded should drive a refit in tests (both the
+    # established-pair and the first-fit cadence).
     monkeypatch.setattr(model_thread, "_REFIT_EVERY", 1)
+    monkeypatch.setattr(model_thread, "_FIRST_FIT_EVERY", 1)
 
 
 def test_refit_writes_predicted_estimates(tmp_path):

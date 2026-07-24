@@ -963,3 +963,18 @@ def test_writer_proxy_chunks_upserts():
         assert isinstance(m, UpsertPredictedTimeEstimates)
         sizes.append(len(m.rows))
     assert sizes == [2, 2, 1]
+
+
+def test_get_runs_for_timing_limit_returns_recent(db):
+    conf, _ = _make_conf_run(system="rpi")
+    for t in (5.0, 6.0, 7.0):
+        _, run = _make_conf_run(system="rpi")
+        run.train_time = t
+        run.timestamp = f"2026-07-23T00:00:0{int(t)}"
+        db.add_run(conf, run)
+
+    all_runs = list(db.get_runs_for_timing("rpi", Precision.FP32))
+    assert len(all_runs) == 3
+    capped = list(db.get_runs_for_timing("rpi", Precision.FP32, limit=2))
+    # The most recent two (by run id), not the oldest.
+    assert sorted(r.train_time for _, r in capped) == [6.0, 7.0]

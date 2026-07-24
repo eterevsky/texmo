@@ -48,9 +48,19 @@ from .timing import TrainTimingModel
 
 
 # Threshold of new runs per (system, precision) pair that triggers a
-# timing-model refit. Picked so refits are frequent enough to absorb
-# genuinely new points but not so frequent that fit cost dominates.
-_REFIT_EVERY = 100
+# timing-model refit. At 100 the fit machinery (get_runs + fit alone,
+# before any estimate refresh) consumed ~18% of server wall in the
+# 2026-07-23 latency report; the model barely moves per 100 runs, so
+# refit rarely. A pair with no fitted model yet (a new system) uses
+# the faster _FIRST_FIT_EVERY so it gets predictions promptly.
+_REFIT_EVERY = 400
+_FIRST_FIT_EVERY = 100
+
+# Cap on runs read for a timing fit: the most recent N. Bounds the
+# get_runs read/parse cost as the DB grows, and recent runs reflect
+# the machine's current performance anyway (code and drivers change).
+# The least-squares is long saturated at this sample size.
+_FIT_RUNS_CAP = 20_000
 
 # Ordinary refits refresh estimates only for confs that have none yet
 # (a few hundred rows, sub-second); every Nth refit per pair re-predicts
@@ -59,7 +69,7 @@ _REFIT_EVERY = 100
 # (~40 s of pure Python at 350k confs, 2026-07-23) and starves the
 # GIL, so it must stay rare -- during a backfill it used to run on
 # every refit and stalled all request handling for minutes.
-_FULL_REFRESH_EVERY = 10
+_FULL_REFRESH_EVERY = 5
 
 # Loss-model refits are triggered by the SERVER, which hands them to
 # clients via /select (server._LOSS_REFIT_EVERY); this thread only
@@ -157,7 +167,8 @@ def _refit_pair(
     full_refresh: bool = True,
 ):
     with latency.timer('timing._refit_pair.get_runs'):
-        runs = list(reader.get_runs_for_timing(system, precision))
+        runs = list(reader.get_runs_for_timing(
+            system, precision, limit=_FIT_RUNS_CAP))
     if not runs:
         return
     with latency.timer('timing._refit_pair.fit'):
@@ -245,7 +256,11 @@ class ModelThread(threading.Thread):
     ):
         key = (system, precision)
         self._run_counter[key] += 1
-        if self._run_counter[key] >= _REFIT_EVERY:
+        threshold = (
+            _REFIT_EVERY
+            if self._timing_model.has_weights(system, precision)
+            else _FIRST_FIT_EVERY)
+        if self._run_counter[key] >= threshold:
             self._run_counter[key] = 0
             self._refit_counter[key] += 1
             full = self._refit_counter[key] >= _FULL_REFRESH_EVERY

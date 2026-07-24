@@ -814,15 +814,19 @@ class DbReader(object):
                     yield conf_id, conf, run
 
     def get_runs_for_timing(
-        self, system: str, precision: Precision
+        self, system: str, precision: Precision,
+        limit: int | None = None,
     ) -> Iterable[tuple[Configuration, Run]]:
         """Yield (conf, run) pairs for fitting a timing model.
 
         Only the fields the timing model needs are populated on Run:
         system and train_time. step_loss/loss/loss_trend are omitted.
+        With `limit`, only the most recent runs (by run id) are
+        returned -- recent runs both bound the read/parse cost and
+        reflect the machine's current performance.
         """
         cur = self._db.execute(
-            """
+            f"""
             SELECT conf.spec AS spec, conf.precision AS precision,
                    conf.lr AS lr, conf.length AS length, conf.batch AS batch,
                    conf.steps AS steps, conf.decay AS decay,
@@ -831,8 +835,9 @@ class DbReader(object):
                    NULLIF(run.train_time, 0) AS train_time
             FROM conf JOIN run ON conf.id = run.conf_id
             WHERE run.system = :system AND conf.precision = :precision
+            {'ORDER BY run.id DESC LIMIT :limit' if limit else ''}
             """,
-            {'system': system, 'precision': str(precision)},
+            {'system': system, 'precision': str(precision), 'limit': limit},
         )
         for row in cur:
             conf = Configuration.from_dict(row)

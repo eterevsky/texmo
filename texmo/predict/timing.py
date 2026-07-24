@@ -672,6 +672,10 @@ class TrainTimingModel:
             return None
         return predict_total_time(weights, conf)
 
+    def has_weights(self, system: str, precision: Precision) -> bool:
+        """Whether a fitted model exists for this (system, precision)."""
+        return (system, precision) in self._weights
+
     def predict_batch(
         self, system: str, confs: list[Configuration]
     ) -> np.ndarray | None:

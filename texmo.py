@@ -6,7 +6,7 @@ import numpy as np
 import config
 
 # Must happen before any JAX code runs.
-jax.config.update('jax_enable_x64', True)
+jax.config.update('jax_enable_x64', False)
 jax.config.update('jax_platforms', config.JAX_PLATFORMS)
 
 from texmo import latency

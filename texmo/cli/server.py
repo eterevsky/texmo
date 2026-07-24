@@ -23,8 +23,12 @@ def main(args: argparse.Namespace):
 
     train_time = tuple(map(float, args.train_time.split("-")))
     logging.info(f"T ∈ {train_time} s")
+    warmup_systems = [
+        s.strip() for s in (args.warmup_systems or '').split(',') if s.strip()
+    ]
     server = SearchServer(
         args.db, template, train_time, args.default_spec,
+        warmup_systems=warmup_systems,
     )
 
     server.serve(api_key=args.api_key or '')
@@ -114,6 +118,17 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="range for the training time in seconds",
     )
     parser.add_argument("--default-spec", type=str, default=None, help="default model")
+    parser.add_argument(
+        "--warmup-systems",
+        type=str,
+        default=None,
+        help="comma-separated systems to put in warmup mode: they only"
+             " get confs whose steps/batch/length fit a ladder of"
+             " gradually rising caps until it is climbed, so a machine"
+             " or backend with no timing model yet can't be handed an"
+             " hours-long run. Use for a new client or a new backend"
+             " (the ladder replays on every server restart).",
+    )
     parser.add_argument(
         "--api-key",
         type=str,

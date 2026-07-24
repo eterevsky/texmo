@@ -10,7 +10,7 @@ import threading
 import time
 from datetime import datetime
 from queue import Queue
-from typing import Optional
+from typing import Iterable, Optional
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -336,11 +336,15 @@ class SearchServer(object):
         template: Template,
         train_time: tuple[float, float],
         default_spec: str,
+        warmup_systems: Optional[Iterable[str]] = None,
     ):
         # `path` is also the read-only handle factory for per-request
         # reads in `index` / `compare` / `throughput`; opening a fresh
         # `DbReader` per request avoids contending with the writer.
         self.path: str = path
+        # Systems that climb the search's warmup ladder before joining
+        # ordinary selection (new machine or new backend).
+        self.warmup_systems: set[str] = set(warmup_systems or ())
         self.template: Template = template
         self.train_time: tuple[float, float] = train_time
         # Stored for `update()` so a template change with no literal
@@ -449,6 +453,7 @@ class SearchServer(object):
             requests_queue=self.requests_queue,
             confs_by_system=self.confs_by_system,
             confs_by_system_lock=self.confs_by_system_lock,
+            warmup_systems=self.warmup_systems,
             timing_model=self.timing_model,
             loss_model=self.loss_model,
         )

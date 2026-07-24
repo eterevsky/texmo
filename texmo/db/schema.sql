@@ -92,8 +92,9 @@ CREATE TABLE run (
 
     -- Which search strategy picked the conf that produced this run.
     -- One of: 'predicted_2nd_neighbor', 'predicted_3rd_neighbor',
-    -- 'time_budget', 'neighbor', 'default'. May also include
-    -- 'hill_climb' on older runs (the strategy was retired).
+    -- 'time_budget', 'neighbor', 'coverage_walk', 'pick_me',
+    -- 'warmup', 'default'. May also include 'hill_climb' on older
+    -- runs (the strategy was retired).
     -- NULL for runs added before the column existed or for
     -- out-of-band inserts (bulk imports, tests).
     strategy TEXT,

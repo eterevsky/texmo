@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass, field
 from math import log2
 from queue import Queue
-from typing import Optional
+from typing import Iterable, Optional
 
 import numpy as np
 
@@ -107,6 +107,39 @@ assert abs(sum(w for _, w in _STRATEGY_PROBS) - 1.0) < 1e-9, (
 # confs (see `_COVERAGE_STICKY_THRESHOLD`), the next call fires
 # unconditionally via `Search._coverage_flag`.
 _COVERAGE_PROB = 0.1
+
+# Warmup ladder: (max_steps, max_batch, max_length) rungs for systems
+# started with `--warmup-systems` (a new machine, or a new backend on
+# a known machine). Such a system has no timing model, so nothing
+# bounds how long a conf will train: handed a fleet-favourite
+# recurrent conf at S8192 it can sit on it for hours, and the search
+# learns nothing until it finishes. Each rung caps the three knobs
+# that multiply into total work, growing ONE knob at a time
+# (steps x4, batch x4, length x2) so the product rises ~2-4x per rung
+# and the timing model is fit (first fit at 100 runs) well before the
+# expensive rungs open.
+_WARMUP_LADDER: list[tuple[int, int, int]] = [
+    (2, 1, 64),
+    (8, 1, 64),
+    (8, 4, 64),
+    (8, 4, 128),
+    (32, 4, 128),
+    (32, 16, 128),
+    (32, 16, 256),
+    (128, 16, 256),
+    (128, 64, 256),
+    (128, 64, 512),
+    (512, 64, 512),
+    (512, 256, 512),
+    (512, 256, 1024),
+    (2048, 256, 1024),
+    (8192, 256, 1024),
+]
+
+# Picks per warmup rung before the next one opens. A rung also
+# advances early once every top conf under it is covered on the
+# system, so a small DB doesn't stall the ladder.
+_WARMUP_SELECTS_PER_RUNG = 10
 
 # Layer-count diversification: per select, sample a cap on num_layers
 # and run the whole select (seed queries, neighbor/BFS expansion via
@@ -313,6 +346,7 @@ class Search(object):
         train_time: tuple[float, float],
         timing_model: TrainTimingModel,
         loss_model: LossModelHolder,
+        warmup_systems: Optional[Iterable[str]] = None,
     ):
         assert isinstance(reader, DbReader)
         # `_db` is the read handle used by every strategy below. Search
@@ -336,6 +370,20 @@ class Search(object):
         # `LossModel` gets swapped atomically on refit.
         self.timing_model = timing_model
         self.loss_model = loss_model
+
+        # Systems climbing the `_WARMUP_LADDER` before ordinary
+        # selection (`--warmup-systems`), with their current rung and
+        # picks spent on it. In-memory only: a restart replays the
+        # ladder, which is cheap by construction and re-verifies the
+        # machine.
+        self.warmup_systems: set[str] = set(warmup_systems or ())
+        self._warmup_rung: dict[str, int] = {}
+        self._warmup_selects: dict[str, int] = {}
+        # (rung, top confs) cache: `top_confs_global` is one of the
+        # priciest queries we run (~5 s on the live DB) and warmup
+        # fires on every select for its system, so the candidate list
+        # is fetched once per rung rather than once per pick.
+        self._warmup_top: dict[str, tuple[int, list]] = {}
 
         # Sticky per-system flag set by `_select_uncovered_top` when it
         # finds 2+ uncovered top confs — keeps the coverage walk firing
@@ -610,6 +658,84 @@ class Search(object):
                     return None
 
             return None
+
+    def _advance_warmup(self, system: str, rung: int, why: str) -> None:
+        self._warmup_rung[system] = rung + 1
+        self._warmup_selects[system] = 0
+        if rung + 1 >= len(_WARMUP_LADDER):
+            logging.info(
+                f'Warmup finished for {system} ({why}); ordinary '
+                f'selection from here')
+            return
+        steps, batch, length = _WARMUP_LADDER[rung + 1]
+        logging.info(
+            f'Warmup {system}: rung {rung + 2}/{len(_WARMUP_LADDER)} '
+            f'({why}) -- steps<={steps} batch<={batch} length<={length}')
+
+    def _warmup_top_confs(self, system: str, rung: int) -> list:
+        cached = self._warmup_top.get(system)
+        if cached is not None and cached[0] == rung:
+            return cached[1]
+        top = list(self._db.top_confs_global(self.template, min_num_runs=1))
+        self._warmup_top[system] = (rung, top)
+        return top
+
+    def _warmup_pick(
+        self, system: str, rung: int,
+        max_steps: int, max_batch: int, max_length: int,
+    ) -> Optional[Configuration]:
+        """First global top conf, in random order, whose knobs shrunk
+        to this rung's caps aren't covered on `system` yet.
+
+        The architecture and weight spread comes from the fleet's top
+        confs; the caps replace their (steps, batch, length) so the
+        work per run stays bounded with no timing model in hand. The
+        template's own floors win over a cap, so the rewritten conf
+        still matches the template.
+        """
+        top = list(self._warmup_top_confs(system, rung))
+        random.shuffle(top)
+        for c in top:
+            conf = c.conf.replace(
+                steps=min(c.conf.steps,
+                          max(max_steps, int(self.template.steps.min))),
+                batch=min(c.conf.batch,
+                          max(max_batch, int(self.template.batch.min))),
+                length=min(c.conf.length,
+                           max(max_length, int(self.template.length.min))),
+            )
+            # No-op until this system has a timing model; once it does,
+            # the ordinary budget cap applies on top of the rung.
+            conf = self._cap_steps(conf, system)
+            if self._db.has_covering_run(conf, system):
+                continue
+            return conf
+        return None
+
+    def _select_warmup(self, system: str) -> Optional[Configuration]:
+        """Pick a deliberately bounded conf for a system still climbing
+        the `_WARMUP_LADDER`, or None once it has finished the ladder
+        (the caller then falls through to ordinary selection).
+
+        Each rung caps (steps, batch, length); the rung advances after
+        `_WARMUP_SELECTS_PER_RUNG` picks, or immediately when every top
+        conf under it is already covered on this system.
+        """
+        with latency.timer('Search._select_warmup'):
+            while True:
+                rung = self._warmup_rung.get(system, 0)
+                if rung >= len(_WARMUP_LADDER):
+                    return None
+                conf = self._warmup_pick(
+                    system, rung, *_WARMUP_LADDER[rung])
+                if conf is None:
+                    self._advance_warmup(system, rung, 'rung fully covered')
+                    continue
+                spent = self._warmup_selects.get(system, 0) + 1
+                self._warmup_selects[system] = spent
+                if spent >= _WARMUP_SELECTS_PER_RUNG:
+                    self._advance_warmup(system, rung, 'picks spent')
+                return conf
 
     def _select_uncovered_top(
         self, system: str
@@ -894,6 +1020,17 @@ class Search(object):
             if pm is not None:
                 return self._result(pm, 'pick_me', system)
 
+            # Warmup ladder: a system started with --warmup-systems
+            # only gets confs whose (steps, batch, length) fit the
+            # current rung, so a machine/backend with no timing model
+            # can't be handed an hours-long run. Returns None once the
+            # ladder is done and the system joins ordinary selection.
+            if system in self.warmup_systems:
+                conf = self._select_warmup(system)
+                if conf is not None:
+                    return self._result(conf, 'warmup', system)
+                self.warmup_systems.discard(system)
+
             # Coverage walk runs *before* t / max_weights selection so
             # the bulk cross-system push isn't confined to the current
             # iteration's weight bucket. Sticky on this system when the
@@ -970,12 +1107,14 @@ class SearchThread(threading.Thread):
         confs_by_system_lock: threading.Lock,
         timing_model: TrainTimingModel,
         loss_model: LossModelHolder,
+        warmup_systems: Optional[Iterable[str]] = None,
     ):
         super().__init__()
         # Search and the DbReader are built lazily on `run()` so the
         # reader is opened on the thread that uses it; that lets
         # `DbReader` enforce `check_same_thread=True`.
         self._path = path
+        self._warmup_systems = set(warmup_systems or ())
         self._template = template
         self._train_time = train_time
         self._default = default
@@ -997,8 +1136,15 @@ class SearchThread(threading.Thread):
             train_time=self._train_time,
             timing_model=self._timing_model,
             loss_model=self._loss_model,
+            warmup_systems=self._warmup_systems,
         )
         logging.info("Started search thread")
+        if self._warmup_systems:
+            logging.info(
+                f"Warmup mode for {sorted(self._warmup_systems)}: "
+                f"{len(_WARMUP_LADDER)} rungs from "
+                f"{_WARMUP_LADDER[0]} to {_WARMUP_LADDER[-1]} "
+                f"(steps, batch, length)")
         try:
             while True:
                 m = self.requests_queue.get()

@@ -9,6 +9,8 @@ from .predict.timing import TrainTimingModel
 from .run import Run
 from .configuration import conf_neighbors
 from .search import (
+    _WARMUP_LADDER,
+    _WARMUP_SELECTS_PER_RUNG,
     Search,
     _generate_limits,
     _layer_capped_template,
@@ -146,7 +148,7 @@ def test_layer_capped_template_prunes_neighbors():
     assert all(n.model.num_layers <= 1 for n in capped_neighbors)
 
 
-def _make_search_at(path):
+def _make_search_at(path, warmup_systems=None):
     """Like `_make_search` but reuses an existing DB at `path` so tests
     can seed runs through a separate `DbWriter` first."""
     return Search(
@@ -160,6 +162,7 @@ def _make_search_at(path):
         train_time=(1.0, 16.0),
         timing_model=TrainTimingModel(),
         loss_model=LossModelHolder(),
+        warmup_systems=warmup_systems,
     )
 
 
@@ -479,3 +482,124 @@ def test_generate_limits():
         [[4, 3], [3, 2], [2, 1]],
         [[4, 3], [3, 2], [2, 1], [1, 0]],
     ]
+
+# --- warmup ladder ---------------------------------------------------
+
+
+def _big_conf():
+    """A conf whose knobs are all far above the first warmup rung."""
+    return Configuration(
+        model=parse_model2("bytes|dense.8.gelu", precision=Precision.FP32),
+        lr=0.01, length=1024, batch=256, steps=8192, decay=1,
+    )
+
+
+def test_warmup_shrinks_knobs_to_the_first_rung(tmp_path):
+    """A fleet top conf keeps its architecture but gets its
+    (steps, batch, length) rewritten down to rung 0 -- except where
+    the template's own floor is higher (steps.min=4 here beats the
+    rung's cap of 2), so the result still matches the template."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    big = _big_conf()
+    _seed_runs(path, big, system='a', n=1)
+    search = _make_search_at(path, warmup_systems=['b'])
+
+    conf = search._select_warmup('b')
+    assert conf is not None
+    assert str(conf.model) == str(big.model)  # architecture preserved
+    assert conf.steps == 4     # rung cap 2 raised to template floor
+    assert conf.batch == 1     # rung cap
+    assert conf.length == 64   # rung cap
+    assert search.template.match(conf)
+
+
+def test_warmup_advances_when_rung_is_covered(tmp_path):
+    """With the only top conf already run at this rung, the ladder
+    steps up instead of returning nothing."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    big = _big_conf()
+    _seed_runs(path, big, system='a', n=1)
+    search = _make_search_at(path, warmup_systems=['b'])
+
+    first = search._select_warmup('b')
+    _seed_runs(path, first, system='b', n=1)   # cover rung 0 on 'b'
+    search = _make_search_at(path, warmup_systems=['b'])
+    second = search._select_warmup('b')
+
+    assert search._warmup_rung['b'] > 0
+    # Higher rung -> strictly more work than the covered pick.
+    assert (second.steps, second.batch, second.length) > \
+        (first.steps, first.batch, first.length)
+
+
+def test_warmup_advances_after_picks_spent(tmp_path):
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    _seed_runs(path, _big_conf(), system='a', n=1)
+    search = _make_search_at(path, warmup_systems=['b'])
+
+    for _ in range(_WARMUP_SELECTS_PER_RUNG):
+        assert search._select_warmup('b') is not None
+    assert search._warmup_rung['b'] == 1
+    assert search._warmup_selects['b'] == 0
+
+
+def test_warmup_ladder_is_monotone():
+    """Every rung raises exactly one knob and never lowers any."""
+    for (s0, b0, l0), (s1, b1, l1) in zip(
+        _WARMUP_LADDER, _WARMUP_LADDER[1:]
+    ):
+        assert (s1 >= s0 and b1 >= b0 and l1 >= l0)
+        assert sum([s1 > s0, b1 > b0, l1 > l0]) == 1
+
+
+def test_select_conf_warmup_takes_priority_then_falls_through(tmp_path):
+    """Warmup outranks the ordinary strategies while the ladder runs,
+    and the system leaves warmup once it is climbed."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    _seed_runs(path, _big_conf(), system='a', n=1)
+    search = _make_search_at(path, warmup_systems=['b'])
+
+    result = search.select_conf('b')
+    assert result.strategy == 'warmup'
+
+    # Ladder exhausted -> ordinary selection, and the flag clears.
+    search._warmup_rung['b'] = len(_WARMUP_LADDER)
+    result = search.select_conf('b')
+    assert result is None or result.strategy != 'warmup'
+    assert 'b' not in search.warmup_systems
+
+
+def test_select_conf_ignores_warmup_for_other_systems(tmp_path):
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    _seed_runs(path, _big_conf(), system='a', n=1)
+    search = _make_search_at(path, warmup_systems=['b'])
+    result = search.select_conf('c')
+    assert result is None or result.strategy != 'warmup'
+
+
+def test_warmup_caches_top_confs_per_rung(tmp_path, monkeypatch):
+    """`top_confs_global` is one of the priciest queries on the live DB,
+    and warmup fires on every select for its system -- it must be
+    fetched once per rung, not once per pick."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    _seed_runs(path, _big_conf(), system='a', n=1)
+    search = _make_search_at(path, warmup_systems=['b'])
+
+    calls = []
+    real = search._db.top_confs_global
+    monkeypatch.setattr(
+        search._db, 'top_confs_global',
+        lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+
+    for _ in range(_WARMUP_SELECTS_PER_RUNG):
+        search._select_warmup('b')
+    assert len(calls) == 1
+    # Advancing the rung refreshes the candidate list.
+    search._select_warmup('b')
+    assert len(calls) == 2

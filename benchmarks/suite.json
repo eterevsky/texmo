@@ -1,0 +1,1047 @@
+{
+  "entries": [
+    {
+      "name": "db00-b16l128",
+      "spec": "bits.1+bp|",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 128,
+      "weights": 5,
+      "num_layers": 0,
+      "source": "db"
+    },
+    {
+      "name": "db00-b64l256",
+      "spec": "bits.1+bp|",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 256,
+      "weights": 5,
+      "num_layers": 0,
+      "source": "db"
+    },
+    {
+      "name": "db01-b64l256",
+      "spec": "bits.1+bp|dense.1.tanh-suffix.4",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 256,
+      "weights": 10,
+      "num_layers": 2,
+      "source": "db"
+    },
+    {
+      "name": "db01-b256l512",
+      "spec": "bits.1+bp|dense.1.tanh-suffix.4",
+      "precision": "fp32",
+      "batch": 256,
+      "length": 512,
+      "weights": 10,
+      "num_layers": 2,
+      "source": "db"
+    },
+    {
+      "name": "db02-b256l512",
+      "spec": "bits.1+bp|split.cat(rnn.1.tanh, pass)-norm-dense.1.tanh-suffix.2",
+      "precision": "fp32",
+      "batch": 256,
+      "length": 512,
+      "weights": 15,
+      "num_layers": 5,
+      "source": "db"
+    },
+    {
+      "name": "db02-b4l1024",
+      "spec": "bits.1+bp|split.cat(rnn.1.tanh, pass)-norm-dense.1.tanh-suffix.2",
+      "precision": "fp32",
+      "batch": 4,
+      "length": 1024,
+      "weights": 15,
+      "num_layers": 5,
+      "source": "db"
+    },
+    {
+      "name": "db03-b4l1024",
+      "spec": "bits.1+bp|split.cat(mingru.1, pass)-norm-latent.2.2-suffix.2-dense.1.tanh",
+      "precision": "fp32",
+      "batch": 4,
+      "length": 1024,
+      "weights": 33,
+      "num_layers": 6,
+      "source": "db"
+    },
+    {
+      "name": "db03-b128l128",
+      "spec": "bits.1+bp|split.cat(mingru.1, pass)-norm-latent.2.2-suffix.2-dense.1.tanh",
+      "precision": "fp32",
+      "batch": 128,
+      "length": 128,
+      "weights": 33,
+      "num_layers": 6,
+      "source": "db"
+    },
+    {
+      "name": "db04-b128l128",
+      "spec": "tokens.32.raw_fold.emb.1|split.add(dense.1.tanh, pass)",
+      "precision": "fp32",
+      "batch": 128,
+      "length": 128,
+      "weights": 67,
+      "num_layers": 2,
+      "source": "db"
+    },
+    {
+      "name": "db04-b16l128",
+      "spec": "tokens.32.raw_fold.emb.1|split.add(dense.1.tanh, pass)",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 128,
+      "weights": 67,
+      "num_layers": 2,
+      "source": "db"
+    },
+    {
+      "name": "db05-b16l128",
+      "spec": "bits.1+bp|mgru.4-dense.4.gelu-norm",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 128,
+      "weights": 97,
+      "num_layers": 3,
+      "source": "db"
+    },
+    {
+      "name": "db05-b64l256",
+      "spec": "bits.1+bp|mgru.4-dense.4.gelu-norm",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 256,
+      "weights": 97,
+      "num_layers": 3,
+      "source": "db"
+    },
+    {
+      "name": "db06-b64l256",
+      "spec": "bits.4.emb.4|rglru.2-norm-conv.4-split.mul(pass, dense.4)",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 256,
+      "weights": 141,
+      "num_layers": 5,
+      "source": "db"
+    },
+    {
+      "name": "db06-b256l512",
+      "spec": "bits.4.emb.4|rglru.2-norm-conv.4-split.mul(pass, dense.4)",
+      "precision": "fp32",
+      "batch": 256,
+      "length": 512,
+      "weights": 141,
+      "num_layers": 5,
+      "source": "db"
+    },
+    {
+      "name": "db07-b256l512",
+      "spec": "tokens.32.raw_fold.emb.4|split.add(lrnn.4.4, pass)",
+      "precision": "fp32",
+      "batch": 256,
+      "length": 512,
+      "weights": 213,
+      "num_layers": 2,
+      "source": "db"
+    },
+    {
+      "name": "db07-b4l1024",
+      "spec": "tokens.32.raw_fold.emb.4|split.add(lrnn.4.4, pass)",
+      "precision": "fp32",
+      "batch": 4,
+      "length": 1024,
+      "weights": 213,
+      "num_layers": 2,
+      "source": "db"
+    },
+    {
+      "name": "db08-b4l1024",
+      "spec": "tokens.32.raw_fold.oh|lrnn.4.4",
+      "precision": "fp32",
+      "batch": 4,
+      "length": 1024,
+      "weights": 356,
+      "num_layers": 1,
+      "source": "db"
+    },
+    {
+      "name": "db08-b128l128",
+      "spec": "tokens.32.raw_fold.oh|lrnn.4.4",
+      "precision": "fp32",
+      "batch": 128,
+      "length": 128,
+      "weights": 356,
+      "num_layers": 1,
+      "source": "db"
+    },
+    {
+      "name": "db09-b128l128",
+      "spec": "tokens.32.raw_fold.emb.8|mingru.4-latent.8.2",
+      "precision": "fp32",
+      "batch": 128,
+      "length": 128,
+      "weights": 465,
+      "num_layers": 2,
+      "source": "db"
+    },
+    {
+      "name": "db09-b16l128",
+      "spec": "tokens.32.raw_fold.emb.8|mingru.4-latent.8.2",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 128,
+      "weights": 465,
+      "num_layers": 2,
+      "source": "db"
+    },
+    {
+      "name": "db10-b16l128",
+      "spec": "bits.4.oh+bp|lrnn.8.2-suffix.2-dense.8.gelu",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 128,
+      "weights": 552,
+      "num_layers": 3,
+      "source": "db"
+    },
+    {
+      "name": "db10-b64l256",
+      "spec": "bits.4.oh+bp|lrnn.8.2-suffix.2-dense.8.gelu",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 256,
+      "weights": 552,
+      "num_layers": 3,
+      "source": "db"
+    },
+    {
+      "name": "db11-b64l256",
+      "spec": "bits.4.oh+bp|rnn.16.gelu-dense.8.gelu-rmsnorm",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 256,
+      "weights": 832,
+      "num_layers": 3,
+      "source": "db"
+    },
+    {
+      "name": "db11-b256l512",
+      "spec": "bits.4.oh+bp|rnn.16.gelu-dense.8.gelu-rmsnorm",
+      "precision": "fp32",
+      "batch": 256,
+      "length": 512,
+      "weights": 832,
+      "num_layers": 3,
+      "source": "db"
+    },
+    {
+      "name": "db12-b256l512",
+      "spec": "bits.4.oh+bp|rnn.16.gelu-split.add(lrnn.16.4, pass)",
+      "precision": "fp32",
+      "batch": 256,
+      "length": 512,
+      "weights": 1600,
+      "num_layers": 3,
+      "source": "db"
+    },
+    {
+      "name": "db12-b4l1024",
+      "spec": "bits.4.oh+bp|rnn.16.gelu-split.add(lrnn.16.4, pass)",
+      "precision": "fp32",
+      "batch": 4,
+      "length": 1024,
+      "weights": 1600,
+      "num_layers": 3,
+      "source": "db"
+    },
+    {
+      "name": "db13-b4l1024",
+      "spec": "bits.4.oh+bp|split.mul(dense.4.tanh, dense.4)-rnn.32.gelu-dense.16.gelu-norm",
+      "precision": "fp32",
+      "batch": 4,
+      "length": 1024,
+      "weights": 2128,
+      "num_layers": 6,
+      "source": "db"
+    },
+    {
+      "name": "db13-b128l128",
+      "spec": "bits.4.oh+bp|split.mul(dense.4.tanh, dense.4)-rnn.32.gelu-dense.16.gelu-norm",
+      "precision": "fp32",
+      "batch": 128,
+      "length": 128,
+      "weights": 2128,
+      "num_layers": 6,
+      "source": "db"
+    },
+    {
+      "name": "db14-b128l128",
+      "spec": "bits.4.oh+bp|rnn.32.gelu-rnn.16.gelu-rmsnorm",
+      "precision": "fp32",
+      "batch": 128,
+      "length": 128,
+      "weights": 2672,
+      "num_layers": 3,
+      "source": "db"
+    },
+    {
+      "name": "db14-b16l128",
+      "spec": "bits.4.oh+bp|rnn.32.gelu-rnn.16.gelu-rmsnorm",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 128,
+      "weights": 2672,
+      "num_layers": 3,
+      "source": "db"
+    },
+    {
+      "name": "db15-b16l128",
+      "spec": "bits.4.oh+bp|suffix.2-rnn.32.gelu-rnn.16.gelu-split.add(suffix.2-dense.16.gelu, pass)-dense.32.gelu",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 128,
+      "weights": 4528,
+      "num_layers": 7,
+      "source": "db"
+    },
+    {
+      "name": "db15-b64l256",
+      "spec": "bits.4.oh+bp|suffix.2-rnn.32.gelu-rnn.16.gelu-split.add(suffix.2-dense.16.gelu, pass)-dense.32.gelu",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 256,
+      "weights": 4528,
+      "num_layers": 7,
+      "source": "db"
+    },
+    {
+      "name": "db16-b64l256",
+      "spec": "bits.4.oh+bp|mgru.32-dense.64.gelu",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 256,
+      "weights": 6352,
+      "num_layers": 2,
+      "source": "db"
+    },
+    {
+      "name": "db16-b256l512",
+      "spec": "bits.4.oh+bp|mgru.32-dense.64.gelu",
+      "precision": "fp32",
+      "batch": 256,
+      "length": 512,
+      "weights": 6352,
+      "num_layers": 2,
+      "source": "db"
+    },
+    {
+      "name": "db17-b256l512",
+      "spec": "bits.4.oh+bp|gru.16-mgru.32-split.cat(dense.64.gelu, pass)",
+      "precision": "fp32",
+      "batch": 256,
+      "length": 512,
+      "weights": 8432,
+      "num_layers": 4,
+      "source": "db"
+    },
+    {
+      "name": "db17-b4l1024",
+      "spec": "bits.4.oh+bp|gru.16-mgru.32-split.cat(dense.64.gelu, pass)",
+      "precision": "fp32",
+      "batch": 4,
+      "length": 1024,
+      "weights": 8432,
+      "num_layers": 4,
+      "source": "db"
+    },
+    {
+      "name": "db18-b4l1024",
+      "spec": "bits.4.oh+bp|mullstm.32-dense.128.gelu",
+      "precision": "fp32",
+      "batch": 4,
+      "length": 1024,
+      "weights": 14256,
+      "num_layers": 2,
+      "source": "db"
+    },
+    {
+      "name": "db18-b128l128",
+      "spec": "bits.4.oh+bp|mullstm.32-dense.128.gelu",
+      "precision": "fp32",
+      "batch": 128,
+      "length": 128,
+      "weights": 14256,
+      "num_layers": 2,
+      "source": "db"
+    },
+    {
+      "name": "db19-b128l128",
+      "spec": "bits.4.oh+bp|gru.64-dense.64.gelu-dense.16.gelu-norm",
+      "precision": "fp32",
+      "batch": 128,
+      "length": 128,
+      "weights": 21216,
+      "num_layers": 4,
+      "source": "db"
+    },
+    {
+      "name": "db19-b16l128",
+      "spec": "bits.4.oh+bp|gru.64-dense.64.gelu-dense.16.gelu-norm",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 128,
+      "weights": 21216,
+      "num_layers": 4,
+      "source": "db"
+    },
+    {
+      "name": "mid00-b16l256",
+      "spec": "bits.4.oh+bp|gru.128",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 58128,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid00-b64l128",
+      "spec": "bits.4.oh+bp|gru.128",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 58128,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid01-b64l128",
+      "spec": "bytes.emb.64|split.add(rmsnorm-attn.64.4.16, pass)-split.add(rmsnorm-dense.256.gelu-dense.64, pass)",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 59905,
+      "num_layers": 7,
+      "source": "mid"
+    },
+    {
+      "name": "mid01-b16l256",
+      "spec": "bytes.emb.64|split.add(rmsnorm-attn.64.4.16, pass)-split.add(rmsnorm-dense.256.gelu-dense.64, pass)",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 59905,
+      "num_layers": 7,
+      "source": "mid"
+    },
+    {
+      "name": "mid02-b16l256",
+      "spec": "bytes.emb.128|rnn.128.tanh",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 65665,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid02-b64l128",
+      "spec": "bytes.emb.128|rnn.128.tanh",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 65665,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid03-b64l128",
+      "spec": "bits.4.oh+bp|lstm.128",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 76816,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid03-b16l256",
+      "spec": "bits.4.oh+bp|lstm.128",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 76816,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid04-b16l256",
+      "spec": "bytes.emb.128|gru.128",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 131457,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid04-b64l128",
+      "spec": "bytes.emb.128|gru.128",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 131457,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid05-b64l128",
+      "spec": "bytes.emb.256|attn.256.4.64",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 229633,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid05-b16l256",
+      "spec": "bytes.emb.256|attn.256.4.64",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 229633,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid06-b16l256",
+      "spec": "bytes.emb.128|gru.128-gru.128",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 230145,
+      "num_layers": 2,
+      "source": "mid"
+    },
+    {
+      "name": "mid06-b64l128",
+      "spec": "bytes.emb.128|gru.128-gru.128",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 230145,
+      "num_layers": 2,
+      "source": "mid"
+    },
+    {
+      "name": "mid07-b64l128",
+      "spec": "bytes.emb.256|msr.64.4",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 262145,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid07-b16l256",
+      "spec": "bytes.emb.256|msr.64.4",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 262145,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid08-b16l256",
+      "spec": "bytes.emb.256|mgru.256",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 328193,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid08-b64l128",
+      "spec": "bytes.emb.256|mgru.256",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 328193,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid09-b64l128",
+      "spec": "bytes.emb.256|gru.256",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 459521,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid09-b16l256",
+      "spec": "bytes.emb.256|gru.256",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 459521,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid10-b16l256",
+      "spec": "bytes.emb.256|split.add(gru.256, pass)",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 459521,
+      "num_layers": 2,
+      "source": "mid"
+    },
+    {
+      "name": "mid10-b64l128",
+      "spec": "bytes.emb.256|split.add(gru.256, pass)",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 459521,
+      "num_layers": 2,
+      "source": "mid"
+    },
+    {
+      "name": "mid11-b64l128",
+      "spec": "bytes.emb.256|conv.4-gru.256",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 460801,
+      "num_layers": 2,
+      "source": "mid"
+    },
+    {
+      "name": "mid11-b16l256",
+      "spec": "bytes.emb.256|conv.4-gru.256",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 460801,
+      "num_layers": 2,
+      "source": "mid"
+    },
+    {
+      "name": "mid12-b16l256",
+      "spec": "bytes.emb.256|lstm.256",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 590849,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid12-b64l128",
+      "spec": "bytes.emb.256|lstm.256",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 590849,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid13-b64l128",
+      "spec": "bytes.emb.512|attn.512.8.64",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 721409,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid13-b16l256",
+      "spec": "bytes.emb.512|attn.512.8.64",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 721409,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid14-b16l256",
+      "spec": "bytes.emb.512|lrnn.512.2",
+      "precision": "fp32",
+      "batch": 16,
+      "length": 256,
+      "weights": 918017,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "mid14-b64l128",
+      "spec": "bytes.emb.512|lrnn.512.2",
+      "precision": "fp32",
+      "batch": 64,
+      "length": 128,
+      "weights": 918017,
+      "num_layers": 1,
+      "source": "mid"
+    },
+    {
+      "name": "big00-b8l256",
+      "spec": "bytes.emb.512|mgru.512",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 1180673,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big00-b32l128",
+      "spec": "bytes.emb.512|mgru.512",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 1180673,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big01-b32l128",
+      "spec": "bytes.emb.256|gru.256-gru.256-gru.256",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 1247489,
+      "num_layers": 3,
+      "source": "big"
+    },
+    {
+      "name": "big01-b8l256",
+      "spec": "bytes.emb.256|gru.256-gru.256-gru.256",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 1247489,
+      "num_layers": 3,
+      "source": "big"
+    },
+    {
+      "name": "big02-b8l256",
+      "spec": "bytes|gru.512",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 1312512,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big02-b32l128",
+      "spec": "bytes|gru.512",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 1312512,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big03-b32l128",
+      "spec": "bytes.emb.512|gru.512",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 1705473,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big03-b8l256",
+      "spec": "bytes.emb.512|gru.512",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 1705473,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big04-b8l256",
+      "spec": "bytes.emb.512|split.add(gru.512, pass)",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 1705473,
+      "num_layers": 2,
+      "source": "big"
+    },
+    {
+      "name": "big04-b32l128",
+      "spec": "bytes.emb.512|split.add(gru.512, pass)",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 1705473,
+      "num_layers": 2,
+      "source": "big"
+    },
+    {
+      "name": "big05-b32l128",
+      "spec": "bytes.emb.512|gru.512-rmsnorm",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 1705985,
+      "num_layers": 2,
+      "source": "big"
+    },
+    {
+      "name": "big05-b8l256",
+      "spec": "bytes.emb.512|gru.512-rmsnorm",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 1705985,
+      "num_layers": 2,
+      "source": "big"
+    },
+    {
+      "name": "big06-b8l256",
+      "spec": "bytes.emb.512|conv.4-gru.512",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 1708033,
+      "num_layers": 2,
+      "source": "big"
+    },
+    {
+      "name": "big06-b32l128",
+      "spec": "bytes.emb.512|conv.4-gru.512",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 1708033,
+      "num_layers": 2,
+      "source": "big"
+    },
+    {
+      "name": "big07-b32l128",
+      "spec": "bytes.emb.512|dense.512.gelu-gru.512",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 1968129,
+      "num_layers": 2,
+      "source": "big"
+    },
+    {
+      "name": "big07-b8l256",
+      "spec": "bytes.emb.512|dense.512.gelu-gru.512",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 1968129,
+      "num_layers": 2,
+      "source": "big"
+    },
+    {
+      "name": "big08-b8l256",
+      "spec": "bytes.emb.512|lstm.512",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 2230273,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big08-b32l128",
+      "spec": "bytes.emb.512|lstm.512",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 2230273,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big09-b32l128",
+      "spec": "bytes.emb.1024|rnn.1024.tanh",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 2360321,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big09-b8l256",
+      "spec": "bytes.emb.1024|rnn.1024.tanh",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 2360321,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big10-b8l256",
+      "spec": "bits.4.oh+bp|gru.1024",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 3217424,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big10-b32l128",
+      "spec": "bits.4.oh+bp|gru.1024",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 3217424,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big11-b32l128",
+      "spec": "bytes.emb.512|gru.512-gru.512",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 3279873,
+      "num_layers": 2,
+      "source": "big"
+    },
+    {
+      "name": "big11-b8l256",
+      "spec": "bytes.emb.512|gru.512-gru.512",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 3279873,
+      "num_layers": 2,
+      "source": "big"
+    },
+    {
+      "name": "big12-b8l256",
+      "spec": "bytes.emb.1024|msr.256.4",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 3407873,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big12-b32l128",
+      "spec": "bytes.emb.1024|msr.256.4",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 3407873,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big13-b32l128",
+      "spec": "bytes|lstm.1024",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 5509376,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big13-b8l256",
+      "spec": "bytes|lstm.1024",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 5509376,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big14-b8l256",
+      "spec": "bytes.emb.512|split.add(rmsnorm-attn.512.8.64, pass)-split.add(rmsnorm-dense.2048.gelu-dense.512, pass)-split.add(rmsnorm-attn.512.8.64, pass)-split.add(rmsnorm-dense.2048.gelu-dense.512, pass)",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 5513217,
+      "num_layers": 14,
+      "source": "big"
+    },
+    {
+      "name": "big14-b32l128",
+      "spec": "bytes.emb.512|split.add(rmsnorm-attn.512.8.64, pass)-split.add(rmsnorm-dense.2048.gelu-dense.512, pass)-split.add(rmsnorm-attn.512.8.64, pass)-split.add(rmsnorm-dense.2048.gelu-dense.512, pass)",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 5513217,
+      "num_layers": 14,
+      "source": "big"
+    },
+    {
+      "name": "big15-b32l128",
+      "spec": "bytes.emb.1024|gru.1024",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 6556673,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big15-b8l256",
+      "spec": "bytes.emb.1024|gru.1024",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 6556673,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big16-b8l256",
+      "spec": "bytes.emb.1024|lstm.1024",
+      "precision": "fp32",
+      "batch": 8,
+      "length": 256,
+      "weights": 8654849,
+      "num_layers": 1,
+      "source": "big"
+    },
+    {
+      "name": "big16-b32l128",
+      "spec": "bytes.emb.1024|lstm.1024",
+      "precision": "fp32",
+      "batch": 32,
+      "length": 128,
+      "weights": 8654849,
+      "num_layers": 1,
+      "source": "big"
+    }
+  ],
+  "shapes": [[16, 128], [64, 256], [256, 512], [4, 1024], [128, 128]],
+  "mid_shapes": [[16, 256], [64, 128]],
+  "big_shapes": [[8, 256], [32, 128]]
+}

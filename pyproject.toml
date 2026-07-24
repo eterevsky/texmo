@@ -15,9 +15,15 @@ dependencies = [
     "torch",
     # GPU JAX on x86_64 Linux (vast.ai-style hosts), CPU JAX everywhere
     # else. ARM Linux (RPi) and macOS get the CPU build; JAX has no
-    # CUDA wheels for Windows.
-    "jax[cuda13]; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "jax[cpu]; sys_platform != 'linux' or platform_machine != 'x86_64'",
+    # CUDA wheels for Windows. Pinned to 0.11 on every platform so
+    # the fleet runs one JAX version (the ceiling matches metaljax's
+    # jax<0.12 requirement -- without it non-mac platforms would
+    # drift ahead and fork the resolution).
+    "jax[cuda13]>=0.11,<0.12; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "jax[cpu]>=0.11,<0.12; sys_platform != 'linux' or platform_machine != 'x86_64'",
+    # Metal backend for JAX on Apple GPUs (github.com/eterevsky/metaljax,
+    # MLX-based) -- gives Mac clients a GPU option next to CPU JAX.
+    "metaljax>=0.1.0; sys_platform == 'darwin'",
     "optax",
     "safetensors>=0.8.0",
 ]

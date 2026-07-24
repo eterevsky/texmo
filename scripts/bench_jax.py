@@ -215,7 +215,14 @@ def main():
                              'default 1 = single-threaded)')
     parser.add_argument('--batch', type=int, default=256)
     parser.add_argument('--ntokens', type=int, default=256)
+    parser.add_argument('--platform', type=str, default=None,
+                        help="JAX platform(s) to use, e.g. 'cpu', 'metal' or "
+                             "'metal,cpu' (a non-CPU platform needs its PJRT "
+                             "plugin installed, e.g. metaljax for 'metal')")
     args = parser.parse_args()
+
+    if args.platform:
+        jax.config.update('jax_platforms', args.platform)
 
     print(f'Backend: {jax.default_backend()}')
     print(f'Devices: {jax.devices()}')

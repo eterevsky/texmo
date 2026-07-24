@@ -19,6 +19,7 @@ sampler; pass --data to drive it from a real corpus instead.
     uv run python scripts/bench_train.py --max-weights 100000
     uv run python scripts/bench_train.py --source big --scan both
     uv run python scripts/bench_train.py -o results/bench-cpu.json
+    uv run python scripts/bench_train.py --platform metal --system mac-metal
     uv run python scripts/bench_train.py --compare a.json b.json
 
 -o writes both a JSON (metadata + rows, what --compare reads) and a
@@ -277,7 +278,16 @@ def main():
                              'machines concatenate into one table')
     parser.add_argument('--compare', nargs='+', default=None,
                         help='compare result JSONs instead of running')
+    parser.add_argument('--platform', type=str, default=None,
+                        help="JAX platform(s) to use, e.g. 'cpu', 'metal' or "
+                             "'metal,cpu' (a non-CPU platform needs its PJRT "
+                             "plugin installed, e.g. metaljax for 'metal'). "
+                             "Same effect as the JAX_PLATFORMS env var.")
     args = parser.parse_args()
+
+    if args.platform:
+        # Must land before anything touches a device.
+        jax.config.update('jax_platforms', args.platform)
 
     if args.compare:
         _compare(args.compare)

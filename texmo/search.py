@@ -113,10 +113,11 @@ _COVERAGE_PROB = 0.1
 # a known machine). Such a system has no timing model, so nothing
 # bounds how long a conf will train: handed a fleet-favourite
 # recurrent conf at S8192 it can sit on it for hours, and the search
-# learns nothing until it finishes. Each rung caps the three knobs
-# that multiply into total work, growing ONE knob at a time
-# (steps x4, batch x4, length x2) so the product rises ~2-4x per rung
-# and the timing model is fit (first fit at 100 runs) well before the
+# learns nothing until it finishes. A rung admits only confs the
+# fleet already runs at or below its caps on the three knobs that
+# multiply into total work, growing ONE knob at a time (steps x4,
+# batch x4, length x2) so the product rises ~2-4x per rung and the
+# timing model is fit (first fit at 100 runs) well before the
 # expensive rungs open.
 _WARMUP_LADDER: list[tuple[int, int, int]] = [
     (2, 1, 64),
@@ -158,6 +159,28 @@ _LAYER_CAP_PROBS: list[tuple[Optional[int], float]] = [
     (4, 0.1),
 ]
 assert abs(sum(w for _, w in _LAYER_CAP_PROBS) - 1.0) < 1e-9
+
+
+def _cap_bound(b: Bounds, cap: int, floor: int) -> Bounds:
+    """`b` with its max lowered to `cap`, never below its own min."""
+    return Bounds((b.min, max(b.min, min(b.max, cap))), floor)
+
+
+def _warmup_template(
+    template: Template, max_steps: int, max_batch: int, max_length: int,
+) -> Template:
+    """`template` intersected with one warmup rung's caps.
+
+    Used as a FILTER on existing confs, not as a rewrite: a shallow
+    copy (sub-objects shared, never mutated), so `top_confs_global`
+    returns only confs the fleet has already run at a shape this rung
+    admits.
+    """
+    capped = copy.copy(template)
+    capped.steps = _cap_bound(template.steps, max_steps, 2)
+    capped.batch = _cap_bound(template.batch, max_batch, 1)
+    capped.length = _cap_bound(template.length, max_length, 1)
+    return capped
 
 
 def _layer_capped_template(
@@ -676,37 +699,31 @@ class Search(object):
         cached = self._warmup_top.get(system)
         if cached is not None and cached[0] == rung:
             return cached[1]
-        top = list(self._db.top_confs_global(self.template, min_num_runs=1))
+        template = _warmup_template(self.template, *_WARMUP_LADDER[rung])
+        top = list(self._db.top_confs_global(template, min_num_runs=1))
         self._warmup_top[system] = (rung, top)
         return top
 
     def _warmup_pick(
-        self, system: str, rung: int,
-        max_steps: int, max_batch: int, max_length: int,
-    ) -> Optional[Configuration]:
-        """First global top conf, in random order, whose knobs shrunk
-        to this rung's caps aren't covered on `system` yet.
+        self, system: str, rung: int) -> Optional[Configuration]:
+        """First global top conf this rung admits, in random order,
+        that `system` hasn't covered yet.
 
-        The architecture and weight spread comes from the fleet's top
-        confs; the caps replace their (steps, batch, length) so the
-        work per run stays bounded with no timing model in hand. The
-        template's own floors win over a cap, so the rewritten conf
-        still matches the template.
+        The conf is taken AS IT STANDS -- the rung caps filter the
+        candidates rather than rewriting them. Shrinking a top conf's
+        knobs to fit would mint a fresh (spec, steps, batch, length)
+        combination the fleet has never run, so its one run here would
+        be the only run it ever has: no cross-system comparison, and
+        below the two runs `top_confs_global` wants before showing a
+        conf at all. Filtering keeps every warmup run landing on a conf
+        others have already measured.
         """
         top = list(self._warmup_top_confs(system, rung))
         random.shuffle(top)
         for c in top:
-            conf = c.conf.replace(
-                steps=min(c.conf.steps,
-                          max(max_steps, int(self.template.steps.min))),
-                batch=min(c.conf.batch,
-                          max(max_batch, int(self.template.batch.min))),
-                length=min(c.conf.length,
-                           max(max_length, int(self.template.length.min))),
-            )
             # No-op until this system has a timing model; once it does,
             # the ordinary budget cap applies on top of the rung.
-            conf = self._cap_steps(conf, system)
+            conf = self._cap_steps(c.conf, system)
             if self._db.has_covering_run(conf, system):
                 continue
             return conf
@@ -717,19 +734,21 @@ class Search(object):
         the `_WARMUP_LADDER`, or None once it has finished the ladder
         (the caller then falls through to ordinary selection).
 
-        Each rung caps (steps, batch, length); the rung advances after
-        `_WARMUP_SELECTS_PER_RUNG` picks, or immediately when every top
-        conf under it is already covered on this system.
+        Each rung admits top confs whose (steps, batch, length) are
+        within its caps; the rung advances after
+        `_WARMUP_SELECTS_PER_RUNG` picks, or immediately when it has no
+        uncovered confs left for this system (including none at all,
+        which is normal for the tightest rungs on a small DB).
         """
         with latency.timer('Search._select_warmup'):
             while True:
                 rung = self._warmup_rung.get(system, 0)
                 if rung >= len(_WARMUP_LADDER):
                     return None
-                conf = self._warmup_pick(
-                    system, rung, *_WARMUP_LADDER[rung])
+                conf = self._warmup_pick(system, rung)
                 if conf is None:
-                    self._advance_warmup(system, rung, 'rung fully covered')
+                    self._advance_warmup(
+                        system, rung, 'no uncovered confs at this rung')
                     continue
                 spent = self._warmup_selects.get(system, 0) + 1
                 self._warmup_selects[system] = spent

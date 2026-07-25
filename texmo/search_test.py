@@ -494,50 +494,81 @@ def _big_conf():
     )
 
 
-def test_warmup_shrinks_knobs_to_the_first_rung(tmp_path):
-    """A fleet top conf keeps its architecture but gets its
-    (steps, batch, length) rewritten down to rung 0 -- except where
-    the template's own floor is higher (steps.min=4 here beats the
-    rung's cap of 2), so the result still matches the template."""
+def _small_conf(spec="bytes|dense.4.gelu"):
+    """A conf the first rung admits: steps at the template floor (4,
+    which outranks the rung's cap of 2), batch and length at the caps."""
+    return Configuration(
+        model=parse_model2(spec, precision=Precision.FP32),
+        lr=0.01, length=64, batch=1, steps=4, decay=1,
+    )
+
+
+def test_warmup_picks_an_existing_conf_unchanged(tmp_path):
+    """The rung FILTERS the fleet's top confs rather than rewriting
+    them, so the pick is a conf other systems have already run -- it
+    keeps its knobs and its existing runs."""
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
-    big = _big_conf()
-    _seed_runs(path, big, system='a', n=1)
+    small = _small_conf()
+    _seed_runs(path, small, system='a', n=2)
     search = _make_search_at(path, warmup_systems=['b'])
 
     conf = search._select_warmup('b')
-    assert conf is not None
-    assert str(conf.model) == str(big.model)  # architecture preserved
-    assert conf.steps == 4     # rung cap 2 raised to template floor
-    assert conf.batch == 1     # rung cap
-    assert conf.length == 64   # rung cap
+    assert conf == small          # identical, not a shrunken variant
     assert search.template.match(conf)
 
 
-def test_warmup_advances_when_rung_is_covered(tmp_path):
-    """With the only top conf already run at this rung, the ladder
-    steps up instead of returning nothing."""
+def test_warmup_skips_confs_above_the_rung(tmp_path):
+    """A conf whose knobs exceed rung 0 is not selected there. The
+    ladder climbs until a rung admits it."""
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
     big = _big_conf()
-    _seed_runs(path, big, system='a', n=1)
+    _seed_runs(path, big, system='a', n=2)
     search = _make_search_at(path, warmup_systems=['b'])
 
-    first = search._select_warmup('b')
-    _seed_runs(path, first, system='b', n=1)   # cover rung 0 on 'b'
-    search = _make_search_at(path, warmup_systems=['b'])
-    second = search._select_warmup('b')
-
+    conf = search._select_warmup('b')
+    # Either it climbed to a rung that admits the conf, or the ladder
+    # ran out -- never a rewritten variant of it.
+    if conf is not None:
+        assert conf == big
+        steps, batch, length = _WARMUP_LADDER[search._warmup_rung['b']]
+        assert big.steps <= max(steps, search.template.steps.min)
     assert search._warmup_rung['b'] > 0
-    # Higher rung -> strictly more work than the covered pick.
-    assert (second.steps, second.batch, second.length) > \
-        (first.steps, first.batch, first.length)
+
+
+def test_warmup_prefers_the_tight_rung_before_climbing(tmp_path):
+    """With both a small and a big conf seeded, rung 0 yields the small
+    one; the big one only becomes reachable further up the ladder."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    small, big = _small_conf(), _big_conf()
+    _seed_runs(path, small, system='a', n=2)
+    _seed_runs(path, big, system='a', n=2, loss_base=0.2)
+    search = _make_search_at(path, warmup_systems=['b'])
+
+    assert search._select_warmup('b') == small
+    assert search._warmup_rung.get('b', 0) == 0
+
+
+def test_warmup_advances_when_rung_is_covered(tmp_path):
+    """With the rung's only conf already run on this system, the
+    ladder steps up instead of returning nothing."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    small = _small_conf()
+    _seed_runs(path, small, system='a', n=2)
+    _seed_runs(path, small, system='b', n=1)   # covered on 'b'
+    search = _make_search_at(path, warmup_systems=['b'])
+
+    search._select_warmup('b')
+    assert search._warmup_rung['b'] > 0
 
 
 def test_warmup_advances_after_picks_spent(tmp_path):
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
-    _seed_runs(path, _big_conf(), system='a', n=1)
+    _seed_runs(path, _small_conf(), system='a', n=2)
     search = _make_search_at(path, warmup_systems=['b'])
 
     for _ in range(_WARMUP_SELECTS_PER_RUNG):
@@ -560,7 +591,7 @@ def test_select_conf_warmup_takes_priority_then_falls_through(tmp_path):
     and the system leaves warmup once it is climbed."""
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
-    _seed_runs(path, _big_conf(), system='a', n=1)
+    _seed_runs(path, _small_conf(), system='a', n=2)
     search = _make_search_at(path, warmup_systems=['b'])
 
     result = search.select_conf('b')
@@ -576,7 +607,7 @@ def test_select_conf_warmup_takes_priority_then_falls_through(tmp_path):
 def test_select_conf_ignores_warmup_for_other_systems(tmp_path):
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
-    _seed_runs(path, _big_conf(), system='a', n=1)
+    _seed_runs(path, _small_conf(), system='a', n=2)
     search = _make_search_at(path, warmup_systems=['b'])
     result = search.select_conf('c')
     assert result is None or result.strategy != 'warmup'
@@ -588,7 +619,7 @@ def test_warmup_caches_top_confs_per_rung(tmp_path, monkeypatch):
     fetched once per rung, not once per pick."""
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
-    _seed_runs(path, _big_conf(), system='a', n=1)
+    _seed_runs(path, _small_conf(), system='a', n=2)
     search = _make_search_at(path, warmup_systems=['b'])
 
     calls = []

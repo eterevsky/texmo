@@ -10,6 +10,7 @@ use tempfile::NamedTempFile;
 mod batch_tokenize;
 mod input;
 mod optimize;
+mod hexbpe;
 mod optimizer;
 mod processing;
 mod stats;
@@ -208,6 +209,45 @@ fn optimize_all(
         min_tokens,
         max_tokens,
     );
+}
+
+fn build_hexbpe(
+    data: &str,
+    ntokens: usize,
+    output: Option<&str>,
+    chunk_size: usize,
+    nchunks: usize,
+    verbose: bool,
+) {
+    let initial_size = std::fs::metadata(data).unwrap().len();
+    println!("Sampling {} x {} bytes of {}...", nchunks, chunk_size, data);
+    let corpus = hexbpe::sample_processed(data, chunk_size, nchunks).unwrap();
+    println!("capswords2 sample: {} bytes", corpus.len());
+
+    let mut builder = hexbpe::HexBpe::new(&corpus);
+    builder.build(ntokens, verbose);
+
+    let (bytes, merged) = builder.vocabulary();
+    println!(
+        "{} tokens = {} nibbles + {} bytes + {} merges; {} extra weights;          {:.4} bytes/token",
+        ntokens,
+        hexbpe::NIBBLES,
+        bytes.len(),
+        merged.len(),
+        builder.extra_weights(),
+        corpus.len() as f64 / builder.cost() as f64,
+    );
+
+    let json = builder.to_json(ntokens, corpus.len() as u64, initial_size);
+    let text = serde_json::to_string_pretty(&json).unwrap();
+    match output {
+        Some(path) => {
+            std::fs::write(path, text + "
+").unwrap();
+            println!("wrote {}", path);
+        }
+        None => println!("{}", text),
+    }
 }
 
 fn process(filename: &str, output: &str, processing: Processing) {
@@ -450,6 +490,30 @@ enum Command {
         max_tokens: usize,
     },
 
+    /// Build a `hexbpe` tokenset: 16 reserved nibble tokens plus
+    /// greedily chosen byte selections and merges. Samples the raw
+    /// corpus and applies capswords2 on the fly, so no preprocessed
+    /// copy of the corpus is needed.
+    BuildHexbpe {
+        #[arg(short, long)]
+        data: String,
+
+        #[arg(short, long)]
+        ntokens: usize,
+
+        #[arg(short, long)]
+        output: Option<String>,
+
+        #[arg(long, default_value_t = 1 << 22)]
+        chunk_size: usize,
+
+        #[arg(long, default_value_t = 16)]
+        nchunks: usize,
+
+        #[arg(long)]
+        verbose: bool,
+    },
+
     Process {
         #[arg(short, long)]
         data: String,
@@ -575,6 +639,22 @@ fn main() {
             &tokens_dir.as_str(),
             *min_tokens,
             *max_tokens,
+        ),
+
+        Command::BuildHexbpe {
+            data,
+            ntokens,
+            output,
+            chunk_size,
+            nchunks,
+            verbose,
+        } => build_hexbpe(
+            data.as_str(),
+            *ntokens,
+            output.as_deref(),
+            *chunk_size,
+            *nchunks,
+            *verbose,
         ),
 
         Command::Process {

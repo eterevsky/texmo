@@ -24,7 +24,7 @@ use self::input::memory_sampler::MemorySampler;
 use self::input::preloaded_sampler::PreloadedSampler;
 use self::optimize::optimize_tokenset;
 use self::optimizer::optimize_bpe;
-use self::processing::{process_file, Processing};
+use self::processing::{process_file, process_file2, Processing};
 use self::tokenizer::tokenize_file;
 use self::tokens::{LiteralEncoding, TokenSet};
 use self::tokenset::TokenType;
@@ -101,14 +101,21 @@ fn maybe_process_file(
     filename_processed: Option<&str>,
     processing: Processing,
 ) -> (String, Option<NamedTempFile>) {
+    // NOTE: `filename_processed` must have been produced by the SAME
+    // processing that is being asked for -- a capswords file handed to
+    // a capswords2 run would silently train on the wrong text. Use
+    // `texmo process --processing capswords2` to make one.
     match (filename_processed, processing) {
         (_, Processing::Raw) => (filename_raw.to_string(), None),
-        (Some(f), Processing::CapsWords) => (f.to_string(), None),
-        (None, Processing::CapsWords) => {
+        (Some(f), Processing::CapsWords | Processing::CapsWords2) => (f.to_string(), None),
+        (None, proc) => {
             println!("Pre-processing the data file... ");
             let mut temp_processed = NamedTempFile::new().unwrap();
             let mut input = File::open(filename_raw).unwrap();
-            process_file(&mut input, &mut temp_processed).unwrap();
+            match proc {
+                Processing::CapsWords2 => process_file2(&mut input, &mut temp_processed).unwrap(),
+                _ => process_file(&mut input, &mut temp_processed).unwrap(),
+            }
             println!("done");
             let filename = temp_processed.path().to_str().unwrap().to_string();
             (filename, Some(temp_processed))
@@ -203,11 +210,15 @@ fn optimize_all(
     );
 }
 
-fn process(filename: &str, output: &str) {
+fn process(filename: &str, output: &str, processing: Processing) {
     let mut input = File::open(filename).unwrap();
     let mut output = File::create(output).unwrap();
 
-    process_file(&mut input, &mut output).unwrap();
+    match processing {
+        Processing::CapsWords2 => process_file2(&mut input, &mut output).unwrap(),
+        Processing::CapsWords => process_file(&mut input, &mut output).unwrap(),
+        Processing::Raw => std::io::copy(&mut input, &mut output).map(|_| ()).unwrap(),
+    }
 }
 
 fn count_chars(filename: &str) {
@@ -445,6 +456,12 @@ enum Command {
 
         #[arg(short, long)]
         output: String,
+
+        /// Which text->text preprocessing to apply. capswords2 adds a
+        /// marker before every mid-word capital, so no uppercase
+        /// letter survives into the tokenset.
+        #[arg(long, default_value_t=Processing::CapsWords)]
+        processing: Processing,
     },
 
     CountChars {
@@ -560,7 +577,11 @@ fn main() {
             *max_tokens,
         ),
 
-        Command::Process { data, output } => process(data.as_str(), output.as_str()),
+        Command::Process {
+            data,
+            output,
+            processing,
+        } => process(data.as_str(), output.as_str(), *processing),
 
         Command::CountChars { data } => count_chars(data.as_str()),
 

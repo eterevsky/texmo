@@ -1,0 +1,462 @@
+[
+ {
+  "in": "",
+  "out": "",
+  "roundtrip": true
+ },
+ {
+  "in": "a",
+  "out": "a\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "A",
+  "out": "\u0014a\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "ab",
+  "out": "ab\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "AB",
+  "out": "\u0015ab\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "Ab",
+  "out": "\u0014ab\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "aB",
+  "out": "a\u0017b\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "AbC",
+  "out": "\u0017ab\u0017c\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "abC",
+  "out": "ab\u0017c\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "ABc",
+  "out": "\u0017a\u0017bc\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "hello world",
+  "out": "hello\u0016world\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "Hello World",
+  "out": "\u0014hello\u0016\u0014world\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "HELLO WORLD",
+  "out": "\u0015hello\u0016\u0015world\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "HeLLo WoRLd",
+  "out": "\u0017he\u0017l\u0017lo\u0016\u0017wo\u0017r\u0017ld\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "Hello",
+  "out": "\u0014hello\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "HELLO",
+  "out": "\u0015hello\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "HeLLo",
+  "out": "\u0017he\u0017l\u0017lo\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "hELLO",
+  "out": "h\u0017e\u0017l\u0017l\u0017o\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "hellO",
+  "out": "hell\u0017o\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": " ",
+  "out": " ",
+  "roundtrip": true
+ },
+ {
+  "in": "  ",
+  "out": "  ",
+  "roundtrip": true
+ },
+ {
+  "in": "   ",
+  "out": "   ",
+  "roundtrip": true
+ },
+ {
+  "in": "a ",
+  "out": "a\u0016 ",
+  "roundtrip": true
+ },
+ {
+  "in": " a",
+  "out": " a\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "a  b",
+  "out": "a\u0016  b\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "a   b",
+  "out": "a\u0016   b\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "  a  ",
+  "out": "  a\u0016  ",
+  "roundtrip": true
+ },
+ {
+  "in": "a b c",
+  "out": "a\u0016b\u0016c\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "a b  c   d",
+  "out": "a\u0016b\u0016  c\u0016   d\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": " Hello World ",
+  "out": " \u0014hello\u0016\u0014world\u0016 ",
+  "roundtrip": true
+ },
+ {
+  "in": "a\tb",
+  "out": "a\u0016\tb\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "a\nb",
+  "out": "a\u0016\nb\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "\n",
+  "out": "\n",
+  "roundtrip": true
+ },
+ {
+  "in": "a\n\nb",
+  "out": "a\u0016\n\nb\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "\n\nHello\n",
+  "out": "\n\n\u0014hello\u0016\n",
+  "roundtrip": true
+ },
+ {
+  "in": "a \n b",
+  "out": "a\u0016 \n b\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "Hello, world!",
+  "out": "\u0014hello\u0016, world\u0016!",
+  "roundtrip": true
+ },
+ {
+  "in": "Hello,world",
+  "out": "\u0014hello\u0016,world\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "a.b",
+  "out": "a\u0016.b\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "...",
+  "out": "...",
+  "roundtrip": true
+ },
+ {
+  "in": "!@#",
+  "out": "!@#",
+  "roundtrip": true
+ },
+ {
+  "in": "a, B",
+  "out": "a\u0016, \u0014b\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "a ,b",
+  "out": "a\u0016 ,b\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "don't",
+  "out": "don\u0016't\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "McDonald's",
+  "out": "\u0017mc\u0017donald\u0016's\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "e.g. U.S.A.",
+  "out": "e\u0016.g\u0016. \u0014u\u0016.\u0014s\u0016.\u0014a\u0016.",
+  "roundtrip": true
+ },
+ {
+  "in": "-Hello-",
+  "out": "-\u0014hello\u0016-",
+  "roundtrip": true
+ },
+ {
+  "in": "iPhone 15 Pro",
+  "out": "i\u0017phone\u0016 15 \u0014pro\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "A1",
+  "out": "\u0014a\u00161",
+  "roundtrip": true
+ },
+ {
+  "in": "1A",
+  "out": "1\u0014a\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "abc123def",
+  "out": "abc\u0016123def\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "42",
+  "out": "42",
+  "roundtrip": true
+ },
+ {
+  "in": "CamelCaseWord",
+  "out": "\u0017camel\u0017case\u0017word\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "HTTPServer",
+  "out": "\u0017h\u0017t\u0017t\u0017p\u0017server\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "eBay",
+  "out": "e\u0017bay\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "iPod",
+  "out": "i\u0017pod\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "McDonald",
+  "out": "\u0017mc\u0017donald\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "XmlHTTPRequest",
+  "out": "\u0017xml\u0017h\u0017t\u0017t\u0017p\u0017request\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "IOException",
+  "out": "\u0017i\u0017o\u0017exception\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "Привет мир",
+  "out": "\u0014привет\u0016мир\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "ПРИВЕТ МИР",
+  "out": "\u0015привет\u0016\u0015мир\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "МиР",
+  "out": "\u0017ми\u0017р\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "Привет",
+  "out": "\u0014привет\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "Ελλάδα",
+  "out": "\u0014ελλάδα\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "ΕΛΛΑΔΑ",
+  "out": "\u0015ελλαδα\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "ΕλΛάΔα",
+  "out": "\u0017ελ\u0017λά\u0017δα\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "café",
+  "out": "café\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "Café",
+  "out": "\u0014café\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "CAFÉ",
+  "out": "\u0015café\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "CaFé",
+  "out": "\u0017ca\u0017fé\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "naïve Naïve NAÏVE",
+  "out": "naïve\u0016\u0014naïve\u0016\u0015naïve\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "日本語",
+  "out": "日本語\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "日本語 text",
+  "out": "日本語\u0016text\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "Hello 日本語 World",
+  "out": "\u0014hello\u0016日本語\u0016\u0014world\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "עברית",
+  "out": "עברית\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "العربية",
+  "out": "العربية\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "İstanbul",
+  "out": "\u0014i̇stanbul\u0016",
+  "roundtrip": false
+ },
+ {
+  "in": "Straße",
+  "out": "\u0014straße\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "STRASSE",
+  "out": "\u0015strasse\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "ǅ",
+  "out": "ǅ\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "ǅungla",
+  "out": "ǅungla\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "ﬁre",
+  "out": "ﬁre\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "Hello 👋 World",
+  "out": "\u0014hello\u0016 👋 \u0014world\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "→ Arrow",
+  "out": "→ \u0014arrow\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "a—b",
+  "out": "a\u0016—b\u0016",
+  "roundtrip": true
+ },
+ {
+  "in": "The quick brown Fox jumps over the LAZY dog's back, e.g. 42 times!",
+  "out": "\u0014the\u0016quick\u0016brown\u0016\u0014fox\u0016jumps\u0016over\u0016the\u0016\u0015lazy\u0016dog\u0016's\u0016back\u0016, e\u0016.g\u0016. 42 times\u0016!",
+  "roundtrip": true
+ },
+ {
+  "in": "a\u0014b",
+  "out": "a\u0016\u0014b\u0016",
+  "roundtrip": false
+ },
+ {
+  "in": "a\u0015b",
+  "out": "a\u0016\u0015b\u0016",
+  "roundtrip": false
+ },
+ {
+  "in": "a\u0016b",
+  "out": "a\u0016\u0016b\u0016",
+  "roundtrip": false
+ },
+ {
+  "in": "a\u0017b",
+  "out": "a\u0016\u0017b\u0016",
+  "roundtrip": false
+ },
+ {
+  "in": "\u0017",
+  "out": "\u0017",
+  "roundtrip": false
+ },
+ {
+  "in": "\u0014\u0015\u0016\u0017",
+  "out": "\u0014\u0015\u0016\u0017",
+  "roundtrip": false
+ }
+]

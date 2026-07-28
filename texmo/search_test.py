@@ -13,6 +13,7 @@ from .search import (
     _WARMUP_SELECTS_PER_RUNG,
     Search,
     _generate_limits,
+    _is_retired,
     _layer_capped_template,
     _run_limit_sequences,
 )
@@ -634,3 +635,142 @@ def test_warmup_caches_top_confs_per_rung(tmp_path, monkeypatch):
     # Advancing the rung refreshes the candidate list.
     search._select_warmup('b')
     assert len(calls) == 2
+
+
+# --- retired inputs --------------------------------------------------
+
+_SHIFT_SPEC = "tokens.64.shift.emb.4|rnn.4.tanh"
+
+
+def _shift_conf(steps=256):
+    return _make_conf(steps=steps, spec=_SHIFT_SPEC)
+
+
+def test_is_retired_covers_both_codec_spellings():
+    assert _is_retired("tokens.64.shift.emb.4|rnn.4.tanh")
+    assert _is_retired("tokens.64.shift.oh|rnn.4.tanh")
+    assert _is_retired("tokens.64.shift.emb.16|split.add(dense.16.tanh)")
+    # The hexbpe bridge it points at is very much alive.
+    assert not _is_retired("tokens.64.hexbpe.emb.4|rnn.4.tanh")
+    assert not _is_retired("tokens.32.raw_fold.oh|rnn.4.tanh")
+    assert not _is_retired("bytes|dense.8.gelu")
+
+
+def test_retired_conf_is_never_re_run(tmp_path, monkeypatch):
+    """A shift conf already in the DB is a top conf on every ordinary
+    re-run path -- and none of them may hand it back."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    conf = _shift_conf()
+    _seed_runs(path, conf, system='a', n=2)
+    search = _make_search_at(path)
+
+    # It IS in the DB's top confs -- the filter is what excludes it,
+    # not an empty query.
+    top = list(search._db.top_confs_for_system(
+        max_time=16.0, max_weights=INF, system='a', limit=10,
+        template=search.template))
+    assert [c.conf for c in top] == [conf]
+
+    # Neighbour walk: with mutation sources yielding nothing, the walk
+    # would fall back to re-running the top conf itself.
+    monkeypatch.setattr(
+        search, '_select_neighbor_fewest_runs', lambda c, s, t: None)
+    assert search._select_top_neighbor(
+        16.0, INF, 'a', search.template) is None
+    # Time-budget scan and coverage walk: pure re-run pickers.
+    assert search._select_time_budget(
+        16.0, INF, 'a', search.template) is None
+    assert search._select_uncovered_top('b') is None
+    # ...and the retired conf doesn't latch the sticky coverage flag on.
+    assert search._coverage_flag['b'] is False
+
+
+def test_retired_conf_is_still_a_mutation_source(tmp_path):
+    """Its neighbours must keep being generated -- the hexbpe bridge is
+    how the shift population migrates."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    conf = _shift_conf()
+    _seed_runs(path, conf, system='a', n=2)
+    search = _make_search_at(path)
+
+    specs = {str(n.model) for n in conf_neighbors(conf, search.template)}
+    assert any(s.startswith('tokens.64.hexbpe') for s in specs), specs
+
+    result = search._select_neighbor_fewest_runs(
+        conf, 'a', search.template)
+    assert result is not None
+    neighbor, _, _ = result
+    assert not _is_retired(str(neighbor.model))
+
+    # End to end: the walk reaches a live conf THROUGH the retired one.
+    picked = search._select_top_neighbor(16.0, INF, 'a', search.template)
+    assert picked is not None
+    assert not _is_retired(str(picked.model))
+
+
+def test_warmup_skips_retired_confs(tmp_path):
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    _seed_runs(path, _small_conf(spec=_SHIFT_SPEC), system='a', n=2)
+    search = _make_search_at(path, warmup_systems=['b'])
+    # Nothing schedulable at any rung -> the ladder runs out.
+    assert search._select_warmup('b') is None
+    assert search._warmup_rung['b'] == len(_WARMUP_LADDER)
+
+
+def test_predicted_best_expands_retired_seed_but_never_picks_it(
+    tmp_path, monkeypatch,
+):
+    import numpy as np
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    seed = _shift_conf()
+    _seed_runs(path, seed, system='a', n=3)
+    search = _make_search_at(path)
+
+    monkeypatch.setattr(
+        search.timing_model, 'predict',
+        lambda system, conf: 16.0 * conf.steps / 1024.0)
+    monkeypatch.setattr(
+        search.timing_model, 'predict_max_steps',
+        lambda system, conf, t: 1024)
+
+    scored: list[Configuration] = []
+
+    class FakeLossModel:
+        def is_ready(self): return True
+        def predict(self, confs):
+            scored.extend(confs)
+            return np.full(len(confs), -1.0, dtype=np.float32)
+
+    search.loss_model = FakeLossModel()
+
+    picked = search._select_predicted_best_impl(
+        t=16.0, max_weights=INF, system='a', bfs_depth=2,
+        template=search.template)
+    assert picked is not None
+    assert not _is_retired(str(picked.model))
+    # The retired seed was expanded (its neighbours are in the pool)
+    # but no retired conf was ever scored as a candidate.
+    assert not any(_is_retired(str(c.model)) for c in scored)
+    assert scored
+
+
+def test_select_conf_never_returns_a_retired_conf(tmp_path):
+    """Whole-select smoke: with only a shift conf in the DB, no
+    strategy -- including the default fallback -- may schedule it."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    conf = _shift_conf()
+    _seed_runs(path, conf, system='a', n=2)
+    writer = DbWriter(path)
+    writer.add_pick_me_conf(conf)   # even an explicit pick is refused
+    writer.close()
+    search = _make_search_at(path)
+    search.init_conf = conf
+    for _ in range(20):
+        result = search.select_conf('b')
+        if result is not None:
+            assert not _is_retired(str(result.conf.model)), result.strategy

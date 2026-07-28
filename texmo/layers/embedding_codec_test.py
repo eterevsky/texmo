@@ -201,8 +201,28 @@ def test_bad_specs_rejected():
 
 def test_fold_tokenset_counts_frequency_weights():
     md = parse_model2("tokens.32.raw_fold.emb.8|rnn.8.tanh", Precision.FP32)
-    plain = parse_model2("tokens.32.test.emb.8|rnn.8.tanh", Precision.FP32)
+    plain = parse_model2(
+        "tokens.32.raw_bits4.emb.8|rnn.8.tanh", Precision.FP32)
     assert md.codec.num_weights == plain.codec.num_weights + 32
+    # Regression on the absolute figure: num_weights is part of a
+    # conf's fleet-wide identity. table 32*8 + scale 1 + 32 stored.
+    assert md.codec.num_weights == 289
+
+
+def test_hexbpe_counts_its_stored_corpus_knowledge():
+    # stats.extra_weights: 17 at 32 tokens, 428 at 256.
+    md = parse_model2("tokens.32.hexbpe.emb.8|rnn.8.tanh", Precision.FP32)
+    assert md.codec.num_weights == 32 * 8 + 1 + 17
+    md = parse_model2("tokens.256.hexbpe.emb.8|rnn.8.tanh", Precision.FP32)
+    assert md.codec.num_weights == 256 * 8 + 1 + 428
+
+
+def test_missing_tokenset_raises_rather_than_guessing():
+    # A silent 0 would give the same spec different weight counts on
+    # machines with and without the tokenset -- forking conf identity.
+    md = parse_model2("tokens.32.nosuchset.emb.8|rnn.8.tanh", Precision.FP32)
+    with pytest.raises(RuntimeError, match="tokens32_nosuchset"):
+        md.codec.num_weights
 
 
 def test_fold_emb_bridges_the_bit_ladder():
@@ -211,14 +231,44 @@ def test_fold_emb_bridges_the_bit_ladder():
     md = parse_model2("tokens.32.raw_fold.emb.8|rnn.8.tanh", Precision.FP32)
     assert md.codec.is_valid()
     assert md.codec.neighbors(8) == (
-        "tokens.32.raw_fold.oh", "bits.4.emb.8", "tokens.64.shift.emb.8")
+        "tokens.32.raw_fold.oh", "bits.4.emb.8", "tokens.32.hexbpe.emb.8")
 
 
-def test_shift64_emb_neighbors_fold32():
-    md = parse_model2(
-        "tokens.32.raw_fold.emb.8|rnn.8.tanh", Precision.FP32)
-    assert "tokens.64.shift.emb.8" in md.codec.neighbors(8)
+def test_hexbpe_emb_bridges_the_bit_ladder_and_fold():
+    md = parse_model2("bits.4.emb.8|rnn.8.tanh", Precision.FP32)
+    assert "tokens.32.hexbpe.emb.8" in md.codec.neighbors(8)
+    md = parse_model2("tokens.32.hexbpe.emb.8|rnn.8.tanh", Precision.FP32)
+    assert md.codec.is_valid()
+    assert md.codec.neighbors(8) == (
+        "tokens.32.hexbpe.oh", "bits.4.emb.8", "tokens.32.raw_fold.emb.8",
+        "tokens.64.hexbpe.emb.8")
+
+
+def test_hexbpe_emb_chain_is_symmetric():
+    chain = (32, 64, 128, 256)
+    for i, n in enumerate(chain):
+        md = parse_model2(
+            f"tokens.{n}.hexbpe.emb.8|rnn.8.tanh", Precision.FP32)
+        nbs = md.codec.neighbors(8)
+        for j in (i - 1, i + 1):
+            if 0 <= j < len(chain):
+                assert f"tokens.{chain[j]}.hexbpe.emb.8" in nbs, (n, nbs)
+        for j, m in enumerate(chain):
+            if abs(i - j) > 1:
+                assert f"tokens.{m}.hexbpe.emb.8" not in nbs
+
+
+def test_shift64_emb_is_retired_one_way_to_hexbpe():
     md = parse_model2("tokens.64.shift.emb.8|rnn.8.tanh", Precision.FP32)
     assert md.codec.is_valid()
     assert md.codec.neighbors(8) == (
-        "tokens.64.shift.oh", "tokens.32.raw_fold.emb.8")
+        "tokens.64.shift.oh", "tokens.64.hexbpe.emb.8")
+    # Nothing else bridges back into shift; the only remaining shift
+    # spelling is the codec mode swap on the conf itself.
+    for spec in ("bytes.emb.8", "bits.1.emb.8", "bits.2.emb.8",
+                 "bits.4.emb.8", "tokens.32.raw_fold.emb.8",
+                 "tokens.32.hexbpe.emb.8", "tokens.64.hexbpe.emb.8",
+                 "tokens.128.hexbpe.emb.8", "tokens.256.hexbpe.emb.8"):
+        md = parse_model2(f"{spec}|rnn.8.tanh", Precision.FP32)
+        assert not any(
+            "shift" in n for n in md.codec.neighbors(8)), spec

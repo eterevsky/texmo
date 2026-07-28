@@ -9,6 +9,7 @@ from .bits_tokenizer import (
 )
 from .bpe_tokenizer import BpeTokenizer
 from .fold_tokenizer import FoldTokenizer
+from .hexbpe_tokenizer import HexBpeTokenizer
 from .tokenizer import Tokenizer
 from .tokenset import TokenSet
 
@@ -54,6 +55,12 @@ def get_tokenizer(name: str):
             # and the generic Decoder can't represent many-to-one
             # groups (length-1 sequences would shadow the head char).
             tokenizer = FoldTokenizer(token_set)
+        elif token_set.type == "hexbpe":
+            # Byte-level BPE with hex-nibble fallback. Checked before
+            # the generic bpe branch: hexbpe sets also say
+            # `algorithm: "bpe"`, but their merges are string pairs and
+            # they carry none of the SentencePiece machinery.
+            tokenizer = HexBpeTokenizer(token_set)
         elif token_set.algorithm == "bpe":
             # BPE sets (converted SentencePiece vocabs) use the merge
             # loop; the DP tokenizer's dense suffix automaton would

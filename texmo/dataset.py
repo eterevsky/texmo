@@ -11,7 +11,7 @@ import numpy as np
 from .common import itoa3
 from .latency import timer
 from .tokens import get_tokenizer
-from .tokens.processing import process
+from .tokens.processing import apply_processing, process
 
 # os.pread (read at an explicit offset, no shared file cursor) is
 # Unix-only; on Windows we fall back to lseek+read (serialized by
@@ -89,18 +89,26 @@ class DataSet(object):
             self.processed_file.close()
 
     def _select_chunk_start(
-        self, processing: bool
-    ) -> tuple[bytes | mmap.mmap, int | None, int, int, bool]:
+        self, processing: str
+    ) -> tuple[bytes | mmap.mmap, int | None, int, int, str]:
         """
+        Args:
+            processing: the tokenset's processing pipeline name.
+
         Returns:
             (data buffer, its file descriptor or None, data size,
-             start offset, whether the data needs processing)
+             start offset, the pipeline still to apply to the chunk --
+             "raw" when the buffer is already processed)
         """
-        if processing and self.processed_data:
+        # Only capswords-1 has a preprocessed on-disk buffer. Every
+        # other pipeline (capswords2 in particular, whose output the
+        # preprocessed file does NOT contain) is applied on the fly to
+        # the raw bytes.
+        if processing == "capswords" and self.processed_data:
             data = self.processed_data
             fd = self.processed_fd
             size = self.processed_data_size
-            processing = False
+            processing = "raw"
         else:
             data = self.data
             fd = self.data_fd
@@ -131,12 +139,16 @@ class DataSet(object):
         """
         tokenizer = get_tokenizer(tokenset_name)
         tokenset = tokenizer.tokenset
-        assert tokenset.processing in ("raw", "capswords", "gemma")
-        processing = tokenset.processing == "capswords"
+        assert tokenset.processing in (
+            "raw", "capswords", "capswords2", "gemma")
 
         samples = []
         while len(samples) < batch:
-            data, fd, data_size, start, need_processing = self._select_chunk_start(processing)
+            data, fd, data_size, start, chunk_processing = (
+                self._select_chunk_start(tokenset.processing))
+            # "gemma" is a vocabulary convention, not a byte transform:
+            # nothing is applied to the chunk, exactly as before.
+            need_processing = chunk_processing in ("capswords", "capswords2")
 
             if need_processing:
                 size = max(round(ntokens * tokenset.avg_bytes_per_token * 1.2), 16)
@@ -159,7 +171,7 @@ class DataSet(object):
                 chunk = chunk[valid_start : valid_end]
 
                 if need_processing:
-                    chunk = process(chunk)
+                    chunk = apply_processing(chunk_processing, chunk)
 
                 sample = tokenizer.tokenize_processed(chunk)
                 if len(sample) >= ntokens:
@@ -189,8 +201,8 @@ class DataSet(object):
         """
         tokenizer = get_tokenizer(tokenset_name)
         tokenset = tokenizer.tokenset
-        assert tokenset.processing in ("raw", "capswords", "gemma")
-        processing = tokenset.processing == "capswords"
+        assert tokenset.processing in (
+            "raw", "capswords", "capswords2", "gemma")
 
         samples = []
         while len(samples) < batch:
@@ -204,9 +216,10 @@ class DataSet(object):
             if end - start < nbytes:
                 continue
 
-            chunk = self.data[start : end]
-            if processing:
-                chunk = process(chunk)
+            # Always sampled from the raw buffer, so the tokenset's own
+            # pipeline applies (identity for "raw"/"gemma").
+            chunk = apply_processing(
+                tokenset.processing, self.data[start : end])
 
             sample = tokenizer.tokenize_processed(chunk)
             samples.append(sample)

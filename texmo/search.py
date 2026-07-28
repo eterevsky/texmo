@@ -86,6 +86,29 @@ class Stop:
 
 SearchMessage = Select | SetTemplate | Stop
 
+# Input encodings retired from SCHEDULING. A conf whose input spec
+# starts with one of these is never handed to a client again, whether
+# as a re-run of a conf already in the DB or as a freshly generated
+# mutation (an architecture mutation of a shift conf is itself a shift
+# conf). Their existing runs stay in the DB and they remain valid
+# mutation SOURCES: neighbor lists are still generated from them, and
+# the non-retired neighbors (the tokens.64.hexbpe bridge) are still
+# schedulable -- that bridge is how the DB population migrates off a
+# retired encoding.
+RETIRED_INPUTS = ('tokens.64.shift',)
+
+
+def _is_retired(spec: str) -> bool:
+    """True when the input part of `spec` (everything before `|`) is a
+    retired encoding. Prefix match, so `.emb.N` and `.oh` spellings are
+    both caught."""
+    return spec.split('|', 1)[0].startswith(RETIRED_INPUTS)
+
+
+def _is_retired_conf(conf: Configuration) -> bool:
+    return _is_retired(str(conf.model))
+
+
 # Per-select strategy split. One weighted draw per `select_conf`
 # decides which main strategy fires first; if it returns None (e.g.
 # `predicted_*` without a fitted loss model), we fall back to the
@@ -515,7 +538,13 @@ class Search(object):
         selected; otherwise it's compared against the min-runs threshold
         from _generate_limits.
         """
-        neighbors = conf_neighbors(conf, template)
+        # `conf` itself may be retired -- it stays a legal source, only
+        # its retired neighbors (including the mode swap back onto
+        # itself) drop out.
+        neighbors = [
+            n for n in conf_neighbors(conf, template)
+            if not _is_retired_conf(n)
+        ]
         if not neighbors:
             return None
 
@@ -592,6 +621,10 @@ class Search(object):
                         have_confs = end
 
                     for j in range(start, min(end, len(top_confs))):
+                        if _is_retired_conf(top_confs[j].conf):
+                            # Not re-runnable, but still expanded as a
+                            # mutation source in the neighbor pass below.
+                            continue
                         if top_confs[j].num_runs < min_self:
                             logging.info(
                                 f'Getting conf {j} because it has {top_confs[j].num_runs} runs < {min_self}')
@@ -636,10 +669,15 @@ class Search(object):
         N, so once N exceeds candidates[0].total_runs we pick it.
         """
         with latency.timer("Search._select_time_budget"):
-            source = iter(self._db.confs_under_time(
-                template=template, system=system,
-                max_weights=max_weights, max_time=t,
-            ))
+            # Pure re-run picks -- nothing is mutated here, so retired
+            # confs are dropped from the stream outright.
+            source = (
+                c for c in self._db.confs_under_time(
+                    template=template, system=system,
+                    max_weights=max_weights, max_time=t,
+                )
+                if not _is_retired_conf(c.conf)
+            )
             candidates: list[ConfWithRuns] = []
             exhausted = False
 
@@ -718,7 +756,8 @@ class Search(object):
         conf at all. Filtering keeps every warmup run landing on a conf
         others have already measured.
         """
-        top = list(self._warmup_top_confs(system, rung))
+        top = [c for c in self._warmup_top_confs(system, rung)
+               if not _is_retired_conf(c.conf)]
         random.shuffle(top)
         for c in top:
             # No-op until this system has a timing model; once it does,
@@ -780,8 +819,12 @@ class Search(object):
             # `min_num_runs=1` so even single-run top confs get picked
             # up — the whole point of this walk is to verify those
             # faster across systems.
-            top = list(self._db.top_confs_global(
-                self.template, min_num_runs=1))
+            # Retired confs drop out before the covered/uncovered
+            # accounting: counted as uncovered they could never be
+            # closed, and the sticky flag would latch on forever.
+            top = [c for c in self._db.top_confs_global(
+                       self.template, min_num_runs=1)
+                   if not _is_retired_conf(c.conf)]
             random.shuffle(top)
 
             selected: Optional[Configuration] = None
@@ -879,9 +922,13 @@ class Search(object):
 
         # Filter by weight budget *after* the BFS, so intermediate
         # neighbors with too many weights can still lead us to
-        # smaller-but-different final candidates at depth N.
+        # smaller-but-different final candidates at depth N. Retired
+        # confs are filtered here too, for the same reason: the BFS
+        # still expands through them (a shift seed's hexbpe bridge
+        # stays reachable), they just can't be picked.
         weight_filtered = [
-            c for c in visited if c.num_weights <= max_weights]
+            c for c in visited
+            if c.num_weights <= max_weights and not _is_retired_conf(c)]
         if not weight_filtered:
             return None
 
@@ -967,6 +1014,10 @@ class Search(object):
     def _select_default(self, system: str) -> Optional[Configuration]:
         """Return init_conf, unless it no longer matches the current
         template or has already been explored enough on this system."""
+        if _is_retired_conf(self.init_conf):
+            logging.info(
+                f'No conf for {system}: init_conf uses a retired input')
+            return None
         if not self.template.match(self.init_conf):
             logging.info(
                 f'No conf for {system}: init_conf does not match template')
@@ -1036,6 +1087,10 @@ class Search(object):
             # until they've been measured enough times.
             pm = self._db.pick_me_conf(
                 self.template, min_runs=PICK_ME_MIN_RUNS)
+            if pm is not None and _is_retired_conf(pm):
+                logging.warning(
+                    f'Ignoring pick_me conf {pm}: retired input')
+                pm = None
             if pm is not None:
                 return self._result(pm, 'pick_me', system)
 

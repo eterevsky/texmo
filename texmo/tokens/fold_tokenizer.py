@@ -1,6 +1,6 @@
 import numpy as np
 
-from .processing import process, unprocess
+from .processing import apply_processing, undo_processing
 from .tokenset import TokenSet
 
 
@@ -67,8 +67,7 @@ class FoldTokenizer(object):
         self.residual_entropy = charge
 
     def tokenize(self, chunk: bytes) -> np.ndarray:
-        if self.tokenset.processing == "capswords":
-            chunk = process(chunk)
+        chunk = apply_processing(self.tokenset.processing, chunk)
         return self.tokenize_processed(chunk)
 
     def tokenize_processed(self, chunk: bytes) -> np.ndarray:
@@ -76,9 +75,7 @@ class FoldTokenizer(object):
 
     def untokenize(self, tokens: list[int]) -> bytes:
         text = bytes(self._head_byte[np.asarray(tokens, dtype=np.int64)])
-        if self.tokenset.processing == "capswords":
-            text = unprocess(text)
-        return text
+        return undo_processing(self.tokenset.processing, text)
 
     def chunk_residual_bits(self, chunk: bytes) -> float:
         """Exact fold charge for this chunk's actual bytes -- the

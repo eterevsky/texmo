@@ -252,16 +252,87 @@ str→str *preprocessing* (capswords), numbered tokens to constructs
 inside the tokenizer. Sequences list every byte without its own
 token in increasing byte order, including bytes the corpus never
 contained. The lossy-group accounting — head-frequency and uniform
-charges, per-set weight surcharges via `codec.fold_extra_weights` —
+charges, per-set weight surcharges via the tokenset's
+`stats.extra_weights` (read by `codec.tokenset_extra_weights`) —
 remains for fold-32 and any future lossy set.
 
-Search-reachable (2026-07-19/20): the tokenset ladder hangs off the
-bit ladder at its nearest rung and continues upward —
-`bits.4.oh+bp <-> tokens.32.raw_fold.oh <-> tokens.64.shift.oh` and
-the same chain in emb mode at the shared table width — and the
-usual oh<->emb mode swap applies. The loss predictor carries the
-residual charge and log2(bytes/token) as global features; the
-timing model treats each input as just another type key.
+**Retired 2026-07-28**: `tokens.64.shift` lost its search
+eligibility to the hexbpe family below. Existing runs stay in the
+DB and shift confs still generate neighbors (the one-way bridge to
+`tokens.64.hexbpe`), but no shift conf is ever scheduled again —
+`search.RETIRED_INPUTS`.
+
+## Hexbpe tokensets: one schema for every size
+
+*Status: implemented 2026-07-28. Sets:
+`tokens/tokens{32,64,128,256}_hexbpe.json` (`tokens.N.hexbpe.emb.d`
+/ `.oh`). Generator: the Rust `build-hexbpe` command; Python side:
+`HexBpeTokenizer` + capswords2 in
+[`processing.py`](../texmo/tokens/processing.py).*
+
+The fold/shift generation solved lossiness but left each size a
+bespoke design, carrying information that neither maps to weights
+nor stays constant across sizes — which is what made the
+weights→loss picture jagged around tokenset switches. **Hexbpe**
+replaces them with a single schema for every `N >= 32`:
+
+- **16 nibble tokens** (ids 0–15). Any byte without its own token
+  spells as two nibbles — the fallback that makes every size
+  lossless (`residual_bits_per_byte = 0`), with the tail's cost
+  in-band where a model can learn it.
+- **Selected bytes**: single-byte tokens, greedily chosen.
+- **BPE merges**: pairs of existing tokens, greedily chosen; the
+  JSON stores them as *string pairs* in rank order.
+
+Selection and merging compete in one currency — emitted tokens
+saved: a byte token saves `count(b)` (one nibble per occurrence), a
+merge saves `count(AB)`. Comparing them by entropy instead would
+smuggle in a model-strength assumption; token counts make the
+greedy ordering well-defined (ties go to the byte — fewer stored
+numbers).
+
+**Weights**: `stats.extra_weights = selected_bytes + 2·merges` — one
+number per byte choice, two per merge (each names two parents).
+`num_weights` counts parameters, not bits, so tokenset decisions are
+priced the same way; the codec reads the value from the tokenset
+stats. This is the honest-accounting answer for *lossless* sets:
+what the set knows about the corpus scales smoothly with N and is
+charged like any other capacity.
+
+**Processing is capswords2**: capswords plus `\x17`
+(next-letter-uppercase, so `iPhone`/`McDonald` stop passing capitals
+into the token space) and single inter-word space elision. Two
+structural rules shape merges: a token's newline run may only touch
+one end (paragraph starts stay usable as generation cut points), and
+no letters after the last `\x16` (no token contains the *start* of a
+following word).
+
+**Stats semantics**: `bytes_per_token` charges tokens against **raw**
+corpus bytes — the invariant every b/B is compared on —
+while `scanned_bytes` is the processed sample length
+(capswords2 output runs ~6% longer than raw) and only sizes
+processed chunks. Encoding is BPE by rank (`HexBpeTokenizer`
+mirrors the builder's greedy), not the DP tokenizer: DP would beat
+the builder's own counts and desynchronize the stats.
+
+| set | bytes | merges | extra weights | raw bytes/token |
+| --- | ---: | ---: | ---: | ---: |
+| 32  | 15 | 1   | 17  | 0.803 |
+| 64  | 28 | 20  | 68  | 1.150 |
+| 128 | 34 | 78  | 190 | 1.469 |
+| 256 | 52 | 188 | 428 | 1.811 |
+
+Search-reachable (2026-07-28): the family hangs off the bit ladder
+at its nearest rung and forms its own chain —
+`bits.4.oh+bp <-> tokens.32.hexbpe.oh <-> tokens.64.hexbpe.oh <->
+tokens.128.hexbpe.oh <-> tokens.256.hexbpe.oh`, with
+`tokens.32.raw_fold.oh <-> tokens.32.hexbpe.oh` bridging the old
+family and a one-way edge `tokens.64.shift.oh ->
+tokens.64.hexbpe.oh` out of the retired set; the same chains exist
+in emb mode at the shared table width, and the usual oh<->emb mode
+swap applies. The loss predictor carries the residual charge and
+log2(bytes/token) as global features; the timing model treats each
+input as just another type key.
 
 ## Why the head is implicit
 

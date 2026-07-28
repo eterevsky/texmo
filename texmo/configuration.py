@@ -499,7 +499,7 @@ def default_from_template(
             # both codecs keep their historical default.
             for input_spec in (
                 'bits.1+bp', 'bits.2.oh+bp', 'bits.4.oh+bp', 'bytes',
-                'tokens.64.shift.emb.1', 'tokens.32.raw_fold.emb.1',
+                'tokens.32.hexbpe.emb.1', 'tokens.32.raw_fold.emb.1',
             ):
                 for layer in (
                     '',

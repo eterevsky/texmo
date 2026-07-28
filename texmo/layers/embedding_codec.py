@@ -62,7 +62,7 @@ import jax.numpy as jnp
 
 from ..common import is_power2_int
 from ..precision import Precision
-from .codec import cap_logits, fold_extra_weights
+from .codec import cap_logits, tokenset_extra_weights
 
 # Mode swaps back to the blessed fixed-codebook inputs, per chunk
 # width. Input swaps carry the chain unchanged, so the final width --
@@ -77,15 +77,25 @@ _OH_SWAPS = {
 # ladder at the same table width.
 _DOMAIN_LADDER = {1: (2,), 2: (1, 4), 4: (2, 8), 8: (4,)}
 
-# The tokenset ladder hangs off the bit ladder at the nearest rung
-# and continues 32 -> 64, all at the same table width, mirroring the
+# The tokenset ladder hangs off the bit ladder at its nearest rung
+# (bits.4's 16 symbols ~ 32 tokens) and continues up the hexbpe chain
+# 32 -> 64 -> 128 -> 256, all at the same table width, mirroring the
 # one-hot bridges in one_hot_codec._INPUT_NEIGHBORS. Keep the
 # directions in sync.
+#
+# tokens.64.shift is RETIRED (2026-07): it keeps its outgoing edge to
+# tokens.64.hexbpe as a migration bridge for the DB population, like
+# bits.1+bm, but nothing points back into it and search.py refuses to
+# schedule it.
 _TOKENS_EMB_BRIDGES = {
-    (32, 'raw_fold'): ('bits.4', 'tokens.64.shift'),
-    (64, 'shift'): ('tokens.32.raw_fold',),
+    (32, 'raw_fold'): ('bits.4', 'tokens.32.hexbpe'),
+    (32, 'hexbpe'): ('bits.4', 'tokens.32.raw_fold', 'tokens.64.hexbpe'),
+    (64, 'hexbpe'): ('tokens.32.hexbpe', 'tokens.128.hexbpe'),
+    (128, 'hexbpe'): ('tokens.64.hexbpe', 'tokens.256.hexbpe'),
+    (256, 'hexbpe'): ('tokens.128.hexbpe',),
+    (64, 'shift'): ('tokens.64.hexbpe',),
 }
-_BITS_EMB_BRIDGES = {4: ('tokens.32.raw_fold',)}
+_BITS_EMB_BRIDGES = {4: ('tokens.32.raw_fold', 'tokens.32.hexbpe')}
 
 
 def _domain_spec(nbits: int, emb_size: int) -> str:
@@ -298,9 +308,9 @@ class EmbeddingCodecDef:
     def num_weights(self) -> int:
         pos = self.npositions if self.npositions > 1 else 0
         table = (self.ntokens + pos) * self.emb_size
-        # Fold tokensets: stored frequencies count as weights (see
-        # OneHotCodecDef.num_weights).
-        extra = fold_extra_weights(self.ntokens, self.variation)
+        # Tokensets carrying corpus knowledge (fold frequencies, hexbpe
+        # merges) pay for it in weights (see OneHotCodecDef.num_weights).
+        extra = tokenset_extra_weights(self.ntokens, self.variation)
         return table + 1 + extra  # +1: the exp(y) input scale
 
     @property

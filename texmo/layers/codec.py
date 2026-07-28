@@ -30,20 +30,43 @@ comparison with the legacy uncapped runtime.
 import jax
 import jax.numpy as jnp
 
+from ..tokens import get_tokenizer
+
 _LOGIT_CAP = 30.0
 
-# Stored per-token corpus knowledge a fold tokenset carries, counted
-# as model weights so lossy sets compare honestly with bits/bytes
-# (docs/io.md, "Fold tokensets"). Keyed by (ntokens, variation) --
-# the codec never loads the tokenset file, so the count lives here.
-# Uniform-bucket fold sets (tokens64) store nothing and default to 0.
-_FOLD_EXTRA_WEIGHTS = {(32, 'raw_fold'): 32}
+# tokens_name -> stats['extra_weights'], memoized because num_weights
+# is called constantly during search and must stay a dict lookup.
+_EXTRA_WEIGHTS: dict[str, int] = {}
 
 
-def fold_extra_weights(ntokens: int, variation: str | None) -> int:
+def tokenset_extra_weights(ntokens: int, variation: str | None) -> int:
+    """Corpus knowledge baked into a tokenset, counted as model
+    weights so sets that carry it compare honestly with bits/bytes
+    (docs/io.md). A fold set stores per-token head frequencies; a
+    hexbpe set stores its selected bytes and merge table. The number
+    is the tokenset's own `stats.extra_weights`; sets that carry
+    nothing (bit-chunk inputs, the shift set) have no such stat and
+    cost 0.
+
+    Raises RuntimeError when the tokenset can't be loaded. num_weights
+    is part of a conf's identity across the whole fleet, so a silent 0
+    on a machine with a missing tokens dir would fork that identity.
+    """
     if variation is None:
         return 0
-    return _FOLD_EXTRA_WEIGHTS.get((ntokens, variation), 0)
+    name = f'tokens{ntokens}_{variation}'
+    extra = _EXTRA_WEIGHTS.get(name)
+    if extra is not None:
+        return extra
+    tokenizer = get_tokenizer(name)
+    if tokenizer is None:
+        raise RuntimeError(
+            f"can't load tokenset {name!r} (tokens dir unset or file "
+            f"missing); its extra weights are part of the conf "
+            f"identity, so guessing 0 would fork it across machines")
+    extra = int((tokenizer.tokenset.stats or {}).get('extra_weights', 0))
+    _EXTRA_WEIGHTS[name] = extra
+    return extra
 
 
 def cap_logits(logits: jax.Array) -> jax.Array:

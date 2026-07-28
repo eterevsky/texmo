@@ -1,4 +1,4 @@
-from .processing import process, unprocess
+from .processing import apply_processing, undo_processing
 from .tokenset import TokenSet
 
 
@@ -129,8 +129,7 @@ class Tokenizer(object):
         self._decoder = Decoder(tokenset)
 
     def tokenize(self, chunk: bytes) -> list[int]:
-        if self.tokenset.processing == "capswords":
-            chunk = process(chunk)
+        chunk = apply_processing(self.tokenset.processing, chunk)
         return self.tokenize_processed(chunk)
 
     def tokenize_processed_impl(self, chunk: bytes) -> list[int]:
@@ -172,7 +171,4 @@ class Tokenizer(object):
 
     def untokenize(self, token_ids: list[int]) -> bytes:
         text = self._decoder.decode(token_ids)
-        if self.tokenset.processing == "capswords":
-            text = unprocess(text)
-        
-        return text
+        return undo_processing(self.tokenset.processing, text)

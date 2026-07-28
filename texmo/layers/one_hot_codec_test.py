@@ -201,11 +201,23 @@ def test_emb_specs_dispatch_to_embedding_codec():
 
 def test_fold_tokenset_counts_frequency_weights():
     md = parse_model2("tokens.32.raw_fold.oh|dense.4.tanh", Precision.FP32)
-    plain = parse_model2("tokens.32.test.oh|dense.4.tanh", Precision.FP32)
+    plain = parse_model2(
+        "tokens.32.raw_bits4.oh|dense.4.tanh", Precision.FP32)
     # The fold set's 32 stored head frequencies count as weights...
     assert md.codec.num_weights == plain.codec.num_weights + 32
     # ...but cost no multiplies (they only price the eval loss).
     assert md.codec.num_mults == plain.codec.num_mults
+    # Regression on the absolute figure: num_weights is part of a
+    # conf's fleet-wide identity. head (32*4 + 32) + 32 stored.
+    assert md.codec.num_weights == 192
+
+
+def test_hexbpe_counts_its_stored_corpus_knowledge():
+    # stats.extra_weights: 17 at 32 tokens, 428 at 256.
+    md = parse_model2("tokens.32.hexbpe.oh|dense.4.tanh", Precision.FP32)
+    assert md.codec.num_weights == 32 * 4 + 32 + 17
+    md = parse_model2("tokens.256.hexbpe.oh|dense.4.tanh", Precision.FP32)
+    assert md.codec.num_weights == 256 * 4 + 256 + 428
 
 
 def test_fold_bridges_the_bit_ladder():
@@ -214,21 +226,54 @@ def test_fold_bridges_the_bit_ladder():
     md = parse_model2("tokens.32.raw_fold.oh|rnn.4.tanh", Precision.FP32)
     assert md.input.is_valid()
     assert md.input.neighbors(4) == (
-        "bits.4.oh+bp", "tokens.64.shift.oh", "tokens.32.raw_fold.emb.4")
+        "bits.4.oh+bp", "tokens.32.hexbpe.oh", "tokens.32.raw_fold.emb.4")
+
+
+def test_hexbpe_bridges_the_bit_ladder_and_fold():
+    md = parse_model2("bits.4.oh+bp|rnn.4.tanh", Precision.FP32)
+    assert "tokens.32.hexbpe.oh" in md.input.neighbors(4)
+    md = parse_model2("tokens.32.hexbpe.oh|rnn.4.tanh", Precision.FP32)
+    assert md.input.is_valid()
+    assert md.input.neighbors(4) == (
+        "bits.4.oh+bp", "tokens.32.raw_fold.oh", "tokens.64.hexbpe.oh",
+        "tokens.32.hexbpe.emb.4")
+
+
+def test_hexbpe_chain_is_symmetric():
+    chain = (32, 64, 128, 256)
+    for i, n in enumerate(chain):
+        md = parse_model2(f"tokens.{n}.hexbpe.oh|rnn.4.tanh", Precision.FP32)
+        nbs = md.input.neighbors(4)
+        for j in (i - 1, i + 1):
+            if 0 <= j < len(chain):
+                assert f"tokens.{chain[j]}.hexbpe.oh" in nbs, (n, nbs)
+        # Only the immediate rungs, never a two-step jump.
+        for j, m in enumerate(chain):
+            if abs(i - j) > 1:
+                assert f"tokens.{m}.hexbpe.oh" not in nbs
 
 
 def test_shift64_counts_no_extra_weights():
     md = parse_model2("tokens.64.shift.oh|dense.4.tanh", Precision.FP32)
-    plain = parse_model2("tokens.64.test.oh|dense.4.tanh", Precision.FP32)
-    # The shift set is lossless -- no stored frequencies, no weight
-    # surcharge (only fold_extra_weights entries pay).
+    plain = parse_model2(
+        "tokens.64.raw_byteshuff.oh|dense.4.tanh", Precision.FP32)
+    # The shift set is lossless and stores nothing -- no weight
+    # surcharge (only sets with stats.extra_weights pay).
     assert md.codec.num_weights == plain.codec.num_weights
 
 
-def test_shift64_neighbors_fold32():
-    md = parse_model2("tokens.32.raw_fold.oh|rnn.4.tanh", Precision.FP32)
-    assert "tokens.64.shift.oh" in md.input.neighbors(4)
+def test_shift64_is_retired_one_way_to_hexbpe():
+    """Retired: shift keeps a single outgoing migration edge onto the
+    hexbpe ladder, and nothing points back into it."""
     md = parse_model2("tokens.64.shift.oh|rnn.4.tanh", Precision.FP32)
-    assert md.input.is_valid()
     assert md.input.neighbors(4) == (
-        "tokens.32.raw_fold.oh", "tokens.64.shift.emb.4")
+        "tokens.64.hexbpe.oh", "tokens.64.shift.emb.4")
+    # The only surviving shift spelling is the codec mode swap on the
+    # conf itself; no other input reaches shift.
+    for spec in ("bytes", "bits.1+bp", "bits.2.oh+bp", "bits.4.oh+bp",
+                 "tokens.32.raw_fold.oh", "tokens.32.hexbpe.oh",
+                 "tokens.64.hexbpe.oh", "tokens.128.hexbpe.oh",
+                 "tokens.256.hexbpe.oh"):
+        md = parse_model2(f"{spec}|rnn.4.tanh", Precision.FP32)
+        assert not any(
+            "shift" in n for n in md.input.neighbors(4)), spec

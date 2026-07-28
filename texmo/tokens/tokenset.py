@@ -46,6 +46,31 @@ def _parse_token(string: str|list[int]|int) -> bytes|int:
     return string
 
 
+def _parse_merges(merges: list) -> list:
+    """Normalize a tokenset's `merges` list.
+
+    Two on-disk shapes exist and both stay supported:
+
+    - `[left_id, right_id, merged_id]` INT TRIPLES (converted
+      SentencePiece vocabs, e.g. tokens256000_gemma) -- passed through
+      unchanged; `BpeTokenizer` reads the ids directly.
+    - `[left_string, right_string]` STRING PAIRS (hexbpe sets) --
+      parsed into `(bytes, bytes)` tuples, in rank order. Ids are NOT
+      resolved here: the merged piece is the concatenation of the pair
+      and the tokenizer owns the string -> id maps.
+    """
+    if not merges or len(merges[0]) != 2:
+        return merges
+    out = []
+    for left, right in merges:
+        left = _parse_token(left)
+        right = _parse_token(right)
+        assert isinstance(left, bytes) and isinstance(right, bytes), (
+            f"merge pair must be strings: {left!r}, {right!r}")
+        out.append((left, right))
+    return out
+
+
 class TokenSet(object):
     @staticmethod
     def from_json_file(filename: str):
@@ -69,8 +94,7 @@ class TokenSet(object):
         token_set.eos_id = tokens_dict.get("eos_id")
         token_set.pad_id = tokens_dict.get("pad_id")
         token_set.unk_id = tokens_dict.get("unk_id")
-        # [left_id, right_id, merged_id] triples in merge-priority order.
-        token_set.merges = tokens_dict.get("merges", [])
+        token_set.merges = _parse_merges(tokens_dict.get("merges", []))
         # {id, name, char}: control tokens with their private-use chars.
         token_set.specials = tokens_dict.get("specials", [])
         # Ids matched verbatim in text before the BPE bulk.

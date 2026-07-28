@@ -221,8 +221,12 @@ fn build_hexbpe(
 ) {
     let initial_size = std::fs::metadata(data).unwrap().len();
     println!("Sampling {} x {} bytes of {}...", nchunks, chunk_size, data);
-    let corpus = hexbpe::sample_processed(data, chunk_size, nchunks).unwrap();
-    println!("capswords2 sample: {} bytes", corpus.len());
+    let (corpus, raw_bytes) = hexbpe::sample_processed(data, chunk_size, nchunks).unwrap();
+    println!(
+        "capswords2 sample: {} bytes ({} raw)",
+        corpus.len(),
+        raw_bytes
+    );
 
     let mut builder = hexbpe::HexBpe::new(&corpus);
     builder.build(ntokens, verbose);
@@ -235,10 +239,10 @@ fn build_hexbpe(
         bytes.len(),
         merged.len(),
         builder.extra_weights(),
-        corpus.len() as f64 / builder.cost() as f64,
+        raw_bytes as f64 / builder.cost() as f64,
     );
 
-    let json = builder.to_json(ntokens, corpus.len() as u64, initial_size);
+    let json = builder.to_json(ntokens, raw_bytes, corpus.len() as u64, initial_size);
     let text = serde_json::to_string_pretty(&json).unwrap();
     match output {
         Some(path) => {

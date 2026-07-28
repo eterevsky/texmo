@@ -267,11 +267,16 @@ pub fn format_token(bytes: &[u8]) -> String {
 /// Processing the sample instead of the whole corpus is what makes
 /// this practical: books3 is 108 GB, and a preprocessed copy of it is
 /// neither cheap to build nor worth keeping around.
-pub fn sample_processed(path: &str, chunk_size: usize, nchunks: usize) -> std::io::Result<Vec<u8>> {
+pub fn sample_processed(
+    path: &str,
+    chunk_size: usize,
+    nchunks: usize,
+) -> std::io::Result<(Vec<u8>, u64)> {
     use std::io::{Read, Seek, SeekFrom};
 
     let mut file = std::fs::File::open(path)?;
     let size = file.metadata()?.len();
+    let mut raw_bytes: u64 = 0;
     let mut out = Vec::with_capacity(chunk_size * nchunks);
     let stride = if nchunks > 1 {
         size / nchunks as u64
@@ -299,13 +304,18 @@ pub fn sample_processed(path: &str, chunk_size: usize, nchunks: usize) -> std::i
             continue;
         }
         if let Ok(text) = std::str::from_utf8(&slice[start..end]) {
+            // Raw length of exactly the lines that made it into the
+            // sample: bytes_per_token must charge tokens against RAW
+            // corpus bytes (the invariant losses are compared on),
+            // while the processed length only sizes the sample itself.
+            raw_bytes += (end - start) as u64;
             for line in text.lines() {
                 out.extend_from_slice(process2(line).as_bytes());
                 out.push(b'\n');
             }
         }
     }
-    Ok(out)
+    Ok((out, raw_bytes))
 }
 
 #[cfg(test)]
@@ -460,7 +470,13 @@ fn json_token(bytes: &[u8]) -> serde_json::Value {
 }
 
 impl HexBpe {
-    pub fn to_json(&self, ntokens: usize, scanned_bytes: u64, initial_size: u64) -> serde_json::Value {
+    pub fn to_json(
+        &self,
+        ntokens: usize,
+        raw_bytes: u64,
+        scanned_bytes: u64,
+        initial_size: u64,
+    ) -> serde_json::Value {
         let (bytes, merged) = self.vocabulary();
 
         // Ids 0..16 are the nibbles, emitted as numbered ext tokens.
@@ -506,11 +522,16 @@ impl HexBpe {
             "sequences": sequences,
             "stats": {
                 "ntokens": ntokens,
-                "bytes_per_token": scanned_bytes as f64 / total_tokens as f64,
+                // RAW corpus bytes per token: byte_loss divides by
+                // this, and losses are compared per raw byte. The
+                // processed length (scanned_bytes) is ~6% longer
+                // under capswords2 and only sizes processed chunks.
+                "bytes_per_token": raw_bytes as f64 / total_tokens as f64,
                 "extra_weights": self.extra_weights(),
                 "residual_bits_per_byte": 0.0,
                 "selected_bytes": bytes.len(),
                 "merges": self.merges.len(),
+                "raw_bytes": raw_bytes,
                 "scanned_bytes": scanned_bytes,
                 "total_tokens": total_tokens,
                 "initial_size": initial_size,

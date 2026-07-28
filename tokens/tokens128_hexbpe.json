@@ -306,11 +306,12 @@
     {"string": [255], "tokens": [15, 15]}
   ],
   "stats": {
-    "bytes_per_token": 1.5555830521805254,
+    "bytes_per_token": 1.468599547354047,
     "extra_weights": 190,
     "initial_size": 108362047381,
     "merges": 78,
     "ntokens": 128,
+    "raw_bytes": 67100983,
     "residual_bits_per_byte": 0.0,
     "scanned_bytes": 71075299,
     "selected_bytes": 34,

@@ -23,7 +23,7 @@ dependencies = [
     "jax[cpu]>=0.11,<0.12; sys_platform != 'linux' or platform_machine != 'x86_64'",
     # Metal backend for JAX on Apple GPUs (github.com/eterevsky/metaljax,
     # MLX-based) -- gives Mac clients a GPU option next to CPU JAX.
-    "metaljax>=0.3.2; sys_platform == 'darwin'",
+    "metaljax>=0.4.2; sys_platform == 'darwin'",
     "optax",
     "safetensors>=0.8.0",
 ]

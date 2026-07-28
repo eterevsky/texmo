@@ -34,6 +34,39 @@ use crate::processing::process2;
 /// Reserved nibble tokens; ids 0..16 in the emitted vocabulary.
 pub const NIBBLES: usize = 16;
 
+/// capswords2 word terminator; see `HexBpe::merge_allowed`.
+const WORD_MARKER: u8 = 0x16;
+
+/// True when `s` holds at most one run of newlines and that run touches
+/// the start or the end -- so the token never has real content on both
+/// sides of a newline.
+fn newline_run_at_one_end(s: &[u8]) -> bool {
+    let Some(first) = s.iter().position(|&b| b == b'\n') else {
+        return true;
+    };
+    let last = s.iter().rposition(|&b| b == b'\n').unwrap();
+    if s[first..=last].iter().any(|&b| b != b'\n') {
+        return false; // two separate runs, so content sits between them
+    }
+    first == 0 || last == s.len() - 1
+}
+
+/// True when nothing after the last word marker is a letter.
+///
+/// A word begins immediately after a marker (the single inter-word
+/// space is elided), so letters there are the START of a following
+/// word: "about<mark>self" would tokenize "self" differently from
+/// every other occurrence of it. Non-ASCII bytes count as letters --
+/// conservative, since a multi-byte character may be one.
+fn no_word_start_inside(s: &[u8]) -> bool {
+    match s.iter().rposition(|&b| b == WORD_MARKER) {
+        None => true,
+        Some(i) => !s[i + 1..]
+            .iter()
+            .any(|&b| b.is_ascii_alphabetic() || b >= 0x80),
+    }
+}
+
 pub struct HexBpe {
     /// Token string per internal id. Ids 0..256 are the single bytes.
     strings: Vec<Vec<u8>>,
@@ -97,6 +130,29 @@ impl HexBpe {
         counts
     }
 
+    /// Structural constraints on what a merge may produce.
+    ///
+    /// 1. No token has real content on both sides of a newline, so none
+    ///    spans a paragraph break. ".\n\n" and "\n\n<caps>i" stay legal
+    ///    (each attaches to one side of the break); ".\n\n<caps>" does
+    ///    not. This keeps paragraph starts usable as cut points, so a
+    ///    prompt can be split from a continuation without handing the
+    ///    model a tokenization it never saw in training.
+    /// 2. Nothing after the last word marker is a letter, so a token
+    ///    never contains the START of a following word. A leading
+    ///    marker is fine on its own ("<mark>. " is word-final material
+    ///    with no word start in it); what matters is that "self" is
+    ///    never glued onto a preceding word's end, which would give it
+    ///    a different token from every other occurrence.
+    ///
+    /// Sentence breaks are deliberately unconstrained -- they are not
+    /// cut points, and ". <caps>" is real structure worth learning.
+    fn merge_allowed(&self, a: u32, b: u32) -> bool {
+        let mut joined = self.strings[a as usize].clone();
+        joined.extend_from_slice(&self.strings[b as usize]);
+        newline_run_at_one_end(&joined) && no_word_start_inside(&joined)
+    }
+
     fn apply_merge(&mut self, a: u32, b: u32) -> u32 {
         let mut string = self.strings[a as usize].clone();
         string.extend_from_slice(&self.strings[b as usize]);
@@ -138,6 +194,7 @@ impl HexBpe {
             let pair_best = self
                 .pair_counts()
                 .into_iter()
+                .filter(|&((a, b), _)| self.merge_allowed(a, b))
                 .max_by_key(|&(ids, n)| (n, std::cmp::Reverse(ids)));
 
             let byte_gain = byte_best.map_or(0, |(_, n)| n);
@@ -311,6 +368,52 @@ mod tests {
     }
 
     #[test]
+    fn newline_rule_accepts_only_one_sided_runs() {
+        assert!(newline_run_at_one_end(b".\n\n")); // run at the end
+        assert!(newline_run_at_one_end(b"\n\nxi")); // run at the start
+        assert!(newline_run_at_one_end(b"\n"));
+        assert!(newline_run_at_one_end(b"\n\n"));
+        assert!(newline_run_at_one_end(b"the ")); // no newline at all
+        assert!(!newline_run_at_one_end(b".\n\nx")); // content both sides
+        assert!(!newline_run_at_one_end(b"a\nb"));
+        assert!(!newline_run_at_one_end(b"\na\n")); // two runs
+    }
+
+    #[test]
+    fn merges_never_span_a_paragraph_break() {
+        let corpus = "end.\n\nStart of the next one.\n\n".repeat(300).into_bytes();
+        let mut bpe = HexBpe::new(&corpus);
+        bpe.build(NIBBLES + 40, false);
+        let (_, merged) = bpe.vocabulary();
+        assert!(!merged.is_empty());
+        for m in &merged {
+            assert!(
+                newline_run_at_one_end(m),
+                "token {:?} spans a paragraph break",
+                format_token(m)
+            );
+        }
+    }
+
+    #[test]
+    fn no_merged_token_contains_a_following_word_start() {
+        // capswords2 shape: words terminated by the marker, the single
+        // inter-word space elided.
+        let corpus = "one\x16self\x16two\x16self\x16".repeat(300).into_bytes();
+        let mut bpe = HexBpe::new(&corpus);
+        bpe.build(NIBBLES + 30, false);
+        let (_, merged) = bpe.vocabulary();
+        assert!(!merged.is_empty());
+        for m in &merged {
+            assert!(
+                no_word_start_inside(m),
+                "token {:?} contains the start of a following word",
+                format_token(m)
+            );
+        }
+    }
+
+    #[test]
     fn extra_weights_counts_selections_and_merges() {
         let corpus = "abcabcabc".repeat(30).into_bytes();
         let mut bpe = HexBpe::new(&corpus);
@@ -363,11 +466,15 @@ impl HexBpe {
         // Ids 0..16 are the nibbles, emitted as numbered ext tokens.
         let mut tokens: Vec<serde_json::Value> =
             (0..NIBBLES).map(|i| serde_json::json!(i)).collect();
-        for b in &bytes {
-            tokens.push(json_token(&[*b]));
-        }
-        for m in &merged {
-            tokens.push(json_token(m));
+        // Everything past the nibbles is sorted lexicographically, so a
+        // set is easy to scan by eye. Safe to reorder: the merge table
+        // refers to tokens by string, and `sequences` refers to the
+        // nibbles by their numbered ids, which keep positions 0..16.
+        let mut rest: Vec<Vec<u8>> = bytes.iter().map(|b| vec![*b]).collect();
+        rest.extend(merged.iter().cloned());
+        rest.sort();
+        for token in &rest {
+            tokens.push(json_token(token));
         }
 
         // Every byte without a slot falls back to two nibbles, which

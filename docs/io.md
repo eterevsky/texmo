@@ -210,10 +210,14 @@ exactly into the token loss plus a per-byte charge
   b/B for the 32-token set; 0 for lossless sets) and every b/B
   conversion goes through it. Training is untouched — the charge is
   an additive constant with no gradients.
-- **The codec counts the table as weights**: `+ntokens` (32) in
-  `num_weights` for variations ending in `fold` — the only
-  non-learned knowledge in the composite byte model, priced in. No
-  `num_mults` cost.
+- **The codec counts the table as weights**: `+2·ntokens` (64) in
+  `num_weights` — 32 head-token *selections* plus the 32 stored
+  frequencies (the selection charge added 2026-07-29 to match
+  hexbpe's one-weight-per-choice accounting; the full fold map
+  assigns all 256 byte values, but one weight per group head is the
+  agreed good-enough price). The only non-learned knowledge in the
+  composite byte model, priced in; no `num_mults` cost. The value
+  lives in the tokenset's `stats.extra_weights`.
 
 Storing 32 numbers instead of the full 256-frequency table costs
 only 0.03 b/B of accounting slack (0.344 vs 0.314 exact) because

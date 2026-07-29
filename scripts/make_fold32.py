@@ -180,7 +180,11 @@ if OUT:
         "stats": {
             "ntokens": 32,
             "bytes_per_token": 1.0,
-            "extra_weights": 32,
+            # 32 head-token selections + 32 head frequencies. The full
+            # fold map assigns all 256 byte values, but one weight per
+            # group head mirrors hexbpe's one-per-selected-byte charge
+            # and is agreed good enough (2026-07-29).
+            "extra_weights": 64,
             "residual_bits_per_byte": round(residual, 6),
             "scanned_bytes": total,
             "total_tokens": total,

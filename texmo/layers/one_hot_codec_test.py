@@ -203,13 +203,16 @@ def test_fold_tokenset_counts_frequency_weights():
     md = parse_model2("tokens.32.raw_fold.oh|dense.4.tanh", Precision.FP32)
     plain = parse_model2(
         "tokens.32.raw_bits4.oh|dense.4.tanh", Precision.FP32)
-    # The fold set's 32 stored head frequencies count as weights...
-    assert md.codec.num_weights == plain.codec.num_weights + 32
-    # ...but cost no multiplies (they only price the eval loss).
+    # 64 = 32 head-token selections + 32 stored head frequencies
+    # (raised from 32 on 2026-07-29 to also price the selection, the
+    # same 1-per-choice charge hexbpe pays; DB weights migrated).
+    assert md.codec.num_weights == plain.codec.num_weights + 64
+    # The stored numbers cost no multiplies (they only price the
+    # eval loss).
     assert md.codec.num_mults == plain.codec.num_mults
     # Regression on the absolute figure: num_weights is part of a
-    # conf's fleet-wide identity. head (32*4 + 32) + 32 stored.
-    assert md.codec.num_weights == 192
+    # conf's fleet-wide identity. head (32*4 + 32) + 64 stored.
+    assert md.codec.num_weights == 224
 
 
 def test_hexbpe_counts_its_stored_corpus_knowledge():

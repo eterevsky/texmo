@@ -266,7 +266,7 @@
   "stats": {
     "ntokens": 64,
     "bytes_per_token": 0.963415,
-    "extra_weights": 0,
+    "extra_weights": 64,
     "residual_bits_per_byte": 0.0,
     "scanned_bytes": 108362047381,
     "total_tokens": 112477023747

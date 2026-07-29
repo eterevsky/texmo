@@ -146,7 +146,11 @@ if OUT:
         "stats": {
             "ntokens": 64,
             "bytes_per_token": round(total / total_tokens, 6),
-            "extra_weights": 0,
+            # 64 token-slot selections at 1 weight each (charged
+            # 2026-07-29, matching raw_fold and hexbpe's
+            # one-per-choice convention). The set stores no
+            # frequencies, so selection is the whole price.
+            "extra_weights": 64,
             "residual_bits_per_byte": 0.0,
             "scanned_bytes": total,
             "total_tokens": total_tokens,

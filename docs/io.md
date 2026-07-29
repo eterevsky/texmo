@@ -242,10 +242,13 @@ frequent remaining bytes; every other byte (161 of them, 0.35% of
 the corpus) spells its **hex code behind an escape** (numbered
 token 1) using the existing digit/letter tokens —
 `\xa0` = `[1, "a", "0"]`. Every byte round-trips exactly, so
-`residual = 0` and `extra_weights = 0`: the tail's information
-moves in-band, where a model can *learn* it (an ignorant model pays
-~8 bits per escaped byte, about what a uniform-bucket charge would
-have been; a good one beats it) — no accounting caveats at all. The
+`residual = 0`: the tail's information moves in-band, where a model
+can *learn* it (an ignorant model pays ~8 bits per escaped byte,
+about what a uniform-bucket charge would have been; a good one
+beats it). `extra_weights = 64` — one weight per token-slot
+selection (charged 2026-07-29 with the rest of the
+one-per-choice convention; originally 0, which let the retired
+set free-ride on the frontier against hexbpe-64's 68). The
 cost is token inflation: 1.038 tokens/byte. Because every byte has
 exactly one encoding, it is a plain tokens+sequences set: `type` is
 `shift`, the generic DP `Tokenizer` handles it (the DP has no

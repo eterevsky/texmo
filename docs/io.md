@@ -311,9 +311,20 @@ following word).
 corpus bytes — the invariant every b/B is compared on —
 while `scanned_bytes` is the processed sample length
 (capswords2 output runs ~6% longer than raw) and only sizes
-processed chunks. Encoding is BPE by rank (`HexBpeTokenizer`
-mirrors the builder's greedy), not the DP tokenizer: DP would beat
-the builder's own counts and desynchronize the stats.
+processed chunks.
+
+**Encoding is the generic DP tokenizer**, not BPE by rank
+(2026-07-29). Measured on the 256 set: the pure-Python merge loop
+does 50k tokens/s vs DP's 791k — a 16x gap that scales with CPU
+while the model scales with GPU — and DP emits only 0.53% fewer
+tokens than the builder's merge-order encoding, so the stats skew is
+far under the ±5% genre variation across corpus slices. The
+literature agrees there is nothing to lose: unigram/DP-style
+segmentation is equal-or-slightly-better than BPE-merge for the
+model (Bostrom & Durrett 2020), and strict token-count minimization
+is not itself a win either (Schmidt et al. 2024) — at N <= 256 the
+difference is noise. `HexBpeTokenizer` (builder-exact BPE by rank)
+remains for scripts that must reproduce the builder's counts.
 
 | set | bytes | merges | extra weights | raw bytes/token |
 | --- | ---: | ---: | ---: | ---: |

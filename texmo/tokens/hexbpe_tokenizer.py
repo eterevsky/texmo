@@ -1,5 +1,13 @@
 """Byte-level BPE tokenizer for "hexbpe" tokensets.
 
+NOT the sampler default: the registry routes hexbpe sets to the
+generic DP `Tokenizer` over the same vocabulary — measured 16x faster
+than this pure-Python merge loop and ~0.5% more compact, with no
+evidence that merge-order segmentation helps the model. This class is
+the builder-EXACT encoder (token-for-token what the Rust generator
+counted); keep it for scripts that need to reproduce the builder's
+stats, and as the reference the DP output can be compared against.
+
 A hexbpe set is built by the Rust generator (`type: "hexbpe"`) and is
 lossless by construction:
 

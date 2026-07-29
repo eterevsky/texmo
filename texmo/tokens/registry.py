@@ -9,7 +9,6 @@ from .bits_tokenizer import (
 )
 from .bpe_tokenizer import BpeTokenizer
 from .fold_tokenizer import FoldTokenizer
-from .hexbpe_tokenizer import HexBpeTokenizer
 from .tokenizer import Tokenizer
 from .tokenset import TokenSet
 
@@ -38,7 +37,19 @@ _TOKENIZERS['bytes'] = _TOKENIZERS['bits.8']
 _TOKENS_DIR = None
 
 
+def _normalize_name(name: str) -> str:
+    """Accept the spec form of a tokenset name alongside the file
+    basename: `tokens.32.hexbpe` (how specs and humans write it) and
+    `tokens32_hexbpe` (the file name, what the codecs pass) resolve to
+    the same tokenizer."""
+    parts = name.split(".")
+    if len(parts) == 3 and parts[0] == "tokens" and parts[1].isdigit():
+        return f"tokens{parts[1]}_{parts[2]}"
+    return name
+
+
 def get_tokenizer(name: str):
+    name = _normalize_name(name)
     if name in _TOKENIZERS:
         return _TOKENIZERS[name]
 
@@ -56,11 +67,16 @@ def get_tokenizer(name: str):
             # groups (length-1 sequences would shadow the head char).
             tokenizer = FoldTokenizer(token_set)
         elif token_set.type == "hexbpe":
-            # Byte-level BPE with hex-nibble fallback. Checked before
-            # the generic bpe branch: hexbpe sets also say
-            # `algorithm: "bpe"`, but their merges are string pairs and
-            # they carry none of the SentencePiece machinery.
-            tokenizer = HexBpeTokenizer(token_set)
+            # Checked before the generic bpe branch: hexbpe sets also
+            # say `algorithm: "bpe"` (their merges are string pairs).
+            # The SAMPLER uses the generic DP tokenizer over the same
+            # vocabulary: measured 16x faster than the pure-Python
+            # merge loop and 0.5% more compact, and no literature
+            # supports merge-order segmentation helping the model.
+            # The builder-exact BPE encoder (HexBpeTokenizer) remains
+            # available for scripts; stats stay BPE-derived, a ~0.5%
+            # skew on bytes_per_token we accept.
+            tokenizer = Tokenizer(token_set)
         elif token_set.algorithm == "bpe":
             # BPE sets (converted SentencePiece vocabs) use the merge
             # loop; the DP tokenizer's dense suffix automaton would
@@ -69,7 +85,10 @@ def get_tokenizer(name: str):
         else:
             tokenizer = Tokenizer(token_set)
     except FileNotFoundError:
-        tokenizer = None
+        # Not cached: the caller may fix the tokens dir (or add the
+        # file) and retry within the same process.
+        logging.warning(f"No tokenset file at {path}")
+        return None
     _TOKENIZERS[name] = tokenizer
 
     return tokenizer

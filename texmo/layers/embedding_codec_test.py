@@ -261,17 +261,33 @@ def test_hexbpe_emb_chain_is_symmetric():
                 assert f"tokens.{m}.hexbpe.emb.8" not in nbs
 
 
-def test_shift64_emb_is_retired_one_way_to_hexbpe():
+def test_shift64_emb_bridges_hexbpe64_and_bucket64():
+    """Re-enabled 2026-07-29 (shift beat hexbpe-64 on the frontier):
+    it hangs off the hexbpe chain at its own size, bidirectionally,
+    and borders the bucket-64 arbiter."""
     md = parse_model2("tokens.64.shift.emb.8|rnn.8.tanh", Precision.FP32)
     assert md.codec.is_valid()
     assert md.codec.neighbors(8) == (
-        "tokens.64.shift.oh", "tokens.64.hexbpe.emb.8")
-    # Nothing else bridges back into shift; the only remaining shift
-    # spelling is the codec mode swap on the conf itself.
+        "tokens.64.shift.oh", "tokens.64.hexbpe.emb.8",
+        "tokens.64.bucket.emb.8")
+    md = parse_model2("tokens.64.hexbpe.emb.8|rnn.8.tanh", Precision.FP32)
+    assert "tokens.64.shift.emb.8" in md.codec.neighbors(8)
+    # The 64-token rung is shift's only doorway; no other input
+    # bridges to it (the mode swap on shift itself aside).
     for spec in ("bytes.emb.8", "bits.1.emb.8", "bits.2.emb.8",
                  "bits.4.emb.8", "tokens.32.raw_fold.emb.8",
-                 "tokens.32.hexbpe.emb.8", "tokens.64.hexbpe.emb.8",
+                 "tokens.32.hexbpe.emb.8",
                  "tokens.128.hexbpe.emb.8", "tokens.256.hexbpe.emb.8"):
         md = parse_model2(f"{spec}|rnn.8.tanh", Precision.FP32)
         assert not any(
             "shift" in n for n in md.codec.neighbors(8)), spec
+
+
+def test_bucket64_emb_sits_between_shift_and_hexbpe():
+    md = parse_model2("tokens.64.bucket.emb.8|rnn.8.tanh", Precision.FP32)
+    assert md.codec.is_valid()
+    assert md.codec.neighbors(8) == (
+        "tokens.64.bucket.oh", "tokens.64.shift.emb.8",
+        "tokens.64.hexbpe.emb.8")
+    # 63 selection weights, uniform bucket stores nothing.
+    assert md.codec.num_weights == 64 * 8 + 1 + 63

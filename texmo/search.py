@@ -89,13 +89,19 @@ SearchMessage = Select | SetTemplate | Stop
 # Input encodings retired from SCHEDULING. A conf whose input spec
 # starts with one of these is never handed to a client again, whether
 # as a re-run of a conf already in the DB or as a freshly generated
-# mutation (an architecture mutation of a shift conf is itself a shift
-# conf). Their existing runs stay in the DB and they remain valid
-# mutation SOURCES: neighbor lists are still generated from them, and
-# the non-retired neighbors (the tokens.64.hexbpe bridge) are still
-# schedulable -- that bridge is how the DB population migrates off a
+# mutation (an architecture mutation of a retired conf is itself a
+# retired conf). Their existing runs stay in the DB and they remain
+# valid mutation SOURCES: neighbor lists are still generated from
+# them, and their non-retired neighbors are still schedulable -- an
+# outgoing bridge edge is how the DB population migrates off a
 # retired encoding.
-RETIRED_INPUTS = ('tokens.64.shift',)
+#
+# Currently empty. tokens.64.shift was retired here 2026-07-28 in
+# favor of tokens.64.hexbpe, then re-enabled a day later when the
+# search showed shift BEATING hexbpe-64 by ~1-2% loss over most of
+# the frontier above ~400 weights (per-letter tokens seem to matter);
+# the mechanism stays for the next retirement.
+RETIRED_INPUTS: tuple[str, ...] = ()
 
 
 def _is_retired(spec: str) -> bool:

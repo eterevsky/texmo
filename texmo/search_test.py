@@ -8,6 +8,7 @@ from .predict.loss_rnn import LossModelHolder
 from .predict.timing import TrainTimingModel
 from .run import Run
 from .configuration import conf_neighbors
+from . import search as search_mod
 from .search import (
     _WARMUP_LADDER,
     _WARMUP_SELECTS_PER_RUNG,
@@ -638,6 +639,10 @@ def test_warmup_caches_top_confs_per_rung(tmp_path, monkeypatch):
 
 
 # --- retired inputs --------------------------------------------------
+#
+# RETIRED_INPUTS is empty right now (tokens.64.shift was retired
+# 2026-07-28 and re-enabled 2026-07-29), so these tests retire shift
+# synthetically to keep the mechanism covered for the next retirement.
 
 _SHIFT_SPEC = "tokens.64.shift.emb.4|rnn.4.tanh"
 
@@ -646,7 +651,13 @@ def _shift_conf(steps=256):
     return _make_conf(steps=steps, spec=_SHIFT_SPEC)
 
 
-def test_is_retired_covers_both_codec_spellings():
+def _retire_shift(monkeypatch):
+    monkeypatch.setattr(
+        search_mod, 'RETIRED_INPUTS', ('tokens.64.shift',))
+
+
+def test_is_retired_covers_both_codec_spellings(monkeypatch):
+    _retire_shift(monkeypatch)
     assert _is_retired("tokens.64.shift.emb.4|rnn.4.tanh")
     assert _is_retired("tokens.64.shift.oh|rnn.4.tanh")
     assert _is_retired("tokens.64.shift.emb.16|split.add(dense.16.tanh)")
@@ -656,7 +667,14 @@ def test_is_retired_covers_both_codec_spellings():
     assert not _is_retired("bytes|dense.8.gelu")
 
 
+def test_nothing_is_retired_by_default():
+    for spec in (_SHIFT_SPEC, "tokens.64.hexbpe.emb.4|rnn.4.tanh",
+                 "bytes|dense.8.gelu"):
+        assert not _is_retired(spec)
+
+
 def test_retired_conf_is_never_re_run(tmp_path, monkeypatch):
+    _retire_shift(monkeypatch)
     """A shift conf already in the DB is a top conf on every ordinary
     re-run path -- and none of them may hand it back."""
     path = str(tmp_path / "test.db")
@@ -686,9 +704,10 @@ def test_retired_conf_is_never_re_run(tmp_path, monkeypatch):
     assert search._coverage_flag['b'] is False
 
 
-def test_retired_conf_is_still_a_mutation_source(tmp_path):
+def test_retired_conf_is_still_a_mutation_source(tmp_path, monkeypatch):
     """Its neighbours must keep being generated -- the hexbpe bridge is
     how the shift population migrates."""
+    _retire_shift(monkeypatch)
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
     conf = _shift_conf()
@@ -710,7 +729,8 @@ def test_retired_conf_is_still_a_mutation_source(tmp_path):
     assert not _is_retired(str(picked.model))
 
 
-def test_warmup_skips_retired_confs(tmp_path):
+def test_warmup_skips_retired_confs(tmp_path, monkeypatch):
+    _retire_shift(monkeypatch)
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
     _seed_runs(path, _small_conf(spec=_SHIFT_SPEC), system='a', n=2)
@@ -724,6 +744,7 @@ def test_predicted_best_expands_retired_seed_but_never_picks_it(
     tmp_path, monkeypatch,
 ):
     import numpy as np
+    _retire_shift(monkeypatch)
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
     seed = _shift_conf()
@@ -758,9 +779,10 @@ def test_predicted_best_expands_retired_seed_but_never_picks_it(
     assert scored
 
 
-def test_select_conf_never_returns_a_retired_conf(tmp_path):
+def test_select_conf_never_returns_a_retired_conf(tmp_path, monkeypatch):
     """Whole-select smoke: with only a shift conf in the DB, no
     strategy -- including the default fallback -- may schedule it."""
+    _retire_shift(monkeypatch)
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
     conf = _shift_conf()

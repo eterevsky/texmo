@@ -83,17 +83,21 @@ _DOMAIN_LADDER = {1: (2,), 2: (1, 4), 4: (2, 8), 8: (4,)}
 # one-hot bridges in one_hot_codec._INPUT_NEIGHBORS. Keep the
 # directions in sync.
 #
-# tokens.64.shift is RETIRED (2026-07): it keeps its outgoing edge to
-# tokens.64.hexbpe as a migration bridge for the DB population, like
-# bits.1+bm, but nothing points back into it and search.py refuses to
-# schedule it.
+# tokens.64.shift hangs off the hexbpe chain at its own size
+# (retired 2026-07-28, re-enabled 2026-07-29 after beating hexbpe-64
+# on the frontier -- see search.RETIRED_INPUTS).
 _TOKENS_EMB_BRIDGES = {
     (32, 'raw_fold'): ('bits.4', 'tokens.32.hexbpe'),
     (32, 'hexbpe'): ('bits.4', 'tokens.32.raw_fold', 'tokens.64.hexbpe'),
-    (64, 'hexbpe'): ('tokens.32.hexbpe', 'tokens.128.hexbpe'),
+    (64, 'hexbpe'): ('tokens.32.hexbpe', 'tokens.128.hexbpe',
+                     'tokens.64.shift', 'tokens.64.bucket'),
     (128, 'hexbpe'): ('tokens.64.hexbpe', 'tokens.256.hexbpe'),
     (256, 'hexbpe'): ('tokens.128.hexbpe',),
-    (64, 'shift'): ('tokens.64.hexbpe',),
+    (64, 'shift'): ('tokens.64.hexbpe', 'tokens.64.bucket'),
+    # bucket-64: strictly 1 token/byte over capswords2 (fold-type,
+    # uniform catch-all) -- the arbiter between shift's naked letters
+    # and hexbpe's merges. Sits between its two rivals.
+    (64, 'bucket'): ('tokens.64.shift', 'tokens.64.hexbpe'),
 }
 _BITS_EMB_BRIDGES = {4: ('tokens.32.raw_fold', 'tokens.32.hexbpe')}
 

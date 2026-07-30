@@ -267,18 +267,31 @@ def test_shift64_counts_its_token_selection():
     assert md.codec.num_weights == plain.codec.num_weights + 64
 
 
-def test_shift64_is_retired_one_way_to_hexbpe():
-    """Retired: shift keeps a single outgoing migration edge onto the
-    hexbpe ladder, and nothing points back into it."""
+def test_shift64_bridges_hexbpe64_and_bucket64():
+    """Re-enabled 2026-07-29 (shift beat hexbpe-64 on the frontier):
+    it hangs off the hexbpe chain at its own size, bidirectionally,
+    and borders the bucket-64 arbiter."""
     md = parse_model2("tokens.64.shift.oh|rnn.4.tanh", Precision.FP32)
     assert md.input.neighbors(4) == (
-        "tokens.64.hexbpe.oh", "tokens.64.shift.emb.4")
-    # The only surviving shift spelling is the codec mode swap on the
-    # conf itself; no other input reaches shift.
+        "tokens.64.hexbpe.oh", "tokens.64.bucket.oh",
+        "tokens.64.shift.emb.4")
+    md = parse_model2("tokens.64.hexbpe.oh|rnn.4.tanh", Precision.FP32)
+    assert "tokens.64.shift.oh" in md.input.neighbors(4)
+    # The 64-token rung is shift's only doorway; no other input
+    # bridges to it (the mode swap on shift itself aside).
     for spec in ("bytes", "bits.1+bp", "bits.2.oh+bp", "bits.4.oh+bp",
                  "tokens.32.raw_fold.oh", "tokens.32.hexbpe.oh",
-                 "tokens.64.hexbpe.oh", "tokens.128.hexbpe.oh",
-                 "tokens.256.hexbpe.oh"):
+                 "tokens.128.hexbpe.oh", "tokens.256.hexbpe.oh"):
         md = parse_model2(f"{spec}|rnn.4.tanh", Precision.FP32)
         assert not any(
             "shift" in n for n in md.input.neighbors(4)), spec
+
+
+def test_bucket64_sits_between_shift_and_hexbpe():
+    md = parse_model2("tokens.64.bucket.oh|rnn.4.tanh", Precision.FP32)
+    assert md.input.is_valid()
+    assert md.input.neighbors(4) == (
+        "tokens.64.shift.oh", "tokens.64.hexbpe.oh",
+        "tokens.64.bucket.emb.4")
+    # 63 selection weights, uniform bucket stores nothing.
+    assert md.codec.num_weights == 64 * 4 + 64 + 63

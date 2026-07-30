@@ -263,11 +263,14 @@ charges, per-set weight surcharges via the tokenset's
 `stats.extra_weights` (read by `codec.tokenset_extra_weights`) —
 remains for fold-32 and any future lossy set.
 
-**Retired 2026-07-28**: `tokens.64.shift` lost its search
-eligibility to the hexbpe family below. Existing runs stay in the
-DB and shift confs still generate neighbors (the one-way bridge to
-`tokens.64.hexbpe`), but no shift conf is ever scheduled again —
-`search.RETIRED_INPUTS`.
+**Retired 2026-07-28, re-enabled 2026-07-29**: `tokens.64.shift`
+briefly lost its search eligibility to the hexbpe family below —
+then the first day of hexbpe search showed shift *beating*
+`tokens.64.hexbpe` by ~1–2% loss over most of the frontier above
+~400 weights (every letter having its own token appears to matter).
+It is schedulable again, bridged bidirectionally to
+`tokens.64.hexbpe`; the retirement mechanism
+(`search.RETIRED_INPUTS`, now empty) stays for the next candidate.
 
 ## Hexbpe tokensets: one schema for every size
 
@@ -340,15 +343,30 @@ remains for scripts that must reproduce the builder's counts.
 | 128 | 34 | 78  | 190 | 1.469 |
 | 256 | 52 | 188 | 428 | 1.811 |
 
+**Bucket tokensets** (2026-07-30, `tokens/tokens64_bucket.json`,
+`tokens.64.bucket`): capswords2 + the top-63 processed bytes as
+singleton tokens + one uniform catch-all — a fold-type set built
+from the full-corpus processed frequencies (`freq_capswords2.txt`,
+regenerable via `process --processing caps-words2` + `count-bytes`).
+Strictly one token per processed byte: the experimental arbiter for
+*why* shift-64 beats hexbpe-64 (naked uniform granularity vs the
+shift mechanic). All letters, digits and markers select naturally;
+the bucket is 0.43% of the stream, charged uniformly at log2(193)
+bits (residual 0.034 b/B raw, `extra_weights = 63` — selections
+only, nothing stored). Same 1-per-choice accounting as its rivals:
+shift 64, hexbpe 68. If it succeeds, the plan is a bucket-style 128
+rung and, at 256+, BPE joins only after every seen byte has its own
+token. Generator: `scripts/make_bucket.py N`.
+
 Search-reachable (2026-07-28): the family hangs off the bit ladder
 at its nearest rung and forms its own chain —
 `bits.4.oh+bp <-> tokens.32.hexbpe.oh <-> tokens.64.hexbpe.oh <->
 tokens.128.hexbpe.oh <-> tokens.256.hexbpe.oh`, with
 `tokens.32.raw_fold.oh <-> tokens.32.hexbpe.oh` bridging the old
-family and a one-way edge `tokens.64.shift.oh ->
-tokens.64.hexbpe.oh` out of the retired set; the same chains exist
-in emb mode at the shared table width, and the usual oh<->emb mode
-swap applies. The loss predictor carries the residual charge and
+family and `tokens.64.shift.oh <-> tokens.64.hexbpe.oh` hanging
+shift off the chain at its own size; the same chains exist in emb
+mode at the shared table width, and the usual oh<->emb mode swap
+applies. The loss predictor carries the residual charge and
 log2(bytes/token) as global features; the timing model treats each
 input as just another type key.
 

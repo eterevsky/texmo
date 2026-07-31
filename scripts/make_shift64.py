@@ -146,11 +146,12 @@ if OUT:
         "stats": {
             "ntokens": 64,
             "bytes_per_token": round(total / total_tokens, 6),
-            # 64 token-slot selections at 1 weight each (charged
-            # 2026-07-29, matching raw_fold and hexbpe's
-            # one-per-choice convention). The set stores no
-            # frequencies, so selection is the whole price.
-            "extra_weights": 64,
+            # 62 byte-token selections + 33 stored shift pairs (26
+            # capitals, tab, six symbols), 1 weight per choice --
+            # the tokens.32.shift convention (recharged 2026-07-31
+            # from the flat 64). The two markers and the hex-escape
+            # spellings are structural and free.
+            "extra_weights": 95,
             "residual_bits_per_byte": 0.0,
             "scanned_bytes": total,
             "total_tokens": total_tokens,

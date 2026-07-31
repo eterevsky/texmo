@@ -257,15 +257,15 @@ def test_hexbpe_chain_is_symmetric():
                 assert f"tokens.{m}.hexbpe.oh" not in nbs
 
 
-def test_shift64_counts_its_token_selection():
+def test_shift64_counts_selections_and_pairs():
     md = parse_model2("tokens.64.shift.oh|dense.4.tanh", Precision.FP32)
     plain = parse_model2(
         "tokens.64.raw_byteshuff.oh|dense.4.tanh", Precision.FP32)
-    # 64 token-slot selections at 1 weight each (2026-07-29; the set
-    # stores no frequencies, so selection is the whole price). Shift
-    # is retired but its runs stay on the frontier -- uncharged
-    # selection would let it free-ride against hexbpe-64's 68.
-    assert md.codec.num_weights == plain.codec.num_weights + 64
+    # 95 = 62 byte-token selections + 33 stored shift pairs (26
+    # capitals, tab, six symbols) at 1 weight per choice -- the
+    # tokens.32.shift convention, recharged 2026-07-31 from the flat
+    # 64. Markers and hex-escape spellings are structural and free.
+    assert md.codec.num_weights == plain.codec.num_weights + 95
 
 
 def test_shift64_bridges_hexbpe64_and_shift32():

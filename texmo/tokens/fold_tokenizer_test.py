@@ -89,8 +89,11 @@ def test_lossless_byte_loss_has_no_residual():
 
 
 def test_real_fold32_tokenset():
-    path = os.path.join(_TOKENS_DIR, "tokens32_raw_fold.json")
+    path = os.path.join(_TOKENS_DIR, "tokens32_fold.json")
     ts = TokenSet.from_json_file(path)
+    # Legacy {ntokens}_{processing}_{type} form -- does NOT match the
+    # file basename (tokens32_fold.json); same cosmetic mismatch as
+    # tokens64_shift. Nothing resolves files through this property.
     assert ts.name == "tokens32_raw_fold"
     assert ts.ntokens == 32
     tk = FoldTokenizer(ts)

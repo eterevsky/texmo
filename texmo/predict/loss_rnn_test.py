@@ -182,7 +182,7 @@ def test_gated_head_fits_and_bounds():
 def test_tokenset_globals():
     set_tokens_dir(
         os.path.join(os.path.dirname(__file__), "..", "..", "tokens"))
-    g = _init_global_features(_m2("tokens.32.raw_fold.oh|rnn.4.tanh"))
+    g = _init_global_features(_m2("tokens.32.fold.oh|rnn.4.tanh"))
     assert g.shape == (N_INIT_GLOBAL,)
     assert 0.3 < g[-2] < 0.4  # the fold set's residual charge
     assert g[-1] == 0.0  # one token per byte

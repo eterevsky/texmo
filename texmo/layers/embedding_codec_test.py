@@ -200,7 +200,7 @@ def test_bad_specs_rejected():
 
 
 def test_fold_tokenset_counts_frequency_weights():
-    md = parse_model2("tokens.32.raw_fold.emb.8|rnn.8.tanh", Precision.FP32)
+    md = parse_model2("tokens.32.fold.emb.8|rnn.8.tanh", Precision.FP32)
     plain = parse_model2(
         "tokens.32.raw_bits4.emb.8|rnn.8.tanh", Precision.FP32)
     # 64 = 32 head-token selections + 32 stored head frequencies
@@ -230,11 +230,11 @@ def test_missing_tokenset_raises_rather_than_guessing():
 
 def test_fold_emb_bridges_the_bit_ladder():
     md = parse_model2("bits.4.emb.8|rnn.8.tanh", Precision.FP32)
-    assert "tokens.32.raw_fold.emb.8" in md.codec.neighbors(8)
-    md = parse_model2("tokens.32.raw_fold.emb.8|rnn.8.tanh", Precision.FP32)
+    assert "tokens.32.fold.emb.8" in md.codec.neighbors(8)
+    md = parse_model2("tokens.32.fold.emb.8|rnn.8.tanh", Precision.FP32)
     assert md.codec.is_valid()
     assert md.codec.neighbors(8) == (
-        "tokens.32.raw_fold.oh", "bits.4.emb.8", "tokens.32.hexbpe.emb.8",
+        "tokens.32.fold.oh", "bits.4.emb.8", "tokens.32.hexbpe.emb.8",
         "tokens.32.shift.emb.8")
 
 
@@ -244,7 +244,7 @@ def test_hexbpe_emb_bridges_the_bit_ladder_and_fold():
     md = parse_model2("tokens.32.hexbpe.emb.8|rnn.8.tanh", Precision.FP32)
     assert md.codec.is_valid()
     assert md.codec.neighbors(8) == (
-        "tokens.32.hexbpe.oh", "bits.4.emb.8", "tokens.32.raw_fold.emb.8",
+        "tokens.32.hexbpe.oh", "bits.4.emb.8", "tokens.32.fold.emb.8",
         "tokens.64.hexbpe.emb.8", "tokens.32.shift.emb.8")
 
 
@@ -275,7 +275,7 @@ def test_shift64_emb_bridges_hexbpe64_and_shift32():
     assert "tokens.64.shift.emb.8" in md.codec.neighbors(8)
     # Only hexbpe-64 and shift-32 reach the 64-token shift rung.
     for spec in ("bytes.emb.8", "bits.1.emb.8", "bits.2.emb.8",
-                 "bits.4.emb.8", "tokens.32.raw_fold.emb.8",
+                 "bits.4.emb.8", "tokens.32.fold.emb.8",
                  "tokens.32.hexbpe.emb.8",
                  "tokens.128.hexbpe.emb.8", "tokens.256.hexbpe.emb.8"):
         md = parse_model2(f"{spec}|rnn.8.tanh", Precision.FP32)
@@ -286,15 +286,15 @@ def test_shift32_emb_sits_between_the_32_token_incumbents():
     md = parse_model2("tokens.32.shift.emb.8|rnn.8.tanh", Precision.FP32)
     assert md.codec.is_valid()
     assert md.codec.neighbors(8) == (
-        "tokens.32.shift.oh", "tokens.32.raw_fold.emb.8",
+        "tokens.32.shift.oh", "tokens.32.fold.emb.8",
         "tokens.32.hexbpe.emb.8", "tokens.64.shift.emb.8")
     # Every edge is reciprocal.
-    for spec in ("tokens.32.raw_fold.emb.8", "tokens.32.hexbpe.emb.8",
+    for spec in ("tokens.32.fold.emb.8", "tokens.32.hexbpe.emb.8",
                  "tokens.64.shift.emb.8"):
         back = parse_model2(f"{spec}|rnn.8.tanh", Precision.FP32)
         assert "tokens.32.shift.emb.8" in back.codec.neighbors(8), spec
     # No direct bits.4 edge: the bit ladder reaches shift-32 through
-    # raw_fold or hexbpe.
+    # fold or hexbpe.
     md = parse_model2("bits.4.emb.8|rnn.8.tanh", Precision.FP32)
     assert "tokens.32.shift.emb.8" not in md.codec.neighbors(8)
 

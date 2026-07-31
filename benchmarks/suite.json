@@ -82,7 +82,7 @@
     },
     {
       "name": "db04-b128l128",
-      "spec": "tokens.32.raw_fold.emb.1|split.add(dense.1.tanh, pass)",
+      "spec": "tokens.32.fold.emb.1|split.add(dense.1.tanh, pass)",
       "precision": "fp32",
       "batch": 128,
       "length": 128,
@@ -92,7 +92,7 @@
     },
     {
       "name": "db04-b16l128",
-      "spec": "tokens.32.raw_fold.emb.1|split.add(dense.1.tanh, pass)",
+      "spec": "tokens.32.fold.emb.1|split.add(dense.1.tanh, pass)",
       "precision": "fp32",
       "batch": 16,
       "length": 128,
@@ -142,7 +142,7 @@
     },
     {
       "name": "db07-b256l512",
-      "spec": "tokens.32.raw_fold.emb.4|split.add(lrnn.4.4, pass)",
+      "spec": "tokens.32.fold.emb.4|split.add(lrnn.4.4, pass)",
       "precision": "fp32",
       "batch": 256,
       "length": 512,
@@ -152,7 +152,7 @@
     },
     {
       "name": "db07-b4l1024",
-      "spec": "tokens.32.raw_fold.emb.4|split.add(lrnn.4.4, pass)",
+      "spec": "tokens.32.fold.emb.4|split.add(lrnn.4.4, pass)",
       "precision": "fp32",
       "batch": 4,
       "length": 1024,
@@ -162,7 +162,7 @@
     },
     {
       "name": "db08-b4l1024",
-      "spec": "tokens.32.raw_fold.oh|lrnn.4.4",
+      "spec": "tokens.32.fold.oh|lrnn.4.4",
       "precision": "fp32",
       "batch": 4,
       "length": 1024,
@@ -172,7 +172,7 @@
     },
     {
       "name": "db08-b128l128",
-      "spec": "tokens.32.raw_fold.oh|lrnn.4.4",
+      "spec": "tokens.32.fold.oh|lrnn.4.4",
       "precision": "fp32",
       "batch": 128,
       "length": 128,
@@ -182,7 +182,7 @@
     },
     {
       "name": "db09-b128l128",
-      "spec": "tokens.32.raw_fold.emb.8|mingru.4-latent.8.2",
+      "spec": "tokens.32.fold.emb.8|mingru.4-latent.8.2",
       "precision": "fp32",
       "batch": 128,
       "length": 128,
@@ -192,7 +192,7 @@
     },
     {
       "name": "db09-b16l128",
-      "spec": "tokens.32.raw_fold.emb.8|mingru.4-latent.8.2",
+      "spec": "tokens.32.fold.emb.8|mingru.4-latent.8.2",
       "precision": "fp32",
       "batch": 16,
       "length": 128,

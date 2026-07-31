@@ -89,20 +89,20 @@ _DOMAIN_LADDER = {1: (2,), 2: (1, 4), 4: (2, 8), 8: (4,)}
 #
 # tokens.32.shift (2026-07-31) sits between both 32-token incumbents
 # and below its 64-token sibling. Deliberately NO direct bits.4 edge:
-# the bit ladder reaches it through raw_fold or hexbpe.
+# the bit ladder reaches it through fold or hexbpe.
 _TOKENS_EMB_BRIDGES = {
-    (32, 'raw_fold'): ('bits.4', 'tokens.32.hexbpe', 'tokens.32.shift'),
-    (32, 'hexbpe'): ('bits.4', 'tokens.32.raw_fold', 'tokens.64.hexbpe',
+    (32, 'fold'): ('bits.4', 'tokens.32.hexbpe', 'tokens.32.shift'),
+    (32, 'hexbpe'): ('bits.4', 'tokens.32.fold', 'tokens.64.hexbpe',
                      'tokens.32.shift'),
     (64, 'hexbpe'): ('tokens.32.hexbpe', 'tokens.128.hexbpe',
                      'tokens.64.shift'),
     (128, 'hexbpe'): ('tokens.64.hexbpe', 'tokens.256.hexbpe'),
     (256, 'hexbpe'): ('tokens.128.hexbpe',),
-    (32, 'shift'): ('tokens.32.raw_fold', 'tokens.32.hexbpe',
+    (32, 'shift'): ('tokens.32.fold', 'tokens.32.hexbpe',
                     'tokens.64.shift'),
     (64, 'shift'): ('tokens.64.hexbpe', 'tokens.32.shift'),
 }
-_BITS_EMB_BRIDGES = {4: ('tokens.32.raw_fold', 'tokens.32.hexbpe')}
+_BITS_EMB_BRIDGES = {4: ('tokens.32.fold', 'tokens.32.hexbpe')}
 
 
 def _domain_spec(nbits: int, emb_size: int) -> str:

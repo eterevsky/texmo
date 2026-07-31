@@ -663,7 +663,7 @@ def test_is_retired_covers_both_codec_spellings(monkeypatch):
     assert _is_retired("tokens.64.shift.emb.16|split.add(dense.16.tanh)")
     # The hexbpe bridge it points at is very much alive.
     assert not _is_retired("tokens.64.hexbpe.emb.4|rnn.4.tanh")
-    assert not _is_retired("tokens.32.raw_fold.oh|rnn.4.tanh")
+    assert not _is_retired("tokens.32.fold.oh|rnn.4.tanh")
     assert not _is_retired("bytes|dense.8.gelu")
 
 

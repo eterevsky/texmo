@@ -32,7 +32,7 @@ def test_type_routes_to_the_matching_tokenizer_class():
     # The `type` field, not the name, picks the class: shift_bucket
     # sets are neither pure-fold tables nor DP-tokenizable.
     assert isinstance(get_tokenizer("tokens.32.shift"), ShiftBucketTokenizer)
-    assert isinstance(get_tokenizer("tokens.32.raw_fold"), FoldTokenizer)
+    assert isinstance(get_tokenizer("tokens.32.fold"), FoldTokenizer)
     # tokens64_shift is type "shift" (lossless, hex escapes): the
     # generic DP tokenizer, unaffected by the shift_bucket branch.
     assert isinstance(get_tokenizer("tokens.64.shift"), Tokenizer)

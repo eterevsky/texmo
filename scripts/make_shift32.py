@@ -25,7 +25,7 @@ The four classes partition all 256 byte values exactly
 Accounting: every byte costs one token except the 29 produced ones,
 which cost two, so `total_tokens = raw_bytes + shifted occurrences`.
 `extra_weights = 58` = 29 token selections + 29 stored pairs, the
-same one-per-choice charge raw_fold and hexbpe pay; the two uniform
+same one-per-choice charge fold and hexbpe pay; the two uniform
 buckets store nothing. `residual_bits_per_byte` prices only the two
 lossy groups, per RAW byte (processing is "raw", so raw and scanned
 bytes coincide).
@@ -183,7 +183,7 @@ def main():
             "ntokens": 32,
             "bytes_per_token": round(total / total_tokens, 6),
             # 29 token-slot selections + 29 stored shift pairs, one
-            # weight per stored choice (the raw_fold/hexbpe
+            # weight per stored choice (the fold/hexbpe
             # convention). The two uniform buckets store nothing.
             "extra_weights": len(visible) + len(pairs),
             "residual_bits_per_byte": round(residual, 6),

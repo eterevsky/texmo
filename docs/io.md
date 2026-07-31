@@ -173,7 +173,7 @@ sqrt(2560), `logits = 30*tanh(h @ E.T / 30)`, no biases).
 ## Fold tokensets: lossy folding with honest accounting
 
 *Status: implemented 2026-07-19. Lossy set:
-`tokens/tokens32_raw_fold.json` (`tokens.32.raw_fold.oh`, also valid
+`tokens/tokens32_fold.json` (`tokens.32.fold.oh`, also valid
 as `.emb.d`); its lossless successor `tokens/tokens64_shift.json`
 (2026-07-20) is an ordinary tokens+sequences set, described below.
 Generators: `scripts/make_fold32.py` / `make_shift64.py` compute the
@@ -369,11 +369,11 @@ Search-reachable (2026-07-28): the family hangs off the bit ladder
 at its nearest rung and forms its own chain —
 `bits.4.oh+bp <-> tokens.32.hexbpe.oh <-> tokens.64.hexbpe.oh <->
 tokens.128.hexbpe.oh <-> tokens.256.hexbpe.oh`, with
-`tokens.32.raw_fold.oh <-> tokens.32.hexbpe.oh` bridging the old
+`tokens.32.fold.oh <-> tokens.32.hexbpe.oh` bridging the old
 family and `tokens.64.shift.oh <-> tokens.64.hexbpe.oh` hanging
 shift off the chain at its own size. shift-32 sits between both
 32-token incumbents and below its 64-token sibling:
-`tokens.32.raw_fold.oh <-> tokens.32.shift.oh <->
+`tokens.32.fold.oh <-> tokens.32.shift.oh <->
 tokens.32.hexbpe.oh` and `tokens.32.shift.oh <->
 tokens.64.shift.oh` (no direct bits.4 edge — reachable through
 either incumbent). The same chains exist in emb mode at the shared

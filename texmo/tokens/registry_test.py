@@ -3,7 +3,9 @@
 The tokens dir is registered by texmo/conftest.py, so the real sets
 in tokens/ are loadable here.
 """
+from .fold_tokenizer import FoldTokenizer
 from .registry import _normalize_name, get_tokenizer
+from .shift_bucket_tokenizer import ShiftBucketTokenizer
 from .tokenizer import Tokenizer
 
 
@@ -24,6 +26,16 @@ def test_hexbpe_dp_round_trips_through_capswords2():
     ids = tok.tokenize(text)
     assert max(ids) < 256
     assert tok.untokenize(ids) == text
+
+
+def test_type_routes_to_the_matching_tokenizer_class():
+    # The `type` field, not the name, picks the class: shift_bucket
+    # sets are neither pure-fold tables nor DP-tokenizable.
+    assert isinstance(get_tokenizer("tokens.32.shift"), ShiftBucketTokenizer)
+    assert isinstance(get_tokenizer("tokens.32.raw_fold"), FoldTokenizer)
+    # tokens64_shift is type "shift" (lossless, hex escapes): the
+    # generic DP tokenizer, unaffected by the shift_bucket branch.
+    assert isinstance(get_tokenizer("tokens.64.shift"), Tokenizer)
 
 
 def test_normalize_leaves_other_names_alone():

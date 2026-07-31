@@ -9,6 +9,7 @@ from .bits_tokenizer import (
 )
 from .bpe_tokenizer import BpeTokenizer
 from .fold_tokenizer import FoldTokenizer
+from .shift_bucket_tokenizer import ShiftBucketTokenizer
 from .tokenizer import Tokenizer
 from .tokenset import TokenSet
 
@@ -66,6 +67,13 @@ def get_tokenizer(name: str):
             # and the generic Decoder can't represent many-to-one
             # groups (length-1 sequences would shadow the head char).
             tokenizer = FoldTokenizer(token_set)
+        elif token_set.type == "shift_bucket":
+            # Partly lossless (the shift pairs), partly forgetting
+            # (the uniform buckets): neither the generic Decoder nor
+            # the fold table can express that mix. Encoding is still
+            # a plain 256-entry lookup -- every byte has exactly one
+            # spelling, so there is nothing for a DP to choose.
+            tokenizer = ShiftBucketTokenizer(token_set)
         elif token_set.type == "hexbpe":
             # Checked before the generic bpe branch: hexbpe sets also
             # say `algorithm: "bpe"` (their merges are string pairs).

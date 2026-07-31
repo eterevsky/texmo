@@ -234,7 +234,8 @@ def test_fold_emb_bridges_the_bit_ladder():
     md = parse_model2("tokens.32.raw_fold.emb.8|rnn.8.tanh", Precision.FP32)
     assert md.codec.is_valid()
     assert md.codec.neighbors(8) == (
-        "tokens.32.raw_fold.oh", "bits.4.emb.8", "tokens.32.hexbpe.emb.8")
+        "tokens.32.raw_fold.oh", "bits.4.emb.8", "tokens.32.hexbpe.emb.8",
+        "tokens.32.shift.emb.8")
 
 
 def test_hexbpe_emb_bridges_the_bit_ladder_and_fold():
@@ -244,7 +245,7 @@ def test_hexbpe_emb_bridges_the_bit_ladder_and_fold():
     assert md.codec.is_valid()
     assert md.codec.neighbors(8) == (
         "tokens.32.hexbpe.oh", "bits.4.emb.8", "tokens.32.raw_fold.emb.8",
-        "tokens.64.hexbpe.emb.8")
+        "tokens.64.hexbpe.emb.8", "tokens.32.shift.emb.8")
 
 
 def test_hexbpe_emb_chain_is_symmetric():
@@ -261,33 +262,46 @@ def test_hexbpe_emb_chain_is_symmetric():
                 assert f"tokens.{m}.hexbpe.emb.8" not in nbs
 
 
-def test_shift64_emb_bridges_hexbpe64_and_bucket64():
+def test_shift64_emb_bridges_hexbpe64_and_shift32():
     """Re-enabled 2026-07-29 (shift beat hexbpe-64 on the frontier):
     it hangs off the hexbpe chain at its own size, bidirectionally,
-    and borders the bucket-64 arbiter."""
+    and since 2026-07-31 also borders its 32-token sibling."""
     md = parse_model2("tokens.64.shift.emb.8|rnn.8.tanh", Precision.FP32)
     assert md.codec.is_valid()
     assert md.codec.neighbors(8) == (
         "tokens.64.shift.oh", "tokens.64.hexbpe.emb.8",
-        "tokens.64.bucket.emb.8")
+        "tokens.32.shift.emb.8")
     md = parse_model2("tokens.64.hexbpe.emb.8|rnn.8.tanh", Precision.FP32)
     assert "tokens.64.shift.emb.8" in md.codec.neighbors(8)
-    # The 64-token rung is shift's only doorway; no other input
-    # bridges to it (the mode swap on shift itself aside).
+    # Only hexbpe-64 and shift-32 reach the 64-token shift rung.
     for spec in ("bytes.emb.8", "bits.1.emb.8", "bits.2.emb.8",
                  "bits.4.emb.8", "tokens.32.raw_fold.emb.8",
                  "tokens.32.hexbpe.emb.8",
                  "tokens.128.hexbpe.emb.8", "tokens.256.hexbpe.emb.8"):
         md = parse_model2(f"{spec}|rnn.8.tanh", Precision.FP32)
-        assert not any(
-            "shift" in n for n in md.codec.neighbors(8)), spec
+        assert "tokens.64.shift.emb.8" not in md.codec.neighbors(8), spec
 
 
-def test_bucket64_emb_sits_between_shift_and_hexbpe():
-    md = parse_model2("tokens.64.bucket.emb.8|rnn.8.tanh", Precision.FP32)
+def test_shift32_emb_sits_between_the_32_token_incumbents():
+    md = parse_model2("tokens.32.shift.emb.8|rnn.8.tanh", Precision.FP32)
     assert md.codec.is_valid()
     assert md.codec.neighbors(8) == (
-        "tokens.64.bucket.oh", "tokens.64.shift.emb.8",
-        "tokens.64.hexbpe.emb.8")
-    # 63 selection weights, uniform bucket stores nothing.
-    assert md.codec.num_weights == 64 * 8 + 1 + 63
+        "tokens.32.shift.oh", "tokens.32.raw_fold.emb.8",
+        "tokens.32.hexbpe.emb.8", "tokens.64.shift.emb.8")
+    # Every edge is reciprocal.
+    for spec in ("tokens.32.raw_fold.emb.8", "tokens.32.hexbpe.emb.8",
+                 "tokens.64.shift.emb.8"):
+        back = parse_model2(f"{spec}|rnn.8.tanh", Precision.FP32)
+        assert "tokens.32.shift.emb.8" in back.codec.neighbors(8), spec
+    # No direct bits.4 edge: the bit ladder reaches shift-32 through
+    # raw_fold or hexbpe.
+    md = parse_model2("bits.4.emb.8|rnn.8.tanh", Precision.FP32)
+    assert "tokens.32.shift.emb.8" not in md.codec.neighbors(8)
+
+
+def test_shift32_counts_its_selections_and_pairs():
+    # 58 = 29 token selections + 29 stored shift pairs; the two
+    # uniform buckets store nothing. table 32*8 + scale 1 + 58.
+    md = parse_model2("tokens.32.shift.emb.8|rnn.8.tanh", Precision.FP32)
+    assert md.codec.num_weights == 32 * 8 + 1 + 58
+    assert md.codec.num_weights == 315

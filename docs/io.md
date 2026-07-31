@@ -343,20 +343,27 @@ remains for scripts that must reproduce the builder's counts.
 | 128 | 34 | 78  | 190 | 1.469 |
 | 256 | 52 | 188 | 428 | 1.811 |
 
-**Bucket tokensets** (2026-07-30, `tokens/tokens64_bucket.json`,
-`tokens.64.bucket`): capswords2 + the top-63 processed bytes as
-singleton tokens + one uniform catch-all — a fold-type set built
-from the full-corpus processed frequencies (`freq_capswords2.txt`,
-regenerable via `process --processing caps-words2` + `count-bytes`).
-Strictly one token per processed byte: the experimental arbiter for
-*why* shift-64 beats hexbpe-64 (naked uniform granularity vs the
-shift mechanic). All letters, digits and markers select naturally;
-the bucket is 0.43% of the stream, charged uniformly at log2(193)
-bits (residual 0.034 b/B raw, `extra_weights = 63` — selections
-only, nothing stored). Same 1-per-choice accounting as its rivals:
-shift 64, hexbpe 68. If it succeeds, the plan is a bucket-style 128
-rung and, at 256+, BPE joins only after every seen byte has its own
-token. Generator: `scripts/make_bucket.py N`.
+**shift-32** (2026-07-31, `tokens/tokens32_shift.json`,
+`tokens.32.shift`, type `shift_bucket`, processing `raw`): the
+insight that killed the short-lived bucket-64 experiment (removed
+before it ever ran): capswords2's word markers and case-marker split
+exist *for multi-char tokens* — word-end markers let word tokens
+absorb boundaries, all-caps markers let one token serve both
+casings. A single-char-token set needs none of it; one shift marker
+applied **at tokenization** (like shift-64, no processing pass)
+does everything. 32 tokens = a numbered shift marker + the 24
+letters except q/z + `space , . ' _` + two lossy faces: `0` (all
+digits, uniform) and `*` (every other byte, uniform). 29 *semantic*
+shift pairs — `a→A` … plus `space→\n`, `,→;`, `.→?`, `'→"`, `_→-`
+— so capitalization is exact and the pair table transfers each
+host's statistics to a genuinely similar partner. That table is
+stored corpus knowledge: `extra_weights = 58` = 29 selections + 29
+pairs, one per stored choice. Coverage: 97.5% of bytes lossless,
+digits keep their *shape* (`1984` → four digit tokens), residual
+0.151 b/B (digits 0.87% at log2 10 + catch-all 1.62% at log2 188),
+1.047 tokens/byte. Against fold-32: 0.151 vs 0.348 residual at 58
+vs 64 weights — fold stays searchable regardless. Generator:
+`scripts/make_shift32.py` from the raw `freq.txt`.
 
 Search-reachable (2026-07-28): the family hangs off the bit ladder
 at its nearest rung and forms its own chain —
@@ -364,9 +371,13 @@ at its nearest rung and forms its own chain —
 tokens.128.hexbpe.oh <-> tokens.256.hexbpe.oh`, with
 `tokens.32.raw_fold.oh <-> tokens.32.hexbpe.oh` bridging the old
 family and `tokens.64.shift.oh <-> tokens.64.hexbpe.oh` hanging
-shift off the chain at its own size; the same chains exist in emb
-mode at the shared table width, and the usual oh<->emb mode swap
-applies. The loss predictor carries the residual charge and
+shift off the chain at its own size. shift-32 sits between both
+32-token incumbents and below its 64-token sibling:
+`tokens.32.raw_fold.oh <-> tokens.32.shift.oh <->
+tokens.32.hexbpe.oh` and `tokens.32.shift.oh <->
+tokens.64.shift.oh` (no direct bits.4 edge — reachable through
+either incumbent). The same chains exist in emb mode at the shared
+table width, and the usual oh<->emb mode swap applies. The loss predictor carries the residual charge and
 log2(bytes/token) as global features; the timing model treats each
 input as just another type key.
 

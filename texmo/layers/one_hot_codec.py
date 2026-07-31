@@ -59,21 +59,24 @@ _INPUT_NEIGHBORS = {
     # rung (32 tokens ~ bits.4's 16) and continues up the hexbpe chain
     # 32 -> 64 -> 128 -> 256. Keep in sync with the emb-mode bridges
     # in embedding_codec.
-    'tokens.32.raw_fold.oh': ('bits.4.oh+bp', 'tokens.32.hexbpe.oh'),
+    'tokens.32.raw_fold.oh': ('bits.4.oh+bp', 'tokens.32.hexbpe.oh',
+                              'tokens.32.shift.oh'),
     'tokens.32.hexbpe.oh': ('bits.4.oh+bp', 'tokens.32.raw_fold.oh',
-                            'tokens.64.hexbpe.oh'),
+                            'tokens.64.hexbpe.oh', 'tokens.32.shift.oh'),
     'tokens.64.hexbpe.oh': ('tokens.32.hexbpe.oh', 'tokens.128.hexbpe.oh',
-                            'tokens.64.shift.oh', 'tokens.64.bucket.oh'),
+                            'tokens.64.shift.oh'),
     'tokens.128.hexbpe.oh': ('tokens.64.hexbpe.oh', 'tokens.256.hexbpe.oh'),
     'tokens.256.hexbpe.oh': ('tokens.128.hexbpe.oh',),
     # shift hangs off the hexbpe chain at its own size (retired
     # 2026-07-28, re-enabled 2026-07-29 after beating hexbpe-64 on
     # the frontier -- see search.RETIRED_INPUTS).
-    'tokens.64.shift.oh': ('tokens.64.hexbpe.oh', 'tokens.64.bucket.oh'),
-    # bucket-64: strictly 1 token/byte over capswords2 (fold-type,
-    # uniform catch-all) -- the arbiter between shift's naked letters
-    # and hexbpe's merges. Sits between its two rivals.
-    'tokens.64.bucket.oh': ('tokens.64.shift.oh', 'tokens.64.hexbpe.oh'),
+    #
+    # shift-32 (2026-07-31) sits between both 32-token incumbents and
+    # below its 64-token sibling. Deliberately NO direct bits.4 edge:
+    # the bit ladder reaches it through raw_fold or hexbpe.
+    'tokens.32.shift.oh': ('tokens.32.raw_fold.oh', 'tokens.32.hexbpe.oh',
+                           'tokens.64.shift.oh'),
+    'tokens.64.shift.oh': ('tokens.64.hexbpe.oh', 'tokens.32.shift.oh'),
 }
 
 

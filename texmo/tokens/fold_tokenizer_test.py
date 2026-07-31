@@ -4,7 +4,6 @@ import os
 import numpy as np
 
 from .fold_tokenizer import FoldTokenizer
-from .processing import process2
 from .tokenset import TokenSet
 
 _TOKENS_DIR = os.path.join(
@@ -114,35 +113,3 @@ def test_uniform_group_without_head_freq():
     tk = FoldTokenizer(ts)
     assert math.isclose(tk.residual_entropy[ord("?")], math.log2(251))
     assert math.isclose(tk.residual_entropy[ord("x")], math.log2(251))
-
-
-def test_bucket64_real_set():
-    """tokens64_bucket: capswords2 + top-63 bytes + uniform catch-all
-    (2026-07-30). Strictly one token per processed byte; the bucket
-    stores nothing, so extra_weights is the 63 selections."""
-    ts = TokenSet.from_json_file(
-        os.path.join(_TOKENS_DIR, "tokens64_bucket.json"))
-    assert ts.processing == "capswords2"
-    assert not ts.head_freq
-    assert ts.stats["extra_weights"] == 63
-    tk = FoldTokenizer(ts)
-
-    text = b"The Quick brown fox, 42 lazy dogs [rare]!"
-    ids = tk.tokenize(text)
-    assert len(ids) == len(process2(text))  # 1:1 with processed bytes
-    assert int(max(ids)) < 64
-    assert isinstance(tk.untokenize(list(ids)), bytes)
-
-    # The bucket group: 193 byte values, all charged uniformly.
-    bucket_id = tk.groups[ord("[")]
-    members = np.flatnonzero(tk.groups == bucket_id)
-    assert len(members) == 193
-    assert math.isclose(
-        tk.residual_entropy[ord("[")], math.log2(193))
-    # All 26 letters, all digits, and the four markers have their own
-    # singleton tokens.
-    for b in (list(range(ord("a"), ord("z") + 1))
-              + list(range(ord("0"), ord("9") + 1))
-              + [0x14, 0x15, 0x16, 0x17]):
-        assert tk.groups[b] != bucket_id, chr(b)
-        assert math.isclose(tk.residual_entropy[b], 0.0), chr(b)

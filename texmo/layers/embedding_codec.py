@@ -86,18 +86,21 @@ _DOMAIN_LADDER = {1: (2,), 2: (1, 4), 4: (2, 8), 8: (4,)}
 # tokens.64.shift hangs off the hexbpe chain at its own size
 # (retired 2026-07-28, re-enabled 2026-07-29 after beating hexbpe-64
 # on the frontier -- see search.RETIRED_INPUTS).
+#
+# tokens.32.shift (2026-07-31) sits between both 32-token incumbents
+# and below its 64-token sibling. Deliberately NO direct bits.4 edge:
+# the bit ladder reaches it through raw_fold or hexbpe.
 _TOKENS_EMB_BRIDGES = {
-    (32, 'raw_fold'): ('bits.4', 'tokens.32.hexbpe'),
-    (32, 'hexbpe'): ('bits.4', 'tokens.32.raw_fold', 'tokens.64.hexbpe'),
+    (32, 'raw_fold'): ('bits.4', 'tokens.32.hexbpe', 'tokens.32.shift'),
+    (32, 'hexbpe'): ('bits.4', 'tokens.32.raw_fold', 'tokens.64.hexbpe',
+                     'tokens.32.shift'),
     (64, 'hexbpe'): ('tokens.32.hexbpe', 'tokens.128.hexbpe',
-                     'tokens.64.shift', 'tokens.64.bucket'),
+                     'tokens.64.shift'),
     (128, 'hexbpe'): ('tokens.64.hexbpe', 'tokens.256.hexbpe'),
     (256, 'hexbpe'): ('tokens.128.hexbpe',),
-    (64, 'shift'): ('tokens.64.hexbpe', 'tokens.64.bucket'),
-    # bucket-64: strictly 1 token/byte over capswords2 (fold-type,
-    # uniform catch-all) -- the arbiter between shift's naked letters
-    # and hexbpe's merges. Sits between its two rivals.
-    (64, 'bucket'): ('tokens.64.shift', 'tokens.64.hexbpe'),
+    (32, 'shift'): ('tokens.32.raw_fold', 'tokens.32.hexbpe',
+                    'tokens.64.shift'),
+    (64, 'shift'): ('tokens.64.hexbpe', 'tokens.32.shift'),
 }
 _BITS_EMB_BRIDGES = {4: ('tokens.32.raw_fold', 'tokens.32.hexbpe')}
 

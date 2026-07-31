@@ -229,7 +229,8 @@ def test_fold_bridges_the_bit_ladder():
     md = parse_model2("tokens.32.raw_fold.oh|rnn.4.tanh", Precision.FP32)
     assert md.input.is_valid()
     assert md.input.neighbors(4) == (
-        "bits.4.oh+bp", "tokens.32.hexbpe.oh", "tokens.32.raw_fold.emb.4")
+        "bits.4.oh+bp", "tokens.32.hexbpe.oh", "tokens.32.shift.oh",
+        "tokens.32.raw_fold.emb.4")
 
 
 def test_hexbpe_bridges_the_bit_ladder_and_fold():
@@ -239,7 +240,7 @@ def test_hexbpe_bridges_the_bit_ladder_and_fold():
     assert md.input.is_valid()
     assert md.input.neighbors(4) == (
         "bits.4.oh+bp", "tokens.32.raw_fold.oh", "tokens.64.hexbpe.oh",
-        "tokens.32.hexbpe.emb.4")
+        "tokens.32.shift.oh", "tokens.32.hexbpe.emb.4")
 
 
 def test_hexbpe_chain_is_symmetric():
@@ -267,31 +268,52 @@ def test_shift64_counts_its_token_selection():
     assert md.codec.num_weights == plain.codec.num_weights + 64
 
 
-def test_shift64_bridges_hexbpe64_and_bucket64():
+def test_shift64_bridges_hexbpe64_and_shift32():
     """Re-enabled 2026-07-29 (shift beat hexbpe-64 on the frontier):
     it hangs off the hexbpe chain at its own size, bidirectionally,
-    and borders the bucket-64 arbiter."""
+    and since 2026-07-31 also borders its 32-token sibling."""
     md = parse_model2("tokens.64.shift.oh|rnn.4.tanh", Precision.FP32)
     assert md.input.neighbors(4) == (
-        "tokens.64.hexbpe.oh", "tokens.64.bucket.oh",
+        "tokens.64.hexbpe.oh", "tokens.32.shift.oh",
         "tokens.64.shift.emb.4")
     md = parse_model2("tokens.64.hexbpe.oh|rnn.4.tanh", Precision.FP32)
     assert "tokens.64.shift.oh" in md.input.neighbors(4)
-    # The 64-token rung is shift's only doorway; no other input
-    # bridges to it (the mode swap on shift itself aside).
+    # Only hexbpe-64 and shift-32 reach the 64-token shift rung.
     for spec in ("bytes", "bits.1+bp", "bits.2.oh+bp", "bits.4.oh+bp",
                  "tokens.32.raw_fold.oh", "tokens.32.hexbpe.oh",
                  "tokens.128.hexbpe.oh", "tokens.256.hexbpe.oh"):
         md = parse_model2(f"{spec}|rnn.4.tanh", Precision.FP32)
-        assert not any(
-            "shift" in n for n in md.input.neighbors(4)), spec
+        assert "tokens.64.shift.oh" not in md.input.neighbors(4), spec
 
 
-def test_bucket64_sits_between_shift_and_hexbpe():
-    md = parse_model2("tokens.64.bucket.oh|rnn.4.tanh", Precision.FP32)
+def test_shift32_sits_between_the_32_token_incumbents():
+    md = parse_model2("tokens.32.shift.oh|rnn.4.tanh", Precision.FP32)
     assert md.input.is_valid()
     assert md.input.neighbors(4) == (
-        "tokens.64.shift.oh", "tokens.64.hexbpe.oh",
-        "tokens.64.bucket.emb.4")
-    # 63 selection weights, uniform bucket stores nothing.
-    assert md.codec.num_weights == 64 * 4 + 64 + 63
+        "tokens.32.raw_fold.oh", "tokens.32.hexbpe.oh",
+        "tokens.64.shift.oh", "tokens.32.shift.emb.4")
+    # Every edge is reciprocal.
+    for spec in ("tokens.32.raw_fold.oh", "tokens.32.hexbpe.oh",
+                 "tokens.64.shift.oh"):
+        back = parse_model2(f"{spec}|rnn.4.tanh", Precision.FP32)
+        assert "tokens.32.shift.oh" in back.input.neighbors(4), spec
+    # No direct bits.4 edge: the bit ladder reaches shift-32 through
+    # raw_fold or hexbpe.
+    md = parse_model2("bits.4.oh+bp|rnn.4.tanh", Precision.FP32)
+    assert "tokens.32.shift.oh" not in md.input.neighbors(4)
+
+
+def test_shift32_counts_its_selections_and_pairs():
+    md = parse_model2("tokens.32.shift.oh|dense.4.tanh", Precision.FP32)
+    plain = parse_model2(
+        "tokens.32.raw_bits4.oh|dense.4.tanh", Precision.FP32)
+    # 58 = 29 token selections + 29 stored shift pairs; the two
+    # uniform buckets store nothing.
+    assert md.codec.num_weights == plain.codec.num_weights + 58
+    # The stored numbers cost no multiplies (they only price the
+    # eval loss).
+    assert md.codec.num_mults == plain.codec.num_mults
+    # Regression on the absolute figure: num_weights is part of a
+    # conf's fleet-wide identity. head (32*4 + 32) + 58 stored.
+    assert md.codec.num_weights == 32 * 4 + 32 + 58
+    assert md.codec.num_weights == 218

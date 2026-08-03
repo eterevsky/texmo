@@ -1,32 +1,36 @@
-"""Generate a "bucket" tokenset: capswords2 + top-(N-1) bytes + one
-uniform catch-all token. tokens/tokens{N}_bucket.json, type "fold".
+"""Generate a "bucket" tokenset: top-(N-1) bytes + one uniform
+catch-all token, over either the raw or the capswords2-processed
+corpus. Emits a fold-type set (`FoldTokenizer` runs it as-is).
 
-The design (2026-07-30): strictly one token per processed byte -- the
-hypothesis is that tiny models prefer a uniform single-byte stream
-over hexbpe's mixed granularity (nibble escapes, merges). The N-1
-most common bytes of the capswords2-processed corpus get their own
-tokens; every other byte folds into one bucket token. The bucket is
-UNIFORM: no stored probabilities, so the fold machinery charges its
-members log2(group size) bits and the set costs only its N-1
-selection weights (stats.extra_weights). Lossy by construction; the
-loss is priced by stats.residual_bits_per_byte, expressed per RAW
-byte because eval divides by raw sample length.
+Two modes, selected by --processing:
 
-Decode prints the bucket's head character for bucket tokens (chosen
-as the most frequent printable-ASCII bucket member). A speculative
-improvement, not implemented: a bucket token mid-word in a
-non-all-caps word could be decoded as the \x17 upper marker.
+- `raw` (tokens{N}_fold.json, e.g. tokens.128.fold): the N-1 most
+  common RAW bytes get their own tokens, everything else folds into
+  one uniform catch-all. The simplest possible lossy set: 1 token per
+  byte, bytes_per_token exactly 1.0. Reads freq.txt.
+- `capswords2` (tokens{N}_bucket.json): same design over the
+  processed stream. This variant lost the 64-token design review to
+  tokens.64.shift (2026-07-31) and no set of it is currently wired
+  into search; the mode remains for future experiments. Reads
+  freq_capswords2.txt (plus freq.txt for the raw byte total).
 
-Inputs: freq_capswords2.txt (full processed-corpus byte counts) and
-freq.txt (raw counts, for the raw byte total) -- both produced by the
-Rust `count-bytes` command; regenerate the first with:
+The bucket is UNIFORM: no stored probabilities, so the fold
+machinery charges its members log2(group size) bits and the set
+costs only its N-1 selection weights (stats.extra_weights). The
+residual is expressed per RAW byte because eval divides by raw
+sample length.
 
-    texmo.exe process -d data/books3.txt -o data/books3_capswords2.txt \
-        --processing caps-words2
-    texmo.exe count-bytes -d data/books3_capswords2.txt > freq_capswords2.txt
+Frequency tables are produced by the Rust `count-bytes` command; see
+freq_capswords2.txt regeneration notes in the repo docs.
 
-Usage: uv run python scripts/make_bucket.py [ntokens]
+Overwriting an existing set needs --force: in particular
+tokens32_fold.json is the CURATED letter-folding set
+(scripts/make_fold32.py), not a product of this generator -- raw
+mode at N=32 would silently replace it with a different design.
+
+Usage: uv run python scripts/make_bucket.py [ntokens] [--processing raw]
 """
+import argparse
 import math
 import os
 import sys
@@ -46,7 +50,7 @@ def _parse_freq(path: str) -> dict[int, int]:
         for line in f:
             line = line.rstrip("\n")
             if not line:
-                break  # the sorted second section repeats the data
+                break  # a sorted second section may repeat the data
             repr_part, count = line.rsplit(" ", 1)
             if repr_part.startswith("'"):
                 body = repr_part[1:-1]
@@ -64,10 +68,23 @@ def _parse_freq(path: str) -> dict[int, int]:
 
 
 def main():
-    ntokens = int(sys.argv[1]) if len(sys.argv) > 1 else 64
-    counts = _parse_freq("freq_capswords2.txt")
-    raw_total = sum(_parse_freq("freq.txt").values())
-    proc_total = sum(counts.values())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("ntokens", type=int, nargs="?", default=64)
+    parser.add_argument(
+        "--processing", choices=("raw", "capswords2"), default="capswords2")
+    parser.add_argument("--force", action="store_true")
+    args = parser.parse_args()
+    ntokens = args.ntokens
+
+    if args.processing == "raw":
+        counts = _parse_freq("freq.txt")
+        raw_total = proc_total = sum(counts.values())
+        variation = "fold"
+    else:
+        counts = _parse_freq("freq_capswords2.txt")
+        raw_total = sum(_parse_freq("freq.txt").values())
+        proc_total = sum(counts.values())
+        variation = "bucket"
 
     ranked = sorted(counts, key=lambda b: (-counts[b], b))
     selected = sorted(ranked[: ntokens - 1])
@@ -82,8 +99,8 @@ def main():
 
     # Uniform group: every member charged log2(group size), exactly
     # what FoldTokenizer computes for a group without head_freq. Per
-    # RAW byte: bucket events live in the processed stream, so the
-    # sum is normalized by the raw length, not the processed one.
+    # RAW byte: bucket events live in the (possibly processed)
+    # stream, so the sum is normalized by the raw length.
     residual = bucket_count * math.log2(len(bucket)) / raw_total
     # For the record: what a fully stored (add-1 smoothed) bucket
     # table would buy, at +len(seen) weights.
@@ -103,13 +120,13 @@ def main():
     ]
 
     doc = {
-        "processing": "capswords2",
+        "processing": args.processing,
         "type": "fold",
         "tokens": tokens,
         "sequences": sequences,
         "stats": {
             "ntokens": ntokens,
-            # RAW bytes per token; one token per processed byte.
+            # RAW bytes per token; one token per (processed) byte.
             "bytes_per_token": raw_total / proc_total,
             # N-1 byte selections at one weight each; the uniform
             # bucket stores nothing.
@@ -121,7 +138,11 @@ def main():
             "initial_size": raw_total,
         },
     }
-    out = f"tokens/tokens{ntokens}_bucket.json"
+    out = f"tokens/tokens{ntokens}_{variation}.json"
+    if os.path.exists(out) and not args.force:
+        raise SystemExit(
+            f"{out} exists; pass --force to overwrite (see the "
+            f"tokens32_fold.json warning in the docstring)")
     with open(out, "w", encoding="utf-8", newline="\n") as f:
         save_json(doc, f)
 

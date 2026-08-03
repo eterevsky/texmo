@@ -116,3 +116,31 @@ def test_uniform_group_without_head_freq():
     tk = FoldTokenizer(ts)
     assert math.isclose(tk.residual_entropy[ord("?")], math.log2(251))
     assert math.isclose(tk.residual_entropy[ord("x")], math.log2(251))
+
+
+def test_fold128_real_set():
+    """tokens128_fold: 127 top raw bytes + uniform catch-all
+    (2026-08-03) -- the simplest lossy set, 1 token per raw byte."""
+    ts = TokenSet.from_json_file(
+        os.path.join(_TOKENS_DIR, "tokens128_fold.json"))
+    assert ts.processing == "raw"
+    assert not ts.head_freq
+    assert ts.stats["extra_weights"] == 127
+    assert ts.stats["bytes_per_token"] == 1.0
+    tk = FoldTokenizer(ts)
+
+    text = b"The Quick brown fox, 42 lazy dogs [rare]! {bucketed}"
+    ids = tk.tokenize(text)
+    assert len(ids) == len(text)  # strictly 1:1, no processing
+    assert int(max(ids)) < 128
+    # Letters, capitals, digits and brackets are all singletons; only
+    # '{' and '}' fall in the bucket and decode as its head '{'.
+    out = tk.untokenize(list(ids))
+    assert out == text.replace(b"}", b"{")
+
+    bucket_id = tk.groups[ord("{")]
+    members = np.flatnonzero(tk.groups == bucket_id)
+    assert len(members) == 129
+    assert math.isclose(
+        tk.residual_entropy[ord("}")], math.log2(129))
+    assert 0.007 < ts.residual_bits_per_byte < 0.009

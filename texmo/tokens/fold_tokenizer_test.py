@@ -89,11 +89,11 @@ def test_lossless_byte_loss_has_no_residual():
 
 
 def test_real_fold32_tokenset():
-    path = os.path.join(_TOKENS_DIR, "tokens32_fold.json")
+    path = os.path.join(_TOKENS_DIR, "tokens.32.fold.json")
     ts = TokenSet.from_json_file(path)
     # Legacy {ntokens}_{processing}_{type} form -- does NOT match the
-    # file basename (tokens32_fold.json); same cosmetic mismatch as
-    # tokens64_shift. Nothing resolves files through this property.
+    # file basename (tokens.32.fold.json); same cosmetic mismatch as
+    # tokens.64.shift. Nothing resolves files through this property.
     assert ts.name == "tokens32_raw_fold"
     assert ts.ntokens == 32
     tk = FoldTokenizer(ts)
@@ -119,10 +119,10 @@ def test_uniform_group_without_head_freq():
 
 
 def test_fold128_real_set():
-    """tokens128_fold: 127 top raw bytes + uniform catch-all
+    """tokens.128.fold: 127 top raw bytes + uniform catch-all
     (2026-08-03) -- the simplest lossy set, 1 token per raw byte."""
     ts = TokenSet.from_json_file(
-        os.path.join(_TOKENS_DIR, "tokens128_fold.json"))
+        os.path.join(_TOKENS_DIR, "tokens.128.fold.json"))
     assert ts.processing == "raw"
     assert not ts.head_freq
     assert ts.stats["extra_weights"] == 127

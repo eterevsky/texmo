@@ -1,4 +1,4 @@
-"""Generate tokens32_shift.json: a 32-token set built from ONE shift
+"""Generate tokens.32.shift.json: a 32-token set built from ONE shift
 marker plus two lossy buckets, over raw bytes (see docs/io.md,
 "shift-32"). Type "shift_bucket", handled by
 `texmo.tokens.shift_bucket_tokenizer.ShiftBucketTokenizer`.
@@ -37,7 +37,7 @@ so only the first block is parsed).
 
 Usage:
     uv run python scripts/make_shift32.py [freq.txt] \
-        [tokens/tokens32_shift.json]
+        [tokens/tokens.32.shift.json]
 
 Without the output path it just prints the analysis.
 """

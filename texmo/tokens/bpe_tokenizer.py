@@ -1,5 +1,5 @@
 """SentencePiece-BPE-compatible tokenizer for converted tokensets
-(algorithm == "bpe", e.g. tokens256000_gemma).
+(algorithm == "bpe", e.g. tokens.256000.gemma).
 
 Encode pipeline, matching the HuggingFace/SentencePiece reference:
 

@@ -1,4 +1,4 @@
-"""Generate tokens64_shift.json: a fully lossless tokenset with
+"""Generate tokens.64.shift.json: a fully lossless tokenset with
 a shift marker and a hex escape (see docs/io.md). Despite growing
 out of the fold family, it is an ordinary tokens+sequences set
 handled by the generic DP Tokenizer -- every byte has exactly one
@@ -19,7 +19,7 @@ to constructs living inside the tokenizer itself.
 
 Usage:
     uv run python scripts/make_shift64.py freq.txt \
-        tokens/tokens64_shift.json
+        tokens/tokens.64.shift.json
 
 Without the output path it prints the allocation and the full
 escaped-byte table."""

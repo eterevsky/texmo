@@ -81,7 +81,7 @@ def test_overlapping_tokens_repeated():
 def _load_shift64():
     path = os.path.join(
         os.path.dirname(__file__), "..", "..", "tokens",
-        "tokens64_shift.json")
+        "tokens.64.shift.json")
     return Tokenizer(TokenSet.from_json_file(path))
 
 

@@ -4,11 +4,11 @@ corpus. Emits a fold-type set (`FoldTokenizer` runs it as-is).
 
 Two modes, selected by --processing:
 
-- `raw` (tokens{N}_fold.json, e.g. tokens.128.fold): the N-1 most
+- `raw` (tokens.{N}.fold.json, e.g. tokens.128.fold): the N-1 most
   common RAW bytes get their own tokens, everything else folds into
   one uniform catch-all. The simplest possible lossy set: 1 token per
   byte, bytes_per_token exactly 1.0. Reads freq.txt.
-- `capswords2` (tokens{N}_bucket.json): same design over the
+- `capswords2` (tokens.{N}.bucket.json): same design over the
   processed stream. This variant lost the 64-token design review to
   tokens.64.shift (2026-07-31) and no set of it is currently wired
   into search; the mode remains for future experiments. Reads
@@ -24,7 +24,7 @@ Frequency tables are produced by the Rust `count-bytes` command; see
 freq_capswords2.txt regeneration notes in the repo docs.
 
 Overwriting an existing set needs --force: in particular
-tokens32_fold.json is the CURATED letter-folding set
+tokens.32.fold.json is the CURATED letter-folding set
 (scripts/make_fold32.py), not a product of this generator -- raw
 mode at N=32 would silently replace it with a different design.
 
@@ -138,11 +138,11 @@ def main():
             "initial_size": raw_total,
         },
     }
-    out = f"tokens/tokens{ntokens}_{variation}.json"
+    out = f"tokens/tokens.{ntokens}.{variation}.json"
     if os.path.exists(out) and not args.force:
         raise SystemExit(
             f"{out} exists; pass --force to overwrite (see the "
-            f"tokens32_fold.json warning in the docstring)")
+            f"tokens.32.fold.json warning in the docstring)")
     with open(out, "w", encoding="utf-8", newline="\n") as f:
         save_json(doc, f)
 

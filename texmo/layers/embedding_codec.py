@@ -264,7 +264,7 @@ class EmbeddingCodecDef:
 
         if nbits is None:
             self.npositions = 1
-            self.tokens_name = f'tokens{ntokens}_{variation}'
+            self.tokens_name = f'tokens.{ntokens}.{variation}'
         else:
             self.npositions = 8 // nbits if nbits < 8 else 1
             self.tokens_name = 'bytes' if nbits == 8 else f'bits.{nbits}'

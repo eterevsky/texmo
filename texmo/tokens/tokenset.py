@@ -52,7 +52,7 @@ def _parse_merges(merges: list) -> list:
     Two on-disk shapes exist and both stay supported:
 
     - `[left_id, right_id, merged_id]` INT TRIPLES (converted
-      SentencePiece vocabs, e.g. tokens256000_gemma) -- passed through
+      SentencePiece vocabs, e.g. tokens.256000.gemma) -- passed through
       unchanged; `BpeTokenizer` reads the ids directly.
     - `[left_string, right_string]` STRING PAIRS (hexbpe sets) --
       parsed into `(bytes, bytes)` tuples, in rank order. Ids are NOT

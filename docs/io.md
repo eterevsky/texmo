@@ -173,8 +173,8 @@ sqrt(2560), `logits = 30*tanh(h @ E.T / 30)`, no biases).
 ## Fold tokensets: lossy folding with honest accounting
 
 *Status: implemented 2026-07-19. Lossy set:
-`tokens/tokens32_fold.json` (`tokens.32.fold.oh`, also valid
-as `.emb.d`); its lossless successor `tokens/tokens64_shift.json`
+`tokens/tokens.32.fold.json` (`tokens.32.fold.oh`, also valid
+as `.emb.d`); its lossless successor `tokens/tokens.64.shift.json`
 (2026-07-20) is an ordinary tokens+sequences set, described below.
 Generators: `scripts/make_fold32.py` / `make_shift64.py` compute the
 mapping, any stored frequencies, and the residual from corpus byte
@@ -231,7 +231,7 @@ Per-slice accounting (charging each eval chunk's actual bytes via
 `FoldTokenizer.chunk_residual_bits`) is implemented but unused — the
 corpus constant is exact in expectation over books3 slices.
 
-**The 64-token successor, `tokens64_shift`** (2026-07-20,
+**The 64-token successor, `tokens.64.shift`** (2026-07-20,
 `tokens.64.shift.oh`), abandons folding entirely and is **fully
 lossless** — the answer to fold-32's tax dominating at higher
 weight counts. Lowercase letters and digits get their own tokens; a
@@ -343,7 +343,7 @@ remains for scripts that must reproduce the builder's counts.
 | 128 | 34 | 78  | 190 | 1.469 |
 | 256 | 52 | 188 | 428 | 1.811 |
 
-**shift-32** (2026-07-31, `tokens/tokens32_shift.json`,
+**shift-32** (2026-07-31, `tokens/tokens.32.shift.json`,
 `tokens.32.shift`, type `shift_bucket`, processing `raw`): the
 insight that killed the short-lived bucket-64 experiment (removed
 before it ever ran): capswords2's word markers and case-marker split
@@ -365,7 +365,7 @@ digits keep their *shape* (`1984` → four digit tokens), residual
 vs 64 weights — fold stays searchable regardless. Generator:
 `scripts/make_shift32.py` from the raw `freq.txt`.
 
-**fold-128** (2026-08-03, `tokens/tokens128_fold.json`,
+**fold-128** (2026-08-03, `tokens/tokens.128.fold.json`,
 `tokens.128.fold`): the simplest possible lossy rung — the 127 most
 common **raw** bytes as singleton tokens plus one uniform
 catch-all, no processing at all, exactly one token per byte
@@ -377,7 +377,7 @@ hexbpe-128 (190 weights, 1.469 raw B/token); the pair brackets the
 compression-vs-simplicity trade at 128 tokens the way shift-64 and
 hexbpe-64 do at 64. Generator: `scripts/make_bucket.py N
 --processing raw` (the raw mode of the bucket generator; it refuses
-to overwrite the curated `tokens32_fold.json` without --force).
+to overwrite the curated `tokens.32.fold.json` without --force).
 Edges: `tokens.64.shift <-> tokens.128.fold <-> bytes` and
 `tokens.128.fold <-> tokens.128.hexbpe`, both codec modes.
 

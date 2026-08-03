@@ -1,4 +1,4 @@
-"""Tests for ShiftBucketTokenizer against the real tokens32_shift set.
+"""Tests for ShiftBucketTokenizer against the real tokens.32.shift set.
 
 The tokens dir is registered by texmo/conftest.py, so `get_tokenizer`
 serves the shipped JSON -- which is the point: these pin the

@@ -300,7 +300,7 @@ class OneHotCodecDef:
 
         if nbits is None:
             self.size = ntokens
-            self.tokens_name = f'tokens{ntokens}_{variation}'
+            self.tokens_name = f'tokens.{ntokens}.{variation}'
         else:
             self.size = ntokens if one_hot else nbits
             if bp:

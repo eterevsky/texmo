@@ -23,7 +23,7 @@ _TEXT = (
 
 
 def _load(ntokens: int) -> HexBpeTokenizer:
-    path = os.path.join(_TOKENS_DIR, f"tokens{ntokens}_hexbpe.json")
+    path = os.path.join(_TOKENS_DIR, f"tokens.{ntokens}.hexbpe.json")
     return HexBpeTokenizer(TokenSet.from_json_file(path))
 
 
@@ -165,7 +165,7 @@ def test_tokens_per_byte_matches_stats():
 
 def test_merges_parse_as_string_pairs():
     ts = TokenSet.from_json_file(
-        os.path.join(_TOKENS_DIR, "tokens32_hexbpe.json"))
+        os.path.join(_TOKENS_DIR, "tokens.32.hexbpe.json"))
     assert ts.merges == [(b"e", b"\x16")]
     assert ts.type == "hexbpe" and ts.processing == "capswords2"
 

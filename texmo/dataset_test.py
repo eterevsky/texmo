@@ -17,13 +17,13 @@ def dataset():
 
 
 def test_sample_tokens(dataset):
-    batch = dataset.sample_tokens(1, 4, "tokens64_capswords_byteshuff")
+    batch = dataset.sample_tokens(1, 4, "tokens.64.shift")
     assert batch.shape == (4, 1)
     assert np.issubdtype(batch.dtype, np.integer)
 
 
 def test_sample_bytes(dataset):
-    batch, lengths = dataset.sample_bytes(1, 4, "tokens64_capswords_byteshuff")
+    batch, lengths = dataset.sample_bytes(1, 4, "tokens.64.shift")
     assert batch.shape[0] == 4
 
 
@@ -51,14 +51,14 @@ def test_sample_tokens_bits4(dataset):
 def test_sample_tokens_hexbpe(dataset):
     # capswords2 has no preprocessed on-disk buffer, so this goes down
     # the on-the-fly path: raw chunk -> process2 -> BPE merge loop.
-    batch = dataset.sample_tokens(4, 3, "tokens32_hexbpe")
+    batch = dataset.sample_tokens(4, 3, "tokens.32.hexbpe")
     assert batch.shape == (3, 4)
     assert np.issubdtype(batch.dtype, np.integer)
     assert (batch >= 0).all() and (batch < 32).all()
 
 
 def test_sample_bytes_hexbpe(dataset):
-    batch, lengths = dataset.sample_bytes(16, 2, "tokens32_hexbpe")
+    batch, lengths = dataset.sample_bytes(16, 2, "tokens.32.hexbpe")
     assert batch.shape[0] == 2
     assert (lengths > 0).all()
     assert (batch >= 0).all() and (batch < 32).all()

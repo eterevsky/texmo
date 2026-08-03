@@ -5,7 +5,7 @@ printer puts every list element on its own line, which makes a 256-token
 set unreadable. `texmo.pjson` keeps short values inline and expands only
 what is long, matching the style of the hand-written sets.
 
-    uv run python scripts/pjson_format.py tokens/tokens32_hexbpe.json ...
+    uv run python scripts/pjson_format.py tokens/tokens.32.hexbpe.json ...
 """
 import json
 import os

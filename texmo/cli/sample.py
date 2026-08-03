@@ -223,7 +223,7 @@ def benchmark_init_args(parser: argparse.ArgumentParser, config):
     )
     parser.add_argument(
         "--token-set",
-        default="tokens256_capswords_byteshuff",
+        default="tokens.128.fold",
         type=str,
         help="token set name",
     )

@@ -1,4 +1,4 @@
-"""Tokenizer for "shift_bucket" tokensets (tokens32_shift).
+"""Tokenizer for "shift_bucket" tokensets (tokens.32.shift).
 
 A shift_bucket set spells every byte with exactly one of
 

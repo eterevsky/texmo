@@ -29,7 +29,7 @@ def test_parse_fields_and_roundtrip():
     assert parse_model2(md.spec, Precision.FP32).spec == md.spec
 
     md = parse_model2("tokens.16.test.emb.8|dense.8.tanh", Precision.FP32)
-    assert md.codec.tokens_name == "tokens16_test"
+    assert md.codec.tokens_name == "tokens.16.test"
     assert md.codec.npositions == 1
 
 
@@ -202,15 +202,12 @@ def test_bad_specs_rejected():
 
 def test_fold_tokenset_counts_frequency_weights():
     md = parse_model2("tokens.32.fold.emb.8|rnn.8.tanh", Precision.FP32)
-    plain = parse_model2(
-        "tokens.32.raw_bits4.emb.8|rnn.8.tanh", Precision.FP32)
-    # 64 = 32 head-token selections + 32 stored head frequencies
-    # (raised from 32 on 2026-07-29 to also price the selection, the
-    # same 1-per-choice charge hexbpe pays; DB weights migrated).
-    assert md.codec.num_weights == plain.codec.num_weights + 64
-    # Regression on the absolute figure: num_weights is part of a
-    # conf's fleet-wide identity. table 32*8 + scale 1 + 64 stored.
-    assert md.codec.num_weights == 321
+    # 64 extra = 32 head-token selections + 32 stored head
+    # frequencies (raised from 32 on 2026-07-29 to also price the
+    # selection, the same 1-per-choice charge hexbpe pays; DB
+    # weights migrated). Absolute pin -- num_weights is part of a
+    # conf's fleet-wide identity: table 32*8 + scale 1 + 64 stored.
+    assert md.codec.num_weights == 32 * 8 + 1 + 64 == 321
 
 
 def test_hexbpe_counts_its_stored_corpus_knowledge():
@@ -225,7 +222,7 @@ def test_missing_tokenset_raises_rather_than_guessing():
     # A silent 0 would give the same spec different weight counts on
     # machines with and without the tokenset -- forking conf identity.
     md = parse_model2("tokens.32.nosuchset.emb.8|rnn.8.tanh", Precision.FP32)
-    with pytest.raises(RuntimeError, match="tokens32_nosuchset"):
+    with pytest.raises(RuntimeError, match=r"tokens\.32\.nosuchset"):
         md.codec.num_weights
 
 

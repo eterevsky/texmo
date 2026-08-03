@@ -15,7 +15,7 @@ from texmo.tokens.tokenset import TokenSet
 
 _HERE = os.path.dirname(__file__)
 _TOKENSET = os.path.join(
-    _HERE, "..", "..", "tokens", "tokens256000_gemma.json")
+    _HERE, "..", "..", "tokens", "tokens.256000.gemma.json")
 _FIXTURES = os.path.join(_HERE, "testdata", "gemma_parity.json")
 
 

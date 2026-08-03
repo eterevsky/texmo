@@ -173,7 +173,7 @@ def test_bm_step_matches_forward():
 
 def test_tokens_oh_parses_and_encodes():
     md = parse_model2("tokens.16.test.oh|dense.4.tanh", Precision.FP32)
-    assert md.input.tokens_name == "tokens16_test"
+    assert md.input.tokens_name == "tokens.16.test"
     assert md.input.size == 16
     assert md.input.is_valid()
     assert md.input.neighbors(4) == ("tokens.16.test.emb.4",)
@@ -202,18 +202,15 @@ def test_emb_specs_dispatch_to_embedding_codec():
 
 def test_fold_tokenset_counts_frequency_weights():
     md = parse_model2("tokens.32.fold.oh|dense.4.tanh", Precision.FP32)
-    plain = parse_model2(
-        "tokens.32.raw_bits4.oh|dense.4.tanh", Precision.FP32)
-    # 64 = 32 head-token selections + 32 stored head frequencies
-    # (raised from 32 on 2026-07-29 to also price the selection, the
-    # same 1-per-choice charge hexbpe pays; DB weights migrated).
-    assert md.codec.num_weights == plain.codec.num_weights + 64
+    # 64 extra = 32 head-token selections + 32 stored head
+    # frequencies (raised from 32 on 2026-07-29 to also price the
+    # selection, the same 1-per-choice charge hexbpe pays; DB
+    # weights migrated). Absolute pin -- num_weights is part of a
+    # conf's fleet-wide identity: head (32*4 + 32) + 64 stored.
+    assert md.codec.num_weights == (32 * 4 + 32) + 64 == 224
     # The stored numbers cost no multiplies (they only price the
-    # eval loss).
-    assert md.codec.num_mults == plain.codec.num_mults
-    # Regression on the absolute figure: num_weights is part of a
-    # conf's fleet-wide identity. head (32*4 + 32) + 64 stored.
-    assert md.codec.num_weights == 224
+    # eval loss): num_mults counts just the head.
+    assert md.codec.num_mults == 32 * 4 + 32
 
 
 def test_hexbpe_counts_its_stored_corpus_knowledge():
@@ -260,13 +257,12 @@ def test_hexbpe_chain_is_symmetric():
 
 def test_shift64_counts_selections_and_pairs():
     md = parse_model2("tokens.64.shift.oh|dense.4.tanh", Precision.FP32)
-    plain = parse_model2(
-        "tokens.64.raw_byteshuff.oh|dense.4.tanh", Precision.FP32)
-    # 95 = 62 byte-token selections + 33 stored shift pairs (26
-    # capitals, tab, six symbols) at 1 weight per choice -- the
+    # 95 extra = 62 byte-token selections + 33 stored shift pairs
+    # (26 capitals, tab, six symbols) at 1 weight per choice -- the
     # tokens.32.shift convention, recharged 2026-07-31 from the flat
     # 64. Markers and hex-escape spellings are structural and free.
-    assert md.codec.num_weights == plain.codec.num_weights + 95
+    # Absolute pin: head (64*4 + 64) + 95 stored.
+    assert md.codec.num_weights == (64 * 4 + 64) + 95
 
 
 def test_shift64_bridges_hexbpe64_and_shift32():
@@ -306,14 +302,13 @@ def test_shift32_sits_between_the_32_token_incumbents():
 
 def test_shift32_counts_its_selections_and_pairs():
     md = parse_model2("tokens.32.shift.oh|dense.4.tanh", Precision.FP32)
-    plain = parse_model2(
-        "tokens.32.raw_bits4.oh|dense.4.tanh", Precision.FP32)
-    # 58 = 29 token selections + 29 stored shift pairs; the two
-    # uniform buckets store nothing.
-    assert md.codec.num_weights == plain.codec.num_weights + 58
+    # 58 extra = 29 token selections + 29 stored shift pairs; the
+    # two uniform buckets store nothing. Absolute pin: head
+    # (32*4 + 32) + 58 stored.
+    assert md.codec.num_weights == (32 * 4 + 32) + 58
     # The stored numbers cost no multiplies (they only price the
-    # eval loss).
-    assert md.codec.num_mults == plain.codec.num_mults
+    # eval loss): num_mults counts just the head.
+    assert md.codec.num_mults == 32 * 4 + 32
     # Regression on the absolute figure: num_weights is part of a
     # conf's fleet-wide identity. head (32*4 + 32) + 58 stored.
     assert md.codec.num_weights == 32 * 4 + 32 + 58

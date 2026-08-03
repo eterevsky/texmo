@@ -9,9 +9,10 @@ from .shift_bucket_tokenizer import ShiftBucketTokenizer
 from .tokenizer import Tokenizer
 
 
-def test_spec_form_and_file_form_resolve_to_the_same_tokenizer():
-    # `tokens.32.hexbpe` is how specs (and humans at the CLI) write
-    # it; `tokens32_hexbpe` is the file basename the codecs pass.
+def test_spec_form_and_legacy_form_resolve_to_the_same_tokenizer():
+    # `tokens.32.hexbpe` is the canonical name AND the file basename
+    # (since 2026-08-03); `tokens32_hexbpe` is the pre-rename file
+    # convention, still accepted from old callers and CLIs.
     a = get_tokenizer("tokens.32.hexbpe")
     b = get_tokenizer("tokens32_hexbpe")
     # The sampler default for hexbpe sets is the generic DP tokenizer
@@ -38,11 +39,16 @@ def test_type_routes_to_the_matching_tokenizer_class():
     assert isinstance(get_tokenizer("tokens.64.shift"), Tokenizer)
 
 
-def test_normalize_leaves_other_names_alone():
-    for name in ("bits.4", "bytes", "tokens32_hexbpe",
+def test_normalize_canonicalizes_to_the_spec_form():
+    # Legacy underscore names map to the dotted spec form...
+    assert _normalize_name("tokens32_hexbpe") == "tokens.32.hexbpe"
+    assert _normalize_name("tokens256000_gemma") == "tokens.256000.gemma"
+    assert _normalize_name("tokens64_raw_byteshuff") == (
+        "tokens.64.raw_byteshuff")
+    # ...and everything else passes through untouched.
+    for name in ("bits.4", "bytes", "tokens.32.fold",
                  "tokens.64.shift.extra"):
         assert _normalize_name(name) == name
-    assert _normalize_name("tokens.256000.gemma") == "tokens256000_gemma"
 
 
 def test_missing_set_returns_none_and_is_not_cached():

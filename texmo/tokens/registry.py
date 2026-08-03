@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 
 from .bits_tokenizer import (
     BitsTokenizer1,
@@ -38,14 +39,18 @@ _TOKENIZERS['bytes'] = _TOKENIZERS['bits.8']
 _TOKENS_DIR = None
 
 
+_LEGACY_NAME = re.compile(r"tokens(\d+)_([a-z0-9_]+)$")
+
+
 def _normalize_name(name: str) -> str:
-    """Accept the spec form of a tokenset name alongside the file
-    basename: `tokens.32.hexbpe` (how specs and humans write it) and
-    `tokens32_hexbpe` (the file name, what the codecs pass) resolve to
-    the same tokenizer."""
-    parts = name.split(".")
-    if len(parts) == 3 and parts[0] == "tokens" and parts[1].isdigit():
-        return f"tokens{parts[1]}_{parts[2]}"
+    """Canonicalize a tokenset name to the spec form, which since
+    2026-08-03 is also the file basename: `tokens.32.hexbpe` maps to
+    `tokens/tokens.32.hexbpe.json`. The legacy underscore form
+    (`tokens32_hexbpe`, the pre-rename file convention) is still
+    accepted from old callers and CLIs."""
+    m = _LEGACY_NAME.match(name)
+    if m:
+        return f"tokens.{m.group(1)}.{m.group(2)}"
     return name
 
 

@@ -54,7 +54,7 @@ def tokenset_extra_weights(ntokens: int, variation: str | None) -> int:
     """
     if variation is None:
         return 0
-    name = f'tokens{ntokens}_{variation}'
+    name = f'tokens.{ntokens}.{variation}'
     extra = _EXTRA_WEIGHTS.get(name)
     if extra is not None:
         return extra

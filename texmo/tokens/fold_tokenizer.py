@@ -10,7 +10,7 @@ class FoldTokenizer(object):
     Every byte maps to exactly one token, so tokenization is a table
     lookup; untokenization prints each group's head character. This
     class exists for LOSSY sets only — a set that instead encodes
-    rare bytes with marker/escape token sequences (tokens64_shift)
+    rare bytes with marker/escape token sequences (tokens.64.shift)
     is lossless and just an ordinary `Tokenizer` set.
 
     The information the fold destroys is priced by the per-byte

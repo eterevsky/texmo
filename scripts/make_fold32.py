@@ -1,4 +1,4 @@
-"""Generate tokens32_fold.json: a fold (forgetting) 32-token set
+"""Generate tokens.32.fold.json: a fold (forgetting) 32-token set
 with head-character frequency accounting (see docs/io.md, "Fold
 tokensets").
 
@@ -9,7 +9,7 @@ the tokenset JSON.
 
 Usage:
     uv run python scripts/make_fold32.py freq.txt \
-        tokens/tokens32_fold.json
+        tokens/tokens.32.fold.json
 
 Without the output path it just prints the analysis, including the
 comparison of the two underscore-placement variants."""

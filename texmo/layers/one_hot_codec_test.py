@@ -130,7 +130,8 @@ def test_input_neighbors_ladder():
     assert md.input.neighbors(8) == (
         "bits.1+bp", "bits.4.oh+bp", "bits.2.emb.8")
     md = parse_model2("bytes|dense.8.gelu", Precision.FP32)
-    assert md.input.neighbors(8) == ("bits.4.oh+bp", "bytes.emb.8")
+    assert md.input.neighbors(8) == (
+        "bits.4.oh+bp", "tokens.128.fold.oh", "bytes.emb.8")
     # bits.1+bm is retired: no incoming edges, but its own outgoing
     # edge remains as a migration bridge for the DB population.
     md = parse_model2("bits.1+bm|dense.8.gelu", Precision.FP32)
@@ -275,10 +276,10 @@ def test_shift64_bridges_hexbpe64_and_shift32():
     md = parse_model2("tokens.64.shift.oh|rnn.4.tanh", Precision.FP32)
     assert md.input.neighbors(4) == (
         "tokens.64.hexbpe.oh", "tokens.32.shift.oh",
-        "tokens.64.shift.emb.4")
+        "tokens.128.fold.oh", "tokens.64.shift.emb.4")
     md = parse_model2("tokens.64.hexbpe.oh|rnn.4.tanh", Precision.FP32)
     assert "tokens.64.shift.oh" in md.input.neighbors(4)
-    # Only hexbpe-64 and shift-32 reach the 64-token shift rung.
+    # Only hexbpe-64, shift-32 and fold-128 reach the shift-64 rung.
     for spec in ("bytes", "bits.1+bp", "bits.2.oh+bp", "bits.4.oh+bp",
                  "tokens.32.fold.oh", "tokens.32.hexbpe.oh",
                  "tokens.128.hexbpe.oh", "tokens.256.hexbpe.oh"):
@@ -317,3 +318,18 @@ def test_shift32_counts_its_selections_and_pairs():
     # conf's fleet-wide identity. head (32*4 + 32) + 58 stored.
     assert md.codec.num_weights == 32 * 4 + 32 + 58
     assert md.codec.num_weights == 218
+
+
+def test_fold128_bridges_shift64_bytes_and_hexbpe128():
+    """fold-128 (2026-08-03): 127 top raw bytes + uniform catch-all.
+    Borders shift-64 below, bytes above, hexbpe-128 across."""
+    md = parse_model2("tokens.128.fold.oh|rnn.4.tanh", Precision.FP32)
+    assert md.input.is_valid()
+    assert md.input.neighbors(4) == (
+        "tokens.64.shift.oh", "bytes", "tokens.128.hexbpe.oh",
+        "tokens.128.fold.emb.4")
+    md = parse_model2("tokens.128.hexbpe.oh|rnn.4.tanh", Precision.FP32)
+    assert "tokens.128.fold.oh" in md.input.neighbors(4)
+    # 127 selection weights; the uniform bucket stores nothing.
+    md = parse_model2("tokens.128.fold.oh|dense.4.tanh", Precision.FP32)
+    assert md.codec.num_weights == 128 * 4 + 128 + 127

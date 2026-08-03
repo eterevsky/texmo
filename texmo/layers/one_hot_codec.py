@@ -49,7 +49,7 @@ _VALID_INPUTS = frozenset(
 # as a migration bridge for the DB population, like the retired relu
 # activations.
 _INPUT_NEIGHBORS = {
-    'bytes': ('bits.4.oh+bp',),
+    'bytes': ('bits.4.oh+bp', 'tokens.128.fold.oh'),
     'bits.1+bm': ('bits.1+bp',),
     'bits.1+bp': ('bits.2.oh+bp',),
     'bits.2.oh+bp': ('bits.1+bp', 'bits.4.oh+bp'),
@@ -65,8 +65,15 @@ _INPUT_NEIGHBORS = {
                             'tokens.64.hexbpe.oh', 'tokens.32.shift.oh'),
     'tokens.64.hexbpe.oh': ('tokens.32.hexbpe.oh', 'tokens.128.hexbpe.oh',
                             'tokens.64.shift.oh'),
-    'tokens.128.hexbpe.oh': ('tokens.64.hexbpe.oh', 'tokens.256.hexbpe.oh'),
+    'tokens.128.hexbpe.oh': ('tokens.64.hexbpe.oh', 'tokens.256.hexbpe.oh',
+                             'tokens.128.fold.oh'),
     'tokens.256.hexbpe.oh': ('tokens.128.hexbpe.oh',),
+    # fold-128 (2026-08-03): the simplest lossy rung -- 127 top raw
+    # bytes + uniform catch-all, 1 token/byte. Borders its size
+    # neighbor below (shift-64), its lossless rival (hexbpe-128) and
+    # the full byte alphabet above.
+    'tokens.128.fold.oh': ('tokens.64.shift.oh', 'bytes',
+                           'tokens.128.hexbpe.oh'),
     # shift hangs off the hexbpe chain at its own size (retired
     # 2026-07-28, re-enabled 2026-07-29 after beating hexbpe-64 on
     # the frontier -- see search.RETIRED_INPUTS).
@@ -76,7 +83,8 @@ _INPUT_NEIGHBORS = {
     # the bit ladder reaches it through fold or hexbpe.
     'tokens.32.shift.oh': ('tokens.32.fold.oh', 'tokens.32.hexbpe.oh',
                            'tokens.64.shift.oh'),
-    'tokens.64.shift.oh': ('tokens.64.hexbpe.oh', 'tokens.32.shift.oh'),
+    'tokens.64.shift.oh': ('tokens.64.hexbpe.oh', 'tokens.32.shift.oh',
+                           'tokens.128.fold.oh'),
 }
 
 

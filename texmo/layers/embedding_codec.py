@@ -96,13 +96,23 @@ _TOKENS_EMB_BRIDGES = {
                      'tokens.32.shift'),
     (64, 'hexbpe'): ('tokens.32.hexbpe', 'tokens.128.hexbpe',
                      'tokens.64.shift'),
-    (128, 'hexbpe'): ('tokens.64.hexbpe', 'tokens.256.hexbpe'),
+    (128, 'hexbpe'): ('tokens.64.hexbpe', 'tokens.256.hexbpe',
+                      'tokens.128.fold'),
     (256, 'hexbpe'): ('tokens.128.hexbpe',),
     (32, 'shift'): ('tokens.32.fold', 'tokens.32.hexbpe',
                     'tokens.64.shift'),
-    (64, 'shift'): ('tokens.64.hexbpe', 'tokens.32.shift'),
+    (64, 'shift'): ('tokens.64.hexbpe', 'tokens.32.shift',
+                    'tokens.128.fold'),
+    # fold-128 (2026-08-03): the simplest lossy rung -- 127 top raw
+    # bytes + uniform catch-all, 1 token/byte. Borders its size
+    # neighbor below (shift-64), its lossless rival (hexbpe-128) and
+    # the full byte alphabet above.
+    (128, 'fold'): ('tokens.64.shift', 'bytes', 'tokens.128.hexbpe'),
 }
-_BITS_EMB_BRIDGES = {4: ('tokens.32.fold', 'tokens.32.hexbpe')}
+_BITS_EMB_BRIDGES = {
+    4: ('tokens.32.fold', 'tokens.32.hexbpe'),
+    8: ('tokens.128.fold',),
+}
 
 
 def _domain_spec(nbits: int, emb_size: int) -> str:

@@ -176,7 +176,8 @@ def test_input_neighbors_mode_swaps_and_domain_ladder():
     assert md.input.neighbors(4) == (
         "bits.2.oh+bp", "bits.1.emb.4", "bits.4.emb.4")
     md = parse_model2("bytes.emb.8|dense.8.tanh", Precision.FP32)
-    assert md.input.neighbors(8) == ("bytes", "bits.4.emb.8")
+    assert md.input.neighbors(8) == (
+        "bytes", "bits.4.emb.8", "tokens.128.fold.emb.8")
     md = parse_model2("bits.1.emb.4|rnn.4.tanh", Precision.FP32)
     assert md.input.neighbors(4) == ("bits.1+bp", "bits.2.emb.4")
     md = parse_model2("tokens.16.test.emb.8|dense.8.tanh", Precision.FP32)
@@ -270,10 +271,10 @@ def test_shift64_emb_bridges_hexbpe64_and_shift32():
     assert md.codec.is_valid()
     assert md.codec.neighbors(8) == (
         "tokens.64.shift.oh", "tokens.64.hexbpe.emb.8",
-        "tokens.32.shift.emb.8")
+        "tokens.32.shift.emb.8", "tokens.128.fold.emb.8")
     md = parse_model2("tokens.64.hexbpe.emb.8|rnn.8.tanh", Precision.FP32)
     assert "tokens.64.shift.emb.8" in md.codec.neighbors(8)
-    # Only hexbpe-64 and shift-32 reach the 64-token shift rung.
+    # Only hexbpe-64, shift-32 and fold-128 reach the shift-64 rung.
     for spec in ("bytes.emb.8", "bits.1.emb.8", "bits.2.emb.8",
                  "bits.4.emb.8", "tokens.32.fold.emb.8",
                  "tokens.32.hexbpe.emb.8",
@@ -305,3 +306,13 @@ def test_shift32_counts_its_selections_and_pairs():
     md = parse_model2("tokens.32.shift.emb.8|rnn.8.tanh", Precision.FP32)
     assert md.codec.num_weights == 32 * 8 + 1 + 58
     assert md.codec.num_weights == 315
+
+
+def test_fold128_emb_bridges_shift64_bytes_and_hexbpe128():
+    md = parse_model2("tokens.128.fold.emb.8|rnn.8.tanh", Precision.FP32)
+    assert md.codec.is_valid()
+    assert md.codec.neighbors(8) == (
+        "tokens.128.fold.oh", "tokens.64.shift.emb.8", "bytes.emb.8",
+        "tokens.128.hexbpe.emb.8")
+    # 127 selection weights; the uniform bucket stores nothing.
+    assert md.codec.num_weights == 128 * 8 + 1 + 127

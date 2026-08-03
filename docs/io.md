@@ -365,6 +365,22 @@ digits keep their *shape* (`1984` → four digit tokens), residual
 vs 64 weights — fold stays searchable regardless. Generator:
 `scripts/make_shift32.py` from the raw `freq.txt`.
 
+**fold-128** (2026-08-03, `tokens/tokens128_fold.json`,
+`tokens.128.fold`): the simplest possible lossy rung — the 127 most
+common **raw** bytes as singleton tokens plus one uniform
+catch-all, no processing at all, exactly one token per byte
+(`bytes_per_token = 1.0`). All letters, capitals and digits select
+naturally; the bucket's 129 values carry 0.11% of the stream, so
+the residual is a near-free 0.0076 b/B at `extra_weights = 127`
+(selections only). Its lossless rival at the same size is
+hexbpe-128 (190 weights, 1.469 raw B/token); the pair brackets the
+compression-vs-simplicity trade at 128 tokens the way shift-64 and
+hexbpe-64 do at 64. Generator: `scripts/make_bucket.py N
+--processing raw` (the raw mode of the bucket generator; it refuses
+to overwrite the curated `tokens32_fold.json` without --force).
+Edges: `tokens.64.shift <-> tokens.128.fold <-> bytes` and
+`tokens.128.fold <-> tokens.128.hexbpe`, both codec modes.
+
 Search-reachable (2026-07-28): the family hangs off the bit ladder
 at its nearest rung and forms its own chain —
 `bits.4.oh+bp <-> tokens.32.hexbpe.oh <-> tokens.64.hexbpe.oh <->

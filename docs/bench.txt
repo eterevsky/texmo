@@ -1,5 +1,6 @@
 GRU.256
 
+JAX + Windows + 5090 (winjax)  10.67s (41.7 ms/step)
 PyTorch + Windows + 5090  11.07s (43.4 ms/step)
 PyTorch + Windows + 4090  12.37s (48.5 ms/step)
 JAX + WSL + 5090  26.81s (105.2 ms/step)
@@ -18,7 +19,8 @@ New tests: disk vs RAM vs VRAM, gru.256 256x256 batches, 256 steps
 |                     | disk+mmap | disk+read |  ram   |   gpu  | gpu-seq |
 |---------------------|-----------|-----------|--------|--------|---------|
 | JAX + Linux + 4090  |  451.4    |   59.7    |   40.6 |   37.9 |   38.1  |
-| JAX + WSL + 5090    |  135.2    |   68.8    |   39.3 |   39.2 |   39.4  |
+| JAX + WSL + 5090    |  117.5    |   76.5    |   40.4 |   40.4 |   40.6  |
+| JAX + Win + 5090 wj |   69.1    |   59.4    |   35.7 |   35.5 |   35.9  |
 | JAX + Mac + M5 CPU  |  266.2    |  266.6    |  259.5 |  259.3 |         |
 | JAX + Windows + CPU |  454.8    |           |  430.7 |  752.2 |  490.0  |
 | JAX + RPi 5         | 3520.3    | 3438.1    | 3401.7 | 3398.6 | 3399.7  |

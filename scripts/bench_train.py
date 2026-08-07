@@ -34,6 +34,9 @@ import sys
 import time
 
 import numpy as np
+# torch before jax: winjax's PATH prepend otherwise breaks torch's
+# bundled cudnn resolution (see texmo/conftest.py).
+import torch  # noqa: F401
 
 # texmo is not an installed package; scripts/ must put the repo root
 # on the path itself.

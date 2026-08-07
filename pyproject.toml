@@ -14,16 +14,22 @@ dependencies = [
     "scipy>=1.17.1",
     "torch",
     # GPU JAX on x86_64 Linux (vast.ai-style hosts), CPU JAX everywhere
-    # else. ARM Linux (RPi) and macOS get the CPU build; JAX has no
-    # CUDA wheels for Windows. Pinned to 0.11 on every platform so
-    # the fleet runs one JAX version (the ceiling matches metaljax's
-    # jax<0.12 requirement -- without it non-mac platforms would
-    # drift ahead and fork the resolution).
+    # else. ARM Linux (RPi) and macOS get the CPU build; upstream JAX
+    # has no CUDA wheels for Windows (winjax below fills that gap).
+    # Pinned to 0.11 on every platform so the fleet runs one JAX
+    # version (the ceiling matches metaljax's jax<0.12 requirement --
+    # without it non-mac platforms would drift ahead and fork the
+    # resolution).
     "jax[cuda13]>=0.11,<0.12; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "jax[cpu]>=0.11,<0.12; sys_platform != 'linux' or platform_machine != 'x86_64'",
     # Metal backend for JAX on Apple GPUs (github.com/eterevsky/metaljax,
     # MLX-based) -- gives Mac clients a GPU option next to CPU JAX.
     "metaljax>=0.11.1; sys_platform == 'darwin'",
+    # Native Windows CUDA for JAX (github.com/eterevsky/winjax, PJRT
+    # plugin loader; auto-registers cuda on import -- set
+    # JAX_PLATFORMS=cpu to opt out). Same 0.12 ceiling as jax: winjax
+    # releases track the jax version they pin.
+    "winjax>=0.11,<0.12; sys_platform == 'win32'",
     "optax",
     "safetensors>=0.8.0",
 ]

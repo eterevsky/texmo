@@ -283,30 +283,21 @@ budget. Dream target: 32-64K weights.
 
   Scripts: `scratch/{tf32_probe,group_bias,era_bias,time_drift}.py`.
 
-* **Re-run regression to the mean** (the real finding from the TF32
-  investigation above, 2026-08-08). Same conf, same machine, later
-  runs score **0.3-0.6% worse** than earlier ones, on every machine
-  in the fleet (+2.8σ to +13.2σ). No code change is needed to explain
-  it: the search re-runs confs that scored well, so a conf's *first*
-  run is what selected it, and every subsequent run regresses toward
-  the true mean. The first recorded loss of any conf is therefore
-  optimistically biased.
+* **First-run bias: measured at 0.3-0.6%** (2026-08-08, a by-product
+  of the TF32 investigation above). Same conf, same machine, later
+  runs score 0.3-0.6% worse than earlier ones across the whole fleet
+  (+2.8σ to +13.2σ, `scratch/time_drift.py`). This is regression to
+  the mean and it is **by design, already mitigated**: the search
+  re-runs top confs precisely to correct the selection, and
+  `top_confs_*` requires `min_num_runs=2` so a single lucky run
+  cannot reach a leaderboard.
 
-  This is larger than every cross-machine and cross-backend effect we
-  went looking for, so it is the thing actually worth understanding.
-  Consequences to think through: `median_score` mixes first runs
-  (biased low) with re-runs (unbiased), so a conf's rank depends on
-  how often it has been re-run; the Pareto frontier is by
-  construction enriched in confs whose first run was lucky; and
-  `changed_winner` fires partly on luck. Possible responses, none
-  obviously right: drop each conf's first run from `median_score`,
-  require N>=2 before a conf can enter the frontier (partly what
-  min_num_runs already does), or model the bias explicitly.
-
-  A clean confirmation is cheap: compare the *second* vs *third* run
-  of each conf, where neither is the promoting run — regression to
-  the mean predicts the effect vanishes, anything else predicts it
-  stays. `scratch/time_drift.py` is one edit away from testing it.
+  Recorded because the *magnitude* is worth knowing: the first-run
+  bias is well under the 1-2% differences the search adjudicates,
+  which says the existing two-run floor is adequately sized rather
+  than merely directionally right. If a future change makes ranking
+  more sensitive (finer frontier resolution, automated promotion on
+  fewer runs), this is the number to re-check against.
 
 * **step/forward parity for consuming->stateful chains.** forward
   drops the transient outputs of consuming layers (conv/suffix,

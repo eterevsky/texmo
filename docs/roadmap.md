@@ -32,6 +32,37 @@ Given a parameter budget N and compute budget T, answer:
   ~1000-weight budgets, in-place adaptation may matter more than at
   scale.
 
+* **`bits.8.gen.X` — bitwise generative IO** (2026-08-08 idea). Not a
+  hidden layer but a fourth IO kind (see [`io.md`](io.md)), replacing
+  both ends of the model at once:
+  - **Input**: the byte as 8 raw bit values — width 8, no one-hot, no
+    embedding table.
+  - **Output**: the byte is generated bit by bit by a small recurrent
+    cell instead of a 256-way head:
+    `logit_n, state_n = output_layer(bit_{n-1}, state_{n-1}, h)`,
+    where `h` is the chain's last activation, `bit_{-1}` is 0.5 (or
+    the last bit of the previous byte), and `state_{-1}` is zeros.
+
+  The 8 conditional bit probabilities chain-rule into an exact
+  distribution over all 256 byte values, so this stays a lossless
+  whole-byte model: no residual charge, 1.0 bytes/token, none of the
+  sub-byte phase bookkeeping (`+bp`) that the bits.N kinds need.
+
+  The point is cost: both ends become `O(X)` instead of `O(256·X)`.
+  The head is the single largest parameter block in a small model —
+  the reason sub-byte inputs exist at all (io.md, "why sub-byte") —
+  and this removes it while keeping byte-level granularity. A
+  `bytes|dense.1.tanh` model spends 768 of its 769 weights on IO;
+  this kind should spend a small constant.
+
+  Open questions: X (the generator's state width) as a search
+  dimension and its neighbor edges; whether the generator sees `h` at
+  every bit or only at bit 0; step-mode cost (8 sequential mini-steps
+  per byte — cheap in weights, not in dispatches, which is exactly
+  where GPUs hurt us); and how it prices against the tied codec at
+  equal weight count, since that is the current answer to the same
+  problem.
+
 ### Candidates to revisit
 
 * **HGRN2** (Qin et al. 2024, "Hierarchically Gated Recurrent
@@ -166,6 +197,48 @@ budget. Dream target: 32-64K weights.
   distributed loss training is enough; no GPU refit benchmark, no
   timing-model outsourcing.
 
+* **Revisit: move loss + timing model training back to the server**
+  (2026-08-08). The decision above was made when the server host had
+  CPU-only JAX and a refit was a serious stall. That premise is gone:
+  native CUDA on Windows (winjax) makes local refits cheap, while the
+  distributed path costs a client slot per refit, a training-data
+  round trip, and a more complicated flow to reason about. Measure a
+  local refit first, then decide for the loss model and the timing
+  model independently.
+
+* **`texmo.py loss` is broken** (observed 2026-08-03). The offline
+  loss-predictor evaluation harness dies inside sklearn's
+  HistGradientBoosting binning: `ValueError: window shape cannot be
+  larger than input array shape`, thrown from numpy's sliding-window
+  machinery — i.e. numpy/sklearn version drift, not anything texmo
+  changed (it reproduces identically on a clean env and predates
+  winjax). Scope is limited to that harness and its sklearn
+  baselines; the server's distributed tree-predictor refits go
+  through `predict/loss_rnn.py` and are unaffected. Fix, or drop the
+  sklearn baselines if they have outlived their usefulness as a
+  reference point.
+
+* **Separate fp32 from tf32 in `Precision`** (measured 2026-08-08 on
+  the native-CUDA 5090). XLA defaults fp32 matmuls to **TF32** tensor
+  cores on Ampere+, so a run labelled `fp32` computes with a 10-bit
+  mantissa on CUDA and a 23-bit one on CPU. On bench_jax's GRU.256 at
+  a stable LR the two backends land 0.11% apart in loss (CUDA 4.8017
+  vs CPU 4.8072) and CUDA is not bit-reproducible run to run; forcing
+  `jax_default_matmul_precision=highest` reproduces the CPU value
+  exactly (4.8072, twice) at no measurable cost — 42.9 vs ~42
+  ms/step, because these models are dispatch-bound rather than
+  matmul-throughput-bound.
+
+  Two questions, in order. (1) Is there a *systematic* per-backend
+  bias in the results DB? Testable directly: confs that ran on both a
+  CPU system (pi5/m5/mini) and a CUDA one (4090/5060ti). 0.11% is
+  well under the 1-2% differences the search adjudicates, but it is a
+  bias, not noise. (2) If so — add a `tf32` member to `Precision` so
+  the DB records what actually ran, or force `highest` fleet-wide and
+  keep a single honest `fp32`? The first forks conf identity across
+  every existing row; the second is free at today's model sizes but
+  may stop being free as they grow.
+
 * **step/forward parity for consuming->stateful chains.** forward
   drops the transient outputs of consuming layers (conv/suffix,
   valid-trim), but step ticks all layers synchronously, so during the
@@ -185,6 +258,26 @@ budget. Dream target: 32-64K weights.
       "\n\n" -- removes the max-entropy padding altogether, making
       step == forward trivial and the model contract match how
       pretrained LMs (BOS) already work.
+
+* **Weighted multi-template search** (2026-08-08 idea). Run several
+  templates concurrently, each with a share of the run budget — e.g.
+  10% to transformer-shaped confs, 10% to a newly implemented layer
+  so it gets measured properly, the rest to the unrestricted main
+  search. Today the server holds exactly one `Template` and every
+  `select_conf` draws from it, so a narrow interest can only be
+  pursued by narrowing the whole search.
+
+  Needs: a weighted template list (config + CLI, ideally editable
+  live like the current template is); a draw at selection time;
+  accounting so the shares hold *over time* rather than per request
+  (a 10% template must not starve when its confs are slow, nor
+  monopolize when they are fast); and web-interface work — per-
+  template frontier views and share display/editing.
+
+  Motivation: a new layer currently has to compete from cold against
+  a mature general population, so it can be starved out before it is
+  ever fairly measured — the search is efficient at exploitation and
+  we keep paying for that at exploration time.
 
 * **Split `is_valid` into invalid vs search-ineligible.** Today one
   flag conflates "this model cannot run / makes no sense" with "this

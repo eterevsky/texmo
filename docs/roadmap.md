@@ -55,8 +55,12 @@ Given a parameter budget N and compute budget T, answer:
   `bytes|dense.1.tanh` model spends 768 of its 769 weights on IO;
   this kind should spend a small constant.
 
-  Open questions: X (the generator's state width) as a search
-  dimension and its neighbor edges; whether the generator sees `h` at
+  **X is the size of the generator's recurrent state** (`state_n`) —
+  the kind's only metaparameter, and a search dimension like any
+  other width.
+
+  Open questions: X's neighbor edges (2x/half, and what it bridges
+  to); whether the generator sees `h` at
   every bit or only at bit 0; step-mode cost (8 sequential mini-steps
   per byte — cheap in weights, not in dispatches, which is exactly
   where GPUs hurt us); and how it prices against the tied codec at
@@ -218,26 +222,91 @@ budget. Dream target: 32-64K weights.
   sklearn baselines if they have outlived their usefulness as a
   reference point.
 
-* **Separate fp32 from tf32 in `Precision`** (measured 2026-08-08 on
-  the native-CUDA 5090). XLA defaults fp32 matmuls to **TF32** tensor
+* **fp32 vs tf32 — investigated 2026-08-08, no action needed.**
+  XLA defaults fp32 matmuls to **TF32** tensor
   cores on Ampere+, so a run labelled `fp32` computes with a 10-bit
   mantissa on CUDA and a 23-bit one on CPU. On bench_jax's GRU.256 at
   a stable LR the two backends land 0.11% apart in loss (CUDA 4.8017
   vs CPU 4.8072) and CUDA is not bit-reproducible run to run; forcing
   `jax_default_matmul_precision=highest` reproduces the CPU value
-  exactly (4.8072, twice) at no measurable cost — 42.9 vs ~42
-  ms/step, because these models are dispatch-bound rather than
-  matmul-throughput-bound.
+  exactly (4.8072, twice).
 
-  Two questions, in order. (1) Is there a *systematic* per-backend
-  bias in the results DB? Testable directly: confs that ran on both a
-  CPU system (pi5/m5/mini) and a CUDA one (4090/5060ti). 0.11% is
-  well under the 1-2% differences the search adjudicates, but it is a
-  bias, not noise. (2) If so — add a `tf32` member to `Precision` so
-  the DB records what actually ran, or force `highest` fleet-wide and
-  keep a single honest `fp32`? The first forks conf identity across
-  every existing row; the second is free at today's model sizes but
-  may stop being free as they grow.
+  **The verdict: the DB shows no TF32 bias worth acting on — don't
+  split `Precision`, and don't force `highest` either.** First, TF32
+  is confirmed as the default on *every* CUDA machine in the fleet,
+  not just the new one (`scratch/tf32_probe.py`:
+  4090/Linux 2.92e-4 and 5090/Windows 2.93e-4 relative error vs
+  HIGHEST; CPU exactly 0). So every 4090/5060ti row in the DB is TF32
+  and every pi5/m5/mini row is true fp32, all labelled `fp32`.
+
+  Then the paired test over confs that ran in both groups (35,464
+  pairs, per-conf medians, diverged runs excluded):
+
+  | comparison | arithmetic | median shift | sign test |
+  | --- | --- | ---: | ---: |
+  | CUDA vs CPU | tf32 vs fp32 | +0.028% | +4.8σ |
+  | 4090 vs 5060ti | **both tf32** | +0.379% | +15.4σ |
+  | macs vs pi5 | **both fp32** | +0.023% | +5.4σ |
+  | m5 vs mini | **both fp32** | +0.004% | +0.9σ |
+
+  Two same-arithmetic CPU machines reproduce a +0.02%/+5σ signature
+  of their own, and the 5060ti (also TF32) sits 0.38% from the 4090 —
+  13x the CPU/CUDA gap — so pooling CUDA machines is not safe. With
+  the 4090 alone the picture is cleaner: it sits +0.054/+0.078/+0.077%
+  above pi5/m5/mini respectively (7.5-10σ each) while the two Macs
+  agree to +0.004% (0.9σ).
+
+  **But calendar-era effects dwarf all of it.** Same conf, same
+  machine, later runs score 0.3-0.6% worse on *every* machine
+  (`scratch/time_drift.py`) — because the search re-runs confs that
+  scored well, so a conf's first run is selected for being lucky and
+  every later run regresses toward the mean. Controlling for era
+  halves the 4090 effect to **+0.033%**, and it survives in only one
+  era of four (+0.006%, +0.029%, −0.008%, +0.068%). That residue is
+  unexplained and is *not* claimed as a TF32 measurement.
+
+  TF32 also does not destabilize training — CPU diverged slightly
+  *more* (2.89% vs 2.43% of runs, McNemar z = −9.1). Everything here
+  is 1-2 orders below the 1-2% differences the search adjudicates and
+  ~100x below the per-conf seed noise (sd 3.5%).
+
+  And forcing `highest` is not free anyway. Measured on the 5090
+  (2026-08-08): **+4.1%** geomean over the benchmark suite at search
+  sizes (5-3000 weights, 60 entries — slower on only 28 of them, so
+  near noise), but **+25-40%** on bench_jax's GRU.256 (ram 36.5 ->
+  49.5, gpu 36.9 -> 51.7 ms/step). Exactly the
+  dispatch-bound/matmul-bound split: tiny models never feed the
+  tensor cores, so TF32 buys them nothing and costs them nothing —
+  but the moment models get big enough for TF32 to matter for loss,
+  it is also big enough to matter for speed. Revisit only if the
+  chatbot program pushes training past ~100k weights.
+
+  Scripts: `scratch/{tf32_probe,group_bias,era_bias,time_drift}.py`.
+
+* **Re-run regression to the mean** (the real finding from the TF32
+  investigation above, 2026-08-08). Same conf, same machine, later
+  runs score **0.3-0.6% worse** than earlier ones, on every machine
+  in the fleet (+2.8σ to +13.2σ). No code change is needed to explain
+  it: the search re-runs confs that scored well, so a conf's *first*
+  run is what selected it, and every subsequent run regresses toward
+  the true mean. The first recorded loss of any conf is therefore
+  optimistically biased.
+
+  This is larger than every cross-machine and cross-backend effect we
+  went looking for, so it is the thing actually worth understanding.
+  Consequences to think through: `median_score` mixes first runs
+  (biased low) with re-runs (unbiased), so a conf's rank depends on
+  how often it has been re-run; the Pareto frontier is by
+  construction enriched in confs whose first run was lucky; and
+  `changed_winner` fires partly on luck. Possible responses, none
+  obviously right: drop each conf's first run from `median_score`,
+  require N>=2 before a conf can enter the frontier (partly what
+  min_num_runs already does), or model the bias explicitly.
+
+  A clean confirmation is cheap: compare the *second* vs *third* run
+  of each conf, where neither is the promoting run — regression to
+  the mean predicts the effect vanishes, anything else predicts it
+  stays. `scratch/time_drift.py` is one edit away from testing it.
 
 * **step/forward parity for consuming->stateful chains.** forward
   drops the transient outputs of consuming layers (conv/suffix,

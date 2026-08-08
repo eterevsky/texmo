@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-import torch
 
 from texmo.layers.lstm import LstmDef
 
@@ -13,64 +12,10 @@ def test_def_properties():
     assert d.is_valid()
     # Single-bias per gate (matches LstmJax).
     assert d.num_weights == 4 * 32 * (16 + 32) + 4 * 32
-    # Torch's nn.LSTM has 4 extra bias vectors.
-    module = d.build_module()
-    assert sum(p.numel() for p in module.parameters()) == d.num_weights + 4 * 32
 
 
 def test_non_power2_invalid():
     assert not LstmDef(13, input_size=8).is_valid()
-
-
-def test_step():
-    d = LstmDef(8, input_size=4)
-    module = d.build_module()
-    state = module.init_state()
-    assert isinstance(state, tuple)
-    h, c = state
-    assert h.shape == (8,)
-    assert c.shape == (8,)
-    assert h.sum() == 0
-    assert c.sum() == 0
-
-    new_state, out = module.step(state, torch.randn(4))
-    new_h, new_c = new_state
-    assert new_h.shape == (8,)
-    assert new_c.shape == (8,)
-    assert out.shape == (8,)
-    assert torch.equal(out, new_h)
-
-
-def test_forward_shape():
-    d = LstmDef(16, input_size=8)
-    module = d.build_module()
-    inputs = torch.randn(2, 5, 8)
-    out = module(inputs)
-    assert out.shape == (2, 5, 16)
-
-
-def test_forward_matches_step():
-    d = LstmDef(8, input_size=4)
-    module = d.build_module()
-    module.eval()
-
-    inputs = torch.randn(1, 6, 4)
-    with torch.no_grad():
-        fwd_out = module(inputs)
-        state = module.init_state()
-        for t in range(inputs.shape[1]):
-            state, step_out = module.step(state, inputs[0, t])
-            assert torch.allclose(fwd_out[0, t], step_out, atol=1e-5)
-
-
-def test_state_dict_roundtrip():
-    d = LstmDef(16, input_size=8)
-    m1 = d.build_module()
-    m2 = d.build_module(state_dict=m1.state_dict())
-
-    inputs = torch.randn(2, 4, 8)
-    with torch.no_grad():
-        assert torch.equal(m1(inputs), m2(inputs))
 
 
 def test_neighbors():
@@ -133,6 +78,10 @@ def test_jax_forward_and_step():
     for t in range(inputs.shape[1]):
         state, out = layer.step(weights, state, inputs[0, t])
         np.testing.assert_allclose(fwd[0, t], out, atol=1e-5)
+        # The emitted value is h, not the cell state c.
+        h, c = state
+        np.testing.assert_array_equal(out, h)
+        assert c.shape == (8,)
 
 
 def test_jax_weight_count_matches_def():

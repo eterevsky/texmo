@@ -25,8 +25,6 @@ weights load directly:
     rolling K/V buffer), like an RNN's hidden state, not in padding.
   - Scores scaled by head_dim**-0.5; softmax in float32.
   - Bias on the output projection only (q/k/v are bias-free).
-
-JAX only, like the other Griffin layers.
 """
 import jax
 import jax.numpy as jnp

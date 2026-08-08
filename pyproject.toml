@@ -12,7 +12,6 @@ dependencies = [
     "requests>=2.32.5",
     "scikit-learn>=1.5",
     "scipy>=1.17.1",
-    "torch",
     # GPU JAX on x86_64 Linux (vast.ai-style hosts), CPU JAX everywhere
     # else. ARM Linux (RPi) and macOS get the CPU build; upstream JAX
     # has no CUDA wheels for Windows (winjax below fills that gap).
@@ -32,18 +31,6 @@ dependencies = [
     "winjax>=0.11,<0.12; sys_platform == 'win32'",
     "optax",
     "safetensors>=0.8.0",
-]
-
-[[tool.uv.index]]
-name = "pytorch-cu130"
-url = "https://download.pytorch.org/whl/cu130"
-explicit = true
-
-[tool.uv.sources]
-# CUDA torch on Windows + x86_64 Linux. macOS and ARM Linux fall
-# back to the default PyPI torch (CPU on Linux, MPS on macOS).
-torch = [
-    { index = "pytorch-cu130", marker = "sys_platform == 'win32' or (sys_platform == 'linux' and platform_machine == 'x86_64')" },
 ]
 
 [tool.pytest.ini_options]

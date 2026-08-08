@@ -1,7 +1,6 @@
 import enum
 
 import jax.numpy as jnp
-import torch
 
 
 class Precision(enum.StrEnum):
@@ -9,18 +8,6 @@ class Precision(enum.StrEnum):
     FP32 = enum.auto()
     FP16 = enum.auto()
     BF16 = enum.auto()
-
-    @property
-    def dtype(self) -> torch.dtype:
-        match self:
-            case Precision.FP64:
-                return torch.float64
-            case Precision.FP32:
-                return torch.float32
-            case Precision.FP16:
-                return torch.float16
-            case Precision.BF16:
-                return torch.bfloat16
 
     @property
     def jax_dtype(self) -> jnp.dtype:

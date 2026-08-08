@@ -64,7 +64,7 @@ def train(args: argparse.Namespace):
     decay = parse_lr(args.decay)
 
     if args.model_path is not None:
-        raise NotImplementedError("Loading pre-trained models not yet supported in PyTorch manager")
+        raise NotImplementedError("Loading pre-trained models is not supported yet")
     else:
         if args.cosine and decay != 1.0:
             raise SystemExit(
@@ -85,7 +85,6 @@ def train(args: argparse.Namespace):
             conf=conf,
             system=args.system,
             dataset=train_set,
-            device=args.device,
             test_sample_len=args.test_sample_len,
             test_batch=args.test_batch,
         )
@@ -292,15 +291,9 @@ def init_args(parser: argparse.ArgumentParser, config):
     )
 
     parser.add_argument(
-        "--device",
-        type=str,
-        default=config.TORCH_DEVICE,
-        help=f"PyTorch device: 'cuda', 'cpu', or 'auto' (default: '{config.TORCH_DEVICE}')",
-    )
-    parser.add_argument(
         "--backend",
         type=str,
-        choices=["torch", "jax"],
+        choices=["jax"],
         default=config.BACKEND,
         help=f"training backend (default: '{config.BACKEND}')",
     )

@@ -226,4 +226,6 @@ anywhere in the IO. Exact.
 2. Embedded bit-chunks class + the mode-swap neighbors — search
    facing; separate commits.
 3. Legacy Model/ModelDef retirement — done 2026-07 (the JAX-side
-   legacy is deleted; per-layer torch Modules stay).
+   legacy is deleted). The per-layer torch Modules that outlived it
+   were removed with the rest of the torch backend on 2026-08-04; see
+   [`backends.md`](backends.md).

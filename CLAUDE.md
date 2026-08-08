@@ -35,7 +35,7 @@ Detailed docs live in [`docs/`](docs/):
 - [`loss_rnn_experiments.md`](docs/loss_rnn_experiments.md) — flat-
   RNN-era sweep results (best configs, null results, open ideas).
 - [`backends.md`](docs/backends.md) — PyTorch vs JAX trade-offs and why
-  JAX is the training runtime (the torch full-model backend is parked).
+  JAX is the training runtime (the torch backend was removed 2026-08).
 - [`search.md`](docs/search.md) — distributed architecture search:
   server, client, result DB, neighbor generation.
 - [`decay_and_checkpoints.md`](docs/decay_and_checkpoints.md) — design
@@ -53,16 +53,15 @@ Detailed docs live in [`docs/`](docs/):
 
 ### Layer pattern
 
-Each layer module contains three classes:
+Each layer module contains two classes:
 
 1. `{Name}Def(LayerDef)` — backend-agnostic descriptor (spec parsing,
    `num_weights`, `is_valid`, `neighbors`).
-2. `{Name}Module(LayerModule)` — PyTorch `nn.Module` implementation.
-3. `{Name}Jax(LayerJax)` — JAX functional implementation (weights
+2. `{Name}Jax(LayerJax)` — JAX functional implementation (weights
    passed explicitly).
 
-`{Name}Def` exposes both `build_module()` and `build_jax(dtype)`. New
-layers are registered in `spec_parser.py:_build_layer_def()`.
+`{Name}Def` exposes `build_jax(dtype)`. New layers are registered in
+`spec_parser.py:_build_layer_def()`.
 
 ### Style
 

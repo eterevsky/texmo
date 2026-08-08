@@ -1,152 +1,15 @@
 import jax
 import jax.numpy as jnp
-import torch
-import torch.nn as nn
-from torch import Tensor
 
 from ..common import is_power2_int
-from ..layer import LayerDef, LayerJax, LayerModule, LayerState
+from ..layer import LayerDef, LayerJax
 from ..layer_jax import LayerWeights, xavier_uniform
-
-
-class GruModule(LayerModule):
-    """Standard GRU backed by nn.GRU (cuDNN-optimized)."""
-
-    def __init__(self, input_size: int, size: int):
-        super().__init__()
-        self.size = size
-        self.gru = nn.GRU(input_size, size, batch_first=True)
-
-    def init_state(
-        self,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
-    ) -> LayerState:
-        return torch.zeros(self.size, device=device, dtype=dtype)
-
-    def step(
-        self, state: LayerState, input: Tensor
-    ) -> tuple[LayerState, Tensor]:
-        _, h = self.gru(
-            input.flatten().unsqueeze(0).unsqueeze(0),
-            state.unsqueeze(0).unsqueeze(0),
-        )
-        new_state = h.squeeze(0).squeeze(0)
-        return new_state, new_state
-
-    def forward(self, inputs: Tensor) -> Tensor:
-        # inputs: (batch, seq_len, input_size)
-        output, _ = self.gru(inputs)
-        return output
-
-
-class MgruModule(LayerModule):
-    """GRU variant with a single gate (update = 1 - forget).
-
-        f = sigmoid(Wf @ [x, h] + bf)
-        hc = tanh(Wh @ [x, f*h] + bh)
-        h = (1-f) * h + f * hc
-    """
-
-    def __init__(self, input_size: int, size: int):
-        super().__init__()
-        self.size = size
-        # Split the input and hidden contributions so we can precompute the
-        # input part for all timesteps at once in forward(). Biases live on
-        # the input-side linears to avoid double-counting.
-        self.wf_x = nn.Linear(input_size, size)
-        self.wf_h = nn.Linear(size, size, bias=False)
-        self.wh_x = nn.Linear(input_size, size)
-        self.wh_h = nn.Linear(size, size, bias=False)
-
-    def init_state(
-        self,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
-    ) -> LayerState:
-        return torch.zeros(self.size, device=device, dtype=dtype)
-
-    def step(
-        self, state: LayerState, input: Tensor
-    ) -> tuple[LayerState, Tensor]:
-        x = input.flatten()
-        f = torch.sigmoid(self.wf_x(x) + self.wf_h(state))
-        hc = torch.tanh(self.wh_x(x) + self.wh_h(f * state))
-        new_state = (1 - f) * state + f * hc
-        return new_state, new_state
-
-    def forward(self, inputs: Tensor) -> Tensor:
-        # inputs: (batch, seq_len, input_size)
-        # Precompute input contributions for all timesteps at once. Only the
-        # hidden-state-dependent part stays inside the loop.
-        f_x = self.wf_x(inputs)  # (batch, seq_len, size)
-        h_x = self.wh_x(inputs)  # (batch, seq_len, size)
-
-        batch, seq_len, _ = inputs.shape
-        state = torch.zeros(
-            batch, self.size, device=inputs.device, dtype=inputs.dtype)
-        outputs = []
-        for t in range(seq_len):
-            f = torch.sigmoid(f_x[:, t] + self.wf_h(state))
-            hc = torch.tanh(h_x[:, t] + self.wh_h(f * state))
-            state = (1 - f) * state + f * hc
-            outputs.append(state)
-        return torch.stack(outputs, dim=1)
-
-
-class MinGruModule(LayerModule):
-    """Minimal GRU where the gate and candidate depend only on the input.
-
-    From https://arxiv.org/abs/2305.17473
-
-        zh = W @ x + b      (shape: 2*size)
-        z = sigmoid(zh[:size])
-        h_new = zh[size:]
-        h = (1-z) * h + z * h_new
-    """
-
-    def __init__(self, input_size: int, size: int):
-        super().__init__()
-        self.size = size
-        self.linear = nn.Linear(input_size, 2 * size)
-
-    def init_state(
-        self,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
-    ) -> LayerState:
-        return torch.zeros(self.size, device=device, dtype=dtype)
-
-    def step(
-        self, state: LayerState, input: Tensor
-    ) -> tuple[LayerState, Tensor]:
-        zh = self.linear(input.flatten())
-        z = torch.sigmoid(zh[:self.size])
-        h_new = zh[self.size:]
-        new_state = (1 - z) * state + z * h_new
-        return new_state, new_state
-
-    def forward(self, inputs: Tensor) -> Tensor:
-        # inputs: (batch, seq_len, input_size)
-        batch, seq_len, _ = inputs.shape
-        # Compute z and h_new for all timesteps at once
-        zh = self.linear(inputs)  # (batch, seq_len, 2*size)
-        z = torch.sigmoid(zh[..., :self.size])
-        h_new = zh[..., self.size:]
-
-        state = torch.zeros(
-            batch, self.size, device=inputs.device, dtype=inputs.dtype)
-        outputs = []
-        for t in range(seq_len):
-            state = (1 - z[:, t]) * state + z[:, t] * h_new[:, t]
-            outputs.append(state)
-        return torch.stack(outputs, dim=1)
 
 
 class GruJax(LayerJax):
     """Standard GRU with stacked gate projections.
 
-    Matches nn.GRU equations with a single bias per gate:
+    Standard GRU equations with a single bias per gate:
         r = sigmoid(W_ir x + W_hr h + b_r)       # reset gate
         z = sigmoid(W_iz x + W_hz h + b_z)       # update gate
         n = tanh(W_in x + b_n + r * (W_hn h))    # candidate
@@ -162,8 +25,8 @@ class GruJax(LayerJax):
     multiplied by r before adding. The r and z gates are stacked so
     sigmoid can be applied to both at once.
 
-    Note: unlike nn.GRU, uses one bias per gate (not two). The JAX
-    param count is thus 3*size less than GruDef.num_weights.
+    Uses one bias per gate (not the two-bias convention some GRU
+    libraries use); see docs/layers.md, "Parameter-count convention".
     """
 
     def init_weights(self, rng: jax.Array) -> LayerWeights:
@@ -358,17 +221,8 @@ class GruDef(LayerDef):
 
     @property
     def num_weights(self) -> int:
-        # Single-bias per gate (matches GruJax). Torch's nn.GRU uses two
-        # biases per gate, so its actual param count is 3*size larger.
+        # Single-bias per gate (matches GruJax).
         return 3 * self.size * (self.input_size + self.size) + 3 * self.size
-
-    def build_module(
-        self, state_dict: dict[str, Tensor] | None = None
-    ) -> GruModule:
-        module = GruModule(self.input_size, self.size)
-        if state_dict is not None:
-            module.load_state_dict(state_dict)
-        return module
 
     def build_jax(self, dtype) -> GruJax:
         return GruJax(self.input_size, self.size, dtype)
@@ -392,14 +246,6 @@ class MgruDef(LayerDef):
         # 2 linear layers, each with (input+size) inputs and size outputs
         return 2 * (self.size * (self.input_size + self.size) + self.size)
 
-    def build_module(
-        self, state_dict: dict[str, Tensor] | None = None
-    ) -> MgruModule:
-        module = MgruModule(self.input_size, self.size)
-        if state_dict is not None:
-            module.load_state_dict(state_dict)
-        return module
-
     def build_jax(self, dtype) -> MgruJax:
         return MgruJax(self.input_size, self.size, dtype)
 
@@ -419,16 +265,8 @@ class MinGruDef(LayerDef):
 
     @property
     def num_weights(self) -> int:
-        # nn.Linear(input_size, 2*size): 2*size*input_size + 2*size
+        # One (2*size, input_size) projection plus its bias.
         return 2 * self.size * self.input_size + 2 * self.size
-
-    def build_module(
-        self, state_dict: dict[str, Tensor] | None = None
-    ) -> MinGruModule:
-        module = MinGruModule(self.input_size, self.size)
-        if state_dict is not None:
-            module.load_state_dict(state_dict)
-        return module
 
     def build_jax(self, dtype) -> MinGruJax:
         return MinGruJax(self.input_size, self.size, dtype)

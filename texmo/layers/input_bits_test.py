@@ -1,6 +1,5 @@
 import jax.numpy as jnp
 import numpy as np
-import torch
 
 from texmo.layers.input_bits import InputBitsDef
 from texmo.precision import Precision
@@ -18,39 +17,39 @@ def test_bits1_def():
 
 
 def test_bits1_step():
-    module = InputBitsDef.from_spec('bits.1').build_module()
-    state = module.init_state()
+    layer = InputBitsDef.from_spec('bits.1').build_jax()
+    state = layer.init_state()
     assert state is None
 
-    state, out = module.step(state, 0)
+    state, out = layer.step(None, state, 0)
     assert out.shape == (1,)
     assert out[0] == 0.0
 
-    state, out = module.step(state, 1)
+    state, out = layer.step(None, state, 1)
     assert out[0] == 1.0
 
 
 def test_bits1_forward():
-    module = InputBitsDef.from_spec('bits.1').build_module()
-    tokens = torch.tensor([[0, 1, 0, 1], [0, 1, 1, 0]], dtype=torch.long)
-    out = module(tokens)
+    layer = InputBitsDef.from_spec('bits.1').build_jax()
+    tokens = jnp.array([[0, 1, 0, 1], [0, 1, 1, 0]], dtype=jnp.int32)
+    out = layer.forward(None, tokens)
 
     assert out.shape == (2, 4, 1)
-    torch.testing.assert_close(
-        out,
-        torch.tensor([[[0], [1], [0], [1]],
-                       [[0], [1], [1], [0]]], dtype=torch.float32))
+    assert out.dtype == jnp.float32
+    np.testing.assert_array_equal(
+        out, [[[0], [1], [0], [1]],
+              [[0], [1], [1], [0]]])
 
 
 def test_bits1_forward_matches_step():
-    module = InputBitsDef.from_spec('bits.1').build_module()
-    tokens = torch.tensor([[0, 1, 1, 0]], dtype=torch.long)
-    fwd = module(tokens)
+    layer = InputBitsDef.from_spec('bits.1').build_jax()
+    tokens = jnp.array([[0, 1, 1, 0]], dtype=jnp.int32)
+    fwd = layer.forward(None, tokens)
 
-    state = module.init_state()
+    state = layer.init_state()
     for t in range(tokens.shape[1]):
-        state, step_out = module.step(state, tokens[0, t].item())
-        assert torch.equal(fwd[0, t], step_out)
+        state, step_out = layer.step(None, state, int(tokens[0, t]))
+        np.testing.assert_array_equal(fwd[0, t], step_out)
 
 
 # -- bits.1+bp (raw bit + binary position) --
@@ -64,46 +63,46 @@ def test_bits1_bp_def():
 
 
 def test_bits1_bp_step():
-    module = InputBitsDef.from_spec('bits.1+bp').build_module()
-    state = module.init_state()
+    layer = InputBitsDef.from_spec('bits.1+bp').build_jax()
+    state = layer.init_state()
     assert state == 0
 
     # pos=0: bp encoding of 0 = [0,0,0]
-    state, out = module.step(state, 0)
-    torch.testing.assert_close(out, torch.tensor([0, 0, 0, 0], dtype=torch.float32))
+    state, out = layer.step(None, state, 0)
+    np.testing.assert_array_equal(out, [0, 0, 0, 0])
 
     # pos=1: bp encoding of 1 = [1,0,0]
-    state, out = module.step(state, 1)
-    torch.testing.assert_close(out, torch.tensor([1, 1, 0, 0], dtype=torch.float32))
+    state, out = layer.step(None, state, 1)
+    np.testing.assert_array_equal(out, [1, 1, 0, 0])
 
 
 def test_bits1_bp_forward():
-    module = InputBitsDef.from_spec('bits.1+bp').build_module()
-    tokens = torch.tensor([[0, 1, 0, 1], [0, 1, 1, 0]], dtype=torch.long)
-    out = module(tokens)
+    layer = InputBitsDef.from_spec('bits.1+bp').build_jax()
+    tokens = jnp.array([[0, 1, 0, 1], [0, 1, 1, 0]], dtype=jnp.int32)
+    out = layer.forward(None, tokens)
 
     assert out.shape == (2, 4, 4)
-    torch.testing.assert_close(
+    np.testing.assert_array_equal(
         out,
-        torch.tensor([[[0, 0, 0, 0],
-                        [1, 1, 0, 0],
-                        [0, 0, 1, 0],
-                        [1, 1, 1, 0]],
-                       [[0, 0, 0, 0],
-                        [1, 1, 0, 0],
-                        [1, 0, 1, 0],
-                        [0, 1, 1, 0]]], dtype=torch.float32))
+        [[[0, 0, 0, 0],
+          [1, 1, 0, 0],
+          [0, 0, 1, 0],
+          [1, 1, 1, 0]],
+         [[0, 0, 0, 0],
+          [1, 1, 0, 0],
+          [1, 0, 1, 0],
+          [0, 1, 1, 0]]])
 
 
 def test_bits1_bp_forward_matches_step():
-    module = InputBitsDef.from_spec('bits.1+bp').build_module()
-    tokens = torch.tensor([[0, 1, 0, 1, 0, 1, 0, 1]], dtype=torch.long)
-    fwd = module(tokens)
+    layer = InputBitsDef.from_spec('bits.1+bp').build_jax()
+    tokens = jnp.array([[0, 1, 0, 1, 0, 1, 0, 1]], dtype=jnp.int32)
+    fwd = layer.forward(None, tokens)
 
-    state = module.init_state()
+    state = layer.init_state()
     for t in range(tokens.shape[1]):
-        state, step_out = module.step(state, tokens[0, t].item())
-        assert torch.equal(fwd[0, t], step_out)
+        state, step_out = layer.step(None, state, int(tokens[0, t]))
+        np.testing.assert_array_equal(fwd[0, t], step_out)
 
 
 # -- bits.2 (raw 2-bit, no position) --
@@ -117,26 +116,26 @@ def test_bits2_def():
 
 
 def test_bits2_step():
-    module = InputBitsDef.from_spec('bits.2').build_module()
-    state = module.init_state()
+    layer = InputBitsDef.from_spec('bits.2').build_jax()
+    state = layer.init_state()
 
-    _, out = module.step(state, 1)  # binary: 01 → [1, 0]
-    torch.testing.assert_close(out, torch.tensor([1, 0], dtype=torch.float32))
+    _, out = layer.step(None, state, 1)  # binary: 01 → [1, 0]
+    np.testing.assert_array_equal(out, [1, 0])
 
-    _, out = module.step(state, 2)  # binary: 10 → [0, 1]
-    torch.testing.assert_close(out, torch.tensor([0, 1], dtype=torch.float32))
+    _, out = layer.step(None, state, 2)  # binary: 10 → [0, 1]
+    np.testing.assert_array_equal(out, [0, 1])
 
 
 def test_bits2_forward():
-    module = InputBitsDef.from_spec('bits.2').build_module()
-    tokens = torch.tensor([[0, 1, 2, 3], [2, 3, 0, 1]], dtype=torch.long)
-    out = module(tokens)
+    layer = InputBitsDef.from_spec('bits.2').build_jax()
+    tokens = jnp.array([[0, 1, 2, 3], [2, 3, 0, 1]], dtype=jnp.int32)
+    out = layer.forward(None, tokens)
 
     assert out.shape == (2, 4, 2)
-    torch.testing.assert_close(
+    np.testing.assert_array_equal(
         out,
-        torch.tensor([[[0, 0], [1, 0], [0, 1], [1, 1]],
-                       [[0, 1], [1, 1], [0, 0], [1, 0]]], dtype=torch.float32))
+        [[[0, 0], [1, 0], [0, 1], [1, 1]],
+         [[0, 1], [1, 1], [0, 0], [1, 0]]])
 
 
 # -- bits.2+bp --
@@ -150,34 +149,34 @@ def test_bits2_bp_def():
 
 
 def test_bits2_bp_step():
-    module = InputBitsDef.from_spec('bits.2+bp').build_module()
-    state = module.init_state()
+    layer = InputBitsDef.from_spec('bits.2+bp').build_jax()
+    state = layer.init_state()
 
     # pos=0: bp of 0 = [0,0]; token 2 = [0,1]
-    state, out = module.step(state, 2)
-    torch.testing.assert_close(out, torch.tensor([0, 1, 0, 0], dtype=torch.float32))
+    state, out = layer.step(None, state, 2)
+    np.testing.assert_array_equal(out, [0, 1, 0, 0])
 
     # pos=1: bp of 1 = [1,0]; token 3 = [1,1]
-    state, out = module.step(state, 3)
-    torch.testing.assert_close(out, torch.tensor([1, 1, 1, 0], dtype=torch.float32))
+    state, out = layer.step(None, state, 3)
+    np.testing.assert_array_equal(out, [1, 1, 1, 0])
 
 
 def test_bits2_bp_forward():
-    module = InputBitsDef.from_spec('bits.2+bp').build_module()
-    tokens = torch.tensor([[0, 1, 2, 3], [2, 3, 0, 1]], dtype=torch.long)
-    out = module(tokens)
+    layer = InputBitsDef.from_spec('bits.2+bp').build_jax()
+    tokens = jnp.array([[0, 1, 2, 3], [2, 3, 0, 1]], dtype=jnp.int32)
+    out = layer.forward(None, tokens)
 
     assert out.shape == (2, 4, 4)
-    torch.testing.assert_close(
+    np.testing.assert_array_equal(
         out,
-        torch.tensor([[[0, 0, 0, 0],
-                        [1, 0, 1, 0],
-                        [0, 1, 0, 1],
-                        [1, 1, 1, 1]],
-                       [[0, 1, 0, 0],
-                        [1, 1, 1, 0],
-                        [0, 0, 0, 1],
-                        [1, 0, 1, 1]]], dtype=torch.float32))
+        [[[0, 0, 0, 0],
+          [1, 0, 1, 0],
+          [0, 1, 0, 1],
+          [1, 1, 1, 1]],
+         [[0, 1, 0, 0],
+          [1, 1, 1, 0],
+          [0, 0, 0, 1],
+          [1, 0, 1, 1]]])
 
 
 # -- bits.2.oh (one-hot 2-bit) --
@@ -191,24 +190,27 @@ def test_bits2_oh_def():
 
 
 def test_bits2_oh_step():
-    module = InputBitsDef.from_spec('bits.2.oh').build_module()
-    state = module.init_state()
+    layer = InputBitsDef.from_spec('bits.2.oh').build_jax()
+    state = layer.init_state()
 
-    _, out = module.step(state, 2)
-    torch.testing.assert_close(out, torch.tensor([0, 0, 1, 0], dtype=torch.float32))
+    _, out = layer.step(None, state, 2)
+    np.testing.assert_array_equal(out, [0, 0, 1, 0])
 
-    _, out = module.step(state, 3)
-    torch.testing.assert_close(out, torch.tensor([0, 0, 0, 1], dtype=torch.float32))
+    _, out = layer.step(None, state, 3)
+    np.testing.assert_array_equal(out, [0, 0, 0, 1])
 
 
 def test_bits2_oh_forward():
-    module = InputBitsDef.from_spec('bits.2.oh').build_module()
-    tokens = torch.tensor([[0, 1, 2, 3], [2, 3, 0, 1]], dtype=torch.long)
-    out = module(tokens)
+    layer = InputBitsDef.from_spec('bits.2.oh').build_jax()
+    assert layer.size == 4
+    tokens = jnp.array([[0, 1, 2, 3], [2, 3, 0, 1]], dtype=jnp.int32)
+    out = layer.forward(None, tokens)
 
     assert out.shape == (2, 4, 4)
     # Verify one-hot
-    assert torch.equal(out.sum(dim=-1), torch.ones(2, 4))
+    np.testing.assert_array_equal(out.sum(axis=-1), jnp.ones((2, 4)))
+    np.testing.assert_array_equal(out[0, 0], [1, 0, 0, 0])
+    np.testing.assert_array_equal(out[0, 3], [0, 0, 0, 1])
     assert out[0, 2, 2] == 1.0
     assert out[1, 0, 2] == 1.0
 
@@ -234,16 +236,16 @@ def test_bits4_def():
 
 
 def test_bits4_step():
-    module = InputBitsDef.from_spec('bits.4').build_module()
-    state = module.init_state()
+    layer = InputBitsDef.from_spec('bits.4').build_jax()
+    state = layer.init_state()
 
     # token 2 = binary 0010 → [0, 1, 0, 0]
-    _, out = module.step(state, 2)
-    torch.testing.assert_close(out, torch.tensor([0, 1, 0, 0], dtype=torch.float32))
+    _, out = layer.step(None, state, 2)
+    np.testing.assert_array_equal(out, [0, 1, 0, 0])
 
     # token 3 = binary 0011 → [1, 1, 0, 0]
-    _, out = module.step(state, 3)
-    torch.testing.assert_close(out, torch.tensor([1, 1, 0, 0], dtype=torch.float32))
+    _, out = layer.step(None, state, 3)
+    np.testing.assert_array_equal(out, [1, 1, 0, 0])
 
 
 # -- bits.4.oh --
@@ -257,15 +259,15 @@ def test_bits4_oh_def():
 
 
 def test_bits4_oh_forward():
-    module = InputBitsDef.from_spec('bits.4.oh').build_module()
-    tokens = torch.tensor([[0, 5, 15]], dtype=torch.long)
-    out = module(tokens)
+    layer = InputBitsDef.from_spec('bits.4.oh').build_jax()
+    tokens = jnp.array([[0, 5, 15]], dtype=jnp.int32)
+    out = layer.forward(None, tokens)
 
     assert out.shape == (1, 3, 16)
     assert out[0, 0, 0] == 1.0
     assert out[0, 1, 5] == 1.0
     assert out[0, 2, 15] == 1.0
-    assert torch.equal(out.sum(dim=-1), torch.ones(1, 3))
+    np.testing.assert_array_equal(out.sum(axis=-1), jnp.ones((1, 3)))
 
 
 # -- bits.4+bp --
@@ -279,14 +281,14 @@ def test_bits4_bp_def():
 
 
 def test_bits4_bp_forward_matches_step():
-    module = InputBitsDef.from_spec('bits.4+bp').build_module()
-    tokens = torch.tensor([[0, 5]], dtype=torch.long)
-    fwd = module(tokens)
+    layer = InputBitsDef.from_spec('bits.4+bp').build_jax()
+    tokens = jnp.array([[0, 5]], dtype=jnp.int32)
+    fwd = layer.forward(None, tokens)
 
-    state = module.init_state()
+    state = layer.init_state()
     for t in range(tokens.shape[1]):
-        state, step_out = module.step(state, tokens[0, t].item())
-        assert torch.equal(fwd[0, t], step_out)
+        state, step_out = layer.step(None, state, int(tokens[0, t]))
+        np.testing.assert_array_equal(fwd[0, t], step_out)
 
 
 # -- bits.8 --
@@ -320,54 +322,31 @@ def test_is_valid():
 # -- dtype --
 
 def test_dtype_fp16():
-    module = InputBitsDef.from_spec('bits.2', precision=Precision.FP16).build_module()
-    _, out = module.step(None, 1)
-    assert out.dtype == torch.float16
+    layer = InputBitsDef.from_spec(
+        'bits.2', precision=Precision.FP16).build_jax()
+    _, out = layer.step(None, None, 1)
+    assert out.dtype == jnp.float16
 
-    tokens = torch.tensor([[0, 1]], dtype=torch.long)
-    out = module(tokens)
-    assert out.dtype == torch.float16
-
-
-# -- JAX --
-
-def test_jax_bits1_forward():
-    layer = InputBitsDef.from_spec('bits.1').build_jax()
-    tokens = jnp.array([[0, 1, 1, 0]], dtype=jnp.int32)
+    tokens = jnp.array([[0, 1]], dtype=jnp.int32)
     out = layer.forward(None, tokens)
-    assert out.shape == (1, 4, 1)
-    assert out.dtype == jnp.float32
-    np.testing.assert_array_equal(out[0, :, 0], [0, 1, 1, 0])
+    assert out.dtype == jnp.float16
 
 
-def test_jax_bits1_bp_forward():
+def test_dtype_bf16():
+    layer = InputBitsDef.from_spec(
+        'bits.2', precision=Precision.BF16).build_jax()
+    out = layer.forward(None, jnp.array([[0, 1]], dtype=jnp.int32))
+    assert out.dtype == jnp.bfloat16
+
+
+# -- padding --
+
+def test_jax_bits1_bp_forward_shape():
     layer = InputBitsDef.from_spec('bits.1+bp').build_jax()
     assert layer.size == 1 + 3  # 1 bit + 3 bp bits
     tokens = jnp.array([[0, 1, 1, 0, 1, 0, 0, 1]], dtype=jnp.int32)
     out = layer.forward(None, tokens)
     assert out.shape == (1, 8, 4)
-
-
-def test_jax_bits1_bp_step_matches_forward():
-    layer = InputBitsDef.from_spec('bits.1+bp').build_jax()
-    tokens = jnp.array([[0, 1, 1, 0, 1, 0, 0, 1]], dtype=jnp.int32)
-    fwd = layer.forward(None, tokens)
-
-    state = layer.init_state()
-    for t in range(8):
-        state, out = layer.step(None, state, int(tokens[0, t]))
-        np.testing.assert_allclose(out, fwd[0, t], atol=1e-6)
-
-
-def test_jax_bits2_oh_forward():
-    layer = InputBitsDef.from_spec('bits.2.oh').build_jax()
-    assert layer.size == 4
-    tokens = jnp.array([[0, 1, 2, 3]], dtype=jnp.int32)
-    out = layer.forward(None, tokens)
-    assert out.shape == (1, 4, 4)
-    # one-hot check
-    np.testing.assert_array_equal(out[0, 0], [1, 0, 0, 0])
-    np.testing.assert_array_equal(out[0, 3], [0, 0, 0, 1])
 
 
 def test_jax_forward_with_padding():

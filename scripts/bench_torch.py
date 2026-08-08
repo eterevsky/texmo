@@ -1,3 +1,17 @@
+"""Standalone PyTorch training benchmark (a hand-written reference
+model, not a texmo `Model2`).
+
+torch is no longer a texmo dependency -- the torch backend and the
+per-layer `nn.Module` implementations were removed 2026-08-04 (see
+docs/backends.md). This script is kept as the cross-framework
+reference point behind the `PyTorch + ...` rows in docs/bench.txt; run
+it with torch supplied ad hoc:
+
+    uv run --with torch python scripts/bench_torch.py
+
+On Windows, torch's bundled cudnn DLLs and the winjax CUDA plugin
+fight over PATH, so prefer a separate throwaway env there.
+"""
 import argparse
 import math
 import os

@@ -10,8 +10,6 @@ precision)`: that's where every string-to-tree decision lives,
 including the `|`-split, the input-layer dispatch, and the
 layer-list grammar. `Model2Def.__init__` only takes already-built
 pieces and stores them.
-
-JAX only. No PyTorch counterpart.
 """
 
 from collections.abc import Iterable

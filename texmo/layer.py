@@ -1,9 +1,5 @@
 from typing import Any, Optional
 
-import torch
-import torch.nn as nn
-from torch import Tensor
-
 from .common import power2_neighbors
 
 # Window used when a type swap lands on attn from a layer that has no
@@ -13,49 +9,6 @@ _ATTN_SWAP_WINDOW = 16
 from .layer_jax import LayerJax
 
 LayerState = Any
-
-
-class LayerModule(nn.Module):
-    """Base class for layer nn.Modules that own weights.
-
-    Produced by LayerDef.create_module().
-    """
-
-    def init_state(
-        self,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
-    ) -> LayerState:
-        """Initialize recurrent state for a single sample.
-
-        Returns None for stateless layers (e.g. dense).
-        """
-        return None
-
-    def step(
-        self, state: LayerState, input: torch.Tensor
-    ) -> tuple[LayerState, torch.Tensor]:
-        """Single timestep forward on a single input.
-
-        Args:
-            state: recurrent state, or None for stateless layers
-            input: (input_size,)
-
-        Returns:
-            (new_state, output) where output is (size,)
-        """
-        raise NotImplementedError
-
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        """Full-sequence forward on a batch.
-
-        Args:
-            inputs: (batch, seq_len, input_size)
-
-        Returns:
-            (batch, seq_len, size)
-        """
-        raise NotImplementedError
 
 
 class LayerDef(object):
@@ -313,18 +266,6 @@ class LayerDef(object):
             if self.name == "lstm":
                 yield f"gru.{self.size}"
                 yield f"mgru.{self.size}"
-
-    def build_module(self, state_dict: Optional[dict[str, Tensor]] = None) -> LayerModule:
-        """Create an nn.Module for this layer.
-
-        Args:
-            state_dict: if provided, load these weights instead of
-                initializing fresh ones.
-
-        Returns:
-            A LayerModule owning its weights.
-        """
-        raise NotImplementedError
 
     def build_jax(self, dtype) -> LayerJax:
         """Create a JAX layer implementation."""

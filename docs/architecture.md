@@ -26,14 +26,11 @@ See [`layers.md`](layers.md) for the full list of available layers.
 
 ## Backends
 
-The **full-model runtime is JAX**. Most individual layers also keep a
-PyTorch `nn.Module` implementation (maintained and tested per-layer),
-but there is no torch full-model runtime: the legacy `Model` /
-`ModelDef` flat representation and its two backends were retired in
-2026-07, and `ManagerTorch` is a parked stub that raises
-`NotImplementedError`. Reviving the torch backend means writing a
-Model2-shaped runtime on top of the `*Module` classes. See
-[`backends.md`](backends.md) for the trade-offs that led here.
+**JAX is the only backend**, end to end: layers, full model, and
+training loop. The `--backend` flag and `create_manager(backend, …)`
+survive as the seam for a future second one. See
+[`backends.md`](backends.md) for the trade-offs that led here and the
+history of the removed torch backend.
 
 ## Key abstractions
 
@@ -70,19 +67,15 @@ explicitly to each call. It supports two modes:
   with layers: `states[0]` is the input state, `states[1]` the layer-
   sequence states.
 
-### LayerDef / LayerModule / LayerJax (`layer.py`, `layer_jax.py`)
+### LayerDef / LayerJax (`layer.py`, `layer_jax.py`)
 
 Base classes for hidden layers.
 
 - **LayerDef** — config/descriptor. Has `input_size`, `size`, `num_weights`,
-  `is_valid()`, `neighbors()`. Factory methods: `build_module()` → PyTorch
-  `LayerModule`, `build_jax(dtype)` → JAX `LayerJax`. `length` attribute
+  `is_valid()`, `neighbors()`. Factory method: `build_jax(dtype)` → JAX
+  `LayerJax`. `length` attribute
   (default 1) is how many previous timesteps the layer depends on
   (suffix-like layers have `length > 1`).
-- **LayerModule** — a PyTorch `nn.Module` that owns its weights.
-  `step(state, input)` for single-timestep, `forward(inputs)` for batched
-  sequences. `init_state(device, dtype)` creates a matching-dtype
-  recurrent state (or `None` for stateless).
 - **LayerJax** — a lightweight wrapper (does **not** own weights). Weights
   are passed explicitly to every call as a pytree of `jax.Array`s. The
   interface: `init_weights(rng)` returns the weight pytree, `init_state()`
@@ -99,22 +92,21 @@ Base classes for hidden layers.
 handles the backend-specific bits: building the model and optimizer,
 training loop mechanics, eval, and text generation.
 
-Use `create_manager(backend, **kwargs)` to build one. The shared
-`train()` and `train_and_eval()` loops live on `Manager`; the backend
-supplies `_get_batch()`, `train_step(batch)`, and `eval()`.
-`ManagerTorch` (`manager_torch.py`) is a parked stub — see
-**Backends** above.
+Use `create_manager(backend, **kwargs)` to build one — `'jax'` is the
+only accepted value. The shared `train()` and `train_and_eval()` loops
+live on `Manager`; the backend supplies `_get_batch()`,
+`train_step(batch)`, and `eval()`.
 
 ### Precision (`precision.py`)
 
-Enum with `.dtype` property (torch.dtype), `.jax_dtype` (jnp.dtype), and
-`.neighbors` (used in the search). FP64 is supported but not in the
-default set (MPS doesn't support it on Mac).
+Enum with a `.jax_dtype` property (jnp.dtype) and `.neighbors` (used in
+the search). FP64 is supported but not in the default set (Metal
+doesn't support it on Mac).
 
 ## Input modules
 
-Input modules convert integer token indices to float vectors. Both Torch
-and JAX implementations live in `layers/input_bits.py` and `layers/input_bytes.py`.
+Input modules convert integer token indices to float vectors. They live
+in `layers/input_bits.py` and `layers/input_bytes.py`.
 
 Spec format: `bits.<nbits>[.oh][+bp]`, or the alias `bytes`.
 

@@ -22,14 +22,8 @@ SERVER_HOST = "localhost:5000"
 # (every request returns 401), which is fine for LAN-only setups.
 API_KEY = ""
 
-# PyTorch device: 'cuda', 'cpu', or 'auto' (auto picks cuda if available)
-TORCH_DEVICE = 'auto'
-
-# Training backend: 'torch' or 'jax'
-# PyTorch has fused kernels for standard layers (GRU, LSTM, RNN with
-# tanh/relu) but loop-based custom layers are slow.
-# JAX compiles custom recurrent layers via lax.scan + jit, making them
-# competitive with hand-fused kernels.
+# Training backend. 'jax' is the only one; the knob is kept as the
+# seam for a future second backend.
 BACKEND = 'jax'
 
 # JAX platforms to initialize. Comma-separated list — e.g. 'cpu',

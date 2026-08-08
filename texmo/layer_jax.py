@@ -17,9 +17,9 @@ def xavier_uniform(rng: jax.Array, shape: tuple[int, int], dtype=jnp.float32) ->
 class LayerJax:
     """Lightweight base for JAX layer implementations.
 
-    Unlike PyTorch's LayerModule, weights are not owned by the layer —
-    they're passed as explicit arguments. This follows JAX's functional
-    paradigm: weights are inputs to jax.grad / jax.jit / lax.scan.
+    Weights are not owned by the layer — they're passed as explicit
+    arguments. This follows JAX's functional paradigm: weights are
+    inputs to jax.grad / jax.jit / lax.scan.
 
     All batch-dimension methods expect batch as the first axis.
     """

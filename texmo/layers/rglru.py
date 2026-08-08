@@ -19,7 +19,6 @@ RecurrentGemma, where `blocks == num_attention_heads` and the block
 width is `lru_width / blocks`) -- a parameter-efficiency choice we
 replicate so pretrained weights load directly.
 
-JAX only (no PyTorch module), consistent with the other recent cells.
 Matches `transformers` `RecurrentGemmaRglru` numerically: gates use the
 stored `Lambda` directly inside `softplus`, the recurrence accumulates
 in float32, and the first position of a sequence is a reset (input

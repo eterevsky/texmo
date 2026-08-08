@@ -97,7 +97,7 @@ def init_args(parser: argparse.ArgumentParser, config):
     parser.add_argument(
         "--backend",
         type=str,
-        choices=["torch", "jax"],
+        choices=["jax"],
         default=config.BACKEND,
         help=f"training backend (default: '{config.BACKEND}')",
     )

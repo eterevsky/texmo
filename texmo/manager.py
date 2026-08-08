@@ -19,8 +19,8 @@ class Manager:
     """Base class defining the manager interface.
 
     A manager takes a Configuration, trains a model, evaluates it,
-    and produces a Run with the results. The two backends (Torch, JAX)
-    implement this interface independently.
+    and produces a Run with the results. JAX is the only backend;
+    `create_manager` keeps the seam for a second one.
     """
 
     def __init__(
@@ -177,15 +177,14 @@ def create_manager(
     conf: Configuration,
     system: str,
     dataset: DataSet,
-    device: Optional[str] = None,
     test_sample_len: int = 1024,
     test_batch: int = 1024,
     verbose: bool = True,
 ) -> Manager:
-    """Create a Manager for the given backend ('torch' or 'jax').
+    """Create a Manager for the given backend ('jax').
 
-    Uses local imports to avoid circular dependencies — both
-    manager_torch and manager_jax import Manager from this module.
+    Uses a local import to avoid a circular dependency — manager_jax
+    imports Manager from this module.
     """
     common = dict(
         conf=conf, system=system, dataset=dataset,
@@ -193,9 +192,6 @@ def create_manager(
         verbose=verbose,
     )
     match backend:
-        case 'torch':
-            from .manager_torch import ManagerTorch
-            return ManagerTorch(device=device or 'auto', **common)
         case 'jax':
             from .manager_jax import ManagerJax
             return ManagerJax(**common)

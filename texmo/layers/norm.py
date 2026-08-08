@@ -1,9 +1,7 @@
 import jax
 import jax.numpy as jnp
-import torch
-from torch import Tensor
 
-from ..layer import LayerDef, LayerJax, LayerModule, LayerState
+from ..layer import LayerDef, LayerJax
 from ..layer_jax import LayerWeights
 
 
@@ -13,28 +11,6 @@ from ..layer_jax import LayerWeights
 # latent.py docstring for why we add `eps` (not `eps*eps`) inside
 # sqrt -- it keeps the smoothing meaningful in fp16/bf16.
 _EPS = 1e-5
-
-
-class NormModule(LayerModule):
-    """L2 normalization along the feature dimension.
-
-    out = x / sqrt(||x||_2^2 + eps)
-    """
-
-    def __init__(self, size: int):
-        super().__init__()
-        self.size = size
-
-    def step(
-        self, state: LayerState, input: Tensor
-    ) -> tuple[LayerState, Tensor]:
-        norm_sq = (input * input).sum(dim=-1, keepdim=True)
-        return None, input / torch.sqrt(norm_sq + _EPS)
-
-    def forward(self, inputs: Tensor) -> Tensor:
-        # inputs: (batch, seq_len, size)
-        norm_sq = (inputs * inputs).sum(dim=-1, keepdim=True)
-        return inputs / torch.sqrt(norm_sq + _EPS)
 
 
 class NormJax(LayerJax):
@@ -79,14 +55,6 @@ class NormDef(LayerDef):
     @property
     def projects_input(self) -> bool:
         return False  # nonlinear elementwise rescale, no matmul
-
-    def build_module(
-        self, state_dict: dict[str, Tensor] | None = None
-    ) -> NormModule:
-        module = NormModule(self.input_size)
-        if state_dict is not None:
-            module.load_state_dict(state_dict)
-        return module
 
     def build_jax(self, dtype) -> NormJax:
         return NormJax(self.input_size, dtype)

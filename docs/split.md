@@ -12,8 +12,8 @@ one-paragraph summary and [`architecture.md`](architecture.md) for how
 `Model2Def` (the recursive layer-DAG that hosts Splits) fits the
 pipeline.
 
-**JAX only.** `SplitDef` has a `build_jax` but no PyTorch `build_module`;
-`Model2` runs on the JAX backend.
+`SplitDef` exposes `build_jax`; `Model2` runs on the JAX backend, which
+is the only backend.
 
 ## Spec and semantics
 
@@ -168,7 +168,7 @@ passed in, so the runtime never inspects heterogeneous branch internals.
 - **`SplitDef`** (`layers/split.py`) — `op`, `branches: list[LayerSeqDef]`,
   derived `size` / `length`, `__str__` (renders an empty branch as
   `pass`), `num_weights` / `num_mults` / `num_layers`, `is_valid`,
-  `build_jax`. No `build_module` (JAX only).
+  `build_jax`.
 - **`SplitJax`** (`layers/split.py`) — the runtime above.
 - **`LayerSeqDef`** (`layers/seq.py`) — a branch or the top chain;
   `is_valid(allow_terminal_bare_dense=…)`, recursive `neighbors`.

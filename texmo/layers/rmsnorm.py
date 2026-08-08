@@ -12,7 +12,7 @@ The reduction and the (1 + gamma) multiply run in float32 and the result
 is cast back to the layer dtype -- matching transformers'
 RecurrentGemmaRMSNorm so pretrained weights load and run faithfully.
 
-Dimension-preserving, stateless, JAX only.
+Dimension-preserving and stateless.
 """
 import jax
 import jax.numpy as jnp

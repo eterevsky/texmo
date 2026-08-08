@@ -1,6 +1,5 @@
 import jax.numpy as jnp
 import numpy as np
-import torch
 
 from texmo.layers.norm import NormDef
 from texmo.precision import Precision
@@ -17,58 +16,6 @@ def test_def_properties():
 
 def test_invalid_size1():
     assert not NormDef(input_size=1).is_valid()
-
-
-def test_step():
-    d = NormDef(input_size=4)
-    module = d.build_module()
-    state = module.init_state()
-    assert state is None
-
-    input = torch.tensor([3.0, 4.0, 0.0, 0.0])
-    new_state, out = module.step(state, input)
-    assert new_state is None
-    # ||[3,4,0,0]|| = 5, so output should be [0.6, 0.8, 0, 0]
-    assert torch.allclose(out, torch.tensor([0.6, 0.8, 0.0, 0.0]))
-
-
-def test_step_zero_vector():
-    d = NormDef(input_size=4)
-    module = d.build_module()
-    input = torch.zeros(4)
-    _, out = module.step(None, input)
-    # Zero vector should stay near zero (not NaN)
-    assert torch.all(torch.isfinite(out))
-
-
-def test_forward_shape():
-    d = NormDef(input_size=8)
-    module = d.build_module()
-    inputs = torch.randn(2, 5, 8)
-    out = module(inputs)
-    assert out.shape == (2, 5, 8)
-
-
-def test_forward_unit_norm():
-    d = NormDef(input_size=8)
-    module = d.build_module()
-    inputs = torch.randn(3, 4, 8)
-    out = module(inputs)
-    norms = torch.linalg.norm(out, dim=-1)
-    assert torch.allclose(norms, torch.ones_like(norms), atol=1e-5)
-
-
-def test_forward_matches_step():
-    d = NormDef(input_size=4)
-    module = d.build_module()
-    module.eval()
-
-    inputs = torch.randn(1, 6, 4)
-    with torch.no_grad():
-        fwd_out = module(inputs)
-        for t in range(inputs.shape[1]):
-            _, step_out = module.step(None, inputs[0, t])
-            assert torch.allclose(fwd_out[0, t], step_out, atol=1e-6)
 
 
 # -- Model-level validity constraints --
@@ -123,6 +70,7 @@ def test_jax_forward_unit_norm():
     inputs = jnp.array(
         np.random.RandomState(0).randn(3, 4, 8), dtype=jnp.float32)
     out = layer.forward(None, inputs)
+    assert out.shape == (3, 4, 8)
     norms = jnp.linalg.norm(out, axis=-1)
     np.testing.assert_allclose(norms, 1.0, atol=1e-5)
 

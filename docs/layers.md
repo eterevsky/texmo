@@ -1,9 +1,10 @@
 # Layers
 
-All layers are implemented in both PyTorch (`{Name}Module`) and JAX
-(`{Name}Jax`), with a shared `{Name}Def` descriptor. See
-[`architecture.md`](architecture.md) for the abstractions and
-[`backends.md`](backends.md) for backend trade-offs.
+Every layer is a JAX implementation (`{Name}Jax`) plus a backend-
+agnostic `{Name}Def` descriptor. (Until 2026-08 a subset also had
+PyTorch `{Name}Module` implementations; those were removed with the
+torch backend — see [`backends.md`](backends.md).) See
+[`architecture.md`](architecture.md) for the abstractions.
 
 Layer files live in `texmo/layers/`. In specs, layers are separated by `-`
 and the full model is `<input>|<layer1>-<layer2>-...`.
@@ -16,17 +17,17 @@ and the full model is `<input>|<layer1>-<layer2>-...`.
 - `σ` — sigmoid
 - Hidden sizes must be powers of 2.
 - All new layer weights are Xavier-uniform initialized for matrices and
-  zero for biases. (Note: PyTorch's `nn.Linear`, `nn.RNN`, `nn.GRU`,
-  `nn.LSTM` use their own uniform init, which is close but not identical.)
+  zero for biases.
 
 ## Parameter-count convention
 
-PyTorch's built-in `nn.RNN`, `nn.GRU`, `nn.LSTM` use **two bias vectors
-per gate** (`bias_ih + bias_hh`), a historical quirk inherited from Lua
-Torch. Our JAX implementations use **one bias per gate**, which is more
-common in modern practice (GPT-2, LLaMA, etc.). `num_weights` on the
-`LayerDef` reports the single-bias count; for PyTorch, the actual
-module has more parameters by the extra bias vectors.
+Several RNN libraries (PyTorch's `nn.RNN`, `nn.GRU`, `nn.LSTM` among
+them) use **two bias vectors per gate** (`bias_ih + bias_hh`), a
+historical quirk inherited from Lua Torch. Our implementations use
+**one bias per gate**, which is more common in modern practice (GPT-2,
+LLaMA, etc.), and `num_weights` on the `LayerDef` reports that
+single-bias count. Worth knowing when comparing a `num_weights` here
+against a published parameter count for the "same" cell.
 
 ## Dense (`dense.<size>.<activation>`)
 
@@ -43,8 +44,6 @@ Elman RNN: `h = activation(W_ih @ x + W_hh @ h_prev + b)`.
 
 - Weights: `W_ih: (size, input_size)`, `W_hh: (size, size)`, `b: (size,)`.
 - Activations: `relu`, `gelu`, `tanh`.
-- PyTorch: `tanh`/`relu` variants use cuDNN-fused `nn.RNN`; `gelu` falls
-  back to a Python loop since `nn.RNN` doesn't support it.
 - JAX: always uses `lax.scan` with the input projection hoisted out of
   the scan (single batched matmul over the full sequence for `W_ih @ x`).
 - `num_weights = size * (input_size + size) + size`.
@@ -62,7 +61,6 @@ Standard GRU:
   `w_ih` of shape `(3*size, input_size)`; hidden projections for `r` and
   `z` stacked into `w_hrz` of shape `(2*size, size)`; `w_hn` stays
   separate (it's gated by `r`, so it can't be fused with `r, z`).
-- PyTorch: cuDNN-fused `nn.GRU`.
 - `num_weights = 3 * size * (input_size + size) + 3 * size`.
 
 ## mGRU (`mgru.<size>`)
@@ -79,7 +77,6 @@ mGRU often matches or beats GRU at the same parameter count.
 - JAX layout: stacked input projections `w_ih: (2*size, input_size)`;
   hidden projections `w_fh` and `w_hh` kept separate because `w_hh` is
   gated by `f`.
-- PyTorch: custom Python-loop implementation (no built-in mGRU).
 - `num_weights = 2 * (size * (input_size + size) + size)`.
 
 ## minGRU (`mingru.<size>`)
@@ -94,7 +91,6 @@ No hidden-to-hidden recurrence — the only time dependence is the
 elementwise mixing. From https://arxiv.org/abs/2410.01201.
 
 - JAX layout: stacked input projections `w_ih: (2*size, input_size)`.
-- PyTorch: custom Python-loop implementation.
 - `num_weights = 2 * size * input_size + 2 * size`.
 
 ## LSTM (`lstm.<size>`)
@@ -111,7 +107,6 @@ Standard LSTM with four gates (forget, input, output, candidate):
   `w_ih: (4*size, input_size)`, `w_hh: (4*size, size)` and a single bias
   `b: (4*size,)`. This gives one matmul per sequence (hoisted) and one
   matmul per timestep (inside scan) instead of 4 of each.
-- PyTorch: cuDNN-fused `nn.LSTM`.
 - `num_weights = 4 * size * (input_size + size) + 4 * size`.
 
 ## mulLSTM (`mullstm.<size>`)
@@ -265,7 +260,6 @@ prepend a `norm` layer in the spec to recover the pre-2026-05 behaviour.
   propagates NaNs through autodiff there).
 - No time recurrence — each position is independent.
 - JAX: uses `lax.scan` over `reps` with fixed length.
-- PyTorch: `reps` Python loop iterations.
 - `num_weights = size * input_size + size + size * size`.
 - Constraints: `size >= 2`, `reps >= 2`, both powers of 2.
 - Note: the paper initializes `s_0` randomly to encourage
@@ -289,7 +283,6 @@ timestep's hidden state as additional context:
   hidden state `h` is still L2-normalized (it has size ≥ 2 so the
   unit-norm projection isn't degenerate).
 - JAX: outer `lax.scan` over time, nested `lax.scan` over reps.
-- PyTorch: Python loops for both.
 - `num_weights = size * input_size + size + size * size + size * size`.
 - Constraints: same as Latent.
 
@@ -352,8 +345,8 @@ residual connections and gating:
   `value(x) ⊙ gate(x)`, e.g. `split.mul(dense.X.gelu, dense.X)` or the
   self-gate `split.mul(pass, dense.X.gelu)`.
 
-No learned weights of its own (`num_weights` = sum over branches). JAX
-only (`SplitJax`; no PyTorch module). Example:
+No learned weights of its own (`num_weights` = sum over branches);
+the runtime is `SplitJax`. Example:
 
     bytes|dense.32.gelu-split.add(dense.32.gelu-dense.32.gelu, pass)-dense.64.tanh
 

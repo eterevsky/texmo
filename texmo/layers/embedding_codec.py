@@ -52,8 +52,6 @@ broken.
 Weights layout: slot 0 holds {'emb', 'pos'?, 'y'}; slot 2 is always
 None (no head parameters) -- the model pytree keeps its
 [input, seq, head] shape.
-
-JAX only.
 """
 import math
 

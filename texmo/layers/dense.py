@@ -1,44 +1,10 @@
 import jax
 import jax.nn as jax_nn
 import jax.numpy as jnp
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch import Tensor
 
 from ..common import is_power2_int
-from ..layer import LayerDef, LayerJax, LayerModule, LayerState
+from ..layer import LayerDef, LayerJax
 from ..layer_jax import LayerWeights, xavier_uniform
-
-
-class DenseModule(LayerModule):
-    def __init__(self, input_size: int, size: int, activation):
-        super().__init__()
-        self.linear = nn.Linear(input_size, size)
-        self.activation = activation
-
-    def step(
-        self, state: LayerState, input: Tensor
-    ) -> tuple[LayerState, Tensor]:
-        assert input.shape == (self.linear.in_features,)
-        out = self.linear(input)
-        if self.activation is not None:
-            out = self.activation(out)
-        return None, out
-
-    def forward(self, inputs: Tensor) -> Tensor:
-        assert inputs.shape[-1] == self.linear.in_features
-        out = self.linear(inputs)
-        if self.activation is not None:
-            out = self.activation(out)
-        return out
-
-
-_ACTIVATIONS = {
-    "relu": F.relu,
-    "tanh": torch.tanh,
-    "gelu": F.gelu,
-}
 
 _JAX_ACTIVATIONS = {
     "relu": jax_nn.relu,
@@ -79,8 +45,12 @@ class DenseDef(LayerDef):
     def __init__(self, size: int, input_size: int, activation: str | None = None):
         super().__init__(input_size=input_size)
         self.size = size
+        # Reject an unknown activation name here rather than silently
+        # degrading to a bare linear at build_jax time (DenseJax looks
+        # the name up with .get(), since None is the legal bare form).
+        if activation is not None and activation not in _JAX_ACTIVATIONS:
+            raise KeyError(activation)
         self._activation = activation
-        self._activation_fn = _ACTIVATIONS[activation] if activation else None
 
     def __str__(self) -> str:
         if self._activation:
@@ -108,12 +78,6 @@ class DenseDef(LayerDef):
     @property
     def num_weights(self) -> int:
         return self.size * self.input_size + self.size
-
-    def build_module(self, state_dict: dict[str, Tensor] | None = None) -> DenseModule:
-        module = DenseModule(self.input_size, self.size, self._activation_fn)
-        if state_dict is not None:
-            module.load_state_dict(state_dict)
-        return module
 
     def build_jax(self, dtype) -> DenseJax:
         return DenseJax(self.input_size, self.size, self._activation, dtype)

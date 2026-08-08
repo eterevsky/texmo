@@ -170,8 +170,9 @@ exact total-time prediction at each.
 
 ## Data source
 
-Runs from `DbReader`. Old per-step (PyTorch / `--no-scan` JAX) data
-is not compatible with the chunked-scan decomposition; before fitting
+Runs from `DbReader`. Old per-step data — from the retired torch
+backend, or from JAX with `--no-scan` — is not compatible with the
+chunked-scan decomposition; before fitting
 the model on a system that previously ran in per-step mode, the
 caller should rename the system in the DB so the old runs land in a
 separate bucket (e.g. `whitebox` → `pre-scan-whitebox`).

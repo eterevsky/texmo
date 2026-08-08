@@ -23,8 +23,6 @@ codebooks indexed by `t mod positions`, so they share all machinery.
 The binary special case (ntokens <= 2) produces a single logit x
 treated as [x, 0]; the padding happens after the cap (tanh(0) == 0, so
 the order is immaterial).
-
-JAX only.
 """
 import jax
 import jax.numpy as jnp

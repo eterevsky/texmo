@@ -49,10 +49,10 @@ def test_train_and_eval():
     assert final_conf.steps == 3
 
 
-def test_torch_backend_is_parked():
-    with pytest.raises(NotImplementedError):
+def test_unknown_backend_rejected():
+    with pytest.raises(ValueError):
         create_manager(
-            'torch', conf=_make_conf(), system='test',
+            'nosuchbackend', conf=_make_conf(), system='test',
             dataset=_make_dataset(),
             test_sample_len=128, test_batch=4,
             verbose=False,

@@ -1,47 +1,9 @@
 import jax
 import jax.numpy as jnp
-import torch
-from torch import Tensor
 
 from ..common import is_power2_int
-from ..layer import LayerDef, LayerJax, LayerModule, LayerState
+from ..layer import LayerDef, LayerJax
 from ..layer_jax import LayerWeights
-
-
-class SuffixModule(LayerModule):
-    """Sliding window layer: stacks the last `length` inputs into one vector."""
-
-    def __init__(self, length: int, input_size: int):
-        super().__init__()
-        self.length = length
-        self.input_size = input_size
-        self.size = length * input_size
-
-    def init_state(
-        self,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
-    ) -> LayerState:
-        return torch.zeros(
-            self.length - 1, self.input_size, device=device, dtype=dtype)
-
-    def step(
-        self, state: LayerState, input: Tensor
-    ) -> tuple[LayerState, Tensor]:
-        # state: (length-1, input_size), input: (input_size,)
-        window = torch.cat([state, input.unsqueeze(0)], dim=0)
-        new_state = window[1:]
-        return new_state, window.reshape(-1)
-
-    def forward(self, inputs: Tensor) -> Tensor:
-        # Inputs: (batch, seq_len, input_size)
-        # Output: (batch, seq_len - length + 1, length * input_size)
-        seq_len = inputs.shape[1]
-        out_len = seq_len - self.length + 1
-        slices = []
-        for offset in range(self.length):
-            slices.append(inputs[:, offset:offset + out_len])
-        return torch.cat(slices, dim=-1)
 
 
 class SuffixJax(LayerJax):
@@ -97,9 +59,6 @@ class SuffixDef(LayerDef):
     @property
     def projects_input(self) -> bool:
         return False  # weightless window stacking, no matmul
-
-    def build_module(self, state_dict=None) -> SuffixModule:
-        return SuffixModule(self.length, self.input_size)
 
     def build_jax(self, dtype) -> SuffixJax:
         return SuffixJax(self.input_size, self.length, dtype)

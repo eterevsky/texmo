@@ -1,11 +1,5 @@
 import os
 
-# torch must load its bundled DLLs before jax: winjax's initialize()
-# (any jax import on win32) prepends the pip nvidia dirs to PATH, and
-# torch's cudnn_cnn64_9.dll would then resolve its sister cudnn DLLs
-# from the wrong copy -- WinError 127 at import. Torch-first is safe
-# in both directions.
-import torch  # noqa: F401
 import jax
 
 from texmo.tokens import set_tokens_dir

@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-import torch
 
 from texmo.layers.suffix import SuffixDef
 from texmo.precision import Precision
@@ -40,98 +39,51 @@ def test_def_is_valid():
     assert not SuffixDef(3, input_size=4).is_valid()  # must be power of 2
 
 
-def test_step():
-    module = SuffixDef(2, input_size=4).build_module()
-    state = module.init_state()
+# -- JAX --
+
+def test_jax_init_state():
+    layer = SuffixDef(2, input_size=4).build_jax(jnp.float32)
+    state = layer.init_state()
     assert state.shape == (1, 4)
     assert state.sum() == 0
 
-    v1 = torch.tensor([1, 2, 3, 4], dtype=torch.float32)
-    state, out = module.step(state, v1)
+
+def test_jax_step_known_values():
+    layer = SuffixDef(2, input_size=4).build_jax(jnp.float32)
+    state = layer.init_state()
+
+    v1 = jnp.array([1, 2, 3, 4], dtype=jnp.float32)
+    state, out = layer.step(None, state, v1)
     # Window: [zeros, v1] → flattened
     assert out.shape == (8,)
-    torch.testing.assert_close(out, torch.tensor([0, 0, 0, 0, 1, 2, 3, 4], dtype=torch.float32))
+    np.testing.assert_array_equal(out, [0, 0, 0, 0, 1, 2, 3, 4])
 
-    v2 = torch.tensor([5, 6, 7, 8], dtype=torch.float32)
-    state, out = module.step(state, v2)
+    v2 = jnp.array([5, 6, 7, 8], dtype=jnp.float32)
+    state, out = layer.step(None, state, v2)
     # Window: [v1, v2]
-    torch.testing.assert_close(out, torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], dtype=torch.float32))
+    np.testing.assert_array_equal(out, [1, 2, 3, 4, 5, 6, 7, 8])
 
-    v3 = torch.tensor([9, 10, 11, 12], dtype=torch.float32)
-    state, out = module.step(state, v3)
+    v3 = jnp.array([9, 10, 11, 12], dtype=jnp.float32)
+    state, out = layer.step(None, state, v3)
     # Window: [v2, v3]
-    torch.testing.assert_close(out, torch.tensor([5, 6, 7, 8, 9, 10, 11, 12], dtype=torch.float32))
+    np.testing.assert_array_equal(out, [5, 6, 7, 8, 9, 10, 11, 12])
 
 
-def test_forward():
-    module = SuffixDef(2, input_size=4).build_module()
-    # 1 batch, 4 positions (including padding), 4 features
-    inputs = torch.tensor([[[0, 0, 0, 0],
-                            [1, 2, 3, 4],
-                            [5, 6, 7, 8],
-                            [9, 10, 11, 12]]], dtype=torch.float32)
-
-    out = module(inputs)
-    # suffix.2 consumes 1 position → output has 3 positions
-    assert out.shape == (1, 3, 8)
-
-    expected = torch.tensor([[[0, 0, 0, 0, 1, 2, 3, 4],
-                              [1, 2, 3, 4, 5, 6, 7, 8],
-                              [5, 6, 7, 8, 9, 10, 11, 12]]], dtype=torch.float32)
-    torch.testing.assert_close(out, expected)
-
-
-def test_forward_batch():
-    module = SuffixDef(2, input_size=4).build_module()
-    inputs = torch.tensor([[[0, 0, 0, 0],
-                            [1, 2, 3, 4],
-                            [5, 6, 7, 8],
-                            [9, 10, 11, 12]],
-                           [[0, 0, 0, 0],
-                            [10, 20, 30, 40],
-                            [50, 60, 70, 80],
-                            [90, 100, 110, 120]]], dtype=torch.float32)
-
-    out = module(inputs)
+def test_jax_forward_batch():
+    layer = SuffixDef(2, input_size=4).build_jax(jnp.float32)
+    inputs = jnp.array([[[0, 0, 0, 0],
+                         [1, 2, 3, 4],
+                         [5, 6, 7, 8],
+                         [9, 10, 11, 12]],
+                        [[0, 0, 0, 0],
+                         [10, 20, 30, 40],
+                         [50, 60, 70, 80],
+                         [90, 100, 110, 120]]], dtype=jnp.float32)
+    out = layer.forward(None, inputs)
     assert out.shape == (2, 3, 8)
+    np.testing.assert_array_equal(
+        out[1, 0], [0, 0, 0, 0, 10, 20, 30, 40])
 
-
-def test_forward_matches_step():
-    module = SuffixDef(2, input_size=4).build_module()
-    inputs = torch.tensor([[[0, 0, 0, 0],
-                            [1, 2, 3, 4],
-                            [5, 6, 7, 8],
-                            [9, 10, 11, 12]]], dtype=torch.float32)
-
-    fwd = module(inputs)
-
-    # Step through the same inputs
-    state = module.init_state()
-    step_outputs = []
-    for t in range(inputs.shape[1]):
-        state, out = module.step(state, inputs[0, t])
-        step_outputs.append(out)
-
-    # forward output starts at position 1 (after consuming 1 padding position)
-    # step outputs include position 0 too
-    for i in range(fwd.shape[1]):
-        assert torch.equal(fwd[0, i], step_outputs[i + 1])
-
-
-def test_suffix4_forward():
-    module = SuffixDef(4, input_size=2).build_module()
-    # 7 positions, suffix.4 consumes 3 → 4 output positions
-    inputs = torch.arange(14, dtype=torch.float32).reshape(1, 7, 2)
-    out = module(inputs)
-    assert out.shape == (1, 4, 8)
-
-    # First output: positions 0,1,2,3
-    torch.testing.assert_close(out[0, 0], inputs[0, 0:4].reshape(-1))
-    # Last output: positions 3,4,5,6
-    torch.testing.assert_close(out[0, 3], inputs[0, 3:7].reshape(-1))
-
-
-# -- JAX --
 
 def test_jax_forward():
     layer = SuffixDef(2, input_size=4).build_jax(jnp.float32)

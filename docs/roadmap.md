@@ -107,40 +107,28 @@ budget. Dream target: 32-64K weights.
   prompting — note our conversion is the base model, not instruct)
   ride with the model.
 
-* **32-token ambiguous letter set with honest entropy accounting.**
-  DONE 2026-07-19 as the *fold* tokenset kind — see the "Fold
-  tokensets" section in [`io.md`](io.md) and
-  `tokens/tokens32_raw_fold.json`. Key upgrade over the sketch here:
-  the within-group knowledge is priced as **model weights** (one
-  stored head-character frequency per token, +32), making the b/B
-  comparison to bits/bytes exact rather than merely additive.
-  Search integration DONE 2026-07-19: neighbor bridges
-  `bits.4.oh+bp <-> tokens.32.raw_fold.oh` and
-  `bits.4.emb.X <-> tokens.32.raw_fold.emb.X` (the oh<->emb swap was
-  already automatic), plus two loss-predictor globals (the tokenset's
-  residual charge and log2 bytes-per-token; timing needs nothing —
-  unseen input types contribute zero until the regular refit learns
-  them).
-  Remaining: per-eval-slice residual accounting (decided against for
-  now — the corpus-average constant is exact in expectation;
-  `chunk_residual_bits` is ready if a cross-corpus eval appears).
-  Decode policy for generation TBD (sample within group vs
-  canonical head character — currently head character).
+* **Custom tokensets — DONE, and then some.** What started here as
+  "a 32-token ambiguous letter set with honest entropy accounting"
+  turned into a whole family, built 2026-07-19..2026-08-03:
+  `tokens.32.fold` (lossy folding, head-frequency accounting),
+  `tokens.{32,64}.shift` (shift marker at tokenization),
+  `tokens.{32,64,128,256}.hexbpe` (nibble fallback + BPE merges) and
+  `tokens.128.fold` (127 top bytes + uniform catch-all), all
+  search-reachable and all priced in weights by the same
+  one-per-stored-choice rule. **[`io.md`](io.md) is the live record**
+  — sizes, residuals, weight charges and the neighbor topology all
+  moved since, so trust it rather than any summary here.
 
-* **64-token set.** DONE 2026-07-20 as `tokens64_shift` — went
-  with in-band marker tokens (raw processing) rather than the
-  capswords sibling sketched here: lowercase + digits + shift
-  marker (caps, tab, six shifted-symbol pairs) + 26 top bytes + a
-  hex escape for everything else. Fully lossless: residual 0, zero
-  extra weights, 1.038 tokens/byte, handled by the generic DP
-  tokenizer (no fold machinery). See the fold section in
-  [`io.md`](io.md). Search-reachable 2026-07-20 as
-  `tokens.32.raw_fold <-> tokens.64.shift` neighbors (oh and emb, at
-  the same table width); predictors need nothing new — the loss
-  globals resolve residual 0 / log2(bpt) from the tokenset, the
-  timing model learns the input key at its next refit.
-  Unicode-char-level sibling (128 tokens, chars not bytes behind the
-  same shift/escape) discussed 2026-07-20, revisit later.
+  Genuinely still open from this thread:
+  - **Decode policy for lossy generation**: sample within a group vs
+    print the canonical head character (currently head character).
+  - **Per-eval-slice residual accounting**: decided against for now
+    (the corpus-average constant is exact in expectation);
+    `chunk_residual_bits` is ready if a cross-corpus eval appears.
+  - **A Unicode-char-level set** (chars, not bytes, behind a shift /
+    escape) — sketched 2026-07-20 and still unbuilt. Note the 128
+    rung is no longer empty (fold-128 and hexbpe-128 both exist), so
+    this would have to earn its place against them.
 
 * **Coherency eval.** Working assumption to start: cross-entropy
   over the dialog training distribution is a workable proxy for
@@ -185,13 +173,23 @@ budget. Dream target: 32-64K weights.
 
 ## Infrastructure
 
-* **select_conf latency** (2026-07-18 report, pre-restart): avg
-  6.5 s at 76% of server wall time; `SearchServer.select` at 171%
-  (overlapping requests queue ~8 s on top). Worst inner offender:
-  `_select_uncovered_top` (avg 4.4 s, max 79 s), then
-  `_select_predicted_best` / `_select_top_neighbor` (~1.5–3 s each).
-  Also `timing._refresh_estimates.iter_confs` at ~1 min per refresh.
-  No action yet — revisit with caching / incremental candidate sets
+* **select_conf latency.** The numbers below are a **2026-07-18
+  report and are now stale** — they predate the server work that
+  followed (incremental timing refresh, chunked upserts, dropping
+  stale `Select` messages, refit cadence 100 -> 400). Re-measure
+  before acting on them: avg 6.5 s at 76% of server wall time;
+  `SearchServer.select` at 171% (overlapping requests queue ~8 s on
+  top); worst inner offender `_select_uncovered_top` (avg 4.4 s, max
+  79 s), then `_select_predicted_best` / `_select_top_neighbor`
+  (~1.5-3 s each); `timing._refresh_estimates.iter_confs` ~1 min per
+  refresh.
+
+  Two things that have changed the picture since: a `top_confs_global`
+  call still costs ~3.6 s unrestricted, and a spec regex adds ~33% on
+  top (4.8 s measured 2026-08-08) because `REGEXP` is a Python
+  callback per row — and multi-template search now issues those
+  per-entry, multiplying the distinct query shapes any cache would
+  have to hold. Revisit with caching / incremental candidate sets
   when it starts hurting client utilization.
 
 * **Predictor training off the server's critical path** — DONE
@@ -330,25 +328,23 @@ budget. Dream target: 32-64K weights.
       step == forward trivial and the model contract match how
       pretrained LMs (BOS) already work.
 
-* **Weighted multi-template search** (2026-08-08 idea). Run several
-  templates concurrently, each with a share of the run budget — e.g.
-  10% to transformer-shaped confs, 10% to a newly implemented layer
-  so it gets measured properly, the rest to the unrestricted main
-  search. Today the server holds exactly one `Template` and every
-  `select_conf` draws from it, so a narrow interest can only be
-  pursued by narrowing the whole search.
+* **Weighted multi-template search — DONE 2026-08-09.** Sub-searches
+  with budget shares; specs live only in the sub-search rows, every
+  other bound stays shared. Coverage is per (system, entry), the
+  layer cap is filtered by each entry's own minimum layer count, and
+  the default fallback returns the entry's seed so a new sub-space
+  bootstraps instead of draining into the general search. See
+  [`search.md`](search.md).
 
-  Needs: a weighted template list (config + CLI, ideally editable
-  live like the current template is); a draw at selection time;
-  accounting so the shares hold *over time* rather than per request
-  (a 10% template must not starve when its confs are slow, nor
-  monopolize when they are fast); and web-interface work — per-
-  template frontier views and share display/editing.
+  Deliberately left ephemeral (revisit only if it bites): realized
+  shares are in-memory counters that reset on restart, and no
+  `run`-table column records which entry produced a run — per-entry
+  views re-derive it by applying the regex at query time.
 
-  Motivation: a new layer currently has to compete from cold against
-  a mature general population, so it can be starved out before it is
-  ever fairly measured — the search is efficient at exploitation and
-  we keep paying for that at exploration time.
+  One consequence worth remembering: shares are of *exploration*
+  selects. `pick_me` and the warmup ladder are drawn before the
+  entry and are no longer spec-restricted at all, since the base
+  template now carries no spec.
 
 * **Split `is_valid` into invalid vs search-ineligible.** Today one
   flag conflates "this model cannot run / makes no sense" with "this

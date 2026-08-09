@@ -306,8 +306,19 @@ budget. Dream target: 32-64K weights.
   transients into its state (suffix.2-gru.4: |step-forward| ~0.33 at
   position 0, decaying over the sample). Every conv/suffix->recurrent
   model therefore trains (forward) on a slightly different function
-  than it evals (forward_recurrent = step path). Pinned as strict
-  xfails in model2_test's step==forward sweep. Candidate fixes,
+  than it evals (forward_recurrent = step path).
+
+  **This is the only known failing behaviour in the tree** — it is
+  pinned as the suite's only two xfails, and clearing them is the
+  deliverable:
+
+      model2_test.py::test_step_matches_forward_all_families
+        [bits.4.oh+bp|dense.8-conv.2-rglru.2]
+        [bits.1+bp|suffix.2-gru.4]
+
+  They are strict xfails, so whichever fix lands flips them to
+  passing on its own and the `xfail` markers come out with it. A
+  green-with-no-xfails suite is the acceptance test. Candidate fixes,
   decision pending:
   (a) make conv/suffix causal-pad internally (Gemma-style, no
       consumption, no total_padding extras) -- a semantics change

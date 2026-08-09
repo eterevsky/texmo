@@ -7,6 +7,51 @@
             input[type="text"] {
                 width: 30rem;
             }
+            table.entry-form {
+                width: 100%;
+            }
+            table.entry-form td {
+                vertical-align: top;
+            }
+            table.entry-form input[type="text"] {
+                font-family: monospace;
+                margin-bottom: 0.15rem;
+            }
+            table.entry-form td.c-specs {
+                width: 100%;
+            }
+            /* Regex and default spec are stacked, each on its own full-
+               width line: real values run 40-80 characters. */
+            table.entry-form td.c-specs label {
+                display: block;
+                color: #666;
+                font-size: 0.85em;
+            }
+            table.entry-form input.c-regex,
+            table.entry-form input.c-spec {
+                display: block;
+                width: 100%;
+                max-width: 100%;
+            }
+            table.entry-form input.c-name {
+                width: 6rem;
+            }
+            table.entry-form input.c-share {
+                width: 4rem;
+            }
+            table.entry-form .norm {
+                color: #666;
+                font-size: 0.85em;
+                padding-left: 0.3rem;
+                white-space: nowrap;
+            }
+            form.filters label,
+            form.filters select,
+            form.filters input {
+                display: inline-block;
+                vertical-align: middle;
+                margin-right: 0.5rem;
+            }
             .copy-link {
                 cursor: pointer;
                 text-decoration: underline;
@@ -14,6 +59,51 @@
             }
         </style>
         <script>
+            // --- sub-search rows -------------------------------------
+            // The form posts four parallel repeated fields
+            // (entry_name / entry_regex / entry_default_spec /
+            // entry_share); the server zips them back by position, so
+            // a row is just a <tr> of those four inputs.
+            function entryRows() {
+                return document.querySelectorAll('#entry-rows tr');
+            }
+            function nextEntryName() {
+                const taken = new Set();
+                document.getElementsByName('entry_name').forEach(
+                    el => taken.add(el.value.trim()));
+                for (let i = 1; ; i++) {
+                    if (!taken.has('sub' + i)) return 'sub' + i;
+                }
+            }
+            function addEntryRow() {
+                const tpl = document.getElementById('entry-row-template');
+                const row = tpl.content.cloneNode(true);
+                row.querySelector('.c-name').value = nextEntryName();
+                document.getElementById('entry-rows').appendChild(row);
+                updateShares();
+            }
+            function removeEntryRow(button) {
+                button.closest('tr').remove();
+                updateShares();
+            }
+            // Shares are normalized server-side; show each row what its
+            // number actually works out to, so 60/20/30 doesn't read as
+            // if it were 60/20/20 plus a rounding error.
+            function updateShares() {
+                let total = 0;
+                entryRows().forEach(row => {
+                    const v = parseFloat(row.querySelector('.c-share').value);
+                    if (!isNaN(v) && v > 0) total += v;
+                });
+                entryRows().forEach(row => {
+                    const v = parseFloat(row.querySelector('.c-share').value);
+                    const out = row.querySelector('.norm');
+                    out.textContent = (total > 0 && !isNaN(v))
+                        ? ' = ' + (100 * v / total).toFixed(0) + '%' : '';
+                });
+            }
+            document.addEventListener('DOMContentLoaded', updateShares);
+
             function copyCmd(el) {
                 const cmd = el.dataset.cmd;
                 const flash = () => {
@@ -54,12 +144,8 @@
             <table>
                 <caption>Template</caption>
                 <tr>
-                    <td>Model spec regex:</td>
-                    <td><input type="text" name="spec" value="{{ spec }}"></td>
-                </tr>
-                <tr>
-                    <td>Default spec (seed):</td>
-                    <td><input type="text" name="default_spec" value="{{ default_spec }}" placeholder="(optional; auto-pick when blank)"></td>
+                    <td>Fallback default spec:</td>
+                    <td><input type="text" name="default_spec" value="{{ default_spec }}" placeholder="(optional; seeds the search when no sub-search row does)"></td>
                 </tr>
                 <tr>
                     <td>Weights:</td>
@@ -107,13 +193,85 @@
                     <td><input type="text" name="time" value="{{ time }}"></td>
                 </tr>
                 <tr>
+                    <td>Sub-searches:</td>
+                    <td>
+                        <table class="entry-form">
+                            <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Model specs</th>
+                                <th>Share</th>
+                                <th></th>
+                            </tr>
+                            </thead>
+                            <tbody id="entry-rows">
+                            {% for e in entry_form %}
+                            <tr>
+                                <td><input type="text" name="entry_name" value="{{ e.name }}" class="c-name"></td>
+                                <td class="c-specs">
+                                    <label>regex<input type="text" name="entry_regex" value="{{ e.regex }}" class="c-regex" placeholder="(blank = unrestricted)"></label>
+                                    <label>default<input type="text" name="entry_default_spec" value="{{ e.default_spec }}" class="c-spec" placeholder="(blank = derived from the regex)"></label>
+                                </td>
+                                <td><input type="text" name="entry_share" value="{{ e.share }}" class="c-share" oninput="updateShares()"><span class="norm"></span></td>
+                                <td><button type="button" onclick="removeEntryRow(this)">Remove</button></td>
+                            </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                        <template id="entry-row-template">
+                            <tr>
+                                <td><input type="text" name="entry_name" value="" class="c-name"></td>
+                                <td class="c-specs">
+                                    <label>regex<input type="text" name="entry_regex" value="" class="c-regex" placeholder="(blank = unrestricted)"></label>
+                                    <label>default<input type="text" name="entry_default_spec" value="" class="c-spec" placeholder="(blank = derived from the regex)"></label>
+                                </td>
+                                <td><input type="text" name="entry_share" value="" class="c-share" oninput="updateShares()"><span class="norm"></span></td>
+                                <td><button type="button" onclick="removeEntryRow(this)">Remove</button></td>
+                            </tr>
+                        </template>
+                        <button type="button" onclick="addEntryRow()">Add sub-search</button>
+                        <br>
+                        <small>Model specs are defined here and nowhere else; every bound
+                        above is shared by all sub-searches. Shares are
+                        <strong>normalized</strong>, so 60/20/20 and 3/1/1 mean the same thing
+                        (the % after each share is what it works out to). A blank regex means
+                        unrestricted; a blank default spec is derived from the regex. Rows left
+                        entirely blank are ignored &mdash; with none left, the search runs
+                        unrestricted as a single <code>main</code> entry.</small>
+                    </td>
+                </tr>
+                <tr>
                     <td></td>
                     <td><input type="submit" value="Update"></td>
                 </tr>
             </table>
         </form>
 
-        <form action="/" method="get">
+        {% if show_entries %}
+        <table>
+            <caption>Sub-searches</caption>
+            <tr>
+                <th>Name</th>
+                <th>Spec filter</th>
+                <th>Share</th>
+                <th>Realized</th>
+                <th>Selects</th>
+                <th>Default conf</th>
+            </tr>
+            {% for e in entries %}
+            <tr>
+                <td>{{ e.name }}</td>
+                <td><code>{{ e.regex }}</code></td>
+                <td>{{ e.share }}</td>
+                <td>{{ e.realized }}</td>
+                <td>{{ e.selects }}</td>
+                <td><code>{{ e.default }}</code></td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% endif %}
+
+        <form action="/" method="get" class="filters">
             <label for="system">System:</label>
             <select name="system" id="system">
                 <option value="" {% if not selected_system %}selected{% endif %}>All systems</option>
@@ -121,6 +279,15 @@
                 <option value="{{ s }}" {% if s == selected_system %}selected{% endif %}>{{ s }}</option>
                 {% endfor %}
             </select>
+            {% if show_entries %}
+            <label for="entry">Sub-search:</label>
+            <select name="entry" id="entry">
+                <option value="" {% if not selected_entry %}selected{% endif %}>Whole template</option>
+                {% for name in entry_names %}
+                <option value="{{ name }}" {% if name == selected_entry %}selected{% endif %}>{{ name }}</option>
+                {% endfor %}
+            </select>
+            {% endif %}
             <input type="submit" value="Filter">
         </form>
 

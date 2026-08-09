@@ -22,6 +22,71 @@ configurations to train and post results back.
 - **Client** (`client.py`) — worker loop that pulls from `/select`, runs
   the training with `Manager`, posts back via `/add`.
 
+## Weighted template sets (sub-searches)
+
+The server can split its select budget between several sub-searches
+that share **every** template bound and differ **only** in their spec
+filter — e.g. 60% unrestricted, 20% transformer-shaped, 20% a newly
+implemented layer. Without this a fresh layer competes from cold
+against a mature general population and is starved before it can be
+fairly measured.
+
+Configured with `--templates <path.json>`, or row by row in the
+sub-search table on the index page (same thing, two spellings):
+
+```json
+[
+  {"name": "main", "share": 60},
+  {"name": "attn", "share": 20, "regex": ".*\\|split\\.add\\(.*attn.*",
+   "default_spec": "bytes|split.add(norm-attn.8.2.8, pass)"}
+]
+```
+
+- `share` values are normalized (they need not sum to 100).
+- `regex` uses the same syntax as `--spec`; omitted = unrestricted.
+- `default_spec` seeds the sub-space — semantically the *smallest*
+  conf that agrees with the entry. Omitted, it is derived by
+  `default_from_template` against the entry's template, which fails
+  loudly at configuration time if nothing matches.
+
+`select_conf` draws one entry per call, weighted by share, right after
+the (template-blind) pick_me and warmup steps. Everything below the
+draw runs inside that entry: the coverage walk, the layer cap, the
+`max_weights` ceiling, the strategy, and both fallbacks. Consequences
+worth knowing:
+
+- **Per-entry frontier.** The coverage walk pulls `top_confs_global`
+  for the *entry's* template, so a conf that is Pareto-optimal for a
+  sub-template but dominated globally still gets its cross-system
+  re-runs. Its sticky flag and progress stats are keyed by
+  `(system, entry)`.
+- **Per-entry weight ceiling.** `_select_max_weights` derives from the
+  best conf *within* the entry, so each sub-space gets a weight range
+  matched to its own population.
+- **Per-entry layer caps.** `_LAYER_CAP_PROBS` drops every cap below
+  the entry's minimum layer count (from its default conf) and
+  renormalizes. A transformer block is ~9 layers, so without this 40%
+  of its selects would query an empty intersection and fall through.
+- **Per-entry default fallback.** The last-resort fallback returns the
+  drawn entry's default conf. This is what bootstraps an empty
+  sub-space; without it a new entry returns None and its budget
+  quietly drains into the general search.
+
+With no `--templates` there is a single entry (`main`, carrying
+`--spec` if given), and the draw is a short-circuit that consumes no
+randomness — selection is byte-for-byte what it was before template
+sets existed. Model specs live **only** in the entries: the base
+template they share has no spec of its own, so nothing filters twice
+and the index form has one place, not two, where specs are set.
+
+The index page shows each entry's nominal share next to its **realized**
+share and the raw select count behind it (an in-memory counter of confs
+served per entry since server start, no schema change; realized share
+means little below a few hundred selects). The top-confs and compare
+views can be filtered to one entry, which just applies its regex at
+query time. Nothing about which entry produced a run is recorded in
+the DB.
+
 ## Search strategies
 
 `Search.select_conf(system)` first picks a time budget `t` (log-uniform
@@ -106,9 +171,10 @@ expanding sequence. For each neighbor, pick it if:
 
 ### 5. `default`
 
-Final fallback: return the initial/default configuration from the
-template (skipped if the init conf doesn't match the current template
-or has already been explored enough).
+Final fallback: return the default configuration of the sub-template
+drawn for this select (the whole template's default when no template
+set is configured). Skipped if that conf doesn't match its own template
+or has already been explored enough.
 
 ## Loss prediction model
 
@@ -206,9 +272,27 @@ a graph (score vs. weights, Pareto frontier), and a table of top configs.
 
 - **Template form** — posting to `/update` creates a new Template via
   `Template.from_form()` and updates `search_thread.search.template`
-  (atomic swap, not mutation).
+  (atomic swap, not mutation). It holds the bounds shared by every
+  entry (weights, layers, length, batch, steps, lr, time, precisions,
+  decay types) and **no spec field**.
+- **Sub-search rows** — one row per entry: name, the two model specs
+  (regex and default, stacked full-width in one column since real ones
+  run 40-80 characters), and share, with Add / Remove buttons and a
+  live-computed normalized percentage next to each share. There is
+  always at least one row; with no sub-searches configured it is a
+  single `main` row whose blank regex means unrestricted. The four
+  fields post as parallel repeated fields (`entry_name`, `entry_regex`,
+  `entry_default_spec`, `entry_share`) and are zipped back by position;
+  rows left entirely blank are dropped. The set is rebuilt against the
+  new base template on every update; anything malformed (a nameless or
+  shareless row, a non-numeric or negative share, duplicate names, a
+  bad regex, a `default_spec` outside its own entry) is rejected with
+  the error banner, leaves the running search alone, and comes back
+  with the submitted values still in the fields.
 - **System dropdown** — filters the graph and table to configs that have
   at least one run on the selected system.
+- **Sub-search dropdown** — with a template set configured, filters the
+  graph and table to one entry's frontier.
 - **Copy link** — each row has a "copy" link that copies a
   `uv run texmo.py train ...` command to the clipboard.
 

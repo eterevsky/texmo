@@ -26,9 +26,14 @@ def main(args: argparse.Namespace):
     warmup_systems = [
         s.strip() for s in (args.warmup_systems or '').split(',') if s.strip()
     ]
+    templates_json = None
+    if args.templates:
+        with open(args.templates, encoding='utf-8') as f:
+            templates_json = f.read()
     server = SearchServer(
         args.db, template, train_time, args.default_spec,
         warmup_systems=warmup_systems,
+        templates_json=templates_json,
     )
 
     server.serve(api_key=args.api_key or '')
@@ -118,6 +123,19 @@ def init_args(parser: argparse.ArgumentParser, config):
         help="range for the training time in seconds",
     )
     parser.add_argument("--default-spec", type=str, default=None, help="default model")
+    parser.add_argument(
+        "--templates",
+        type=str,
+        default=None,
+        help="path to a JSON file splitting the select budget between"
+             " several sub-searches, e.g."
+             ' \'[{"name": "main", "share": 60},'
+             ' {"name": "attn", "share": 40, "regex": ".*attn.*",'
+             ' "default_spec": "..."}]\'. Entries share every template'
+             " bound and differ only in their spec filter; shares are"
+             " normalized. Omit for a single unrestricted search"
+             " (the default, identical to not having the flag).",
+    )
     parser.add_argument(
         "--warmup-systems",
         type=str,

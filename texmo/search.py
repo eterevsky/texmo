@@ -1,4 +1,5 @@
 import copy
+import functools
 import logging
 import random
 import threading
@@ -12,7 +13,14 @@ import numpy as np
 
 from . import latency
 from .common import INF, itoa3, ttoa3
-from .configuration import Bounds, Configuration, Template, conf_neighbors
+from .configuration import (
+    Bounds,
+    Configuration,
+    Template,
+    TemplateEntry,
+    TemplateSet,
+    conf_neighbors,
+)
 from .db import ConfScore, ConfWithRuns, DbReader
 from .predict.loss_rnn import LossModelHolder
 from .predict.timing import TrainTimingModel
@@ -72,11 +80,15 @@ _SELECT_STALE_S = 120.0
 
 @dataclass
 class SetTemplate:
-    """Reconfigure `Search` between two `select_conf` calls. The trio
-    moves together so a partial update never lands on the search loop."""
+    """Reconfigure `Search` between two `select_conf` calls. The group
+    moves together so a partial update never lands on the search loop.
+
+    `templates` is the weighted sub-search set derived from the same
+    base `template`; it always has at least one entry."""
     template: Template
     init_conf: Configuration
     train_time: tuple[float, float]
+    templates: TemplateSet
 
 
 @dataclass
@@ -188,6 +200,28 @@ _LAYER_CAP_PROBS: list[tuple[Optional[int], float]] = [
     (4, 0.1),
 ]
 assert abs(sum(w for _, w in _LAYER_CAP_PROBS) - 1.0) < 1e-9
+
+
+@functools.lru_cache(maxsize=None)
+def _layer_cap_probs(
+    min_layers: int,
+) -> tuple[tuple[Optional[int], float], ...]:
+    """`_LAYER_CAP_PROBS` with every cap below `min_layers` dropped and
+    the surviving weights renormalized. `None` (unrestricted) always
+    survives.
+
+    A sub-search whose smallest conf already has N layers can never
+    satisfy a cap below N -- a transformer block is ~9 layers, so 40%
+    of its selects would query an empty intersection, pay for the
+    (regex-filtered) queries and fall through. Cached: this is called
+    on every select, keyed by the entry's cached `min_layers`.
+    """
+    kept = [
+        (cap, w) for cap, w in _LAYER_CAP_PROBS
+        if cap is None or cap >= min_layers
+    ]
+    total = sum(w for _, w in kept)
+    return tuple((cap, w / total) for cap, w in kept)
 
 
 def _cap_bound(b: Bounds, cap: int, floor: int) -> Bounds:
@@ -399,6 +433,7 @@ class Search(object):
         timing_model: TrainTimingModel,
         loss_model: LossModelHolder,
         warmup_systems: Optional[Iterable[str]] = None,
+        templates: Optional[TemplateSet] = None,
     ):
         assert isinstance(reader, DbReader)
         # `_db` is the read handle used by every strategy below. Search
@@ -407,10 +442,33 @@ class Search(object):
         self._db = reader
 
         assert isinstance(template, Template)
+        # The BASE template: the whole region the server is searching.
+        # Used by the template-blind steps (pick_me, warmup ladder, the
+        # steps floor in `_cap_steps`). Everything downstream of the
+        # sub-template draw uses the drawn entry's template instead.
         self.template = template
 
         assert isinstance(init_conf, Configuration)
+        # The base template's default conf, and the one a stand-in
+        # single-entry set is built from. The default FALLBACK uses the
+        # drawn entry's own `default` instead, which is what lets a
+        # brand-new sub-space bootstrap.
         self.init_conf = init_conf
+
+        # Confs served per entry, in memory since server start (no DB
+        # schema change). The web UI shows each entry's count and its
+        # share of the total -- the REALIZED share, next to the nominal
+        # one. The raw count is the sample size behind that percentage:
+        # it takes a few hundred selects before the two are comparable.
+        self.entry_selects: dict[str, int] = {}
+
+        # Weighted sub-searches. Absent one, the whole template is a
+        # single entry and every select behaves exactly as it did
+        # before template sets existed.
+        if templates is None:
+            templates = TemplateSet.single(
+                template, spec=template.spec_pattern, default=init_conf)
+        self.set_templates(templates)
 
         assert isinstance(train_time[0], float)
         assert isinstance(train_time[1], float)
@@ -437,16 +495,29 @@ class Search(object):
         # is fetched once per rung rather than once per pick.
         self._warmup_top: dict[str, tuple[int, list]] = {}
 
-        # Sticky per-system flag set by `_select_uncovered_top` when it
-        # finds 2+ uncovered top confs — keeps the coverage walk firing
-        # at 100% on the next select for that system until the gap
-        # closes. Reset by the same call when fewer than 2 are found.
-        self._coverage_flag: dict[str, bool] = {}
+        # Sticky flag set by `_select_uncovered_top` when it finds
+        # `_COVERAGE_STICKY_THRESHOLD`+ uncovered top confs — keeps the
+        # coverage walk firing at 100% on the next select for that
+        # (system, entry) until the gap closes; reset by the same call
+        # when fewer are found. Keyed per entry because a conf can be
+        # Pareto-optimal for one sub-template and invisible under
+        # another: covering it under `main` says nothing about the
+        # frontier a narrow entry sees.
+        self._coverage_flag: dict[tuple[str, str], bool] = {}
 
-        # Last (covered, total) top-conf counts from `_select_uncovered_top`,
-        # per system. Attached to coverage-walk SearchResults so the
-        # client can log progress.
-        self._coverage_stats: dict[str, tuple[int, int]] = {}
+        # Last (covered, total) top-conf counts from
+        # `_select_uncovered_top`, per (system, entry). Attached to
+        # coverage-walk SearchResults so the client can log progress.
+        self._coverage_stats: dict[tuple[str, str], tuple[int, int]] = {}
+
+    def set_templates(self, templates: TemplateSet) -> None:
+        """Install a template set and make sure every entry has its
+        select counter, so concurrent readers (the web UI) never see
+        the counter dict grow under them."""
+        assert isinstance(templates, TemplateSet)
+        self.templates = templates
+        for entry in templates:
+            self.entry_selects.setdefault(entry.name, 0)
 
     def _select_time(self) -> float:
         tmin, tmax = self.train_time
@@ -802,21 +873,24 @@ class Search(object):
                 return conf
 
     def _select_uncovered_top(
-        self, system: str
+        self, system: str, entry: TemplateEntry,
     ) -> Optional[Configuration]:
-        """Walk every top conf the template admits in random order,
-        cap each for `system`, and return the first whose capped
+        """Walk every top conf `entry`'s template admits in random
+        order, cap each for `system`, and return the first whose capped
         variant has no covering run on `system` (= no run with the
         same spec/lr/length/batch/precision/decay/cosine and steps ≥
         the capped count).
 
-        Sets `self._coverage_flag[system]` to True when
+        The frontier is the one the ENTRY sees: a conf another system
+        found that is Pareto-optimal for this sub-template but not
+        globally still deserves a cross-system re-run here.
+
+        Sets `self._coverage_flag[(system, entry.name)]` to True when
         `_COVERAGE_STICKY_THRESHOLD`+ uncovered confs are found, so
-        the next select on this system fires this walk
-        unconditionally; resets to False otherwise. The randomized
-        order keeps successive selects from picking the same conf
-        during the prefetch gap window (before the previous run is
-        written back).
+        the next select for that pair fires this walk unconditionally;
+        resets to False otherwise. The randomized order keeps
+        successive selects from picking the same conf during the
+        prefetch gap window (before the previous run is written back).
         """
         with latency.timer('Search._select_uncovered_top'):
             # `top_confs_global` applies the template's max_weights
@@ -829,7 +903,7 @@ class Search(object):
             # accounting: counted as uncovered they could never be
             # closed, and the sticky flag would latch on forever.
             top = [c for c in self._db.top_confs_global(
-                       self.template, min_num_runs=1)
+                       entry.template, min_num_runs=1)
                    if not _is_retired_conf(c.conf)]
             random.shuffle(top)
 
@@ -846,11 +920,12 @@ class Search(object):
             sticky = uncovered >= _COVERAGE_STICKY_THRESHOLD
             covered = len(top) - uncovered
             logging.info(
-                f'Coverage walk {system}: {covered}/{len(top)} '
-                f'top confs covered, sticky={sticky}'
+                f'Coverage walk {system}/{entry.name}: '
+                f'{covered}/{len(top)} top confs covered, sticky={sticky}'
             )
-            self._coverage_flag[system] = sticky
-            self._coverage_stats[system] = (covered, len(top))
+            key = (system, entry.name)
+            self._coverage_flag[key] = sticky
+            self._coverage_stats[key] = (covered, len(top))
             return selected
 
     def _select_predicted_best(
@@ -1013,41 +1088,68 @@ class Search(object):
     def _result(
         self, conf: Configuration, strategy: str, system: str,
         covered: int | None = None, total: int | None = None,
+        entry: Optional[TemplateEntry] = None,
     ) -> SearchResult:
-        logging.info(f'Conf for {system}: {conf} ({strategy})')
+        """Build the SearchResult and log it. `entry` (when the pick
+        came from a drawn sub-template) also books the select against
+        that entry's realized-share counter."""
+        if entry is None:
+            logging.info(f'Conf for {system}: {conf} ({strategy})')
+        else:
+            self.entry_selects[entry.name] = (
+                self.entry_selects.get(entry.name, 0) + 1)
+            logging.info(
+                f'Conf for {system}: {conf} ({strategy}, {entry.name})')
         return SearchResult(conf, strategy, system, covered, total)
 
-    def _select_default(self, system: str) -> Optional[Configuration]:
-        """Return init_conf, unless it no longer matches the current
-        template or has already been explored enough on this system."""
-        if _is_retired_conf(self.init_conf):
+    def _select_default(
+        self, system: str, entry: TemplateEntry,
+    ) -> Optional[Configuration]:
+        """Return the DRAWN entry's default conf, unless it no longer
+        matches that entry's template or has already been explored
+        enough on this system.
+
+        This is what bootstraps an empty sub-space: without it a
+        brand-new entry returns None on every select and its budget
+        evaporates into the general search.
+        """
+        default = entry.default
+        if _is_retired_conf(default):
             logging.info(
-                f'No conf for {system}: init_conf uses a retired input')
+                f'No conf for {system}: default conf for {entry.name!r} '
+                f'uses a retired input')
             return None
-        if not self.template.match(self.init_conf):
+        if not entry.template.match(default):
             logging.info(
-                f'No conf for {system}: init_conf does not match template')
+                f'No conf for {system}: default conf for {entry.name!r} '
+                f'does not match the template')
             return None
-        conf_id = self._db.get_conf_id(self.init_conf)
+        conf_id = self._db.get_conf_id(default)
         if conf_id is not None:
             counts = self._db.get_run_counts([conf_id], system=system)
             total_runs, system_runs = counts.get(conf_id, (0, 0))
             if total_runs >= 7 and system_runs >= 1:
                 logging.info(
-                    f'No conf for {system}: init_conf has {total_runs} '
-                    f'total runs ({system_runs} on this system)')
+                    f'No conf for {system}: default conf for '
+                    f'{entry.name!r} has {total_runs} total runs '
+                    f'({system_runs} on this system)')
                 return None
-        return self.init_conf
+        return default
 
-    def _sample_layer_capped_template(self) -> tuple[Template, Optional[int]]:
-        """Sample a per-select num_layers cap from `_LAYER_CAP_PROBS`
-        and intersect it with the base template."""
+    def _sample_layer_capped_template(
+        self, entry: TemplateEntry,
+    ) -> tuple[Template, Optional[int]]:
+        """Sample a per-select num_layers cap and intersect it with the
+        entry's template. Caps below the entry's own minimum layer count
+        are dropped from the distribution first (see
+        `_layer_cap_probs`)."""
+        probs = _layer_cap_probs(entry.min_layers)
         (cap, _), = random.choices(
-            _LAYER_CAP_PROBS,
-            weights=[w for _, w in _LAYER_CAP_PROBS],
+            probs,
+            weights=[w for _, w in probs],
             k=1,
         )
-        return _layer_capped_template(self.template, cap)
+        return _layer_capped_template(entry.template, cap)
 
     def _run_strategy(
         self, name: str, t: float, max_weights: int, system: str,
@@ -1074,19 +1176,27 @@ class Search(object):
 
         Pick-me confs (explicit user-injected candidates with
         `pick_me = 1`) take absolute priority until each has
-        `PICK_ME_MIN_RUNS` total runs.
+        `PICK_ME_MIN_RUNS` total runs. The warmup ladder comes next.
+        Both are template-blind: they run against the base template.
 
-        Then the coverage walk runs (independent of t / max_weights)
+        Then ONE share-weighted draw picks the sub-template for this
+        select, and everything below it -- coverage walk, layer cap,
+        weight ceiling, strategies and both fallbacks -- runs inside
+        that entry. With a single entry this is exactly the
+        pre-template-set path.
+
+        The coverage walk runs first (independent of t / max_weights)
         and fires either with probability `_COVERAGE_PROB` or
-        unconditionally when its sticky flag is set on this system.
+        unconditionally when its sticky flag is set for this
+        (system, entry).
 
         After that, one weighted random draw over `_STRATEGY_PROBS`
         picks the main strategy. If the picked strategy returns None
         (e.g. `predicted_*` without a fitted loss model, or
         `time_budget` with no qualifying confs), we fall back to the
         neighbor walk. If neighbor too is unavailable, fall back to
-        the default conf (skipped if it doesn't match the current
-        template or has already been explored enough).
+        the entry's default conf (skipped if it doesn't match the
+        entry's template or has already been explored enough).
         """
         with latency.timer("Search.select_conf"):
             # Pick-me: explicit user picks bypass every other strategy
@@ -1111,37 +1221,51 @@ class Search(object):
                     return self._result(conf, 'warmup', system)
                 self.warmup_systems.discard(system)
 
+            # Sub-template draw: one share-weighted pick per select,
+            # after which this whole call lives inside that entry.
+            entry = self.templates.draw()
+            if not self.templates.is_single:
+                logging.info(
+                    f'Sub-template for {system}: {entry.name} '
+                    f'(spec={entry.spec})')
+
             # Coverage walk runs *before* t / max_weights selection so
             # the bulk cross-system push isn't confined to the current
-            # iteration's weight bucket. Sticky on this system when the
-            # previous walk left more uncovered to do. Held back until
-            # the system has a fitted timing model: without one we can't
-            # cap the (often slow, recurrent) global top confs this walk
-            # pulls, so a fresh system would run them at full length.
-            # The neighbor walk seeds the timing model first; once it's
-            # fit, this turns on and catches up on the global tops.
+            # iteration's weight bucket. Sticky on this (system, entry)
+            # when the previous walk left more uncovered to do. Held
+            # back until the system has a fitted timing model: without
+            # one we can't cap the (often slow, recurrent) global top
+            # confs this walk pulls, so a fresh system would run them at
+            # full length. The neighbor walk seeds the timing model
+            # first; once it's fit, this turns on and catches up on the
+            # entry's top confs.
             if self._timing_ready(system) and (
-                self._coverage_flag.get(system, False)
+                self._coverage_flag.get((system, entry.name), False)
                 or random.random() < _COVERAGE_PROB
             ):
-                conf = self._select_uncovered_top(system)
+                conf = self._select_uncovered_top(system, entry)
                 if conf is not None:
                     covered, total = self._coverage_stats.get(
-                        system, (None, None))
+                        (system, entry.name), (None, None))
                     return self._result(
-                        conf, 'coverage_walk', system, covered, total)
+                        conf, 'coverage_walk', system, covered, total,
+                        entry=entry)
 
             # Layer-count diversification: this select (seed queries,
             # neighbor/BFS expansion, and hence the trained conf) may run
-            # under a sampled num_layers cap. The fallback chain below
-            # stays capped too; only the final default fallback is base.
-            template, layer_cap = self._sample_layer_capped_template()
+            # under a sampled num_layers cap on top of the entry's
+            # template. The fallback chain below stays capped too; only
+            # the final default fallback is uncapped.
+            template, layer_cap = self._sample_layer_capped_template(entry)
             if layer_cap is not None:
                 logging.info(
                     f'Layer-capped select for {system}: '
                     f'num_layers <= {layer_cap}')
 
             t = self._select_time()
+            # Derived from the best conf WITHIN this (capped) entry, so
+            # each sub-space gets a weight range matched to its own
+            # population rather than to the global frontier.
             max_weights = self._select_max_weights(t, system, template)
 
             picked, _ = random.choices(
@@ -1151,7 +1275,7 @@ class Search(object):
             )[0]
             conf = self._run_strategy(picked, t, max_weights, system, template)
             if conf is not None:
-                return self._result(conf, picked, system)
+                return self._result(conf, picked, system, entry=entry)
 
             # First-line strategy was unavailable -- always fall back
             # to the neighbor walk.
@@ -1159,11 +1283,12 @@ class Search(object):
                 conf = self._run_strategy(
                     'neighbor', t, max_weights, system, template)
                 if conf is not None:
-                    return self._result(conf, 'neighbor', system)
+                    return self._result(
+                        conf, 'neighbor', system, entry=entry)
 
-            conf = self._select_default(system)
+            conf = self._select_default(system, entry)
             if conf is not None:
-                return self._result(conf, 'default', system)
+                return self._result(conf, 'default', system, entry=entry)
             return None
 
 
@@ -1188,6 +1313,7 @@ class SearchThread(threading.Thread):
         timing_model: TrainTimingModel,
         loss_model: LossModelHolder,
         warmup_systems: Optional[Iterable[str]] = None,
+        templates: Optional[TemplateSet] = None,
     ):
         super().__init__()
         # Search and the DbReader are built lazily on `run()` so the
@@ -1196,6 +1322,7 @@ class SearchThread(threading.Thread):
         self._path = path
         self._warmup_systems = set(warmup_systems or ())
         self._template = template
+        self._templates = templates
         self._train_time = train_time
         self._default = default
         self._timing_model = timing_model
@@ -1217,8 +1344,17 @@ class SearchThread(threading.Thread):
             timing_model=self._timing_model,
             loss_model=self._loss_model,
             warmup_systems=self._warmup_systems,
+            templates=self._templates,
         )
         logging.info("Started search thread")
+        if self.search.templates.is_single:
+            logging.info("Single template (no sub-searches)")
+        else:
+            for entry in self.search.templates:
+                logging.info(
+                    f'Sub-search {entry.name}: '
+                    f'{self.search.templates.nominal_share(entry):.0f}% '
+                    f'spec={entry.spec} default={entry.default.model}')
         if self._warmup_systems:
             logging.info(
                 f"Warmup mode for {sorted(self._warmup_systems)}: "
@@ -1267,13 +1403,19 @@ class SearchThread(threading.Thread):
                         template=template,
                         init_conf=init_conf,
                         train_time=train_time,
+                        templates=templates,
                     ):
                         self.search.template = template
                         self.search.init_conf = init_conf
                         self.search.train_time = train_time
+                        self.search.set_templates(templates)
                         self.max_time = train_time[1]
                         logging.info(
                             f'Search thread: new template {template}')
+                        if not templates.is_single:
+                            logging.info(
+                                f'Search thread: new sub-searches '
+                                f'{templates}')
                     case Stop():
                         logging.info("Stopping search thread")
                         break

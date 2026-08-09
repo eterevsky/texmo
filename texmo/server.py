@@ -9,6 +9,7 @@ import pickle
 import threading
 import time
 from datetime import datetime
+from itertools import zip_longest
 from queue import Queue
 from typing import Iterable, Optional
 
@@ -32,6 +33,7 @@ from .configuration import (
     DecayType,
     Precision,
     Template,
+    TemplateSet,
     default_from_template,
     format_lr,
 )
@@ -214,10 +216,57 @@ def _strip_prefix(form: dict, prefix: str) -> dict:
 
 def _template_from_compare_form(form: dict, prefix: str) -> Template:
     """Build a Template from prefixed compare-form fields, plumbing the
-    shared `weights` value through unchanged."""
+    shared `weights` value through unchanged.
+
+    Unlike the index form, a compare column DOES have its own spec box
+    (each column is a free-form query, not the live search), so the spec
+    is passed to `from_form` explicitly."""
     sub = _strip_prefix(form, prefix)
     sub['weights'] = form.get('weights', '')
-    return Template.from_form(sub)
+    return Template.from_form(sub, spec=sub.get('spec') or None)
+
+
+# The sub-search table posts four parallel repeated fields, one value
+# per row per field; rows are reassembled by position. Order matches
+# the columns in index.html.
+_ENTRY_FORM_FIELDS = (
+    ('name', 'entry_name'),
+    ('regex', 'entry_regex'),
+    ('default_spec', 'entry_default_spec'),
+    ('share', 'entry_share'),
+)
+
+
+def _entry_rows_from_form(params) -> list[dict]:
+    """Zip the form's parallel `entry_*` fields into row dicts.
+
+    `zip_longest` rather than `zip`: a hand-built or partially posted
+    form can carry unequal counts, and a missing cell should read as
+    blank (and so, with the rest of its row, be ignored) instead of
+    silently shifting every later row up a slot.
+    """
+    columns = [params.getlist(field) for _, field in _ENTRY_FORM_FIELDS]
+    return [
+        {key: (value or '').strip()
+         for (key, _), value in zip(_ENTRY_FORM_FIELDS, values)}
+        for values in zip_longest(*columns, fillvalue='')
+    ]
+
+
+def _apply_entry(
+    template: Template, name: str, templates: TemplateSet,
+) -> Template:
+    """Restrict a compare column to one sub-search: the entry's spec
+    filter replaces whatever the column's spec field held. An unknown
+    (or empty) name leaves the template alone; the main entry's empty
+    filter clears the column's spec, which is what "unrestricted"
+    means."""
+    if not name:
+        return template
+    entry = templates.by_name(name)
+    if entry is None:
+        return template
+    return template.with_spec(entry.spec)
 
 
 def _compare_defaults(live: Template) -> dict:
@@ -230,6 +279,7 @@ def _compare_defaults(live: Template) -> dict:
     out = {'weights': weights_default}
     for prefix in ('t1', 't2'):
         out[f'{prefix}_spec'] = ''
+        out[f'{prefix}_entry'] = ''
         out[f'{prefix}_lr'] = ''
         out[f'{prefix}_length'] = ''
         out[f'{prefix}_batch'] = ''
@@ -337,6 +387,7 @@ class SearchServer(object):
         train_time: tuple[float, float],
         default_spec: str,
         warmup_systems: Optional[Iterable[str]] = None,
+        templates_json: Optional[str] = None,
     ):
         # `path` is also the read-only handle factory for per-request
         # reads in `index` / `compare` / `throughput`; opening a fresh
@@ -345,13 +396,36 @@ class SearchServer(object):
         # Systems that climb the search's warmup ladder before joining
         # ordinary selection (new machine or new backend).
         self.warmup_systems: set[str] = set(warmup_systems or ())
-        self.template: Template = template
+        # Model specs live in the sub-search entries, never in the base
+        # template: the two would otherwise both filter, and the index
+        # form would have two boxes meaning the same thing. `--spec`
+        # seeds the first entry instead (below).
+        cli_spec = template.spec_pattern
+        self.template: Template = template.with_spec(None)
         self.train_time: tuple[float, float] = train_time
         # Stored for `update()` so a template change with no literal
         # spec can still fall back to the CLI default.
         self._default_spec = default_spec
+        # Derived from the CLI template, spec included, so `--spec` with
+        # no `--default-spec` still seeds a matching conf.
         self.default = default_from_template(template, spec=default_spec)
         logging.info(f"Default configuration: {self.default}")
+
+        # Weighted sub-searches (`--templates`). Without a file this is
+        # a single `main` entry carrying `--spec` (unrestricted when
+        # that wasn't given), which leaves selection exactly as it was.
+        if templates_json:
+            self.templates = TemplateSet.from_json(
+                templates_json, self.template)
+            for entry in self.templates:
+                logging.info(
+                    f'Sub-search {entry.name}: '
+                    f'{self.templates.nominal_share(entry):.0f}% '
+                    f'spec={entry.spec} default={entry.default}')
+        else:
+            self.templates = TemplateSet.single(
+                self.template, spec=cli_spec, default_spec=default_spec,
+                default=self.default)
 
         self.requests_queue = Queue()
         self.confs_by_system: dict[str, Queue] = {}
@@ -456,6 +530,7 @@ class SearchServer(object):
             warmup_systems=self.warmup_systems,
             timing_model=self.timing_model,
             loss_model=self.loss_model,
+            templates=self.templates,
         )
         self.search_thread.start()
 
@@ -464,30 +539,57 @@ class SearchServer(object):
         self.train_queue.put(ModelStop())
         self.write_queue.put(WriterStop())
 
-    def index(self, selected_system: Optional[str] = None):
+    def index(
+        self,
+        selected_system: Optional[str] = None,
+        selected_entry: Optional[str] = None,
+    ):
         return self._render_index(
             template=self.template,
+            templates=self.templates,
             default_spec=self._default_spec or '',
             train_time=self.train_time,
             selected_system=selected_system,
+            selected_entry=selected_entry,
         )
+
+    def _entry_rows(self, templates: TemplateSet) -> list[dict]:
+        """Per-entry display rows: nominal vs realized share.
+
+        Realized share is `selects / total selects` from the search
+        thread's in-memory counters (see `Search.entry_selects`), and
+        `selects` is the raw count behind that percentage -- realized
+        share means nothing until an entry has a few hundred selects,
+        and the count is how you see whether it does.
+        """
+        search = self.search_thread.search
+        selects = {} if search is None else search.entry_selects
+        total = sum(selects.get(e.name, 0) for e in templates)
+        rows = []
+        for entry in templates:
+            n = selects.get(entry.name, 0)
+            rows.append({
+                'name': entry.name,
+                'regex': entry.spec or '(unrestricted)',
+                'share': f'{templates.nominal_share(entry):.0f}%',
+                'realized': f'{100.0 * n / total:.0f}%' if total else '—',
+                'selects': n,
+                'default': str(entry.default.model),
+            })
+        return rows
 
     def _render_index(
         self,
         *,
         template: Template,
+        templates: TemplateSet,
         default_spec: str,
         train_time: tuple[float, float],
         selected_system: Optional[str] = None,
+        selected_entry: Optional[str] = None,
+        entry_form: Optional[list[dict]] = None,
         error: Optional[str] = None,
     ):
-        if template.spec:
-            pattern = template.spec
-        elif template.regex:
-            pattern = template.regex.pattern
-        else:
-            pattern = ''
-
         precision = {}
         for p in Precision:
             precision[p] = p in template.precision
@@ -499,6 +601,12 @@ class SearchServer(object):
         tmin, tmax = train_time
         train_time_str = f'{tmin}-{tmax}'
 
+        # Frontier filter: with an entry selected, the top list is the
+        # one THAT sub-search sees (its spec filter applied at query
+        # time -- no schema change, no stored attribution).
+        entry = templates.by_name(selected_entry) if selected_entry else None
+        query_template = template if entry is None else entry.template
+
         # Use a dedicated read-only connection to avoid contending with
         # the writer thread for the main connection.
         # `max_time=tmax` limits the top list to confs that at least
@@ -509,7 +617,7 @@ class SearchServer(object):
             systems = ro_db.get_systems()
             top_confs = list(
                 ro_db.top_confs_global(
-                    template, system=selected_system,
+                    query_template, system=selected_system,
                     max_time=tmax))
 
         graph = build_graph(top_confs)
@@ -518,7 +626,6 @@ class SearchServer(object):
 
         return render_template(
             "index.html",
-            spec=pattern,
             default_spec=default_spec,
             weights=_render_bounds(template.max_weights),
             num_layers=_render_bounds(template.num_layers),
@@ -533,6 +640,14 @@ class SearchServer(object):
             graph=base64.b64encode(graph).decode('ascii'),
             systems=systems,
             selected_system=selected_system,
+            # Always at least one row -- the live set's, or on the
+            # rejection path the submitted ones, so the user can fix
+            # them in place rather than retype.
+            entry_form=entry_form or templates.rows(),
+            entries=self._entry_rows(templates),
+            show_entries=not templates.is_single,
+            entry_names=templates.names,
+            selected_entry=selected_entry or '',
             error=error,
         )
 
@@ -541,13 +656,29 @@ class SearchServer(object):
         # "no override, let the auto-finder pick". Replaces any prior
         # value (CLI --default-spec on startup, or previous form value).
         new_default_spec = params.get('default_spec', '').strip()
+        new_rows = _entry_rows_from_form(params)
         new_template = None
         new_default = None
+        new_templates = None
         new_train_time = self.train_time
         try:
+            # No spec on the base template: the sub-search rows are the
+            # only place model specs are defined.
             new_template = Template.from_form(params)
-            spec = new_template.spec or new_default_spec or None
-            new_default = default_from_template(new_template, spec=spec)
+            new_default = default_from_template(
+                new_template, spec=new_default_spec or None)
+            # The template set is rebuilt against the NEW base template
+            # -- entries share every bound but the spec filter, so a
+            # bounds edit has to propagate into all of them. Anything
+            # malformed (a nameless or shareless row, a non-numeric or
+            # negative share, duplicate names, a bad regex, a
+            # default_spec outside its own entry) raises here and the
+            # whole update is rejected below. All-blank rows are
+            # dropped; with no rows left this is one `main` entry
+            # covering the whole (unrestricted) template.
+            new_templates = TemplateSet.from_rows(
+                new_rows, new_template,
+                default_spec=new_default_spec or None, default=new_default)
             time_str = params.get("time", "")
             if time_str:
                 tmin, tmax = map(float, time_str.split("-"))
@@ -560,9 +691,11 @@ class SearchServer(object):
             logging.warning(f"update() rejected form: {exc}")
             return self._render_index(
                 template=new_template or self.template,
+                templates=self.templates,
                 default_spec=new_default_spec or (
                     self._default_spec or ''),
                 train_time=new_train_time,
+                entry_form=new_rows,
                 error=str(exc),
             )
 
@@ -573,17 +706,21 @@ class SearchServer(object):
             template=new_template,
             init_conf=new_default,
             train_time=new_train_time,
+            templates=new_templates,
         ))
         # SearchServer-side copies are read by Flask handlers (index
         # form rendering, /compare); the search thread's copies may
         # lag by one queue step but converge on the next select.
         self.template = new_template
         self.default = new_default
+        self.templates = new_templates
         self.train_time = new_train_time
         self._default_spec = new_default_spec
         logging.info(f'New default configuration: {new_default}')
         logging.info(f'New template: {new_template}')
         logging.info(f'New train time: {new_train_time}')
+        if not new_templates.is_single:
+            logging.info(f'New sub-searches: {new_templates}')
         return redirect("/")
 
     def throughput(self, args):
@@ -703,8 +840,12 @@ class SearchServer(object):
             except (TypeError, ValueError):
                 max_weights = None
             if max_weights is not None and max_weights > 0:
-                t1 = _template_from_compare_form(form, 't1')
-                t2 = _template_from_compare_form(form, 't2')
+                t1 = _apply_entry(
+                    _template_from_compare_form(form, 't1'),
+                    form.get('t1_entry', ''), self.templates)
+                t2 = _apply_entry(
+                    _template_from_compare_form(form, 't2'),
+                    form.get('t2_entry', ''), self.templates)
                 t1_max_time = _maybe_float(form.get('t1_time'))
                 t2_max_time = _maybe_float(form.get('t2_time'))
                 with DbReader(self.path) as ro_db:
@@ -726,6 +867,8 @@ class SearchServer(object):
             graph=graph,
             top1=top1,
             top2=top2,
+            entry_names=self.templates.names,
+            show_entries=not self.templates.is_single,
         )
 
     def _maybe_grant_refit(self, system: str) -> Optional[dict]:
@@ -941,7 +1084,10 @@ class SearchServer(object):
         @app.route("/", methods=["GET"])
         def _index():
             selected_system = request.args.get("system") or None
-            return self.index(selected_system=selected_system)
+            selected_entry = request.args.get("entry") or None
+            return self.index(
+                selected_system=selected_system,
+                selected_entry=selected_entry)
 
         @app.route("/update", methods=["POST"])
         def _update():

@@ -1,7 +1,14 @@
+import random
 from copy import deepcopy
 
 from .common import INF
-from .configuration import Configuration, Precision, Template
+from .configuration import (
+    Configuration,
+    Precision,
+    Template,
+    TemplateEntry,
+    TemplateSet,
+)
 from .db import DbReader, DbWriter
 from .spec_parser import parse_model2
 from .predict.loss_rnn import LossModelHolder
@@ -10,11 +17,13 @@ from .run import Run
 from .configuration import conf_neighbors
 from . import search as search_mod
 from .search import (
+    _LAYER_CAP_PROBS,
     _WARMUP_LADDER,
     _WARMUP_SELECTS_PER_RUNG,
     Search,
     _generate_limits,
     _is_retired,
+    _layer_cap_probs,
     _layer_capped_template,
     _run_limit_sequences,
 )
@@ -25,6 +34,12 @@ def _make_conf(steps=1024, batch=32, spec="bytes|dense.8.gelu"):
     return Configuration(
         model=model, lr=0.01, length=128, batch=batch, steps=steps, decay=1,
     )
+
+
+def _main(search):
+    """The single implicit template entry a Search gets when no
+    `TemplateSet` is passed."""
+    return search.templates.entries[0]
 
 
 def _make_search(tmp_path):
@@ -185,8 +200,8 @@ def test_select_uncovered_top_empty_db(tmp_path):
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
     search = _make_search_at(path)
-    assert search._select_uncovered_top('b') is None
-    assert search._coverage_flag.get('b', False) is False
+    assert search._select_uncovered_top('b', _main(search)) is None
+    assert search._coverage_flag.get(('b', 'main'), False) is False
 
 
 def test_select_uncovered_top_one_uncovered_no_flag(tmp_path):
@@ -195,12 +210,12 @@ def test_select_uncovered_top_one_uncovered_no_flag(tmp_path):
     conf = _make_conf(steps=256)
     _seed_runs(path, conf, system='a', n=2)  # qualifies as top
     search = _make_search_at(path)
-    result = search._select_uncovered_top('b')
+    result = search._select_uncovered_top('b', _main(search))
     assert result == conf
     # Only one uncovered conf — flag stays False.
-    assert search._coverage_flag.get('b', False) is False
+    assert search._coverage_flag.get(('b', 'main'), False) is False
     # Stats recorded for the client log: 0 covered of 1 total.
-    assert search._coverage_stats['b'] == (0, 1)
+    assert search._coverage_stats[('b', 'main')] == (0, 1)
 
 
 def test_select_uncovered_top_below_threshold_no_flag(tmp_path):
@@ -216,9 +231,9 @@ def test_select_uncovered_top_below_threshold_no_flag(tmp_path):
     _seed_runs(path, confA, system='a', n=2, loss_base=0.5)
     _seed_runs(path, confB, system='a', n=2, loss_base=0.3)
     search = _make_search_at(path)
-    result = search._select_uncovered_top('b')
+    result = search._select_uncovered_top('b', _main(search))
     assert result in (confA, confB)
-    assert search._coverage_flag.get('b', False) is False
+    assert search._coverage_flag.get(('b', 'main'), False) is False
 
 
 def test_select_uncovered_top_at_threshold_sets_flag(
@@ -253,9 +268,9 @@ def test_select_uncovered_top_at_threshold_sets_flag(
         search._db, 'has_covering_run',
         lambda conf, system: False)  # all uncovered
 
-    result = search._select_uncovered_top('b')
+    result = search._select_uncovered_top('b', _main(search))
     assert result is not None
-    assert search._coverage_flag['b'] is True
+    assert search._coverage_flag[('b', 'main')] is True
 
 
 def test_select_uncovered_top_all_covered(tmp_path):
@@ -265,8 +280,8 @@ def test_select_uncovered_top_all_covered(tmp_path):
     _seed_runs(path, conf, system='a', n=2)
     _seed_runs(path, conf, system='b', n=1)
     search = _make_search_at(path)
-    assert search._select_uncovered_top('b') is None
-    assert search._coverage_flag['b'] is False
+    assert search._select_uncovered_top('b', _main(search)) is None
+    assert search._coverage_flag[('b', 'main')] is False
 
 
 def test_select_uncovered_top_higher_steps_covers(tmp_path):
@@ -281,7 +296,7 @@ def test_select_uncovered_top_higher_steps_covers(tmp_path):
     search = _make_search_at(path)
     # conf_query is still uncovered on 'b' since steps=1024 >= 256 means
     # the higher-steps run covers it. No selection.
-    assert search._select_uncovered_top('b') is None
+    assert search._select_uncovered_top('b', _main(search)) is None
 
 
 def test_select_predicted_best_no_seed_returns_none(tmp_path):
@@ -422,12 +437,12 @@ def test_select_conf_holds_coverage_walk_until_timing_ready(
     search = _make_search(tmp_path)
     sentinel = _make_conf(spec="bytes|dense.16.gelu")
 
-    def fake_uncovered(system):
-        search._coverage_stats[system] = (3, 10)
+    def fake_uncovered(system, entry):
+        search._coverage_stats[(system, entry.name)] = (3, 10)
         return sentinel
     monkeypatch.setattr(search, '_select_uncovered_top', fake_uncovered)
     # Sticky so the walk would fire unconditionally if not gated.
-    search._coverage_flag['sys'] = True
+    search._coverage_flag[('sys', 'main')] = True
 
     # No timing model for 'sys' -> walk held back (some other strategy
     # or the default fires, but never coverage_walk).
@@ -699,9 +714,9 @@ def test_retired_conf_is_never_re_run(tmp_path, monkeypatch):
     # Time-budget scan and coverage walk: pure re-run pickers.
     assert search._select_time_budget(
         16.0, INF, 'a', search.template) is None
-    assert search._select_uncovered_top('b') is None
+    assert search._select_uncovered_top('b', _main(search)) is None
     # ...and the retired conf doesn't latch the sticky coverage flag on.
-    assert search._coverage_flag['b'] is False
+    assert search._coverage_flag[('b', 'main')] is False
 
 
 def test_retired_conf_is_still_a_mutation_source(tmp_path, monkeypatch):
@@ -791,8 +806,261 @@ def test_select_conf_never_returns_a_retired_conf(tmp_path, monkeypatch):
     writer.add_pick_me_conf(conf)   # even an explicit pick is refused
     writer.close()
     search = _make_search_at(path)
+    # The default fallback returns the drawn entry's default conf, so
+    # the retired conf has to be planted there.
     search.init_conf = conf
+    _main(search).default = conf
     for _ in range(20):
         result = search.select_conf('b')
         if result is not None:
             assert not _is_retired(str(result.conf.model)), result.strategy
+
+
+# --- weighted template sets ------------------------------------------
+#
+# `main` is unrestricted; `rnn` only sees recurrent specs. The two
+# confs below are built so that confB is Pareto-optimal for `rnn` but
+# invisible globally (more weights AND worse loss than confA), which is
+# exactly the case the per-entry coverage walk exists for.
+
+_RNN_REGEX = r".*\|rnn\..*"
+_CONF_A_SPEC = "bytes|dense.4.gelu"    # 2308 weights
+_CONF_B_SPEC = "bytes|rnn.8.tanh"      # 4424 weights
+
+
+def _make_search_with(path, templates, warmup_systems=None):
+    """`_make_search_at` with an explicit template set."""
+    base = _make_template()
+    return Search(
+        reader=DbReader(path),
+        template=base,
+        init_conf=_make_conf(),
+        train_time=(1.0, 16.0),
+        timing_model=TrainTimingModel(),
+        loss_model=LossModelHolder(),
+        warmup_systems=warmup_systems,
+        templates=templates,
+    )
+
+
+def _two_entry_set(default_spec=_CONF_B_SPEC, main_share=50, rnn_share=50):
+    base = _make_template()
+    return TemplateSet([
+        TemplateEntry(base, name='main', share=main_share),
+        TemplateEntry(base, name='rnn', share=rnn_share,
+                      spec=_RNN_REGEX, default_spec=default_spec),
+    ])
+
+
+def test_default_template_set_is_the_whole_template(tmp_path):
+    """No template set passed: one implicit entry that IS the base
+    template with the base default conf -- the pre-template-set path."""
+    search = _make_search(tmp_path)
+    assert search.templates.is_single
+    entry = _main(search)
+    assert entry.name == 'main'
+    assert entry.template is search.template
+    assert entry.default is search.init_conf
+    # And the layer-cap distribution is untouched: every cap is >= the
+    # default's own layer count.
+    assert entry.min_layers == 1  # bytes|dense.8.gelu
+    assert _layer_cap_probs(0) == tuple(_LAYER_CAP_PROBS)
+    assert _layer_cap_probs(1) == tuple(_LAYER_CAP_PROBS)
+
+
+def test_layer_cap_probs_drops_sub_minimum_caps():
+    """Caps below the entry's own minimum layer count would query an
+    empty intersection; they're dropped and the rest renormalized."""
+    probs = _layer_cap_probs(3)
+    assert [cap for cap, _ in probs] == [None, 3, 4]
+    assert abs(sum(w for _, w in probs) - 1.0) < 1e-9
+    # Ratios among survivors are preserved (0.6 : 0.1 : 0.1).
+    weights = dict(probs)
+    assert abs(weights[None] - 0.75) < 1e-9
+    assert abs(weights[3] - 0.125) < 1e-9
+    assert abs(weights[4] - 0.125) < 1e-9
+    # Deeper than every cap -> unrestricted is all that's left.
+    assert _layer_cap_probs(9) == ((None, 1.0),)
+
+
+def test_sample_layer_capped_template_respects_entry_minimum(tmp_path):
+    """A transformer-shaped entry never draws a 1-4 layer cap it can't
+    satisfy; a shallow entry still gets the full spread."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    base = _make_template()
+    deep_spec = "bytes|split.add(norm-attn.8.2.8, pass)"   # 3 layers
+    templates = TemplateSet([
+        TemplateEntry(base, name='main', share=50),
+        TemplateEntry(base, name='attn', share=50,
+                      spec=r".*\|split\.add\(.*attn.*",
+                      default_spec=deep_spec),
+    ])
+    search = _make_search_with(path, templates)
+    deep = templates.by_name('attn')
+    assert deep.min_layers == 3
+    random.seed(4)
+    caps = {search._sample_layer_capped_template(deep)[1]
+            for _ in range(200)}
+    assert caps <= {None, 3, 4}
+    assert caps & {3, 4}, "the surviving caps should still fire"
+    shallow_caps = {
+        search._sample_layer_capped_template(templates.by_name('main'))[1]
+        for _ in range(200)}
+    assert shallow_caps == {None, 1, 2, 3, 4}
+
+
+def test_select_conf_draws_entries_by_share(tmp_path, monkeypatch):
+    """Over many selects the budget splits per share, and every conf
+    is booked against its entry's counter."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    templates = _two_entry_set(main_share=75, rnn_share=25)
+    search = _make_search_with(path, templates)
+    # Keep the select cheap: every strategy misses, so each select
+    # falls through to the drawn entry's default conf.
+    monkeypatch.setattr(
+        search, '_run_strategy', lambda *a, **k: None)
+    random.seed(2026)
+    n = 400
+    for _ in range(n):
+        assert search.select_conf('b') is not None
+    # Every select produced a conf, so the counters ARE the draws.
+    assert sum(search.entry_selects.values()) == n
+    assert abs(search.entry_selects['main'] / n - 0.75) < 0.06
+    assert abs(search.entry_selects['rnn'] / n - 0.25) < 0.06
+
+
+def test_select_conf_falls_back_to_the_entry_default(tmp_path, monkeypatch):
+    """An entry with no matching confs in the DB must hand back ITS own
+    default -- not None, and not a conf from another sub-space."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    # The DB only knows a dense conf, which the rnn entry can't see.
+    _seed_runs(path, _make_conf(spec=_CONF_A_SPEC), system='a', n=3)
+    templates = _two_entry_set()
+    search = _make_search_with(path, templates)
+    rnn = templates.by_name('rnn')
+    monkeypatch.setattr(search.templates, 'draw', lambda: rnn)
+
+    result = search.select_conf('b')
+    assert result is not None, "the sub-space never bootstraps"
+    assert result.strategy == 'default'
+    assert result.conf == rnn.default
+    assert str(result.conf.model) == _CONF_B_SPEC
+    assert search.entry_selects['rnn'] == 1
+    assert search.entry_selects['main'] == 0
+
+
+def test_select_conf_default_fallback_is_per_entry(tmp_path, monkeypatch):
+    """The main entry keeps falling back to the base default, not to
+    the narrow entry's."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    templates = _two_entry_set()
+    search = _make_search_with(path, templates)
+    monkeypatch.setattr(
+        search, '_run_strategy', lambda *a, **k: None)
+    main = templates.by_name('main')
+    monkeypatch.setattr(search.templates, 'draw', lambda: main)
+    result = search.select_conf('b')
+    assert result.strategy == 'default'
+    assert result.conf == main.default
+    assert result.conf != templates.by_name('rnn').default
+
+
+def test_coverage_walk_uses_the_entry_frontier(tmp_path):
+    """A conf that is Pareto-optimal for the sub-template but not
+    globally still gets a cross-system re-run under that entry."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    conf_a = _make_conf(steps=256, spec=_CONF_A_SPEC)   # global winner
+    conf_b = _make_conf(steps=256, spec=_CONF_B_SPEC)   # more W, worse
+    _seed_runs(path, conf_a, system='a', n=2, loss_base=0.3)
+    _seed_runs(path, conf_b, system='a', n=2, loss_base=0.5)
+    templates = _two_entry_set()
+    search = _make_search_with(path, templates)
+
+    # Globally, conf_b is dominated: it never surfaces.
+    assert search._select_uncovered_top(
+        'b', templates.by_name('main')) == conf_a
+    assert search._coverage_stats[('b', 'main')] == (0, 1)
+    # Under the rnn entry it IS the frontier.
+    assert search._select_uncovered_top(
+        'b', templates.by_name('rnn')) == conf_b
+    assert search._coverage_stats[('b', 'rnn')] == (0, 1)
+
+
+def test_coverage_state_is_per_system_and_entry(tmp_path):
+    """Coverage bookkeeping is keyed by (system, entry): closing the
+    gap under one entry doesn't silence another, and a conf covered
+    for one entry is still selectable under a different one."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    conf_a = _make_conf(steps=256, spec=_CONF_A_SPEC)
+    conf_b = _make_conf(steps=256, spec=_CONF_B_SPEC)
+    _seed_runs(path, conf_a, system='a', n=2, loss_base=0.3)
+    _seed_runs(path, conf_b, system='a', n=2, loss_base=0.5)
+    # conf_a covered on 'b' -> nothing left for `main` there.
+    _seed_runs(path, conf_a, system='b', n=1)
+    templates = _two_entry_set()
+    search = _make_search_with(path, templates)
+    main, rnn = templates.by_name('main'), templates.by_name('rnn')
+
+    assert search._select_uncovered_top('b', main) is None
+    assert search._coverage_stats[('b', 'main')] == (1, 1)
+    # ...while `rnn` still has conf_b outstanding on the same system.
+    assert search._select_uncovered_top('b', rnn) == conf_b
+    assert search._coverage_stats[('b', 'rnn')] == (0, 1)
+    # And a different system keeps its own state entirely.
+    assert search._select_uncovered_top('c', main) == conf_a
+    assert set(search._coverage_stats) == {
+        ('b', 'main'), ('b', 'rnn'), ('c', 'main')}
+
+
+def test_coverage_sticky_flag_is_not_shared_between_entries(
+    tmp_path, monkeypatch,
+):
+    """A sticky flag set under one entry must not make the walk fire
+    for another entry on the same system."""
+    from .predict.timing import Weights
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    templates = _two_entry_set()
+    search = _make_search_with(path, templates)
+    search.timing_model._weights[('sys', Precision.FP32)] = Weights(
+        {}, {}, {}, {})
+    search._coverage_flag[('sys', 'main')] = True
+    # Never fire the probabilistic coverage draw, so only the sticky
+    # flag can trigger the walk. (`random.choices` / `random.shuffle`
+    # use the Random instance's bound method and are unaffected.)
+    monkeypatch.setattr(search_mod.random, 'random', lambda: 1.0)
+
+    walked: list[str] = []
+
+    def fake_uncovered(system, entry):
+        walked.append(entry.name)
+        return _make_conf(spec=_CONF_A_SPEC)
+    monkeypatch.setattr(search, '_select_uncovered_top', fake_uncovered)
+    monkeypatch.setattr(search, '_run_strategy', lambda *a, **k: None)
+
+    rnn = templates.by_name('rnn')
+    monkeypatch.setattr(search.templates, 'draw', lambda: rnn)
+    for _ in range(5):
+        assert search.select_conf('sys').strategy == 'default'
+    assert walked == []
+
+    main = templates.by_name('main')
+    monkeypatch.setattr(search.templates, 'draw', lambda: main)
+    assert search.select_conf('sys').strategy == 'coverage_walk'
+    assert walked == ['main']
+
+
+def test_set_templates_seeds_counters_for_every_entry(tmp_path):
+    """The web UI reads this dict from another thread, so no entry may
+    appear in it for the first time mid-select."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    search = _make_search_with(path, _two_entry_set())
+    assert set(search.entry_selects) == {'main', 'rnn'}
+    assert set(search.entry_selects.values()) == {0}

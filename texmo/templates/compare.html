@@ -68,6 +68,21 @@
                     <td><input type="text" name="t1_spec" value="{{ form.t1_spec }}"></td>
                     <td><input type="text" name="t2_spec" value="{{ form.t2_spec }}"></td>
                 </tr>
+                {% if show_entries %}
+                <tr>
+                    <td>Sub-search:<br><small>(overrides the spec regex)</small></td>
+                    {% for prefix in ['t1', 't2'] %}
+                    <td>
+                        <select name="{{ prefix }}_entry">
+                            <option value="" {% if not form[prefix + '_entry'] %}selected{% endif %}>&mdash;</option>
+                            {% for name in entry_names %}
+                            <option value="{{ name }}" {% if name == form[prefix + '_entry'] %}selected{% endif %}>{{ name }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endif %}
                 <tr>
                     <td>Sample length:</td>
                     <td><input type="text" name="t1_length" value="{{ form.t1_length }}"></td>

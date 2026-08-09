@@ -1,12 +1,16 @@
 import argparse
+import copy
 import enum
+import json
 import math
+import random
 import re
 from typing import Iterable, Optional
 
 from . import latency
 from .common import INF, itoa3
 from .model2 import Model2Def
+from .pjson import pjson
 from .spec_parser import parse_model2
 from .precision import Precision
 from .tokens.tokenizer import Tokenizer
@@ -293,6 +297,25 @@ def _parse_interval(arg: str, num_type: type) -> tuple:
         return comps
 
 
+def _parse_spec_filter(
+    spec: Optional[str],
+) -> tuple[Optional[str], Optional[re.Pattern]]:
+    """Split a spec filter into its `(spec, regex)` pair.
+
+    A filter that parses as a model is kept as the canonical spec
+    string, so the literal match in `match_model` lines up with
+    `str(model)` for confs built via `parse_model2`. Anything else is
+    compiled as a regex.
+    """
+    if not spec:
+        return None, None
+    try:
+        model = parse_model2(spec, Precision.FP32)
+        return str(model), None
+    except Exception:
+        return None, re.compile(spec)
+
+
 class Template(object):
     def __init__(
         self,
@@ -306,20 +329,7 @@ class Template(object):
         decay_types: Optional[Iterable[DecayType | str]] = None,
         num_layers: Optional[IntLimits] = None,
     ):
-        if not spec:
-            self.regex = None
-            self.spec = None
-        else:
-            try:
-                # Store the canonical spec so the literal match in
-                # `match_model` lines up with `str(model)` for confs
-                # built via parse_model2.
-                model = parse_model2(spec, Precision.FP32)
-                self.regex = None
-                self.spec = str(model)
-            except Exception:
-                self.regex = re.compile(spec)
-                self.spec = None
+        self.spec, self.regex = _parse_spec_filter(spec)
 
         self.max_weights = Bounds(max_weights, 16)
         # num_layers bounds the count of intermediate layers in the
@@ -366,8 +376,15 @@ class Template(object):
         )
 
     @staticmethod
-    def from_form(params: dict):
-        """Create a Template from web form parameters."""
+    def from_form(params: dict, spec: Optional[str] = None):
+        """Create a Template from web form parameters.
+
+        `spec` is passed in rather than read from the form: the index
+        page has no spec field: model specs live in the sub-search rows,
+        one per entry, and the base template they share is unrestricted.
+        The compare page does have one spec box per column and passes it
+        here explicitly.
+        """
         precision = []
         for p in Precision:
             if params.get(str(p)):
@@ -378,7 +395,7 @@ class Template(object):
         ]
 
         return Template(
-            spec=params["spec"],
+            spec=spec,
             lr=_parse_interval(params['lr'], float),
             length=_parse_interval(params['length'], int),
             batch=_parse_interval(params['batch'], int),
@@ -404,16 +421,46 @@ class Template(object):
             + f'decay_types=\'{decay_types}\')'
         )
 
+    @property
+    def spec_pattern(self) -> Optional[str]:
+        """The spec filter as a single string: the canonical literal
+        spec, the regex source, or None when unrestricted."""
+        if self.spec is not None:
+            return self.spec
+        if self.regex is not None:
+            return self.regex.pattern
+        return None
+
+    def with_spec(self, spec: Optional[str]) -> Template:
+        """This template with its spec filter replaced by `spec`.
+
+        Every other bound is shared with the original: a shallow copy,
+        whose sub-objects are never mutated (same contract as
+        `_warmup_template` / `_layer_capped_template` in `search.py`).
+        Returns `self` when the filter is unchanged, so a single-entry
+        `TemplateSet` keeps using the base template object itself.
+        """
+        if spec == self.spec_pattern:
+            return self
+        out = copy.copy(self)
+        out.spec, out.regex = _parse_spec_filter(spec)
+        return out
+
+    def matches_spec(self, model_spec: str) -> bool:
+        """True when `model_spec` passes the spec filter alone. The
+        bounds (weights, layers, ...) are deliberately not consulted."""
+        if self.spec is not None:
+            return self.spec == model_spec
+        if self.regex is not None:
+            return bool(self.regex.fullmatch(model_spec))
+        return True
+
     def match_model(self, model: Model2Def) -> bool:
         if model.num_weights > self.max_weights.max:
             return False
         if not self.num_layers.match(model.num_layers):
             return False
-        if self.spec is not None:
-            return self.spec == str(model)
-        if self.regex is not None:
-            return bool(self.regex.fullmatch(str(model)))
-        return True
+        return self.matches_spec(str(model))
 
     def match(self, conf: Configuration) -> bool:
         return (
@@ -553,3 +600,309 @@ def default_from_template(
     raise RuntimeError(
         "Can't pick up a default model that would fit the template"
     )
+
+
+# --- weighted template set ---------------------------------------------------
+#
+# Several sub-searches running concurrently over one server, each with
+# a slice of the select budget. They share EVERY template bound (lr,
+# length, batch, steps, weights, precision, decay types, num_layers)
+# and differ only in their spec filter -- so an entry is "the same
+# search, restricted to this corner of model space". The point is to
+# let a freshly implemented layer be measured on its own budget
+# instead of competing from cold against a mature general population.
+
+# Name of the lone entry a server runs when no sub-searches are
+# configured.
+MAIN_ENTRY = 'main'
+
+_ENTRY_KEYS = frozenset({'name', 'share', 'regex', 'default_spec'})
+
+# The same four fields as the web form's per-row inputs, in column
+# order (see `TemplateSet.from_rows` / `.rows`).
+_ROW_KEYS = ('name', 'regex', 'default_spec', 'share')
+
+
+class TemplateEntry(object):
+    """One sub-search: a name, a budget share, and a spec filter.
+
+    `template` is the base template with this entry's spec substituted;
+    `default` is the conf that bootstraps the sub-space -- the smallest
+    conf agreeing with `template`, either given explicitly as
+    `default_spec` or derived by `default_from_template`. Without it a
+    brand-new sub-space has nothing to hand out and its budget would
+    quietly drain back into the general search.
+    """
+
+    __slots__ = ('name', 'share', 'spec', 'default_spec', 'template',
+                 'default', 'min_layers')
+
+    def __init__(
+        self,
+        base: Template,
+        name: str,
+        share: float,
+        spec: Optional[str] = None,
+        default_spec: Optional[str] = None,
+        default: Optional[Configuration] = None,
+    ):
+        name = (name or '').strip()
+        if not name:
+            raise ValueError('template entry needs a non-empty name')
+        if share < 0:
+            raise ValueError(
+                f'entry {name!r}: share must be >= 0, got {share}')
+        self.name = name
+        self.share = float(share)
+        self.spec = spec or None
+        self.default_spec = default_spec or None
+
+        try:
+            self.template = base.with_spec(self.spec)
+        except re.error as exc:
+            raise ValueError(
+                f'entry {name!r}: bad spec regex {self.spec!r}: {exc}'
+            ) from exc
+
+        if default is None:
+            try:
+                default = default_from_template(
+                    self.template, spec=self.default_spec)
+            except Exception as exc:
+                raise ValueError(f'entry {name!r}: {exc}') from exc
+            # `default_from_template` applies the spec filter only when
+            # it has to auto-pick; an explicit `default_spec` goes
+            # through unchecked, and one that its own entry rejects
+            # could never be selected. Catch it at configuration time.
+            # (A `default` handed in by the caller is their business --
+            # that is the pre-template-set path, where a mismatched
+            # --default-spec is simply skipped at select time.)
+            if not self.template.matches_spec(str(default.model)):
+                raise ValueError(
+                    f'entry {name!r}: default spec {str(default.model)!r} '
+                    f'does not match the entry spec filter {self.spec!r}')
+        self.default = default
+
+        # The smallest layer count this sub-space can produce, taken
+        # from its default (the smallest conf that agrees with it).
+        # Cached: `search._layer_cap_probs` needs it on every select.
+        self.min_layers = self.default.model.num_layers
+
+    def to_dict(self) -> dict:
+        out: dict = {'name': self.name}
+        share = self.share
+        out['share'] = int(share) if share == int(share) else share
+        if self.spec:
+            out['regex'] = self.spec
+        if self.default_spec:
+            out['default_spec'] = self.default_spec
+        return out
+
+    def __str__(self) -> str:
+        spec = self.spec if self.spec else '(unrestricted)'
+        return (
+            f'TemplateEntry({self.name!r}, share={self.share:g}, '
+            f'spec={spec}, default={self.default.model})'
+        )
+
+
+class TemplateSet(object):
+    """An ordered list of `TemplateEntry`, drawn per select in
+    proportion to their shares (which are normalized, so they need not
+    sum to 100)."""
+
+    def __init__(self, entries: Iterable[TemplateEntry]):
+        entries = list(entries)
+        if not entries:
+            raise ValueError('template set is empty')
+        names = [e.name for e in entries]
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        if duplicates:
+            raise ValueError(
+                f'duplicate template names: {", ".join(duplicates)}')
+        total = sum(e.share for e in entries)
+        if total <= 0:
+            raise ValueError('template shares must add up to more than 0')
+        self.entries = entries
+        self.total_share = total
+
+    def __len__(self) -> int:
+        return len(self.entries)
+
+    def __iter__(self):
+        return iter(self.entries)
+
+    @property
+    def is_single(self) -> bool:
+        return len(self.entries) == 1
+
+    @property
+    def names(self) -> list[str]:
+        return [e.name for e in self.entries]
+
+    def by_name(self, name: str) -> Optional[TemplateEntry]:
+        for e in self.entries:
+            if e.name == name:
+                return e
+        return None
+
+    def nominal_share(self, entry: TemplateEntry) -> float:
+        """`entry`'s share as a percentage of the whole set."""
+        return 100.0 * entry.share / self.total_share
+
+    def draw(self) -> TemplateEntry:
+        """Draw one entry weighted by share.
+
+        Short-circuits for a single entry so the no-template-set case
+        doesn't consume randomness -- the selection path (and its RNG
+        stream) is then exactly what it was before template sets
+        existed.
+        """
+        if len(self.entries) == 1:
+            return self.entries[0]
+        return random.choices(
+            self.entries, weights=[e.share for e in self.entries], k=1
+        )[0]
+
+    @staticmethod
+    def single(
+        base: Template,
+        spec: Optional[str] = None,
+        default_spec: Optional[str] = None,
+        default: Optional[Configuration] = None,
+    ) -> TemplateSet:
+        """A one-entry set: `main`, covering `spec` (the whole template
+        when that is None). This is what a server with no sub-searches
+        configured runs -- one unrestricted search, same as before
+        template sets existed, but represented as an ordinary entry."""
+        return TemplateSet([TemplateEntry(
+            base, name=MAIN_ENTRY, share=100.0, spec=spec,
+            default_spec=default_spec, default=default,
+        )])
+
+    @staticmethod
+    def from_json(text: str, base: Template) -> TemplateSet:
+        """Parse a template set from its JSON list form:
+
+            [{"name": "main", "share": 60},
+             {"name": "attn", "share": 40, "regex": ".*attn.*",
+              "default_spec": "bytes|split.add(attn.4.1)"}]
+
+        Raises ValueError on anything malformed -- callers surface that
+        to the user and keep running on the previous set.
+        """
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f'invalid JSON: {exc}') from exc
+        if not isinstance(data, list):
+            raise ValueError(
+                f'template set must be a JSON list of entries, got '
+                f'{type(data).__name__}')
+        entries = []
+        for i, item in enumerate(data):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f'entry {i}: expected an object, got '
+                    f'{type(item).__name__}')
+            unknown = sorted(set(item) - _ENTRY_KEYS)
+            if unknown:
+                raise ValueError(
+                    f'entry {i}: unknown key(s) {", ".join(unknown)}; '
+                    f'known keys are {", ".join(sorted(_ENTRY_KEYS))}')
+            name = item.get('name')
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(
+                    f'entry {i}: "name" must be a non-empty string')
+            share = item.get('share', 0)
+            if isinstance(share, bool) or not isinstance(share, (int, float)):
+                raise ValueError(
+                    f'entry {name!r}: "share" must be a number, got '
+                    f'{share!r}')
+            for key in ('regex', 'default_spec'):
+                value = item.get(key)
+                if value is not None and not isinstance(value, str):
+                    raise ValueError(
+                        f'entry {name!r}: "{key}" must be a string, got '
+                        f'{value!r}')
+            entries.append(TemplateEntry(
+                base,
+                name=name,
+                share=share,
+                spec=item.get('regex'),
+                default_spec=item.get('default_spec'),
+            ))
+        return TemplateSet(entries)
+
+    def to_json(self) -> str:
+        """The JSON form `from_json` accepts, for `--templates`."""
+        return pjson([e.to_dict() for e in self.entries])
+
+    @staticmethod
+    def from_rows(
+        rows: Iterable[dict],
+        base: Template,
+        default_spec: Optional[str] = None,
+        default: Optional[Configuration] = None,
+    ) -> TemplateSet:
+        """Build a set from the web form's parallel row fields.
+
+        Each row is a dict of raw strings keyed by `_ROW_KEYS`. Rows
+        whose every field is blank are dropped, so a stray row left by
+        the form's Add button is harmless rather than an error; with
+        nothing left this is one unrestricted `main` entry (built from
+        `default_spec` / `default`, same as `single()`).
+
+        Raises ValueError on anything malformed -- callers surface that
+        to the user and keep running on the previous set.
+        """
+        filled = [
+            (i, row) for i, row in enumerate(rows)
+            if any((row.get(k) or '').strip() for k in _ROW_KEYS)
+        ]
+        if not filled:
+            return TemplateSet.single(
+                base, default_spec=default_spec, default=default)
+
+        entries = []
+        for i, row in filled:
+            name = (row.get('name') or '').strip()
+            if not name:
+                raise ValueError(f'sub-search row {i + 1}: name is required')
+            share_text = (row.get('share') or '').strip()
+            if not share_text:
+                raise ValueError(f'entry {name!r}: share is required')
+            try:
+                share = float(share_text)
+            except ValueError:
+                raise ValueError(
+                    f'entry {name!r}: share {share_text!r} is not a number'
+                ) from None
+            entries.append(TemplateEntry(
+                base,
+                name=name,
+                share=share,
+                spec=(row.get('regex') or '').strip(),
+                default_spec=(row.get('default_spec') or '').strip(),
+            ))
+        return TemplateSet(entries)
+
+    def rows(self) -> list[dict]:
+        """Row dicts for the web form -- the inverse of `from_rows`.
+
+        Always at least one row, since a set always has at least one
+        entry: a server with no sub-searches configured shows a single
+        `main` row with a blank regex, which is the unrestricted search
+        it was already running, now visible and editable.
+        """
+        return [{
+            'name': e.name,
+            'regex': e.spec or '',
+            'default_spec': e.default_spec or '',
+            'share': f'{e.share:g}',
+        } for e in self.entries]
+
+    def __str__(self) -> str:
+        return 'TemplateSet(' + ', '.join(
+            f'{e.name}:{self.nominal_share(e):.0f}%' for e in self.entries
+        ) + ')'

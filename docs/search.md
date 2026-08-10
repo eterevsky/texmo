@@ -236,6 +236,23 @@ The `system_runs == 0` rule in `_select_top_neighbor` is the current
 mechanism for bootstrapping new systems: a top neighbor that's never been
 run locally gets picked once, even if its total run count is already high.
 
+### Why a conf's first run reads optimistically
+
+A conf's first recorded loss is biased low, by a measured **0.3-0.6%**
+across every machine in the fleet (2026-08-08). Nothing is broken —
+this is regression to the mean, and it is the direct consequence of
+the search re-running confs *because* they scored well: the first run
+is the one that selected the conf, so every later run drifts back
+toward the truth.
+
+Two existing rules already absorb it: top confs get re-run precisely
+to correct the selection, and `top_confs_*` takes `min_num_runs=2` so
+a single lucky run cannot reach a leaderboard. The magnitude is worth
+knowing mainly as a calibration — 0.3-0.6% sits well under the 1-2%
+differences the search adjudicates, so the two-run floor is
+adequately sized rather than merely pointed the right way. Re-check
+it against this number if anything ever promotes confs on fewer runs.
+
 ## Database access (`texmo/db/`)
 
 - **`DbWriter`** — opens the SQLite file read-write. SearchThread and

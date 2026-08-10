@@ -67,6 +67,30 @@ Given a parameter budget N and compute budget T, answer:
   equal weight count, since that is the current answer to the same
   problem.
 
+* **Swish / SiLU as a third activation** (2026-08-10 idea).
+  `x * sigmoid(x)` — the activation Llama-class models use, and the
+  `S` in SwiGLU. The search currently offers exactly two:
+  `_JAX_ACTIVATIONS` also holds `relu`, but it is retired (2026-07,
+  almost strictly worse than gelu in the DB), so `is_valid` admits
+  only `tanh` and `gelu` and the mutation cycle proposes only those.
+
+  Cheap to try — `jax.nn.silu` into `_JAX_ACTIVATIONS`, the name into
+  the `is_valid` whitelist, and the activation-swap cycle picks it up
+  for free. Two reasons it might earn its slot rather than just
+  widening the search: it is smooth and non-monotonic like gelu but
+  materially cheaper (one sigmoid vs gelu's erf/tanh approximation),
+  which matters because our models are dispatch- and elementwise-
+  bound rather than matmul-bound; and it is the natural partner for
+  the gated form the split machinery already expresses
+  (`split.mul(dense.X.silu, dense.X)` is SwiGLU exactly, where today
+  that reads `.gelu` and is GeGLU).
+
+  Watch for: a third activation multiplies the per-size mutation
+  fan-out, so check it does not dilute the search more than it
+  contributes — the relu retirement is the precedent for cutting one
+  back out. Settle it the same way, from the DB (see the layer-audit
+  bullet under Analysis).
+
 ### Candidates to revisit
 
 * **HGRN2** (Qin et al. 2024, "Hierarchically Gated Recurrent
@@ -107,28 +131,17 @@ budget. Dream target: 32-64K weights.
   prompting — note our conversion is the base model, not instruct)
   ride with the model.
 
-* **Custom tokensets — DONE, and then some.** What started here as
-  "a 32-token ambiguous letter set with honest entropy accounting"
-  turned into a whole family, built 2026-07-19..2026-08-03:
-  `tokens.32.fold` (lossy folding, head-frequency accounting),
-  `tokens.{32,64}.shift` (shift marker at tokenization),
-  `tokens.{32,64,128,256}.hexbpe` (nibble fallback + BPE merges) and
-  `tokens.128.fold` (127 top bytes + uniform catch-all), all
-  search-reachable and all priced in weights by the same
-  one-per-stored-choice rule. **[`io.md`](io.md) is the live record**
-  — sizes, residuals, weight charges and the neighbor topology all
-  moved since, so trust it rather than any summary here.
-
-  Genuinely still open from this thread:
+* **Tokenset loose ends.** The families themselves are built and
+  documented in [`io.md`](io.md); what is left:
   - **Decode policy for lossy generation**: sample within a group vs
     print the canonical head character (currently head character).
   - **Per-eval-slice residual accounting**: decided against for now
     (the corpus-average constant is exact in expectation);
     `chunk_residual_bits` is ready if a cross-corpus eval appears.
   - **A Unicode-char-level set** (chars, not bytes, behind a shift /
-    escape) — sketched 2026-07-20 and still unbuilt. Note the 128
-    rung is no longer empty (fold-128 and hexbpe-128 both exist), so
-    this would have to earn its place against them.
+    escape), sketched 2026-07-20. The 128 rung is no longer empty
+    (fold-128 and hexbpe-128 both exist), so it has to earn its
+    place against them.
 
 * **Coherency eval.** Working assumption to start: cross-entropy
   over the dialog training distribution is a workable proxy for
@@ -192,21 +205,19 @@ budget. Dream target: 32-64K weights.
   have to hold. Revisit with caching / incremental candidate sets
   when it starts hurting client utilization.
 
-* **Predictor training off the server's critical path** — DONE
-  2026-07-18 for the loss model (option (b): refit jobs handed to
-  clients via /select + /training_data + /submit_loss_model; see
-  loss_prediction.md). Follow-ups dropped 2026-07-19 (Oleg):
-  distributed loss training is enough; no GPU refit benchmark, no
-  timing-model outsourcing.
+* **Move loss + timing model training back to the server**
+  (2026-08-08). Loss-model refits are currently handed out to clients
+  (`/select` + `/training_data` + `/submit_loss_model`, see
+  [`loss_prediction.md`](loss_prediction.md)) — a 2026-07-18 decision
+  taken when the server host had CPU-only JAX and a local refit was a
+  serious stall.
 
-* **Revisit: move loss + timing model training back to the server**
-  (2026-08-08). The decision above was made when the server host had
-  CPU-only JAX and a refit was a serious stall. That premise is gone:
-  native CUDA on Windows (winjax) makes local refits cheap, while the
-  distributed path costs a client slot per refit, a training-data
-  round trip, and a more complicated flow to reason about. Measure a
-  local refit first, then decide for the loss model and the timing
-  model independently.
+  **That premise died with winjax** (2026-08-08): the server host now
+  has native CUDA, so a local refit is cheap, while the distributed
+  path still costs a client slot per refit, a training-data round
+  trip, and a more complicated flow to reason about. Measure a local
+  refit first, then decide for the loss model and the timing model
+  independently.
 
 * **`texmo.py loss` is broken** (observed 2026-08-03). The offline
   loss-predictor evaluation harness dies inside sklearn's
@@ -219,83 +230,6 @@ budget. Dream target: 32-64K weights.
   through `predict/loss_rnn.py` and are unaffected. Fix, or drop the
   sklearn baselines if they have outlived their usefulness as a
   reference point.
-
-* **fp32 vs tf32 — investigated 2026-08-08, no action needed.**
-  XLA defaults fp32 matmuls to **TF32** tensor
-  cores on Ampere+, so a run labelled `fp32` computes with a 10-bit
-  mantissa on CUDA and a 23-bit one on CPU. On bench_jax's GRU.256 at
-  a stable LR the two backends land 0.11% apart in loss (CUDA 4.8017
-  vs CPU 4.8072) and CUDA is not bit-reproducible run to run; forcing
-  `jax_default_matmul_precision=highest` reproduces the CPU value
-  exactly (4.8072, twice).
-
-  **The verdict: the DB shows no TF32 bias worth acting on — don't
-  split `Precision`, and don't force `highest` either.** First, TF32
-  is confirmed as the default on *every* CUDA machine in the fleet,
-  not just the new one (`scratch/tf32_probe.py`:
-  4090/Linux 2.92e-4 and 5090/Windows 2.93e-4 relative error vs
-  HIGHEST; CPU exactly 0). So every 4090/5060ti row in the DB is TF32
-  and every pi5/m5/mini row is true fp32, all labelled `fp32`.
-
-  Then the paired test over confs that ran in both groups (35,464
-  pairs, per-conf medians, diverged runs excluded):
-
-  | comparison | arithmetic | median shift | sign test |
-  | --- | --- | ---: | ---: |
-  | CUDA vs CPU | tf32 vs fp32 | +0.028% | +4.8σ |
-  | 4090 vs 5060ti | **both tf32** | +0.379% | +15.4σ |
-  | macs vs pi5 | **both fp32** | +0.023% | +5.4σ |
-  | m5 vs mini | **both fp32** | +0.004% | +0.9σ |
-
-  Two same-arithmetic CPU machines reproduce a +0.02%/+5σ signature
-  of their own, and the 5060ti (also TF32) sits 0.38% from the 4090 —
-  13x the CPU/CUDA gap — so pooling CUDA machines is not safe. With
-  the 4090 alone the picture is cleaner: it sits +0.054/+0.078/+0.077%
-  above pi5/m5/mini respectively (7.5-10σ each) while the two Macs
-  agree to +0.004% (0.9σ).
-
-  **But calendar-era effects dwarf all of it.** Same conf, same
-  machine, later runs score 0.3-0.6% worse on *every* machine
-  (`scratch/time_drift.py`) — because the search re-runs confs that
-  scored well, so a conf's first run is selected for being lucky and
-  every later run regresses toward the mean. Controlling for era
-  halves the 4090 effect to **+0.033%**, and it survives in only one
-  era of four (+0.006%, +0.029%, −0.008%, +0.068%). That residue is
-  unexplained and is *not* claimed as a TF32 measurement.
-
-  TF32 also does not destabilize training — CPU diverged slightly
-  *more* (2.89% vs 2.43% of runs, McNemar z = −9.1). Everything here
-  is 1-2 orders below the 1-2% differences the search adjudicates and
-  ~100x below the per-conf seed noise (sd 3.5%).
-
-  And forcing `highest` is not free anyway. Measured on the 5090
-  (2026-08-08): **+4.1%** geomean over the benchmark suite at search
-  sizes (5-3000 weights, 60 entries — slower on only 28 of them, so
-  near noise), but **+25-40%** on bench_jax's GRU.256 (ram 36.5 ->
-  49.5, gpu 36.9 -> 51.7 ms/step). Exactly the
-  dispatch-bound/matmul-bound split: tiny models never feed the
-  tensor cores, so TF32 buys them nothing and costs them nothing —
-  but the moment models get big enough for TF32 to matter for loss,
-  it is also big enough to matter for speed. Revisit only if the
-  chatbot program pushes training past ~100k weights.
-
-  Scripts: `scratch/{tf32_probe,group_bias,era_bias,time_drift}.py`.
-
-* **First-run bias: measured at 0.3-0.6%** (2026-08-08, a by-product
-  of the TF32 investigation above). Same conf, same machine, later
-  runs score 0.3-0.6% worse than earlier ones across the whole fleet
-  (+2.8σ to +13.2σ, `scratch/time_drift.py`). This is regression to
-  the mean and it is **by design, already mitigated**: the search
-  re-runs top confs precisely to correct the selection, and
-  `top_confs_*` requires `min_num_runs=2` so a single lucky run
-  cannot reach a leaderboard.
-
-  Recorded because the *magnitude* is worth knowing: the first-run
-  bias is well under the 1-2% differences the search adjudicates,
-  which says the existing two-run floor is adequately sized rather
-  than merely directionally right. If a future change makes ranking
-  more sensitive (finer frontier resolution, automated promotion on
-  fewer runs), this is the number to re-check against.
 
 * **step/forward parity for consuming->stateful chains.** forward
   drops the transient outputs of consuming layers (conv/suffix,
@@ -328,23 +262,28 @@ budget. Dream target: 32-64K weights.
       step == forward trivial and the model contract match how
       pretrained LMs (BOS) already work.
 
-* **Weighted multi-template search — DONE 2026-08-09.** Sub-searches
-  with budget shares; specs live only in the sub-search rows, every
-  other bound stays shared. Coverage is per (system, entry), the
-  layer cap is filtered by each entry's own minimum layer count, and
-  the default fallback returns the entry's seed so a new sub-space
-  bootstraps instead of draining into the general search. See
-  [`search.md`](search.md).
+* **Per-entry bounds for sub-searches** (2026-08-10, out of the
+  bits.1 scaling investigation). A sub-search entry carries only a
+  spec filter; `max_weights` and `train_time` stay shared with the
+  main search, so an entry aimed at a *region* rather than a shape
+  cannot reach it.
 
-  Deliberately left ephemeral (revisit only if it bites): realized
-  shares are in-memory counters that reset on restart, and no
-  `run`-table column records which entry produced a run — per-entry
-  views re-derive it by applying the regex at query time.
+  Worked example: 10% of the search on `bits\.1.*` to measure scaling
+  past 4000 weights produced 53 runs there out of ~10k, and one
+  frontier conf. Not a run-count gate — the 4000-8000 frontier holds
+  one conf at `min_num_runs=1` as well. The heavy confs are dominated
+  on merit because they train short: they beat the 3.033 bar from
+  4096 steps and reach **2.848** at 32768 (144 s, well inside a 480 s
+  budget), but only 7 runs exist at that step count. The cause is
+  compounding log-uniform draws — P(t big enough) ~19% x P(weight
+  ceiling > 4000) ~15% x the 10% share ~= 0.3% of selects.
 
-  One consequence worth remembering: shares are of *exploration*
-  selects. `pick_me` and the warmup ladder are drawn before the
-  entry and are no longer spec-restricted at all, since the base
-  template now carries no spec.
+  Letting an entry override `max_weights` and `train_time` (that
+  entry at `-w 4000-8000 -t 120-480`) points its whole share at the
+  cell being measured — roughly 30x the sampling rate there, with no
+  effect on the main search. `TemplateEntry` already owns a
+  `Template`, so this is two optional bound overrides plus two form
+  columns.
 
 * **Split `is_valid` into invalid vs search-ineligible.** Today one
   flag conflates "this model cannot run / makes no sense" with "this
@@ -370,10 +309,3 @@ budget. Dream target: 32-64K weights.
   reached lower loss than joint training, supporting the bet that
   small-model joint optimisation gets stuck in local minima that
   layer-wise training avoids.
-
-(A former "run an off-the-shelf open-source LLM" section lived here;
-accomplished 2026-07 — RecurrentGemma-2B runs end-to-end on texmo:
-sliding-window attention with partial RoPE, RG-LRU, dependency-free
-BPE tokenizer conversion, safetensors-referencing model manifests,
-bench/eval/chat-ready generation. Next-port candidates are covered
-by the open-model survey bullet above.)

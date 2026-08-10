@@ -117,3 +117,32 @@ For mGRU (no fused kernel available):
 - **Cross-verification:** was a real benefit of two backends and is
   gone. `scripts/bench_torch.py` is the remaining cross-framework
   sanity point, at the whole-model level rather than per layer.
+
+## Precision: fp32 is TF32 on every CUDA machine
+
+XLA runs fp32 matmuls on **TF32** tensor cores on Ampere and later, so
+a run labelled `fp32` computes with a 10-bit mantissa on CUDA and a
+23-bit one on CPU. Measured 2026-08-08 (`scratch/tf32_probe.py`):
+relative error against `Precision.HIGHEST` is 2.92e-4 on a Linux
+4090 and 2.93e-4 on a Windows 5090, and exactly 0 on CPU. The fleet's
+CUDA rows and its CPU rows are therefore not quite the same
+arithmetic, under one `Precision` label.
+
+**It does not matter, and `Precision` should not be split.** Paired
+over 35,464 confs that ran in both groups, CUDA sits +0.028% from CPU
+— but two *same-arithmetic* CPU machines reproduce the same
+signature (+0.023%), and two same-arithmetic CUDA machines differ by
+13x more than the CUDA/CPU gap. Controlling for era halves what is
+left, and it survives in one era of four. TF32 does not destabilize
+training either: CPU diverged slightly *more* (2.89% vs 2.43% of
+runs, McNemar z = -9.1). Everything here is one to two orders below
+the 1-2% differences the search adjudicates, and ~100x below the
+per-conf seed noise (sd 3.5%).
+
+Forcing `jax_default_matmul_precision=highest` is not free: **+4.1%**
+geomean over the benchmark suite at search sizes (5-3000 weights) but
+**+25-40%** on a GRU.256 (ram 36.5 -> 49.5 ms/step). That is the
+dispatch-bound/matmul-bound split — tiny models never feed the tensor
+cores, so TF32 buys them nothing and costs them nothing, while the
+regime where TF32 could move the loss is the same regime where it
+pays for itself. Revisit only if training goes past ~100k weights.

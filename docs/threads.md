@@ -1,8 +1,7 @@
-# Threading model (planned refactor)
+# Threading model
 
-Working document for the in-flight refactor that moves all DB writes
-onto a single dedicated thread and lets search become stateless.
-This file describes the *target* shape; the code is mid-transition.
+How the search server splits work across threads: all DB writes land on
+a single dedicated thread, and Search is stateless and read-only.
 
 ## Rule
 
@@ -36,7 +35,7 @@ class LossRefit:
 class Stop:
     pass
 
-TrainMessage = RunAdded | LossRefit | Stop
+TrainMessage = RunAdded | LossRefit | BootstrapTiming | Stop
 
 
 # In the consumer:
@@ -51,8 +50,8 @@ match m:
         assert False, f"unknown: {m!r}"
 ```
 
-RPC-style messages add a `response_queue: Queue` field on just the
-classes that need it (e.g. `latency.Report`), not on every message.
+RPC-style messages add a reply-queue field on just the classes that
+need it (`latency._Report(reply)`), not on every message.
 
 The simple object-only queues (`confs_by_system[system]`, which just
 carries a `SearchResult | None`) are exempt — they don't need the
@@ -64,63 +63,75 @@ wrapper.
   - Count: many (one per request).
   - Owns: nothing persistent.
   - Reads from: a per-request `DbReader`, only for the report-style
-    routes (`/`, `/compare`, `/throughput`, `/latency`). The hot
-    paths (`/select`, `/add`) just enqueue messages and never touch
-    the DB directly.
+    routes (`/`, `/compare`, `/throughput`, `/fastest`,
+    `/training_data`, and `/update` when it rejects a form and
+    re-renders the index instead of redirecting). The hot paths
+    (`/select`, `/add`) never touch the DB directly, and `/latency`
+    doesn't either.
   - Sends to:
-    - `DBWriter` via `write_queue` to record incoming runs (`/add`).
-    - `Search` via `select_queue`, but only the first time a new
-      system is seen — to seed N initial `select` messages. After
-      that the handler just drains `confs_by_system[system]`;
-      Search itself keeps the queue primed (see below).
-    - `Model` via `train_queue` to notify it of newly added runs
+    - `WriterThread` via `write_queue` to record incoming runs
+      (`/add`), through the `SearchServer`-owned `DbWriterProxy`.
+    - `SearchThread` via `requests_queue`: one `Select` per `/select`
+      request (plus one extra the first time a system is seen, which
+      primes that system's pipeline by one), and a `SetTemplate` from
+      `/update`.
+    - `ModelThread` via `train_queue` to notify it of newly added runs
       so it can update its own counters and decide on refits.
+  - `/submit_loss_model` additionally calls `save_predictor` and
+    `LossModelHolder.set_model` inline — see "Shared mutable objects".
 
-- **DBWriter** (new)
+- **WriterThread** (`texmo/db/writer.py`)
   - Count: 1.
-  - Owns: the single `DbWriter` instance (read-write connection) and
-    all write-transaction state.
+  - Owns: the only post-init `DbWriter` (read-write connection) and
+    all write-transaction state. Opens it inside `run()`, so sqlite's
+    default `check_same_thread=True` holds.
   - Reads from: its `write_queue`.
-  - Sends to: nothing on the happy path. On unrecoverable I/O error
-    it logs the failure and triggers the same clean-shutdown path as
-    the `/stop` button (drain queues, refuse further messages, join
-    threads) so other producers fail fast rather than wedge forever.
+  - Sends to: nothing.
 
-- **Search**
-  - Count: N (≥ 1; 1 for now, multiple later).
-  - Owns: its own persistent `DbReader`.
+- **SearchThread** (`texmo/search.py`)
+  - Count: 1 (created in `SearchServer.__init__`).
+  - Owns: its own persistent `DbReader` and the `Search` object, both
+    built inside `run()`.
   - Reads from:
     - `DbReader` for query work.
     - The shared `TrainTimingModel` and `LossModelHolder` instances
       (writer is the Model thread; see "Shared mutable objects").
-    - `select_queue` for incoming requests.
-  - Sends to:
-    - The matching per-system queue in `confs_by_system`, dropping
-      each produced `SearchResult` onto it.
-    - `select_queue`, putting back one `select` for the same system
-      after each one it consumes. This is what keeps the prefetch
-      pipeline primed — Search never needs to know about the set of
-      known systems; it just refills the one it just produced for.
+    - `requests_queue` for incoming commands.
+  - Sends to: the matching per-system queue in `confs_by_system`,
+    dropping each produced `SearchResult` (or `None`) onto it.
+  - Writes nothing. A `Select` whose `enqueued_at` is older than
+    `_SELECT_STALE_S` is answered with `None` without doing the work —
+    its client has certainly timed out. A `select_conf` exception is
+    caught and logged rather than killing the thread, since a dead
+    search thread would leave every `/select` blocked forever.
 
-- **Model**
+- **ModelThread** (`texmo/predict/model_thread.py`)
   - Count: 1.
   - Owns (mutates): the shared `TrainTimingModel` (per-(system,
     precision) weight inserts; one shared instance is reused across
     threads), and the underlying `LossModel` slot inside the shared
     `LossModelHolder` (replaced wholesale on refit).
-  - Owns (private): per-(system, precision) refit counters, the
-    loss-refit counter, and the `featurize()` `@functools.cache`
-    (purely local to this thread by construction).
+  - Owns (private): per-(system, precision) run counters and refit
+    counters (the latter drive the incremental-vs-full estimate
+    refresh cadence).
   - Reads from: its own `DbReader` for fitting runs, plus
-    `train_queue` for incoming "run added" notifications.
-  - Sends to: `DBWriter` via `write_queue` to persist predicted-time
-    estimates and model snapshots.
+    `train_queue` for incoming notifications.
+  - Sends to: `WriterThread` via `write_queue` (through a
+    `DbWriterProxy`) to persist predicted-time estimates. Fitted
+    predictors go to disk directly via `save_predictor`, not through
+    the queue.
 
 - **Latency** (dedicated thread inside `texmo/latency.py`; see
   "Shared mutable objects")
-  - Count: 1.
+  - Count: 1, started lazily as a daemon at module load.
   - Owns: the `_measures` dict.
   - Reads from: its internal `_queue` (`_Record` / `_Report`).
+
+- **Latency dump loop** (`SearchServer._dump_latency_loop`)
+  - Count: 1 daemon, started by `serve()`. Appends a timestamped
+    latency snapshot plus queue depths to `latency.log` every
+    `_LATENCY_DUMP_INTERVAL` seconds. Touches no DB and no search
+    state, so it keeps reporting even while `/select` is stalled.
 
 The two werkzeug listener threads (`internal_srv.serve_forever` and
 `external_srv.serve_forever`) are infrastructure, not application
@@ -129,59 +140,65 @@ threads — they dispatch into the request-handler thread pool.
 ## Queues
 
 - `write_queue`
-  - Producers: SearchThread (`AddRun` on the `/add` path) and
-    ModelThread (predicted-time bulk upserts, timing/loss snapshot
-    persistence). Both go through `DbWriterProxy`, which has the same
+  - Producers: request handlers (`AddRun` on the `/add` path, via
+    `SearchServer._writer`) and ModelThread (predicted-time bulk
+    upserts). Both go through `DbWriterProxy`, which has the same
     method names as `DbWriter` and turns each call into a message.
-  - Consumer: WriterThread (`texmo.db.writer.WriterThread`).
+  - Consumer: `WriterThread`.
   - Messages (`WriteMessage = AddRun | UpsertPredictedTimeEstimates
-    | SaveModel | UpdateAllScores | Stop`):
+    | UpdateAllScores | Stop`):
     - `AddRun(conf, run, strategy, track_winner_change)`
-    - `UpsertPredictedTimeEstimates(rows)`
-    - `SaveModel(name, obj)`
-    - `UpdateAllScores()` (queue-side wrapper exists; only the
-      bootstrap path uses it today, and that runs on the main thread
-      with a direct `DbWriter` rather than via the queue)
+    - `UpsertPredictedTimeEstimates(rows)` — the proxy splits a
+      refresh into `_UPSERT_CHUNK` (20k) row batches so `AddRun`
+      messages interleave between the writer's transactions instead
+      of waiting behind one giant upsert.
+    - `UpdateAllScores()` (used by the median backfill in
+      `bootstrap()`)
     - `Stop()` — exit the loop.
-  - Search does **not** write. Anything bookkeeping-adjacent that
-    needs to land in the DB is either piggy-backed on `/add` by the
-    SearchThread or routed via Model.
+  - SearchThread does **not** write. Anything bookkeeping-adjacent
+    that needs to land in the DB is either posted by the `/add`
+    handler or routed via ModelThread.
 
-- `select_queue`
-  - Producers:
-    - Request handlers (`/select`), **only** the first time a new
-      system is seen, to seed N initial `select` messages.
-    - Search threads themselves — after producing a `SearchResult`
-      for system `S`, the Search thread puts one more
-      `select(system=S)` back on the queue. This is what keeps the
-      per-system prefetch primed without anyone tracking the set of
-      known systems.
-  - Consumers: the N Search threads (any one picks up a message).
-  - Commands:
-    - `select` (fields: `system`)
+- `requests_queue`
+  - Producers: request handlers only. `/select` posts one `Select`
+    per request; the first request for a previously unseen system
+    posts an extra one while holding `confs_by_system_lock`, which
+    leaves that system's pipeline one conf ahead. `/update` posts
+    `SetTemplate`.
+  - Consumer: the SearchThread.
+  - Messages (`SearchMessage = Select | SetTemplate | Stop`):
+    - `Select(system, enqueued_at)`
+    - `SetTemplate(template, init_conf, train_time, templates)` — the
+      group moves together so a partial update never lands mid-loop.
+    - `Stop()`
 
 - `confs_by_system: dict[str, Queue[SearchResult | None]]`
-  - Producer: Search threads, one item per `select` command processed.
+  - Producer: SearchThread, one item per `Select` processed.
   - Consumer: `/select` handlers, which just `get()` from the
-    target system's queue. They do **not** enqueue refills —
-    Search self-replenishes after every production.
+    target system's queue.
   - Lock: `confs_by_system_lock` protects creation of the per-system
-    queue + initial N-seed (the first time a new system appears).
+    queue + its one-off extra seed, and every `put` / `qsize` on the
+    dict's queues.
 
 - `train_queue`
   - Producers:
-    - SearchThread (currently); will become request handlers (`/add`)
-      directly once DBWriter owns the write. Either way, the post is
-      ordered after the run has landed in the DB.
-    - `SearchServer.__init__` posts a one-shot `LossRefit` at startup
-      when no persisted loss model is on disk.
+    - Request handlers (`/add`), posting `RunAdded` after the `AddRun`
+      write has been enqueued from the same thread — SQLite WAL then
+      guarantees a later ModelThread read sees the row.
+    - `SearchServer.__init__` posts a one-shot `BootstrapTiming`
+      and/or `LossRefit` at startup for whichever persisted predictor
+      is missing or fails its compatibility probe.
   - Consumer: ModelThread.
-  - Messages (`TrainMessage = RunAdded | LossRefit | Stop`):
-    - `RunAdded(system, precision)` — Model owns the per-pair and
-      total run counters and decides when to fit.
+  - Messages (`TrainMessage = RunAdded | LossRefit | BootstrapTiming
+    | Stop`):
+    - `RunAdded(system, precision)` — Model owns the per-pair
+      counters and decides when to fit.
     - `LossRefit()` — force a loss-model refit now.
+    - `BootstrapTiming()` — run the full timing bootstrap (median
+      backfill, per-pair refits, predictions for every conf without a
+      median) on the Model thread.
     - `Stop()` — exit the loop.
-  - DBWriter does **not** know about training. The producer that
+  - WriterThread does **not** know about training. The producer that
     posted the write is the same one that notifies the Model
     thread; the business logic stays out of the writer.
 
@@ -191,15 +208,26 @@ threads — they dispatch into the request-handler thread pool.
       thread.
     - `get_report()` posts a `_Report(reply)` and blocks on the reply
       queue, which the latency thread fills with the report string.
-  - Consumer: the Latency thread (started lazily as a daemon at
-    module load).
+      FIFO ordering guarantees every record posted before the call is
+      folded into the response.
+  - Consumer: the Latency thread.
   - The queue is private to `texmo/latency.py`; the public surface
     stays `Timer` / `timer(name)` / `get_report()` / `report()`.
+
+## Shutdown
+
+`/stop` (internal port only) spawns a one-shot thread that calls
+`shutdown()` on both werkzeug servers — doing it from inside the
+request thread would deadlock. `serve()` then falls through to
+`SearchServer.join()`, which stops the producers before the consumer:
+`Stop` to `requests_queue` and join SearchThread, then `train_queue`
+and ModelThread, then `write_queue` and WriterThread, so nothing is
+still posting when the writer drains.
 
 ## Shared mutable objects
 
 A small number of objects are necessarily shared across threads. Each
-is encapsulated behind a narrow interface with one designated writer.
+is encapsulated behind a narrow interface.
 
 - **`TrainTimingModel`** (single shared instance)
   - Already keyed by `(system, precision) -> Weights` internally; each
@@ -207,16 +235,29 @@ is encapsulated behind a narrow interface with one designated writer.
     in CPython, so readers never see a partially-written entry.
   - Writer (Model thread only): `fit(...)` / `_refit_pair(...)`.
   - Readers (Search): `predict`, `predict_batch`, `predict_step_time`,
-    `predict_max_steps` — each returns `None` if the requested
-    `(system, precision)` pair has no weights yet.
-  - The instance is created in `server.py` at startup and passed by
-    reference to the Model thread and to every Search thread.
+    `predict_max_steps`, `has_weights` — each returns `None` (or
+    False) if the requested `(system, precision)` pair has no weights
+    yet.
+  - Created in `server.py` at startup and passed by reference to the
+    Model thread and the Search thread. If a compatible persisted
+    model loads from disk, *that* instance becomes the shared one —
+    swapped in before any thread starts.
+  - `timing.featurize` is a module-level `@functools.cache`, so it is
+    shared by every thread that predicts or fits. `Configuration` is
+    immutable and the cache is a plain dict, so a race at worst
+    duplicates work.
 
-- **`LossModelHolder`** (lives next to `LossModel` in `predict/loss_rnn.py`)
+- **`LossModelHolder`** (lives next to `LossModel` in
+  `predict/loss_rnn.py`)
   - Atomically-swappable holder for a `LossModel`. Refits replace the
     whole model wholesale, so the holder just owns one pointer and
     exposes `predict` that delegates to the current model.
-  - Writer (Model thread only): `set_model(loss_model)`.
+  - Writers: the Model thread (`_refit_loss`) **and** the
+    `/submit_loss_model` request handler, which publishes a
+    client-fitted model after a probe-predict and a `run_count`
+    freshness check. Two writers are safe here only because the write
+    is a single pointer swap; the `run_count` comparison that decides
+    whether to publish is done under `_refit_lock`.
   - Readers (Search): `is_ready()` for the gate, `predict(confs)` for
     the actual call.
   - Implementation: one attribute write swaps the pointer; atomic in
@@ -229,10 +270,19 @@ is encapsulated behind a narrow interface with one designated writer.
     on `__exit__`) and `get_report()` / `report()` (post a `_Report`
     with an ephemeral reply queue and wait on the reply).
 
-The `SearchServer.template` / `default` / `train_time` objects are
-built once at frontend startup and are immutable thereafter, so they
-are plain read-only references handed to the Search threads — not
-shared mutable state.
+- **`SearchServer.template` / `default` / `templates` / `train_time`**
+  are rebound wholesale by `/update` under no lock, then handed to the
+  Search thread as a `SetTemplate` message. The objects themselves are
+  never mutated in place, so a concurrent reader sees either the old
+  or the new one; the server-side copies exist only for form rendering
+  and `/compare`, and the search thread's copies may lag by one queue
+  step.
+
+- **`SearchServer._refit_lock`** guards the client-refit bookkeeping
+  counters (`_refit_runs_since_grant`, `_refit_published_count`,
+  `_refit_published_at`, `_refit_granted_at`), which concurrent
+  request handlers touch. Held only for the few lines of arithmetic,
+  never across fitting or I/O.
 
 ## Database access (`texmo/db/`)
 
@@ -241,107 +291,105 @@ type system enforces the read/write boundary. Code layout:
 
 - `texmo/db/common.py` — shared helpers: regex bridge, ndarray
   packing, template->SQL conditions, the one shared SQL constant
-  (`FIND_CONF`), and the connection bootstrap.
+  (`FIND_CONF`), and the connection bootstrap (`open_connection`).
 - `texmo/db/reader.py` — `DbReader` class, plus `ConfScore` /
   `ConfWithRuns` (only produced by reads) and read-only SQL
   constants.
-- `texmo/db/writer.py` — `DbWriter` class plus write-side SQL
-  constants.
+- `texmo/db/writer.py` — `DbWriter`, `DbWriterProxy`, `WriterThread`
+  and the write-side SQL constants.
 - `texmo/db/schema.sql` — the schema (used to bootstrap the writer
   connection on a fresh DB).
 
+Every connection is opened on the thread that uses it and inherits
+sqlite's default `check_same_thread=True`. File-backed writer
+connections enable WAL and a 30 s `busy_timeout`.
+
 - **`DbReader`**
-  - Constructor opens the SQLite file with `mode=ro` (URI form).
+  - Constructor opens the SQLite file with `mode=ro` (URI form) and
+    asserts a real path — sqlite refuses `mode=ro` on `:memory:`.
   - Each thread that needs DB reads instantiates one — per-request
-    for report handlers, persistent for Search and Model threads.
-  - Methods (read-only): `get_systems`, `get_conf_id`,
-    `get_run_counts`, `top_confs_global`, `top_confs_for_system`,
-    `fastest_near_best_segments`, `confs_under_time`,
-    `best_conf_for_spec_on_system`, `iter_confs_by_precision`,
-    `get_conf_ids_with_median_time`, `get_losses_by_conf_ids`,
-    `get_time_estimate`, `get_runs_for_timing`, `get_confs_runs`,
-    `iter_labeled_runs`, `total_runs`, `load_model`.
+    for report handlers, persistent for the Search and Model threads.
+  - Methods (read-only): `get_conf_id`, `get_run_counts`,
+    `get_systems`, `has_covering_run`, `top_confs_global`,
+    `pick_me_conf`, `fastest_near_best_segments`,
+    `fastest_near_best_segments_any_system`, `top_confs_for_system`,
+    `best_conf_for_spec_on_system`, `confs_under_time`, `total_runs`,
+    `get_confs_runs`, `get_runs_for_timing`, `iter_labeled_runs`,
+    `iter_labeled_runs_raw`, `iter_confs_by_precision`,
+    `iter_confs_missing_estimate`, `get_conf_ids_with_median_time`,
+    `get_losses_by_conf_ids`, `get_time_estimate`.
   - Internal state: positive-only `_conf_id_cache` (Configuration ->
     conf_id), populated lazily on disk hits.
 
 - **`DbWriter`**
-  - Constructor opens the SQLite file read-write. Until migration
-    step 6 multiple `DbWriter` instances coexist (one in
-    `SearchServer`, one in `ModelThread`); WAL + the 30s
-    `busy_timeout` serialize them. Step 6 collapses them to a single
-    instance on the DBWriter thread.
+  - Constructor opens the SQLite file read-write, applying the schema
+    if the DB is fresh. In the running server `WriterThread` owns the
+    only post-init instance; `SearchServer.__init__` opens a
+    throwaway one on the main thread purely to apply that schema
+    before the first read. Single-threaded callers (the `cli/db.py`
+    admin commands, tests) use it directly.
   - Methods (write-only, but may read as part of a write):
-    - `add_run` (still runs `track_winner_change` inline — owns the
-      transaction; just doesn't return the bool to the caller),
-    - `find_or_add_conf`,
-    - `upsert_predicted_time_estimates`,
-    - `upsert_time_estimates`,
-    - `save_model`, `clear_system`, `update_all_scores`.
-  - Internal state:
-    - `_conf_id_cache` (Configuration -> conf_id, populated by
-      `find_or_add_conf`).
-    - All write-transaction logic (`BEGIN IMMEDIATE` / `COMMIT`).
+    `add_run` (still runs `track_winner_change` inline — it owns the
+    transaction, and just doesn't return the bool to the caller),
+    `find_or_add_conf`, `add_pick_me_conf`, `upsert_time_estimates`,
+    `upsert_predicted_time_estimates`, `update_all_scores`,
+    `backfill_num_layers`, `clear_system`.
+  - `upsert_predicted_time_estimates` uses an
+    `ON CONFLICT ... WHERE source = 'predicted'` guard so a `median`
+    row written concurrently by `_add_run` is never clobbered.
+  - Internal state: `_conf_id_cache` (Configuration -> conf_id,
+    populated by `find_or_add_conf`) and all write-transaction logic
+    (`BEGIN IMMEDIATE` / `COMMIT`).
 
-## Migration plan
+The fitted predictors (timing, loss) are **not** in the DB. They are
+pickles next to the DB file, written atomically with rotation by
+`texmo/predict/persist.py` (`save_predictor` / `load_predictor`).
 
-Land in this order so each step is independently verifiable:
+## Outstanding
 
-1. ~~**Introduce shared model instances.**~~ **done**: Search and the
-   Model thread now share one `TrainTimingModel` (mutated in place via
-   atomic per-key dict inserts) and one `LossModelHolder` (a tiny
-   pointer-swap wrapper around `LossModel`). The Model thread no
-   longer pushes `loss_weights` / `timing_weights` messages through
-   the search queue.
-2. ~~**Move the refit counters off Search.**~~ **done**: `_run_counter`
-   and `_total_run_counter` now live on `ModelThread`. The
-   `train_queue` (renamed from `timing_queue`) carries `RunAdded` /
-   `LossRefit` / `Stop`. SearchThread posts `RunAdded` after persisting
-   each run; Model decides on its own when to refit.
-3. ~~Cache decisions~~ **done**: `model._cache` and
-   `Template._conf_neighbors_cache` were removed once measurement
-   showed `conf_neighbors` averages ~1 ms/call without them.
-4. ~~**Standardise queue messages on per-command dataclasses.**~~
-   **done**: `requests_queue` carries `Select` / `SetTemplate` /
-   `Stop` from `texmo/search.py` (defined alongside `Search` and
-   `SearchThread`). `train_queue` and `write_queue` were already on
-   the new format from steps 2 and 6; the latency thread (step 7)
-   uses `_Record` / `_Report`. `confs_by_system` is exempt (single
-   payload type — `SearchResult | None`).
-5. ~~**Split `ResultDB` into `DbReader` / `DbWriter`**~~ **done**:
-   live under `texmo/db/{common,reader,writer}.py` with the schema
-   at `texmo/db/schema.sql`. Semantics unchanged; the boundary is
-   now type-enforced.
-6. ~~**Introduce DBWriter thread and `write_queue`.**~~ **done**:
-   `WriterThread` in `texmo/db/writer.py` owns the only post-init
-   `DbWriter`; producers (ModelThread, request handlers) hold a
-   `DbWriterProxy` and post `WriteMessage`s (`AddRun`,
-   `UpsertPredictedTimeEstimates`, `SaveModel`, `UpdateAllScores`,
-   `Stop`). `SearchThread` is read-only now: the `/add` HTTP
-   handler enqueues `AddRun` + `RunAdded` directly from the
-   request-handler thread. `SearchServer.__init__` opens a temporary
-   `DbWriter` on the main thread only to apply the schema on a fresh
-   DB, then loads the persisted timing/loss models via `DbReader`
-   and posts `BootstrapTiming` / `LossRefit` for whatever's missing;
-   training runs async on the Model thread. Every connection (writer
-   and reader) is opened on the thread that uses it and inherits
-   sqlite's default `check_same_thread=True`. The SQL-level
-   `_UPSERT_PREDICTED_ESTIMATE` `ON CONFLICT` guard and the
-   I/O-error panic path are still outstanding (carve-outs for a
-   later commit, not blockers for step 7).
-7. ~~**Move `latency._measures` onto its own thread**~~ **done**:
-   `texmo/latency.py` spins a daemon thread at module load that
-   owns `_measures`. `Timer.__exit__` posts `_Record(name,
-   elapsed_ns)`, `get_report()` posts `_Report(reply)` and blocks
-   on the reply queue. Public surface (`Timer` / `timer(name)` /
-   `get_report()` / `report()`) is unchanged.
-8. **Optional: spawn N Search threads.** Created explicitly in
-   `server.main()`, each with its own persistent `DbReader` and
-   references to the shared `TrainTimingModel` / `LossModelHolder` /
-   `select_queue` / `confs_by_system`.
+- **No I/O-error panic path on WriterThread.** An unrecoverable write
+  error propagates out of `run()`, closes the connection and kills the
+  thread silently; producers keep posting into a queue nobody drains.
+  The intent is to log the failure and trigger the same clean-shutdown
+  path as the `/stop` button so producers fail fast.
+- **A single Search thread.** The design supports N (`requests_queue`
+  is a shared work queue and any consumer can serve any message; each
+  would need its own persistent `DbReader` plus references to the
+  shared `TrainTimingModel` / `LossModelHolder`), but only one is
+  created today, in `SearchServer.__init__` rather than in
+  `server.main()`.
+- **`/select` doesn't prefetch.** Each request posts its own `Select`
+  and then blocks on the response queue, so the one extra seed per
+  system is the whole pipeline depth. An earlier design had Search
+  self-replenish after every production; that is not what the code
+  does.
 
-## Open questions
+## History
 
-- `track_winner_change` stays inside DBWriter so the (before, after)
-  sampling is atomic with the run insert. The result is recorded
-  in the `changed_winner` column; the caller doesn't see it. No
-  user-facing change.
+This file began as a plan for a refactor that moved every DB write
+onto a dedicated thread and made Search stateless. The refactor landed
+in 2026-07 and the document was rewritten as a description of the
+result. Along the way:
+
+1. Search and the Model thread came to share one `TrainTimingModel`
+   and one `LossModelHolder` instead of pushing weights through the
+   search queue.
+2. The refit counters moved off Search onto `ModelThread`, and
+   `timing_queue` became `train_queue` carrying `RunAdded` /
+   `LossRefit` / `Stop`.
+3. `model._cache` and `Template._conf_neighbors_cache` were removed
+   once measurement showed `conf_neighbors` averages ~1 ms/call
+   without them.
+4. Every multi-payload queue was standardised on per-command
+   dataclasses with `match` dispatch.
+5. `ResultDB` was split into `DbReader` / `DbWriter` under
+   `texmo/db/`, with the boundary type-enforced.
+6. `WriterThread` + `DbWriterProxy` took over all writes; SearchThread
+   became read-only and the `/add` handler enqueues `AddRun` +
+   `RunAdded` itself.
+7. `latency._measures` moved onto its own daemon thread behind an
+   unchanged public surface.
+
+`track_winner_change` stayed inside the writer so the (before, after)
+sampling is atomic with the run insert. The result is recorded in the
+`changed_winner` column; the caller doesn't see it.

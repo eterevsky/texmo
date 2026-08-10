@@ -7,57 +7,84 @@ architecture and scaling it, it explores the joint space of
 architectures and hyperparameters, training a large number of small
 configurations and using their results to predict where to look next.
 
-The implementation is primarily targeting **JAX** (a PyTorch backend
-also exists; see [`docs/backends.md`](docs/backends.md)).
+Training runs on **JAX**, which is the only backend; see
+[`docs/backends.md`](docs/backends.md).
 
 ## What "good" means here
 
 For every weight budget the search tracks the best cross-entropy loss
 achieved on held-out text from an English-language dataset, measured
-per input *byte* — the model reads raw UTF-8, no tokenizer. The plot
-below summarises ~560k training runs across ~290k distinct
-configurations collected so far.
+per input *byte*. Per-byte is the point: models here read their input
+in very different units — one bit at a time, 4-bit chunks, or a small
+custom tokenset — and only a per-byte score makes those comparable.
+Roughly 1.16M training runs across 658k distinct configurations have
+been collected so far; the plot below is a periodic snapshot of that
+frontier.
 
 ![Loss vs. weights](docs/images/graph.png)
 
 Best models found so far at a few sample weight budgets — see
 [`docs/best_models.md`](docs/best_models.md) for the full list:
 
-| Weights | Loss   | Spec                                                                                          |
-|--------:|-------:|-----------------------------------------------------------------------------------------------|
-| 50      | 4.7796 | `bits.1+bp\|skip.2.add-mgru.1-skip.2.cat-dense.4.tanh-norm-skip.2.cat-suffix.2-dense.1.tanh`  |
-| 97      | 4.4743 | `bits.1+bp\|mgru.4-dense.4.gelu`                                                              |
-| 200     | 4.1061 | `bits.4.oh+bp\|latent.2.2-suffix.2-mingru.4-norm-skip.2.add-mingru.4-norm`                    |
-| 392     | 3.8028 | `bits.4.oh+bp\|dense.4.tanh-skip.5.add-suffix.2-mgru.4-skip.2.add-suffix.2-skip.1.add-dense.8.gelu` |
+| Weights | Loss   | Spec                                                                                   |
+|--------:|-------:|----------------------------------------------------------------------------------------|
+| 15      | 5.3849 | `bits.1+bp\|split.cat(rnn.1.tanh, pass)-norm-dense.1.tanh-suffix.2`                     |
+| 97      | 4.4564 | `bits.1+bp\|mgru.4-dense.4.gelu-norm`                                                   |
+| 231     | 4.0161 | `tokens.32.shift.emb.4\|mingru.4-split.add(rmsnorm, pass)`                              |
+| 474     | 3.7047 | `tokens.32.hexbpe.emb.8\|lrnn.8.2`                                                      |
+| 2960    | 3.0569 | `bits.4.oh+bp\|rnn.32.gelu-rnn.16.gelu-split.add(dense.16.gelu-rmsnorm, pass)-rmsnorm`  |
 
 A spec has the form `<input>|<layer>-<layer>-...`. The part before `|`
-describes how an input byte is fed to the network: `bits.1` feeds the
-byte one bit at a time, `bits.4.oh` feeds it in two 4-bit chunks
-one-hot-encoded, and the `+bp` suffix adds a positional encoding for
-the bit position within the byte. The part after `|` is the sequence
-of layers applied at each step (see [`docs/layers.md`](docs/layers.md)
-for the full set). `skip.X.add` / `skip.X.cat` are residual
-connections that fold the output of `X` layers back into the stream by
-addition or concatenation (see [`docs/skip.md`](docs/skip.md)).
+names the **codec** — how token ids become vectors going in, and how
+the last layer's activations become logits coming out. `bits.1` feeds
+a byte one bit at a time, `bits.4.oh` feeds it in two one-hot 4-bit
+chunks, and the `+bp` suffix adds a positional encoding for the chunk's
+position within the byte. `tokens.32.shift` names a learned tokenset
+from `tokens/`, and an `.emb.d` suffix means the ids go through a
+learned `d`-wide embedding table that is *tied* into the output head
+instead of one-hot vectors. See [`docs/io.md`](docs/io.md) for all
+three kinds.
 
-## Why no tokens
+The part after `|` is the layer chain applied at each step (see
+[`docs/layers.md`](docs/layers.md) for the full set). It is a DAG, not
+a straight line: `split.op(branch, branch)` is a **fork-and-merge**
+node where both branches see the same input and their outputs are
+combined by `op` ∈ {`add`, `cat`, `mul`}. A branch of `pass` is the
+identity, so `split.add(F, pass)` is a residual connection and
+`split.mul(value, gate)` is gating. See
+[`docs/split.md`](docs/split.md).
 
-TexMo trains directly on bytes (and bit-prefixes), not on a learned
-tokenization, for two reasons:
+## Bytes, bits, and tokensets
+
+TexMo started out refusing tokenization entirely and training directly
+on bytes and bit-prefixes, for two reasons:
 
 1. **Tokens encode language knowledge.** A BPE vocabulary trained on a
    large corpus already captures word frequencies and common
    morphology. Counting those bytes-of-text per byte-of-model is
    misleading: part of the language model lives in the tokenizer.
-   Training on raw bytes forces the model itself to learn everything
-   it knows.
 2. **Multiple tokenizations would blow up the search space.** The
    architecture search already covers many degrees of freedom; adding
    "which tokenizer" as another axis would multiply the work without
    informing the comparison between architectures.
 
-The tokenization code in the repo still works and is documented in
-[`docs/tokens.md`](docs/tokens.md); it is currently parked.
+Both objections have since been answered rather than avoided, and
+small custom tokensets are now a first-class part of the search — they
+hold much of the frontier between roughly 200 and 1000 weights.
+
+The first is answered by **charging for what the tokenset knows**. A
+set's corpus knowledge is priced into `num_weights` like any other
+parameter (one weight per stored choice — a selected byte, a merge, a
+shift pair), and a *lossy* set additionally pays a fixed per-byte
+residual at eval time for the information it destroys. A model over an
+easier token stream therefore does not get a free ride on the
+weights-versus-loss plot. The second is answered by making the
+tokenset just another neighbor edge: sets form a ladder that the local
+search walks one rung at a time, exactly like a layer-size mutation.
+
+[`docs/io.md`](docs/io.md) is the live record of the tokenset families
+and this accounting; [`docs/tokens.md`](docs/tokens.md) covers the
+machinery (file format, tokenizers, how sets are built).
 
 ## Architectures don't scale equally
 
@@ -65,9 +92,9 @@ Per-system throughput at the same near-best loss target:
 
 ![Throughput across systems](docs/images/throughput.png)
 
-For these tiny weight budgets the GPU (5060ti) is **outright slower**
-than the Apple-silicon laptop (m5, running on the CPU — not the GPU
-via Metal) and even the Raspberry Pi 5 — except for fixed-suffix
+For these tiny weight budgets a consumer discrete GPU is **outright
+slower** than an Apple-silicon laptop running on its CPU cores (not the
+GPU via Metal), and even than a Raspberry Pi — except for fixed-suffix
 convolution-like models (`suffix.N` + dense), which the GPU handles
 well. The reason is that the majority of best-performing
 configurations at this scale are **recurrent** (RNN / GRU / mGRU /
@@ -80,19 +107,27 @@ step than GPUs lose to under-used SMs.
 The search composes models from these building blocks (see
 [`docs/layers.md`](docs/layers.md) for equations and parameter counts):
 
-- `dense.<size>.<activation>` — feed-forward (tanh, gelu activations)
+- `dense.<size>.<activation>` — feed-forward (tanh, gelu, or bare)
 - `rnn.<size>.<activation>` — vanilla recurrent
 - `gru.<size>`, `mgru.<size>`, `mingru.<size>` — gated recurrent variants
-- `lstm.<size>`
-- `latent.<size>.<reps>`, `lrnn.<size>.<reps>` — latent-state recurrent, `lrnn`
-  includes two dimensions of recurrence
+- `lstm.<size>`, plus the xLSTM/mLSTM family `slstm.<size>`,
+  `matlstm.<size>`, `mullstm.<size>`
+- `latent.<size>.<reps>`, `lrnn.<size>.<reps>`, `lmgu.<size>.<reps>` —
+  depth-recurrent (iterative refinement); `lrnn` and `lmgu` add time
+  recurrence on top
+- `rglru.<blocks>` — Griffin / RecurrentGemma's gated linear recurrence
+- `msr.<dim>.<heads>` — multi-scale retention (linear attention)
+- `attn.<size>.<heads>.<window>` — sliding-window multi-query attention
+  with rotary embeddings
+- `conv.<kernel>` — depthwise causal convolution over time
 - `suffix.<length>` — stack the last few positions
-- `norm` — layer normalisation
-- `skip.<X>.<add|cat>` — residual connections (see
-  [`docs/skip.md`](docs/skip.md))
+- `norm`, `rmsnorm` — L2 normalisation, without and with a learned scale
+- `split.<op>(<branch>, <branch>)` — fork-and-merge: residual
+  connections and gating (see [`docs/split.md`](docs/split.md))
 
-For the full pipeline (input encodings, layer stacking, two backends),
-see [`docs/architecture.md`](docs/architecture.md).
+For the full pipeline (codecs, layer stacking, how a spec becomes a
+runnable model), see
+[`docs/architecture.md`](docs/architecture.md).
 
 ## How the search picks candidates
 
@@ -107,8 +142,10 @@ before paying for a real training run:
 - A **timing model** that predicts per-step training time from
   architecture features and the target system. See
   [`docs/timing.md`](docs/timing.md).
-- A **loss-prediction model** (an RNN trained on the result database
-  itself) that estimates final loss for unseen configurations. See
+- A **loss-prediction model** trained on the result database itself,
+  estimating final loss for unseen configurations. The production
+  predictor mirrors the model's own layer tree; an earlier flat RNN
+  survives as the baseline. See
   [`docs/loss_prediction.md`](docs/loss_prediction.md) and the
   experiment notes in
   [`docs/loss_rnn_experiments.md`](docs/loss_rnn_experiments.md).
@@ -121,26 +158,26 @@ coverage walks across systems — is described in
 
 The search currently optimises over:
 
-- **Model architecture** — layer sequence and per-layer sizes
+- **Model architecture** — layer sequence, per-layer sizes, and the
+  input codec (including which tokenset)
 - **Batch size**
 - **Sample length** (context window)
 - **Steps**
 - **Learning rate**
-
-These are implemented and accepted by the trainer but **not actively
-varied by the search**:
-
-- **LR decay schedule** (`none` / `exp` / `cosine`) — defaults to
-  cosine; see
+- **LR decay schedule** (`none` / `exp` / `cosine`) — reached by an
+  exp-decay walk plus a cosine toggle; restrict it with
+  `--decay-types`. See
   [`docs/decay_and_checkpoints.md`](docs/decay_and_checkpoints.md)
-- **Precision** (`fp32` / `fp16` / `bf16` / `fp64`) — defaults to fp32
+- **Precision** (`fp32` / `fp16` / `bf16` / `fp64`) — mutated alongside
+  the architecture; the server defaults to `fp32,fp16,bf16`, and fp64
+  is opt-in via `--precision`
 
 ## Setup
 
 Before running anything, copy `config_sample.py` to `config.py` and
-edit the paths (training data location, DB path, system name, server
-address, backend). `config.py` is gitignored — every host gets its
-own.
+edit it for this host: training data location, DB path, system name,
+server address, and the JAX platforms to initialise. `config.py` is
+gitignored — every host gets its own.
 
 ## Training a single model
 
@@ -152,7 +189,9 @@ uv run texmo.py train -s 'bits.1+bp|mgru.4-dense.4.gelu' -b 32 --length 128 --st
 
 `-s` is the model spec (see the [conventions](#what-good-means-here)
 above), `-b` is the batch size, `--length` is the context window in
-bytes, and `--lr` is the (initial) learning rate. See
+*tokens* (which for `bits.1` is bits, not bytes), and `--lr` is the
+(initial) learning rate. Add `--no-graph` to skip the plot window when
+running non-interactively. See
 [`docs/architecture.md`](docs/architecture.md) for the full pipeline.
 
 ## Running the search
@@ -160,7 +199,7 @@ bytes, and `--lr` is the (initial) learning rate. See
 Server on one machine:
 
 ```
-uv run texmo.py search -t 1-120 -w 5-800
+uv run texmo.py server -t 1-120 -w 5-800
 ```
 
 Worker(s) on the same or other machines:

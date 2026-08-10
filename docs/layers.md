@@ -210,6 +210,155 @@ stabilisation for numerical bounds. JAX only.
   (see `model_jax.forward_recurrent`) handles it the same way as
   any other scan-based layer.
 
+## RG-LRU (`rglru.<blocks>`)
+
+The Real-Gated Linear Recurrent Unit from Griffin / Hawk (De et al.
+2024), as shipped in RecurrentGemma — a diagonal *real* linear
+recurrence with input-dependent gating:
+
+    r = σ(W_a x + b_a)                    # recurrence gate
+    i = σ(W_x x + b_x)                    # input gate
+    a = exp(-c · r · softplus(Λ)),  c = 8  # per-channel decay
+    h_new = a * h + sqrt(1 - a^2) * (i * x)
+
+Neither gate depends on `h`, and the recurrence is elementwise, so the
+whole layer is a linear scan. `Λ` is a learned per-channel parameter
+(initialized to −4, putting the decay near 0.93 at the gate midpoint);
+the `sqrt(1 - a^2)` factor holds the state variance steady as `a`
+varies.
+
+- Dimension-preserving: `size == input_size`, like `conv` and the
+  normalizations. `blocks` is the **only** metaparameter.
+- The two gate projections are **block-diagonal** with `blocks` blocks
+  of width `block_width = size / blocks` — a parameter-efficiency
+  choice copied from RecurrentGemma (where `blocks` is the attention
+  head count) so pretrained weights load directly.
+- Weights: `lam: (size,)`, and per gate `w: (blocks, bw, bw)` +
+  `b: (blocks, bw)`. Each block is Xavier-uniform for fan-in `bw`.
+  `num_weights = size + 2 · blocks · bw · (bw + 1)`, i.e.
+  `size · (2·size/blocks + 3)`. At `blocks = size` the gates collapse
+  to per-channel scale+bias pairs (`5·size` weights in total); at
+  `blocks = 1` they are two full `size × size` matrices plus biases.
+- State: `h`, accumulated in **float32** regardless of layer dtype,
+  plus a `first` flag. Position 0 is a reset — input multiplier 1
+  instead of `sqrt(1 - a^2)`, matching the reference at `t = 0` (it
+  matters for long-memory channels, where that factor is tiny).
+- Validity: `blocks` a power of 2 and `blocks` divides `input_size`.
+  RecurrentGemma's `rglru.10` is deliberately *not* search-valid; that
+  model is loaded outside the search.
+- `projects_input` is False — `x` also enters elementwise through
+  `i * x`, so a preceding bare dense survives (Griffin's linear
+  front-end feeds conv + RG-LRU).
+- Matches `transformers`' `RecurrentGemmaRglru` numerically.
+
+## MSR (`msr.<dim>.<heads>`)
+
+Multi-Scale Retention (RetNet, Sun et al. 2023) — linear attention
+with a **fixed** per-head scalar decay, no softmax:
+
+    S_h = γ_h · S_h_prev + RoPE(k_h)^T v_h
+    o_h = RoPE(q_h) · S_h
+
+with `γ_h = 1 − 2^(−5−h)` and `θ_j = 10000^(−2j/dim)` shared across
+heads. The decay ladder is what makes it "multi-scale": head 0 forgets
+fastest, the last head slowest.
+
+- No biases on Q/K/V, no output projection, no GroupNorm — stack
+  `norm` or `dense.<size>` after it as needed.
+- RoPE here uses the **interleaved** pair convention `(x_2j, x_2j+1)`,
+  unlike `attn`'s split-half. The decay and rotation tables stay in
+  fp32: by `t ≈ 100` both the slow heads' `γ^t` and the smallest
+  rotation angles have fallen below bf16 precision.
+- Training uses the parallel (quadratic) form — a `(T, T)` decay matrix
+  applied to `Q_rot K_rot^T` — while `step` runs the recurrence, so
+  inference state is `O(heads · dim^2)` and independent of length.
+- Weights: one stacked `w_qkv: (3 · heads · dim, input_size)`.
+  `size = heads · dim`, `num_weights = 3 · heads · dim · input_size`.
+  `num_mults = num_weights + 2 · heads · dim^2` (outer-product write
+  plus the `q · S` read).
+- State: `(S: (heads, dim, dim), pos)`.
+- Validity: `dim` a power of 2 and `≥ 2` (RoPE needs one pair);
+  `heads` a power of 2.
+- The fixed γ is the suspected weakness: it forgets on a schedule
+  rather than on content. The DeltaNet entry in
+  [`roadmap.md`](roadmap.md#architectures-to-add) exists specifically
+  to test that hypothesis, by swapping the scalar decay for a learned
+  per-token delta-rule update.
+
+## Attention (`attn.<size>.<heads>.<window>`)
+
+Local (sliding-window) **multi-query** attention with partial rotary
+embeddings — the attention block of Griffin / RecurrentGemma, with
+`head_dim = size / heads`:
+
+    q = W_q x       # (heads · head_dim,) -- one vector per query head
+    k = W_k x       # (head_dim,) -- ONE shared head (MQA)
+    v = W_v x       # (head_dim,) -- ONE shared head
+    rope(q_i), rope(k)                            # split-half, first
+                                                  # half of head_dim
+    s_i = softmax(q_i · k_past / sqrt(head_dim))  # over the last
+                                                  # `window` positions,
+                                                  # current included
+    out = W_o concat_i(s_i @ v_past) + b_o
+
+- **MQA**: a single shared K/V head, so per-position KV state is
+  `2 · head_dim` no matter how many query heads there are.
+- **Partial rotary**: RoPE is applied to the first
+  `head_dim / 2` dims of `q` and `k` (module constant
+  `_ROTARY_FRACTION = 0.5`, base 10000); the rest passes through
+  unrotated. Pairs are split-half `(x_j, x_{j+rd/2})`, **not** the
+  interleaved pairs `msr` uses. Angles are computed in float32, as is
+  the softmax; scores are scaled by `head_dim^-0.5`.
+- Banded causal mask: position `t` attends to `(t − window, t]`.
+  Position 0 attends to itself only — the shift-pad initial vector
+  plays the BOS role. **No leading padding is consumed**, so
+  `length = 1`: history lives in the step-mode state (a rolling K/V
+  buffer), like an RNN's hidden state, rather than in the model's
+  `total_padding`. This is what distinguishes it from `suffix` and
+  `conv`, which do consume positions.
+- Weights: `w_q: (size, input_size)`, `w_k`/`w_v:
+  (head_dim, input_size)`, `w_o: (size, size)`, `b_o: (size,)`. Bias
+  on the output projection only (Q/K/V bias-free, per the reference).
+  `num_weights = size · input_size + 2 · head_dim · input_size
+  + size^2 + size`.
+  `num_mults = num_weights + 2 · window · size`.
+- State: rolling K/V buffers of the last `window − 1` positions (keys
+  stored post-rotation) plus a position counter.
+- Validity: `size`, `heads` and `window` all powers of 2,
+  `heads` divides `size`, `head_dim ≥ 4` (so the rotary half still has
+  at least one rotatable pair), and `window ≥ 2`. RecurrentGemma's own
+  `attn.2560.10.2048` is therefore not search-valid; like `rglru.10`
+  it is loaded outside the search.
+- Matches `transformers`' `RecurrentGemmaAttention` numerically, so
+  pretrained weights load directly.
+
+## Conv (`conv.<kernel>`)
+
+Depthwise causal 1-D convolution along the time axis — per-channel
+kernels, no cross-channel mixing:
+
+    y[c, t] = sum_{k=0..L-1} w[k, c] * x[c, t + L-1 - k] + b[c]
+
+- Depthwise, so `size == input_size`.
+- Weights: `w: (kernel, input_size)`, `b: (input_size,)`.
+  `num_weights = input_size * (kernel + 1)`. Initialized normal, scaled
+  by `1/sqrt(L)` so the per-channel sum of `L` weighted inputs starts
+  at unit variance.
+- **Consuming**, like `suffix`: `length = kernel`, and `forward` emits
+  a valid (un-padded) convolution of `seq_len - kernel + 1` outputs.
+  The `kernel - 1` leading transient positions are supplied by the
+  model's `total_padding` machinery. Step-mode inference instead warms
+  the layer up with `kernel - 1` padding iterations, then emits one
+  output per call.
+- State: `(kernel - 1, input_size)` — the recent-input buffer.
+- Validity: `kernel` a power of 2 and `≥ 2`. `conv.1` would collapse to
+  a per-channel scale + bias.
+- `projects_input` is False (no cross-channel matmul), so a preceding
+  bare dense doesn't collapse into it.
+- `conv` and `suffix` are mutual neighbors at the same span — the
+  learned per-channel mix of the last `L` positions vs. the hard
+  concat of them.
+
 ## Suffix (`suffix.<length>`)
 
 Sliding window: stacks the last `length` inputs into a single vector of
@@ -223,22 +372,52 @@ window requires `length - 1` padding tokens, supplied by the model's
 `total_padding` machinery).
 
 - State: `(length - 1, input_size)` — the recent history buffer.
-- `length` attribute on the def is > 1; `LayerSeqDef.is_valid` enforces
-  that two adjacent suffix-like layers are invalid.
+- `length` attribute on the def is > 1; `LayerSeqDef.is_valid` rejects
+  two adjacent layers that both consume positions, and more broadly two
+  adjacent **temporal-wrap** layers — `msr`, `attn`, `conv`, `suffix`
+  in any combination all fold a span of previous positions into the
+  current one, so stacking two with nothing in between is redundant.
 - `num_weights = 0`.
 
 ## Norm (`norm`)
 
-Elementwise L2 normalization along the feature axis:
+Parameter-free L2 normalization along the feature axis, in Tikhonov
+form:
 
-    out = x / max(||x||_2, eps)
+    out = x / sqrt(||x||_2^2 + eps)      eps = 1e-5
 
-No learned weights. Stateless.
+The `sqrt(||x||^2 + eps)` denominator (rather than `max(||x||, eps)`)
+keeps the gradient well-defined at `x = 0`. No learned weights.
+Stateless.
 
-- Same `size` as `input_size`.
-- Validity: first layer can't be norm, and you can't have two adjacent
-  norms or norm-after-suffix.
+- Same `size` as `input_size`; requires `input_size > 1`.
+- Validity: a normalization can't open the **top-level** chain — it
+  would be normalizing the raw input encoding — but it *may* open a
+  split branch, which is the pre-norm residual block
+  `split.add(rmsnorm-..., pass)`. You also can't have two adjacent
+  normalizations (either flavor) or a normalization directly after a
+  `suffix`.
 - `num_weights = 0`.
+
+## RMSNorm (`rmsnorm`)
+
+The learned-scale sibling of `norm`: Gemma / RecurrentGemma RMSNorm.
+
+    out = x * rsqrt(mean(x^2) + eps) * (1 + γ)      eps = 1e-6
+
+`γ` is a per-channel vector initialized to **zero**, so the layer
+starts as pure RMS normalization (scale 1) and weight decay
+regularises it toward identity. The reduction and the `(1 + γ)`
+multiply run in float32 and the result is cast back to the layer
+dtype, matching `transformers`' `RecurrentGemmaRMSNorm` so pretrained
+weights load and run faithfully.
+
+- Dimension-preserving and stateless; requires `input_size > 1`.
+- `num_weights = size` (the learned `γ`) — the only substantive
+  difference from `norm`, which has none.
+- `projects_input` is False (elementwise rescale, no matmul).
+- Shares every adjacency rule with `norm` above, and the two are
+  mutual neighbors: `norm ↔ rmsnorm` is a single mutation.
 
 ## Latent (`latent.<size>.<reps>`)
 
@@ -263,9 +442,9 @@ prepend a `norm` layer in the spec to recover the pre-2026-05 behaviour.
 - `num_weights = size * input_size + size + size * size`.
 - Constraints: `size >= 2`, `reps >= 2`, both powers of 2.
 - Note: the paper initializes `s_0` randomly to encourage
-  path-independence. We zero-initialize for both backends until we see
-  that the layer is commonly picked by search and a randomized variant
-  is worth the RNG-plumbing.
+  path-independence. We zero-initialize until we see that the layer is
+  commonly picked by search and a randomized variant is worth the
+  RNG-plumbing.
 
 ## Lrnn (`lrnn.<size>.<reps>`)
 
@@ -372,19 +551,58 @@ remove a layer, insert / remove `suffix`·`norm`, wrap / unwrap residual
 and gate Splits) live in `model2.py` — see [`split.md`](split.md).
 Per-layer summary:
 
-- **dense ↔ rnn** — with the activation preserved.
+- **dense ↔ rnn** — with the activation preserved. A *bare* (
+  activation-less) dense has no cross-type swap; it stays a dense.
+- **dense activation cycle** — `dense.X` ↔ `dense.X.tanh` ↔
+  `dense.X.gelu` at the same size, the bare form included (it's the
+  tied-codec adapter and the gate/linear path, filtered by validity
+  everywhere else). `rnn` cycles between `tanh` and `gelu` only; it has
+  no bare form. A retired `relu` layer still proposes the survivors, so
+  existing relu lineages migrate instead of dying.
 - **dense.X.tanh ↔ latent.X.2** — promotes a dense-tanh to its
-  depth-recurrent twin.
+  depth-recurrent twin (needs `X > 1`).
 - **rnn.X.tanh ↔ lrnn.X.2** — likewise for recurrent.
 - **rnn ↔ gru, mgru, mingru** — activation is dropped when moving to a
   gated cell.
 - **gru, mgru, mingru, lstm** are mutual neighbors, with one exception:
   **lstm ↮ mingru** (mingru has no hidden-to-hidden state, so it's
   structurally too different).
-- **latent.X.Y ↔ lrnn.X.Y** — swap between the two depth-recurrent
-  variants at matching size/reps.
-- Size `S` and reps `R` mutations: `×2`, `÷2` (keeping powers of 2 and
-  minimum sizes).
+- **lstm, matlstm, slstm, mullstm** are all-to-all mutual neighbors
+  within the LSTM family (matlstm is skipped at size 1); `lstm`
+  additionally keeps its swaps with `gru` and `mgru`.
+- **latent.X.Y ↔ lrnn.X.Y ↔ lmgu.X.Y** — swaps within the
+  depth-recurrent family at matching size/reps (`latent ↮ lmgu`
+  directly). At `reps == 2` each collapses to its non-iterating cousin:
+  `latent.X.2 ↔ dense.X.tanh`, `lrnn.X.2 ↔ rnn.X.tanh`,
+  `lmgu.X.2 ↔ mgru.X`.
+- **norm ↔ rmsnorm** — the parameter-free L2 norm and the learned-scale
+  RMS norm. Neither has any other metaparameter, so this is their only
+  mutation.
+- **suffix.L ↔ conv.L** — same time-axis span; the hard concat vs. the
+  learned per-channel mix.
+- **suffix.L ↔ attn.<input_size>.1.L** — the same span wrapped softly
+  by a single attention head instead of concatenated. The reverse edge
+  is guarded to the exact image of the forward one (`heads == 1` and
+  `size == input_size`) so the relation stays symmetric.
+- **msr.D.H ↔ attn.D.H.16** — the attention-family swap, linear
+  attention against softmax attention. `attn` needs a window that `msr`
+  doesn't have, so the swap lands on a modest 16
+  (`_ATTN_SWAP_WINDOW`) and lets the window mutate from there. Note
+  the edge matches the two specs **field for field**, not by output
+  width: `msr`'s first field is the *per-head* `dim` (output width
+  `H·D`) while `attn`'s is the total `size` (output width `D`), so
+  `msr.8.4` (width 32) swaps to `attn.8.4.16` (width 8). The two are
+  exact spec-level inverses, and at `H = 1` the widths coincide.
+- **msr.X.1 ↔ mgru.X** — single-head retention has the same vector
+  state width as mgru (skipped at `X = 1`, where msr has no RoPE pair).
+- **rglru.1 ↔ mgru.X, mingru.X** — the RG-LRU is size-preserving, so
+  the swap only fires when the gated cell preserves size too
+  (`size == input_size`), and it lands on the canonical single-block
+  form.
+- Size `S`, reps `R`, `heads`, `window`, `kernel` and `blocks`
+  mutations: `×2`, `÷2` (keeping powers of 2 and minimum sizes;
+  `is_valid` filters the boundary cases, e.g. `attn`'s `head_dim ≥ 4`
+  or an `rglru` block count that no longer divides the width).
 
 See `layer.py:LayerDef.neighbors` for the per-layer rules and
 [`split.md`](split.md) (`model2.py`) for the chain- and Split-level

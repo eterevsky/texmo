@@ -12,7 +12,8 @@ architectures.
 Detailed docs live in [`docs/`](docs/):
 
 - [`architecture.md`](docs/architecture.md) — model pipeline, layer
-  abstractions, input encoding, and how the two backends fit together.
+  abstractions, input encoding, and how a spec becomes a runnable
+  model.
 - [`layers.md`](docs/layers.md) — the available layer types, their
   equations, parameter counts, and neighbor relations.
 - [`split.md`](docs/split.md) — design reference for the `split.op(...)`
@@ -25,8 +26,13 @@ Detailed docs live in [`docs/`](docs/):
   model contract and the three IO kinds (one-hot bit chunks, embedded
   bit chunks, tokenized), what/how/why for each.
 - [`tied_io.md`](docs/tied_io.md) — design record for the tied
-  InputOutput migration: decision log, rejected alternatives, mutation
-  consequences, Gemma fidelity mapping. Agreed, not yet implemented.
+  codec (`EmbeddingCodec`): decision log, rejected alternatives,
+  mutation consequences, Gemma fidelity mapping. Implemented; kept
+  for the reasoning, including the reversals.
+- [`tokens.md`](docs/tokens.md) — tokenization machinery: the tokenset
+  JSON format, the tokenizer implementations, text preprocessing, the
+  DP tokenization algorithm, and the Rust generators. The tokenset
+  *families* live in [`io.md`](docs/io.md).
 - [`timing.md`](docs/timing.md) — training-step time prediction
   model (features, fit, and use).
 - [`loss_prediction.md`](docs/loss_prediction.md) — the
@@ -38,9 +44,20 @@ Detailed docs live in [`docs/`](docs/):
   JAX is the training runtime (the torch backend was removed 2026-08).
 - [`search.md`](docs/search.md) — distributed architecture search:
   server, client, result DB, neighbor generation.
+- [`threads.md`](docs/threads.md) — the server's threading model:
+  which thread owns what, the queue protocol between them, and the
+  read/write DB split.
+- [`best_models.md`](docs/best_models.md) — dated snapshot of the
+  Pareto frontier by weight count, regenerated from the result DB by
+  `scripts/make_best_models.py`.
 - [`decay_and_checkpoints.md`](docs/decay_and_checkpoints.md) — design
   notes on LR decay interacting with intermediate checkpoints.
 - [`roadmap.md`](docs/roadmap.md) — planned features.
+- [`links.md`](docs/links.md) — bare list of reference papers and
+  repos.
+
+`docs/bench.txt` is a hand-maintained scratch table of per-machine
+training benchmarks, not prose.
 
 ## Conventions
 

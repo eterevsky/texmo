@@ -7,7 +7,9 @@ single-consumer Queue guarantees the work messages are processed before
 "stop".
 """
 
+import dataclasses
 import datetime
+import pickle
 from queue import Queue
 
 import numpy as np
@@ -18,7 +20,7 @@ from texmo.db import DbReader, DbWriter
 from texmo.db.writer import Stop as WriterStop, WriterThread
 from texmo.spec_parser import parse_model2
 from texmo.precision import Precision
-from texmo.predict import model_thread
+from texmo.predict import loss_tree, model_thread
 from texmo.predict.loss_rnn import LossModelHolder
 from texmo.predict.model_thread import (
     ModelThread,
@@ -26,8 +28,18 @@ from texmo.predict.model_thread import (
     Stop,
     bootstrap,
 )
+from texmo.predict.persist import predictor_path
 from texmo.predict.timing import TrainTimingModel
 from texmo.run import Run
+
+
+@dataclasses.dataclass
+class _StubLossModel:
+    """Stands in for a fitted TreeLossModel; module-level so the
+    publish path can pickle it."""
+    tag: int
+    simple_types: tuple = ()
+    per_type_fwd: bool = True
 
 
 def _conf(
@@ -70,7 +82,9 @@ def _seed_runs(
             conf, run, timestamp=base + datetime.timedelta(seconds=i))
 
 
-def _run_thread(db_path: str, messages: list):
+def _run_thread(
+    db_path: str, messages: list, loss_model: LossModelHolder | None = None,
+):
     """Run ModelThread with messages + Stop; block until done.
 
     Spins up a real `WriterThread` so the writes ModelThread posts
@@ -85,7 +99,7 @@ def _run_thread(db_path: str, messages: list):
         db_path, q,
         write_queue=write_queue,
         timing_model=TrainTimingModel(),
-        loss_model=LossModelHolder(),
+        loss_model=loss_model or LossModelHolder(),
     )
     thread.start()
     for m in messages:
@@ -166,6 +180,38 @@ def test_refit_skips_when_below_min_samples(tmp_path, monkeypatch):
     with DbReader(db_path) as reader:
         # No model was fit, so no predicted estimates should appear.
         assert reader.get_time_estimate(unrun_id, "rpi") is None
+
+
+def test_loss_refit_fires_once_per_cadence(tmp_path, monkeypatch):
+    """Labeled runs drive the loss refit: one fit per
+    `_LOSS_REFIT_EVERY` runs, published to the holder and to disk.
+
+    The real fit is minutes long, so the fit itself is stubbed -- what
+    matters here is the cadence and the publish plumbing.
+    """
+    db_path = str(tmp_path / "test.db")
+    with DbWriter(db_path):
+        pass
+    monkeypatch.setattr(model_thread, "_LOSS_REFIT_EVERY", 3)
+    fitted = []
+
+    def _fake_train(reader):
+        fitted.append(reader)
+        return _StubLossModel(len(fitted))
+
+    monkeypatch.setattr(loss_tree, "train_loss_model", _fake_train)
+
+    holder = LossModelHolder()
+    _run_thread(
+        db_path,
+        [RunAdded(system="rpi", precision=Precision.FP32)] * 5,
+        loss_model=holder,
+    )
+
+    assert len(fitted) == 1, "expected exactly one refit at 5 runs, cadence 3"
+    assert holder.is_ready()
+    with open(predictor_path(db_path, 'loss'), 'rb') as f:
+        assert pickle.load(f).tag == 1
 
 
 def test_bootstrap_fits_all_pairs(tmp_path):

@@ -63,9 +63,9 @@ wrapper.
   - Count: many (one per request).
   - Owns: nothing persistent.
   - Reads from: a per-request `DbReader`, only for the report-style
-    routes (`/`, `/compare`, `/throughput`, `/fastest`,
-    `/training_data`, and `/update` when it rejects a form and
-    re-renders the index instead of redirecting). The hot paths
+    routes (`/`, `/compare`, `/throughput`, `/fastest`, and `/update`
+    when it rejects a form and re-renders the index instead of
+    redirecting). The hot paths
     (`/select`, `/add`) never touch the DB directly, and `/latency`
     doesn't either.
   - Sends to:
@@ -77,8 +77,8 @@ wrapper.
       `/update`.
     - `ModelThread` via `train_queue` to notify it of newly added runs
       so it can update its own counters and decide on refits.
-  - `/submit_loss_model` additionally calls `save_predictor` and
-    `LossModelHolder.set_model` inline — see "Shared mutable objects".
+  - No request handler fits or publishes a model; every refit happens
+    on ModelThread.
 
 - **WriterThread** (`texmo/db/writer.py`)
   - Count: 1.
@@ -113,7 +113,13 @@ wrapper.
     `LossModelHolder` (replaced wholesale on refit).
   - Owns (private): per-(system, precision) run counters and refit
     counters (the latter drive the incremental-vs-full estimate
-    refresh cadence).
+    refresh cadence), plus the global labeled-run counter behind the
+    loss-refit cadence (`_LOSS_REFIT_EVERY`).
+  - Fits both predictors: per-pair timing fits (~30 s each) and the
+    full loss refit (~2 min, all labeled runs). Both are synchronous
+    on this thread, so everything else on `train_queue` waits;
+    that is the accepted cost of keeping fitting off the request
+    path and out of the clients.
   - Reads from: its own `DbReader` for fitting runs, plus
     `train_queue` for incoming notifications.
   - Sends to: `WriterThread` via `write_queue` (through a
@@ -184,7 +190,9 @@ threads — they dispatch into the request-handler thread pool.
   - Producers:
     - Request handlers (`/add`), posting `RunAdded` after the `AddRun`
       write has been enqueued from the same thread — SQLite WAL then
-      guarantees a later ModelThread read sees the row.
+      guarantees a later ModelThread read sees the row. `/add` drops
+      runs without a loss before either enqueue, so `RunAdded` is one
+      per *labeled* run.
     - `SearchServer.__init__` posts a one-shot `BootstrapTiming`
       and/or `LossRefit` at startup for whichever persisted predictor
       is missing or fails its compatibility probe.
@@ -192,8 +200,10 @@ threads — they dispatch into the request-handler thread pool.
   - Messages (`TrainMessage = RunAdded | LossRefit | BootstrapTiming
     | Stop`):
     - `RunAdded(system, precision)` — Model owns the per-pair
-      counters and decides when to fit.
-    - `LossRefit()` — force a loss-model refit now.
+      counters and the global labeled-run counter, and decides when
+      to fit the timing model and when to refit the loss model.
+    - `LossRefit()` — force a loss-model refit now (startup only;
+      the cadence itself lives in the `RunAdded` handler).
     - `BootstrapTiming()` — run the full timing bootstrap (median
       backfill, per-pair refits, predictions for every conf without a
       median) on the Model thread.
@@ -252,12 +262,11 @@ is encapsulated behind a narrow interface.
   - Atomically-swappable holder for a `LossModel`. Refits replace the
     whole model wholesale, so the holder just owns one pointer and
     exposes `predict` that delegates to the current model.
-  - Writers: the Model thread (`_refit_loss`) **and** the
-    `/submit_loss_model` request handler, which publishes a
-    client-fitted model after a probe-predict and a `run_count`
-    freshness check. Two writers are safe here only because the write
-    is a single pointer swap; the `run_count` comparison that decides
-    whether to publish is done under `_refit_lock`.
+  - Writer: the Model thread only (`_refit_loss`, reached from the
+    `RunAdded` cadence or a startup `LossRefit`). A second writer
+    existed while refits ran on clients — the `/submit_loss_model`
+    handler, arbitrating by `run_count` under a lock — and went away
+    with that path.
   - Readers (Search): `is_ready()` for the gate, `predict(confs)` for
     the actual call.
   - Implementation: one attribute write swaps the pointer; atomic in
@@ -277,12 +286,6 @@ is encapsulated behind a narrow interface.
   or the new one; the server-side copies exist only for form rendering
   and `/compare`, and the search thread's copies may lag by one queue
   step.
-
-- **`SearchServer._refit_lock`** guards the client-refit bookkeeping
-  counters (`_refit_runs_since_grant`, `_refit_published_count`,
-  `_refit_published_at`, `_refit_granted_at`), which concurrent
-  request handlers touch. Held only for the few lines of arithmetic,
-  never across fitting or I/O.
 
 ## Database access (`texmo/db/`)
 

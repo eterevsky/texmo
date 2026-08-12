@@ -37,6 +37,9 @@ from .. import latency
 from ..configuration import Configuration
 from ..db import DbReader
 from ..layers.split import SplitDef
+from ..model2 import Model2Def
+from ..precision import Precision
+from ..spec_parser import parse_model2
 from .loss_rnn import (
     N_INIT_GLOBAL,
     _init_global_features,
@@ -48,7 +51,8 @@ from .predict_common import MAX_LOSS, MIN_LOSS, layer_type_id
 
 __all__ = [
     'TreeLossModel', 'compile_conf', 'build_arrays',
-    'discover_simple_types', 'fit', 'predict', 'train_loss_model',
+    'discover_simple_types', 'fit', 'load_training_data', 'predict',
+    'train_loss_model',
 ]
 
 D_ACT = 32       # activation-vector width (one per register)
@@ -375,10 +379,8 @@ class TreeLossModel:
     simple_types: list[str]
     per_type_fwd: bool = False
     latent_step: int = 0
-    # Number of labeled runs this model was trained on -- counted by
-    # whoever ran the fit (the worker counts its own training rows).
-    # Monotonic over the DB's life, so it doubles as the freshness
-    # measure when client-fitted models race (see server.py).
+    # Number of labeled runs this model was trained on. Informative
+    # only (it dates the model against the DB's monotonic run count).
     run_count: int = 0
 
     def predict(self, confs: list[Configuration]) -> np.ndarray:
@@ -393,10 +395,8 @@ def train_from_data(
 ) -> TreeLossModel | None:
     """Fit the production configuration -- typed step
     (`per_type_fwd=True`) -- on (conf, loss) pairs. See
-    docs/loss_prediction.md for the measured trade-offs. Used both by
-    the in-process refit path and by client-side refit jobs (which
-    build `train_data` from the /training_data download). Returns
-    None on empty data.
+    docs/loss_prediction.md for the measured trade-offs. Returns None
+    on empty data.
     """
     if not train_data:
         return None
@@ -410,10 +410,35 @@ def train_from_data(
         run_count=len(train_data))
 
 
+def load_training_data(
+    db: DbReader,
+) -> list[tuple[Configuration, float]]:
+    """Load (Configuration, loss) pairs for every labeled run in `db`.
+
+    Runs sharing a (spec, precision) reuse one parsed `Model2Def`:
+    the spec parse dominates the load and hyperparameter variants of
+    one spec are common, so the dedup cuts the load to about a third
+    of the per-row parse in `iter_labeled_runs`.
+    """
+    models: dict[tuple[str, str], Model2Def] = {}
+    train_data: list[tuple[Configuration, float]] = []
+    for row in db.iter_labeled_runs_raw():
+        spec, prec, lr, length, batch, steps, decay, cosine, loss = row
+        key = (spec, prec)
+        model = models.get(key)
+        if model is None:
+            model = parse_model2(spec, Precision(prec))
+            models[key] = model
+        conf = Configuration(
+            model=model, lr=lr, length=length, batch=batch,
+            steps=steps, decay=decay, cosine=bool(cosine),
+        )
+        train_data.append((conf, loss))
+    return train_data
+
+
 def train_loss_model(db: DbReader) -> TreeLossModel | None:
     """Retrain the tree loss predictor on all labeled runs in `db`."""
     with latency.timer('train_loss_model.load'):
-        train_data = [
-            (conf, loss) for _, conf, loss in db.iter_labeled_runs()
-        ]
+        train_data = load_training_data(db)
     return train_from_data(train_data)

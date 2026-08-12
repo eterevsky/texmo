@@ -3,6 +3,7 @@
 import numpy as np
 
 from texmo.configuration import Configuration
+from texmo.db import DbReader, DbWriter
 from texmo.precision import Precision
 from texmo.predict.loss_tree import (
     TreeLossModel,
@@ -10,8 +11,10 @@ from texmo.predict.loss_tree import (
     compile_conf,
     discover_simple_types,
     fit,
+    load_training_data,
     predict,
 )
+from texmo.run import Run
 from texmo.spec_parser import parse_model2
 
 
@@ -148,6 +151,37 @@ def test_bank_slots_distinguish_extra_dim_types_and_merge_ops():
     bs_add = compile_conf(confs[2], ti, len(st))[4]
     bs_mul = compile_conf(confs[3], ti, len(st))[4]
     assert bs_add[-1] != bs_mul[-1]           # merge.add vs merge.mul
+
+
+def test_load_training_data_dedups_models(tmp_path):
+    """One example per labeled run, hyperparameters preserved, and
+    runs sharing (spec, precision) reuse one parsed model -- the parse
+    dominates the load at DB scale."""
+    db_path = str(tmp_path / "test.db")
+    confs = [
+        _conf('bytes|dense.32.gelu'),
+        Configuration(
+            parse_model2('bytes|dense.32.gelu', Precision.FP32),
+            lr=0.05, length=64, batch=8, steps=256, decay=0.5,
+            cosine=True),
+        _conf('bits.1+bp|gru.4'),
+    ]
+    with DbWriter(db_path) as writer:
+        for i, conf in enumerate(confs):
+            writer.add_run(conf, Run(
+                system='rpi', step_loss=[0.1], loss=3.0 - i,
+                train_time=1.0))
+
+    with DbReader(db_path) as reader:
+        data = load_training_data(reader)
+
+    assert len(data) == 3
+    by_loss = {loss: conf for conf, loss in data}
+    assert set(by_loss) == {3.0, 2.0, 1.0}
+    assert by_loss[2.0].lr == 0.05 and by_loss[2.0].cosine
+    # Same (spec, precision) -> one parsed model object shared.
+    assert by_loss[3.0].model is by_loss[2.0].model
+    assert by_loss[1.0].model is not by_loss[3.0].model
 
 
 def test_fit_predict_latent_step():

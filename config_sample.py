@@ -37,8 +37,3 @@ JAX_PLATFORMS = 'cpu'
 # workers keep even tiny models from starving on input. 1 disables
 # the parallelism (single prefetch thread).
 SAMPLE_THREADS = 4
-
-# Whether this machine volunteers for loss-model refit jobs from the
-# search server (the ~15-min predictor training; see
-# docs/loss_prediction.md). Set False on slow machines (e.g. a Pi).
-REFIT = True

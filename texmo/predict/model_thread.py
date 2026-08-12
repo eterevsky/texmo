@@ -8,9 +8,10 @@ queue. Owns the writer side of the shared `TrainTimingModel` and
 consumes `TrainMessage`s from its input queue:
 
     RunAdded(system, precision)
-        Notification that a new run has been written to the DB. The
-        thread tracks per-(system, precision) and global run counts and
-        triggers refits when the corresponding threshold is crossed.
+        Notification that a new labeled run has been written to the
+        DB. The thread tracks per-(system, precision) and global run
+        counts and triggers timing / loss refits when the
+        corresponding threshold is crossed.
 
     LossRefit()
         Force a loss-model refit now (used at server startup when no
@@ -65,16 +66,19 @@ _FIRST_FIT_EVERY = 100
 # every refit and stalled all request handling for minutes.
 _FULL_REFRESH_EVERY = 5
 
-# Loss-model refits are triggered by the SERVER, which hands them to
-# clients via /select (server._LOSS_REFIT_EVERY); this thread only
-# handles the explicit LossRefit message (startup with no persisted
-# model) as the in-process fallback.
+# Every this-many new labeled runs the loss predictor is refit from
+# scratch on all labeled runs. The fit blocks this thread for ~2 min
+# at 1.2M runs (dedup load + typed-step tree on the server host's
+# GPU), which is why it stays this rare: timing refits and estimate
+# refreshes queue behind it.
+_LOSS_REFIT_EVERY = 500
 
 
 @dataclass
 class RunAdded:
-    """A new run was written to the DB. Producer: request handlers via
-    SearchThread; consumer: ModelThread (counter bump + maybe refit)."""
+    """A new labeled run was written to the DB. Producer: request
+    handlers via SearchThread (`/add` drops runs without a loss);
+    consumer: ModelThread (counter bump + maybe refit)."""
     system: str
     precision: Precision
 
@@ -221,6 +225,9 @@ class ModelThread(threading.Thread):
         self._run_counter: dict[tuple[str, Precision], int] = defaultdict(int)
         # Refit counters driving the incremental/full refresh cadence.
         self._refit_counter: dict[tuple[str, Precision], int] = defaultdict(int)
+        # Labeled runs since the last loss-model refit (global, not
+        # per pair -- the loss predictor is fit on every labeled run).
+        self._loss_run_counter = 0
 
     def run(self):
         reader = DbReader(self._db_path)
@@ -248,6 +255,11 @@ class ModelThread(threading.Thread):
         self, reader: DbReader, writer: DbWriterProxy,
         system: str, precision: Precision,
     ):
+        self._loss_run_counter += 1
+        if self._loss_run_counter >= _LOSS_REFIT_EVERY:
+            self._loss_run_counter = 0
+            self._refit_loss(reader, writer)
+
         key = (system, precision)
         self._run_counter[key] += 1
         threshold = (

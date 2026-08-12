@@ -270,8 +270,10 @@ it against this number if anything ever promotes confs on fewer runs.
   on every `add_run` and supersedes any predicted value for the same
   `(conf, system)`.
 - **Persisted models** — the fitted timing model and loss model are
-  pickled into the `model` table under keys `'timing'` and `'loss'`,
-  so the server doesn't re-fit on restart.
+  pickled next to the DB file as `timing_model.pickle` /
+  `loss_model.pickle` (`predict/persist.py`), so the server doesn't
+  re-fit on restart. Both are refit on the model thread; clients only
+  ever train configurations.
 
 CLI commands:
 - `db-update` — recompute all scores.

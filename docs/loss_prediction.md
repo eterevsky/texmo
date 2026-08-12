@@ -10,9 +10,8 @@ The predictor is the **structure-mirroring "tree" model**
 designed 2026-07 (Oleg) and validated against the previous flat RNN.
 **Status**: in production — `loss_tree.train_loss_model` (typed
 step) is what the server's model thread fits and publishes. Refits
-currently run in-process on the server (~16 min on whitebox CPU, an
-accepted interim cost); moving them to a client-side job is the next
-infrastructure task (roadmap). The flat RNN
+run in-process on the model thread, ~2 min end to end at 1.2M
+labeled runs on the server host's GPU. The flat RNN
 ([`texmo/predict/loss_rnn.py`](../texmo/predict/loss_rnn.py)) stays
 as the fast baseline and the source of the shared feature
 extraction.
@@ -80,16 +79,17 @@ L1 on the clipped log2 target; adamw, lr 0.02 with cosine decay,
 fit is a single jitted `lax.scan`; tape compilation is a one-off
 Python pass (~1–2 min at 900k runs).
 
-**Cost** (~900k runs): the per-instruction weight-bank gather
-dominates, and the workload is GPU-shaped — measured in production
-client-refit jobs (2026-07-19): **4090 2m12s**, m5 8m36s, mini
-19m28s, whitebox in-process ~16m, pi5 2h27m (keep `REFIT = False`
-there — a 2.5h turnaround guarantees its submission arrives stale
-and the fit is wasted). Download is ~10s and the client's
-(spec, precision)-deduped parse 3–17s, vs ~2m50s for the old
-server-side load. The `per_type_fwd=False` variant (one shared step)
-fits in ~4 min on whitebox at val L1 0.0570 and is the fallback
-where refit cost matters.
+**Cost**: the per-instruction weight-bank gather dominates, and the
+workload is GPU-shaped — a current desktop NVIDIA GPU runs the
+production fit in ~1.5–2 min, an Apple-silicon laptop in ~9–20 min,
+a small ARM SBC in ~2.5 h (all at ~900k runs, measured 2026-07-19
+across the fleet). Measured end to end on the server host
+(2026-08-10, fresh process, 1.16M labeled runs): raw DB read 5.5 s +
+(spec, precision)-deduped parse 14.1 s + fit 93.3 s ≈ **2 min**. The
+dedup matters: parsing every row separately costs ~3× that load. The
+`per_type_fwd=False` variant (one shared step) fits several times
+faster at val L1 0.0570 and is the fallback where refit cost
+matters.
 
 ## Performance
 
@@ -201,29 +201,39 @@ timestamped backups). On load the server sanity-probes it with a
 trivial predict and refits on any error, so feature-schema changes
 just cost one refit.
 
-**Refits run on clients** (2026-07-18). Every
-`server._LOSS_REFIT_EVERY = 1000` labeled runs, ONE refit job is
-handed to the next `/select` from a client advertising `refit=1`
-(worker-side eligibility: `config.REFIT` / `--no-refit`; note the
-default is True even for config.py files that predate the flag, so
-slow machines like the Pi must opt out explicitly — the criterion is
-that a worker's grant-to-publish turnaround must stay well under the
-typical grant interval, or its submissions lose the run-count race
-and the fit is wasted) and forgotten — no reservation, no
-timeout: a dead worker just means the next 1000-run boundary issues
-a fresh job (run-count cadence is the natural staleness clock), and
-overlapping fits resolve by run count at submission. The client
-downloads `GET /training_data` (gzipped CSV streamed off a raw
-cursor — no server-side parsing; the client dedups `parse_model2` by
-(spec, precision)), fits the production config, and POSTs the pickle
-to `/submit_loss_model` tagged with the snapshot's run count. The
-server accepts it only if newer than the published model *and* it
-survives a probe-predict (guarding schema drift from clients on
-older code), then persists + atomically swaps the holder. The
-publish log records fit time, grant-to-publish turnaround, interval
-since the previous model, and runs-behind — the numbers that say
-whether refit cadence is keeping up. The in-process fit remains only
-as the startup fallback when no persisted model exists.
+**Refits run in-process on the model thread** (2026-08-10). Every
+`model_thread._LOSS_REFIT_EVERY = 500` labeled runs (`RunAdded` is
+posted once per run with a loss, so the counter is exactly a
+labeled-run tally), ModelThread loads all labeled runs via
+`loss_tree.load_training_data` — raw rows off `iter_labeled_runs_raw`
+with `parse_model2` deduped by (spec, precision) — fits the
+production config, then persists the pickle and swaps it into the
+`LossModelHolder`. It is the same publish path as the `LossRefit`
+message, which still exists for startup when no persisted model is
+on disk (or the persisted one fails its probe).
+
+The fit blocks ModelThread for ~2 min; timing refits and estimate
+refreshes queue behind it, which is why the cadence stays at 500. No
+lock is involved: ModelThread is the sole writer of the holder.
+
+The fit runs on whatever JAX platform the server process was started
+with — `texmo.py` applies `config.JAX_PLATFORMS` before anything
+touches a device, so the server host needs a GPU platform there for
+the ~2 min figure; on CPU the same fit is minutes to tens of
+minutes. The fit peaks around 3.4 GiB of device memory.
+
+*Previously* (2026-07-18 → 2026-08-10) refits were handed to
+clients: `/select` granted a refit job, the worker downloaded a
+gzipped-CSV `/training_data` dump, fit locally, and POSTed the
+pickle to `/submit_loss_model`, where a `run_count` comparison
+resolved races. That design existed because the server host had
+CPU-only JAX and a local fit was a ~16 min stall. Native CUDA on the
+server host killed the premise: a local fit is ~2 min, while each
+handout cost an 11–13 s payload build on a request thread, a 118 MiB
+download, and a client training slot. The endpoints, the grant
+branch, and the client-side job were removed;
+`TreeLossModel.run_count` survives as an informational field on
+persisted models.
 
 ## CLI
 

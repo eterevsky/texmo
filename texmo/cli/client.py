@@ -25,7 +25,6 @@ def main(args: argparse.Namespace):
                 dataset=dataset_wrapper,
                 backend=args.backend, once=args.once,
                 api_key=args.api_key or '',
-                refit_ok=not args.no_refit,
             )
         except KeyboardInterrupt:
             logging.info("Interrupted")
@@ -86,13 +85,6 @@ def init_args(parser: argparse.ArgumentParser, config):
     parser.add_argument(
         '--once',
         action='store_true',
-    )
-    parser.add_argument(
-        '--no-refit',
-        action='store_true',
-        default=not getattr(config, 'REFIT', True),
-        help="never accept loss-model refit jobs from the server "
-             "(default from config.REFIT)",
     )
     parser.add_argument(
         "--backend",

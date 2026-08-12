@@ -457,10 +457,9 @@ def main(args: argparse.Namespace):
         p.fit(train_data)
         preds = p.predict(val_confs)
         logging.info(f"{p.name}: val {_format_loss(_eval_log_l1(preds, val_targets))}")
-        # Release the fitted model before the next one trains. Keeping
-        # the whole zoo resident (the absolute_error random forest
-        # alone is tens of GB at 1M train rows) pushes the process
-        # into memory pressure that slowed the late fits ~10x.
+        # Release the fitted model before the next one trains -- the
+        # absolute_error random forest alone is tens of GB at 1M
+        # train rows, and nothing reads a predictor after its eval.
         predictors[i] = None
 
     # Oracle lower bound.

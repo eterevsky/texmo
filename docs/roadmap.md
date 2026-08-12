@@ -215,21 +215,22 @@ budget. Dream target: 32-64K weights.
   **That premise died with winjax** (2026-08-08): the server host now
   has native CUDA, so a local refit is cheap, while the distributed
   path still costs a client slot per refit, a training-data round
-  trip, and a more complicated flow to reason about. Measure a local
-  refit first, then decide for the loss model and the timing model
-  independently.
+  trip, and a more complicated flow to reason about.
 
-* **`texmo.py loss` is broken** (observed 2026-08-03). The offline
-  loss-predictor evaluation harness dies inside sklearn's
-  HistGradientBoosting binning: `ValueError: window shape cannot be
-  larger than input array shape`, thrown from numpy's sliding-window
-  machinery — i.e. numpy/sklearn version drift, not anything texmo
-  changed (it reproduces identically on a clean env and predates
-  winjax). Scope is limited to that harness and its sklearn
-  baselines; the server's distributed tree-predictor refits go
-  through `predict/loss_rnn.py` and are unaffected. Fix, or drop the
-  sklearn baselines if they have outlived their usefulness as a
-  reference point.
+  Measured 2026-08-10 on the server host (fresh process, winjax GPU):
+  dedup-style data load ~20 s + production typed-step tree fit 93 s ≈
+  **2 min end to end** at 1.16M labeled runs. For comparison, each
+  distributed handout costs an 11–13 s `/training_data` payload build
+  on a request thread (live `latency.log` averages), a 118 MiB
+  download, and a client slot for the fit; a standalone fit on a busy
+  client OOMs (the fit needs a 3.4 GiB device buffer, and the worker
+  preallocates the GPU), so refits only work inside the worker's
+  pool. Timing-model refits are already server-local
+  (`model_thread._refit_pair`, ~30 s per pair at the 20k cap) —
+  nothing to move there. Remaining work: run the loss refit on the
+  ModelThread (dedup load, not per-row parse), retire the
+  `/training_data` + `/submit_loss_model` endpoints and client
+  refit code.
 
 * **step/forward parity for consuming->stateful chains.** forward
   drops the transient outputs of consuming layers (conv/suffix,

@@ -56,12 +56,6 @@ from .timing import TrainTimingModel
 _REFIT_EVERY = 400
 _FIRST_FIT_EVERY = 100
 
-# Cap on runs read for a timing fit: the most recent N. Bounds the
-# get_runs read/parse cost as the DB grows, and recent runs reflect
-# the machine's current performance anyway (code and drivers change).
-# The least-squares is long saturated at this sample size.
-_FIT_RUNS_CAP = 20_000
-
 # Ordinary refits refresh estimates only for confs that have none yet
 # (a few hundred rows, sub-second); every Nth refit per pair re-predicts
 # everything, bounding the drift of old predictions against the updated
@@ -168,7 +162,7 @@ def _refit_pair(
 ):
     with latency.timer('timing._refit_pair.get_runs'):
         runs = list(reader.get_runs_for_timing(
-            system, precision, limit=_FIT_RUNS_CAP))
+            system, precision, limit=TrainTimingModel.FIT_RUNS_CAP))
     if not runs:
         return
     with latency.timer('timing._refit_pair.fit'):

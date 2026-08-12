@@ -1,5 +1,8 @@
 import argparse
 import logging
+import math
+import statistics
+import time
 
 from ..common import ttoa3
 from ..configuration import Configuration
@@ -10,14 +13,13 @@ from ..spec_parser import parse_model2
 from ..tokens import set_tokens_dir
 
 
-def _matching_runs(db_runs, system, precision_str, spec, batch, length):
-    """Find actual runs that match the query spec."""
+def _matching_runs(pair_runs, spec, batch, length):
+    """Per-step times of runs matching the query spec/shape.
+
+    `pair_runs` is already filtered to the queried (system, precision).
+    """
     matches = []
-    for conf, run in db_runs:
-        if run.system != system:
-            continue
-        if str(conf.precision) != precision_str:
-            continue
+    for conf, run in pair_runs:
         if str(conf.model) != spec:
             continue
         if conf.batch != batch or conf.length != length:
@@ -32,13 +34,37 @@ def _matching_runs(db_runs, system, precision_str, spec, batch, length):
 def main(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
 
-    logging.info(f"Loading runs from {args.db}")
     db = DbReader(args.db)
-    db_runs = [(conf, run) for _, conf, run in db.get_confs_runs()]
-    logging.info(f"Loaded {len(db_runs)} runs")
 
+    # Same shape as the server's bootstrap (model_thread.bootstrap):
+    # per-pair reads capped to the most recent FIT_RUNS_CAP runs.
+    # Fitting on full history instead stopped being viable once the
+    # run table passed ~1M rows.
     model = TrainTimingModel()
-    model.fit(db_runs, verbose=True)
+    for system in db.get_systems():
+        for precision in Precision:
+            t0 = time.perf_counter()
+            runs = list(db.get_runs_for_timing(
+                system, precision, limit=TrainTimingModel.FIT_RUNS_CAP))
+            if not runs:
+                continue
+            read_t = time.perf_counter() - t0
+            t0 = time.perf_counter()
+            model.fit(runs, verbose=False)
+            fit_t = time.perf_counter() - t0
+            key = (system, precision)
+            if model.has_weights(system, precision):
+                rmse = math.sqrt(model.loss(system, precision))
+                print(
+                    f"fit {key}: {len(runs)} runs "
+                    f"(read {read_t:.1f}s, fit {fit_t:.1f}s), "
+                    f"RMSE={rmse:.3f}s"
+                )
+            else:
+                print(
+                    f"skipping {key}: <{TrainTimingModel.MIN_SAMPLES} "
+                    f"usable of {len(runs)} runs"
+                )
 
     if not model.keys():
         logging.warning("No (system, precision) pairs had enough data to fit.")
@@ -76,11 +102,10 @@ def main(args: argparse.Namespace):
 
     # Compare to any existing runs with the same spec/shape/system/precision.
     actual = _matching_runs(
-        db_runs, args.system, args.precision, args.spec, args.batch, args.length
+        db.get_runs_for_timing(args.system, Precision(args.precision)),
+        args.spec, args.batch, args.length,
     )
     if actual:
-        import statistics
-
         median = statistics.median(actual)
         print()
         print(f"actual runs matching this query: {len(actual)}")

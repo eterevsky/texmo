@@ -622,6 +622,13 @@ class TrainTimingModel:
     MIN_STEPS = 4
     MIN_SAMPLES = 20
 
+    # Cap on runs read for a fit: the most recent N per (system,
+    # precision). Bounds the read/parse cost as the DB grows, and
+    # recent runs reflect the machine's current performance anyway
+    # (code and drivers change). The least-squares is long saturated
+    # at this sample size.
+    FIT_RUNS_CAP = 20_000
+
     def __init__(self):
         self._weights: dict[tuple[str, Precision], Weights] = {}
         self._losses: dict[tuple[str, Precision], float] = {}

@@ -108,9 +108,14 @@ def _rf_big_features(
     first_non_marker = non_marker[0] if len(non_marker) > 0 else None
     second_non_marker = non_marker[1] if len(non_marker) > 1 else None
 
+    # Split types are markers: they are excluded from the non-marker
+    # walk above, so a first/second-layer-size slot for them could
+    # never be filled. Only emit their counts.
+    sized_types = [t for t in type_ids if not t.startswith('split.')]
+
     counts = {t: 0 for t in type_ids}
-    first_size = {t: missing_sentinel for t in type_ids}
-    second_size = {t: missing_sentinel for t in type_ids}
+    first_size = {t: missing_sentinel for t in sized_types}
+    second_size = {t: missing_sentinel for t in sized_types}
     for layer in layers:
         t = layer_type_id(layer)
         if t in counts:
@@ -165,9 +170,10 @@ def _rf_big_features(
             _split_at(1, 'cat'),
         ])
     for t in type_ids:
-        base.append(first_size[t])
+        if t in first_size:
+            base.append(first_size[t])
         base.append(float(counts[t]))
-        if with_second_layer:
+        if with_second_layer and t in second_size:
             base.append(second_size[t])
     return base
 
@@ -225,12 +231,16 @@ class HistGBRPredictor(Predictor):
                 c, self._type_ids, float('nan'), self._with_second_layer)
             for c, _ in train_data
         ])
+        # An all-NaN column (a type that never appears first in this
+        # train split) crashes sklearn's binning; it carries no signal
+        # anyway, so drop it here and at predict.
+        self._col_mask = ~np.all(np.isnan(X), axis=0)
         y = _log_clip_targets(
             np.array([loss for _, loss in train_data]))
         self._model = HistGradientBoostingRegressor(
             loss='absolute_error', random_state=0,
         )
-        self._model.fit(X, y)
+        self._model.fit(X[:, self._col_mask], y)
 
     def predict(self, confs):
         X = np.array([
@@ -238,7 +248,7 @@ class HistGBRPredictor(Predictor):
                 c, self._type_ids, float('nan'), self._with_second_layer)
             for c in confs
         ])
-        return self._model.predict(X)
+        return self._model.predict(X[:, self._col_mask])
 
 
 class RnnPredictor(Predictor):
@@ -442,11 +452,16 @@ def main(args: argparse.Namespace):
         TreePredictor(),
         TreePredictor(per_type_fwd=True),
     ]
-    for p in predictors:
+    for i, p in enumerate(predictors):
         logging.info(f"Training {p.name}")
         p.fit(train_data)
         preds = p.predict(val_confs)
         logging.info(f"{p.name}: val {_format_loss(_eval_log_l1(preds, val_targets))}")
+        # Release the fitted model before the next one trains. Keeping
+        # the whole zoo resident (the absolute_error random forest
+        # alone is tens of GB at 1M train rows) pushes the process
+        # into memory pressure that slowed the late fits ~10x.
+        predictors[i] = None
 
     # Oracle lower bound.
     oracle_preds = _within_conf_oracle(val_data, val_log_targets)

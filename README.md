@@ -10,6 +10,27 @@ configurations and using their results to predict where to look next.
 Training runs on **JAX**, which is the only backend; see
 [`docs/backends.md`](docs/backends.md).
 
+## Highlights
+
+* **The frontier is a power law.** Across eleven weight doublings the
+  best per-byte loss tracks **b/B ≈ 7.3 · w^−0.109** (R² = 0.997 in
+  log-log): every doubling of the weight budget buys about 7.3% off
+  the loss. See the plot below.
+* **Search is fast at these scales.** The fastest configuration
+  within 1% of the best loss at a weight limit trains to saturation
+  in about a second at 100 weights, under ten seconds at 1000, and a
+  couple of minutes at 10k.
+* **Transformers are close but never ahead.** From 100 to 5000
+  weights the best transformer block (attention + FFN, both residual)
+  trails the overall best by 2–6% loss; at 10k the gap is currently
+  ~9%, but attention is also the youngest arm of the search at the
+  heavy end.
+* **The most useful non-obvious building block is the minimal gated
+  unit** (`mgru` / `mingru`, single-gate GRU variants —
+  [`docs/layers.md`](docs/layers.md)): more than half of the frontier
+  configurations use one, more than anything except plain dense and
+  rnn layers.
+
 ## What "good" means here
 
 For every weight budget the search tracks the best cross-entropy loss
@@ -17,9 +38,9 @@ achieved on held-out text from an English-language dataset, measured
 per input *byte*. Per-byte is the point: models here read their input
 in very different units — one bit at a time, 4-bit chunks, or a small
 custom tokenset — and only a per-byte score makes those comparable.
-Roughly 1.16M training runs across 658k distinct configurations have
+Roughly 1.16M training runs across 666k distinct configurations have
 been collected so far; the plot below is a periodic snapshot of that
-frontier.
+frontier, with the power-law fit drawn in.
 
 ![Loss vs. weights](docs/images/graph.png)
 
@@ -31,8 +52,9 @@ Best models found so far at a few sample weight budgets — see
 | 15      | 5.3849 | `bits.1+bp\|split.cat(rnn.1.tanh, pass)-norm-dense.1.tanh-suffix.2`                     |
 | 97      | 4.4564 | `bits.1+bp\|mgru.4-dense.4.gelu-norm`                                                   |
 | 231     | 4.0161 | `tokens.32.shift.emb.4\|mingru.4-split.add(rmsnorm, pass)`                              |
-| 474     | 3.7047 | `tokens.32.hexbpe.emb.8\|lrnn.8.2`                                                      |
-| 2960    | 3.0569 | `bits.4.oh+bp\|rnn.32.gelu-rnn.16.gelu-split.add(dense.16.gelu-rmsnorm, pass)-rmsnorm`  |
+| 474     | 3.7044 | `tokens.32.hexbpe.emb.8\|lrnn.8.2`                                                      |
+| 2944    | 3.0635 | `bits.4.oh+bp\|rnn.32.gelu-dense.16.gelu-mingru.16`                                     |
+| 9824    | 2.6992 | `bits.4.oh+bp\|dense.8.gelu-mullstm.32-dense.64.gelu`                                   |
 
 A spec has the form `<input>|<layer>-<layer>-...`. The part before `|`
 names the **codec** — how token ids become vectors going in, and how

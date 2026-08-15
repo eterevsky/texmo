@@ -76,9 +76,10 @@ class LossModel:
 class LossModelHolder:
     """Atomically-swappable holder for the current `LossModel`.
 
-    The Model thread is the sole writer; it publishes new fits via
-    `set_model`. Readers (Search threads) call `predict` directly.
-    The reference swap is atomic in CPython, so no lock is needed.
+    Writers publish new fits via `set_model`: the Model thread
+    (in-process refits) and the /submit_loss_model handler (worker
+    refits). Readers (Search threads) call `predict` directly. The
+    reference swap is atomic in CPython, so no lock is needed.
     Holders start empty; `is_ready` reports whether any model has been
     published yet.
     """
@@ -88,6 +89,14 @@ class LossModelHolder:
 
     def set_model(self, model: LossModel) -> None:
         self._model = model
+
+    def current(self) -> LossModel | None:
+        """The currently published model (None before the first fit).
+        The single source of freshness truth: submit_loss_model
+        compares a submission's run_count against this, so a model
+        published by either refit path is never overwritten by an
+        older one."""
+        return self._model
 
     def is_ready(self) -> bool:
         return self._model is not None

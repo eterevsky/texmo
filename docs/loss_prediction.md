@@ -8,10 +8,10 @@ spending compute on them.
 The predictor is the **structure-mirroring "tree" model**
 ([`texmo/predict/loss_tree.py`](../texmo/predict/loss_tree.py)),
 designed 2026-07 (Oleg) and validated against the previous flat RNN.
-**Status**: in production — `loss_tree.train_loss_model` (typed
-step) is what the server's model thread fits and publishes. Refits
-run in-process on the model thread, ~2 min end to end at 1.2M
-labeled runs on the server host's GPU. The flat RNN
+**Status**: in production — the typed-step tree is what the server
+publishes. Refits run either on a worker (the default) or in-process
+on the model thread, selected by `config.LOSS_REFIT`; see
+"Persistence and refit". The flat RNN
 ([`texmo/predict/loss_rnn.py`](../texmo/predict/loss_rnn.py)) stays
 as the fast baseline and the source of the shared feature
 extraction.
@@ -201,39 +201,60 @@ timestamped backups). On load the server sanity-probes it with a
 trivial predict and refits on any error, so feature-schema changes
 just cost one refit.
 
-**Refits run in-process on the model thread** (2026-08-10). Every
-`model_thread._LOSS_REFIT_EVERY = 500` labeled runs (`RunAdded` is
-posted once per run with a loss, so the counter is exactly a
-labeled-run tally), ModelThread loads all labeled runs via
-`loss_tree.load_training_data` — raw rows off `iter_labeled_runs_raw`
-with `parse_model2` deduped by (spec, precision) — fits the
-production config, then persists the pickle and swaps it into the
-`LossModelHolder`. It is the same publish path as the `LossRefit`
-message, which still exists for startup when no persisted model is
-on disk (or the persisted one fails its probe).
+**Two refit modes, one switch.** `config.LOSS_REFIT` (overridable
+with `--loss-refit`) selects where the fit runs:
 
-The fit blocks ModelThread for ~2 min; timing refits and estimate
-refreshes queue behind it, which is why the cadence stays at 500. No
-lock is involved: ModelThread is the sole writer of the holder.
+- `'workers'` (default) — the distributed flow. Every
+  `_LOSS_REFIT_EVERY = 500` labeled runs the server hands ONE refit
+  job to the next `/select` from a client advertising `refit=1`
+  (worker-side eligibility: `config.REFIT` / `--no-refit`, so slow
+  machines don't volunteer) and forgets it: no reservation, no
+  timeout. A dead worker just means the next boundary issues a fresh
+  job, and overlapping fits resolve by `run_count` at submission. The
+  client downloads `GET /training_data` (gzipped CSV streamed off a
+  raw cursor, parsed client-side with `parse_model2` deduped by
+  (spec, precision)) and POSTs the pickle to `/submit_loss_model`.
+- `'server'` — ModelThread fits in-process on the same cadence,
+  loading via `loss_tree.load_training_data` (the same dedup, applied
+  straight to `iter_labeled_runs_raw`), then persists and swaps the
+  holder.
 
-The fit runs on whatever JAX platform the server process was started
-with — `texmo.py` applies `config.JAX_PLATFORMS` before anything
-touches a device, so the server host needs a GPU platform there for
-the ~2 min figure; on CPU the same fit is minutes to tens of
-minutes. The fit peaks around 3.4 GiB of device memory.
+The mode gates only the **trigger**. Both endpoints, the submit
+acceptance path, and the client-side job exist in either mode, so a
+submission that arrives while ModelThread owns the cadence is still
+accepted when it is valid and newer — which keeps switching modes on
+a live fleet safe. `RunAdded` is posted once per run with a loss, so
+both cadences count exactly labeled runs. The `LossRefit` message
+(startup with no usable persisted model) fits in-process in both
+modes; it predates the distributed flow.
 
-*Previously* (2026-07-18 → 2026-08-10) refits were handed to
-clients: `/select` granted a refit job, the worker downloaded a
-gzipped-CSV `/training_data` dump, fit locally, and POSTed the
-pickle to `/submit_loss_model`, where a `run_count` comparison
-resolved races. That design existed because the server host had
-CPU-only JAX and a local fit was a ~16 min stall. Native CUDA on the
-server host killed the premise: a local fit is ~2 min, while each
-handout cost an 11–13 s payload build on a request thread, a 118 MiB
-download, and a client training slot. The endpoints, the grant
-branch, and the client-side job were removed;
-`TreeLossModel.run_count` survives as an informational field on
-persisted models.
+Acceptance for a submitted model: it must survive a probe-predict
+(guarding schema drift from a client on older code) *and* carry a
+`run_count` — the training rows the fitter counted, monotonic over
+the DB's life — greater than the published model's. The publish log
+records fit time, grant-to-publish turnaround, and the interval since
+the previous model: the numbers that say whether the cadence is
+keeping up.
+
+**Choosing.** In `'server'` mode the fit blocks ModelThread for
+~2 min at 1.2M runs, so timing refits and estimate refreshes queue
+behind it — that is the cost of the cadence staying at 500. It also
+runs on whatever JAX platform the server process was started with
+(`texmo.py` applies `config.JAX_PLATFORMS` before anything touches a
+device), so the server host needs a GPU platform there for the ~2 min
+figure; on CPU the same fit is minutes to tens of minutes, which is
+why `'workers'` is the default. The fit peaks around 3.4 GiB of
+device memory, and a standalone fit on a busy worker OOMs — hence the
+client job runs inside the worker's own pool. Each handout, in turn,
+costs an 11–13 s `/training_data` payload build on a request thread,
+a 118 MiB download, and a client training slot.
+
+*History*: the distributed flow landed 2026-07-18, when the server
+host had CPU-only JAX and a local fit was a ~16 min stall. Native
+CUDA there killed that premise and the flow was removed 2026-08-10 in
+favour of the in-process fit; it came back a few days later as a
+mode alongside it, since the JAX platform the server runs on is a
+per-host decision rather than a permanent one.
 
 ## CLI
 

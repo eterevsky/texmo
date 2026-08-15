@@ -379,8 +379,10 @@ class TreeLossModel:
     simple_types: list[str]
     per_type_fwd: bool = False
     latent_step: int = 0
-    # Number of labeled runs this model was trained on. Informative
-    # only (it dates the model against the DB's monotonic run count).
+    # Number of labeled runs this model was trained on -- counted by
+    # whoever ran the fit (the worker counts its own training rows).
+    # Monotonic over the DB's life, so it doubles as the freshness
+    # measure when client-fitted models race (see server.py).
     run_count: int = 0
 
     def predict(self, confs: list[Configuration]) -> np.ndarray:
@@ -395,8 +397,10 @@ def train_from_data(
 ) -> TreeLossModel | None:
     """Fit the production configuration -- typed step
     (`per_type_fwd=True`) -- on (conf, loss) pairs. See
-    docs/loss_prediction.md for the measured trade-offs. Returns None
-    on empty data.
+    docs/loss_prediction.md for the measured trade-offs. Used both by
+    the in-process refit path and by client-side refit jobs (which
+    build `train_data` from the /training_data download). Returns
+    None on empty data.
     """
     if not train_data:
         return None

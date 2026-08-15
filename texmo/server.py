@@ -1,8 +1,11 @@
 import base64
+import csv
+import gzip
 import hmac
 import io
 import logging
 import os
+import pickle
 import threading
 import time
 from datetime import datetime
@@ -14,6 +17,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from flask import (
     Flask,
+    Response,
     make_response,
     redirect,
     render_template,
@@ -37,8 +41,9 @@ from .db import ConfScore, DbReader, DbWriter
 from .db.writer import DbWriterProxy, Stop as WriterStop, WriterThread
 from .latency import get_report, report, timer
 from .predict.loss_rnn import LossModelHolder
-from .predict.persist import load_predictor
+from .predict.persist import load_predictor, save_predictor
 from .predict.model_thread import (
+    LOSS_REFIT_EVERY,
     BootstrapTiming,
     LossRefit,
     ModelThread,
@@ -328,6 +333,21 @@ def _render_bounds(b: Bounds):
         return f'{b.min}-{b.max}'
 
 
+# Where loss-model refits run. 'workers': the server hands ONE job
+# per `LOSS_REFIT_EVERY` labeled runs to the next eligible client via
+# /select and forgets it -- if the worker dies the next boundary
+# issues a fresh job, and overlapping fits resolve by run_count at
+# /submit_loss_model. Eligibility is worker-side (config.REFIT /
+# --no-refit), so slow machines don't volunteer. 'server': ModelThread
+# fits in-process on the same cadence, which needs a fast JAX platform
+# in the server process (see docs/loss_prediction.md).
+#
+# The mode gates only the TRIGGER: the endpoints, the submit
+# acceptance path and the client-side job exist in both modes, so a
+# stray submission is still accepted when it is valid and newer.
+LOSS_REFIT_MODES = ('workers', 'server')
+
+
 def _probe_timing(model: TrainTimingModel, conf: Configuration) -> None:
     """Exercise a loaded timing model's feature path on one conf, to
     surface a feature-schema mismatch. predict_batch returns early
@@ -372,7 +392,12 @@ class SearchServer(object):
         default_spec: str,
         warmup_systems: Optional[Iterable[str]] = None,
         templates_json: Optional[str] = None,
+        loss_refit: str = 'workers',
     ):
+        assert loss_refit in LOSS_REFIT_MODES, (
+            f"loss_refit must be one of {LOSS_REFIT_MODES}, "
+            f"got {loss_refit!r}")
+        self.loss_refit = loss_refit
         # `path` is also the read-only handle factory for per-request
         # reads in `index` / `compare` / `throughput`; opening a fresh
         # `DbReader` per request avoids contending with the writer.
@@ -460,6 +485,21 @@ class SearchServer(object):
                     "Loaded persisted loss model "
                     f"({type(loaded_loss_model).__name__})")
 
+        # Refit bookkeeping. The lock guards the counters below
+        # (touched from concurrent request handlers); held only for
+        # the few lines of arithmetic, never across any fitting or
+        # I/O. Freshness is NOT tracked here: submit_loss_model
+        # compares against the run_count of whatever the holder
+        # currently publishes, which the model thread's in-process
+        # refits keep fresh too. Maintained in both modes -- the
+        # submit path stays open even when this server grants no
+        # jobs.
+        self._refit_lock = threading.Lock()
+        self._refit_runs_since_grant = 0
+        self._refit_published_at = time.time()
+        self._refit_granted_at = 0.0
+        logging.info(f"Loss-model refits run on: {self.loss_refit}")
+
         # Writer thread first: producers below post to its queue and
         # we want a consumer ready before that happens.
         self.write_queue: Queue = Queue()
@@ -476,6 +516,7 @@ class SearchServer(object):
             write_queue=self.write_queue,
             timing_model=self.timing_model,
             loss_model=self.loss_model,
+            loss_refit_local=(self.loss_refit == 'server'),
         )
         self.model_thread.start()
         # Whatever wasn't on disk: train it async. Each request gets a
@@ -841,8 +882,31 @@ class SearchServer(object):
             show_entries=not self.templates.is_single,
         )
 
+    def _maybe_grant_refit(self, system: str) -> Optional[dict]:
+        """Grant a loss-refit job to `system` if one is due.
+
+        Fire-and-forget cadence: one job per LOSS_REFIT_EVERY new
+        labeled runs since the last GRANT (not publish). A dead
+        worker just means the next boundary issues a fresh job; an
+        overlap is resolved by the newer run_count at submit time."""
+        with self._refit_lock:
+            if self._refit_runs_since_grant < LOSS_REFIT_EVERY:
+                return None
+            self._refit_runs_since_grant = 0
+            self._refit_granted_at = time.time()
+        logging.info(f"Granting loss-refit job to {system}")
+        return {
+            "system": system, "conf": None, "strategy": None,
+            "refit_loss": {},
+        }
+
     def select(self, args):
         system = args["system"]
+
+        if self.loss_refit == 'workers' and args.get("refit") == "1":
+            job = self._maybe_grant_refit(system)
+            if job is not None:
+                return job
 
         with self.confs_by_system_lock:
             if system not in self.confs_by_system:
@@ -874,10 +938,85 @@ class SearchServer(object):
         # ModelThread reading after `AddRun` commits sees the new row.
         self._writer.add_run(
             conf, run, strategy=strategy, track_winner_change=True)
-        # Only runs with a loss get here, so the Model thread's
-        # loss-refit cadence counts labeled runs.
+        # Only runs with a loss get here, so both refit cadences --
+        # the grant tally below and the Model thread's -- count
+        # labeled runs. The tally is kept in either mode; it just
+        # goes unread when the Model thread owns the trigger.
+        with self._refit_lock:
+            self._refit_runs_since_grant += 1
         self.train_queue.put(
             RunAdded(system=run.system, precision=conf.precision))
+
+    def training_data(self) -> tuple[bytes, int]:
+        """Gzipped CSV of all labeled runs + the run count.
+
+        Streamed straight off a raw DB cursor -- no Configuration
+        parsing here; the client parses, deduplicating by
+        (spec, precision)."""
+        with timer('SearchServer.training_data'):
+            buf = io.BytesIO()
+            n = 0
+            with DbReader(self.path) as reader, \
+                    gzip.GzipFile(fileobj=buf, mode='wb') as gz:
+                text = io.TextIOWrapper(gz, encoding='utf-8', newline='')
+                w = csv.writer(text)
+                w.writerow(['spec', 'precision', 'lr', 'length', 'batch',
+                            'steps', 'decay', 'cosine', 'loss'])
+                for row in reader.iter_labeled_runs_raw():
+                    w.writerow(row)
+                    n += 1
+                text.flush()
+                text.detach()
+            logging.info(
+                f"Serving training data: {n} runs, "
+                f"{len(buf.getvalue()) / 1e6:.1f} MB gzipped")
+            return buf.getvalue(), n
+
+    def submit_loss_model(self, args, body: bytes) -> dict:
+        """Accept a client-fitted loss model (pickled in `body`).
+
+        The model carries its own freshness measure: `run_count`, the
+        number of training rows counted by the worker that fit it
+        (monotonic over the DB's life). Accept only if newer than the
+        published model, and only if it survives a probe-predict
+        (guards against a client running a different feature schema).
+
+        Open in both refit modes: a submission that arrives while the
+        model thread owns the cadence is still a valid, newer model."""
+        system = args.get('system', '?')
+        fit_s = float(args.get('fit_s', 0))
+        try:
+            model = pickle.loads(body)
+            model.predict([self.default])
+        except Exception as e:
+            logging.warning(
+                f"Rejecting loss model from {system}: probe failed: {e!r}")
+            return {'accepted': False, 'reason': f'probe failed: {e!r}'}
+        run_count = getattr(model, 'run_count', 0)
+        now = time.time()
+        with self._refit_lock:
+            # Compare against the live holder, not a separate tally:
+            # in 'server' mode the model thread publishes without
+            # touching this handler, and a straggler submission must
+            # not overwrite that fresher model.
+            published = getattr(
+                self.loss_model.current(), 'run_count', 0) or 0
+            if run_count <= published:
+                logging.info(
+                    f"Rejecting stale loss model from {system} "
+                    f"(run_count={run_count} <= {published})")
+                return {'accepted': False, 'reason': 'stale run_count'}
+            turnaround = now - self._refit_granted_at
+            interval = now - self._refit_published_at
+            self._refit_published_at = now
+        save_predictor(self.path, 'loss', model)
+        self.loss_model.set_model(model)
+        logging.info(
+            f"Published client-fitted loss model from {system}: "
+            f"run_count={run_count}, fit={ttoa3(fit_s)}, "
+            f"turnaround={ttoa3(turnaround)}, "
+            f"interval since previous model={ttoa3(interval)}")
+        return {'accepted': True}
 
     def join(self):
         # Producers first so no more writes / refits land on the
@@ -990,6 +1129,18 @@ class SearchServer(object):
         def _fastest():
             with timer("SearchServer.fastest"):
                 return self.fastest(request.args)
+
+        @app.route("/training_data", methods=["GET"])
+        def _training_data():
+            payload, n = self.training_data()
+            resp = Response(payload, mimetype='text/csv')
+            resp.headers['Content-Encoding'] = 'gzip'
+            resp.headers['X-Run-Count'] = str(n)
+            return resp
+
+        @app.route("/submit_loss_model", methods=["POST"])
+        def _submit_loss_model():
+            return self.submit_loss_model(request.args, request.get_data())
 
         @app.route("/select", methods=["GET"])
         def _select():

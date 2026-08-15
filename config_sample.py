@@ -37,3 +37,17 @@ JAX_PLATFORMS = 'cpu'
 # workers keep even tiny models from starving on input. 1 disables
 # the parallelism (single prefetch thread).
 SAMPLE_THREADS = 4
+
+# Whether this machine volunteers for loss-model refit jobs from the
+# search server (a multi-minute predictor training; see
+# docs/loss_prediction.md). Set False on slow machines: a worker
+# whose turnaround exceeds the grant interval loses the run-count
+# race and its fit is wasted. Only consulted when the server runs
+# refits on workers (LOSS_REFIT below).
+REFIT = True
+
+# Where loss-model refits run: 'workers' hands the fit to a client
+# via /select (the distributed flow), 'server' fits in-process on
+# the model thread (needs a fast JAX platform in the server
+# process -- see docs/loss_prediction.md).
+LOSS_REFIT = 'workers'

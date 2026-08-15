@@ -10,12 +10,17 @@ consumes `TrainMessage`s from its input queue:
     RunAdded(system, precision)
         Notification that a new labeled run has been written to the
         DB. The thread tracks per-(system, precision) and global run
-        counts and triggers timing / loss refits when the
-        corresponding threshold is crossed.
+        counts and triggers a timing refit when the corresponding
+        threshold is crossed -- and a loss refit too, but only with
+        `loss_refit_local` (otherwise the server hands that fit to a
+        worker; see server.LOSS_REFIT_MODES).
 
     LossRefit()
         Force a loss-model refit now (used at server startup when no
-        persisted loss model is on disk).
+        persisted loss model is on disk). Honoured in both refit
+        modes -- it predates the distributed flow and is the only way
+        a mode-'workers' server gets a first model without waiting
+        for a grant.
 
     Stop()
         Exit the loop.
@@ -68,10 +73,15 @@ _FULL_REFRESH_EVERY = 5
 
 # Every this-many new labeled runs the loss predictor is refit from
 # scratch on all labeled runs. The fit blocks this thread for ~2 min
-# at 1.2M runs (dedup load + typed-step tree on the server host's
-# GPU), which is why it stays this rare: timing refits and estimate
+# at 1.2M runs (dedup load + typed-step tree on a GPU platform),
+# which is why it stays this rare: timing refits and estimate
 # refreshes queue behind it.
-_LOSS_REFIT_EVERY = 500
+#
+# The same cadence drives the distributed flow, where the server
+# grants one client job per this many runs instead (server.py imports
+# this constant; one definition, two triggers). Which trigger is live
+# is the `loss_refit_local` flag below.
+LOSS_REFIT_EVERY = 500
 
 
 @dataclass
@@ -207,6 +217,7 @@ class ModelThread(threading.Thread):
         write_queue: Queue,
         timing_model: TrainTimingModel,
         loss_model: LossModelHolder,
+        loss_refit_local: bool = False,
     ):
         super().__init__(daemon=True)
         self._db_path = db_path
@@ -227,6 +238,10 @@ class ModelThread(threading.Thread):
         self._refit_counter: dict[tuple[str, Precision], int] = defaultdict(int)
         # Labeled runs since the last loss-model refit (global, not
         # per pair -- the loss predictor is fit on every labeled run).
+        # Only consulted when this thread owns the refit trigger; with
+        # `loss_refit_local` false the server grants the fit to a
+        # worker instead and nothing here counts down to it.
+        self._loss_refit_local = loss_refit_local
         self._loss_run_counter = 0
 
     def run(self):
@@ -255,10 +270,11 @@ class ModelThread(threading.Thread):
         self, reader: DbReader, writer: DbWriterProxy,
         system: str, precision: Precision,
     ):
-        self._loss_run_counter += 1
-        if self._loss_run_counter >= _LOSS_REFIT_EVERY:
-            self._loss_run_counter = 0
-            self._refit_loss(reader, writer)
+        if self._loss_refit_local:
+            self._loss_run_counter += 1
+            if self._loss_run_counter >= LOSS_REFIT_EVERY:
+                self._loss_run_counter = 0
+                self._refit_loss(reader, writer)
 
         key = (system, precision)
         self._run_counter[key] += 1

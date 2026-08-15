@@ -272,8 +272,10 @@ it against this number if anything ever promotes confs on fewer runs.
 - **Persisted models** — the fitted timing model and loss model are
   pickled next to the DB file as `timing_model.pickle` /
   `loss_model.pickle` (`predict/persist.py`), so the server doesn't
-  re-fit on restart. Both are refit on the model thread; clients only
-  ever train configurations.
+  re-fit on restart. The timing model is always refit on the model
+  thread; the loss model is refit either there or on a worker, per
+  `config.LOSS_REFIT` (see
+  [`loss_prediction.md`](loss_prediction.md)).
 
 CLI commands:
 - `db-update` — recompute all scores.

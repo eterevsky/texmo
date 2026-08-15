@@ -869,8 +869,9 @@ class DbReader(object):
         cosine, loss) tuples for every run with a loss.
 
         Unlike `iter_labeled_runs` this skips Configuration parsing --
-        the caller parses, deduplicating by (spec, precision); see
-        `loss_tree.load_training_data`.
+        the caller parses, deduplicating by (spec, precision). Both
+        consumers do: `loss_tree.load_training_data` in-process, and
+        the /training_data CSV a client-side refit downloads.
         """
         cur = self._db.execute(
             """

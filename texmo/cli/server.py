@@ -10,7 +10,7 @@ import logging
 import matplotlib
 
 from ..configuration import Template
-from ..server import SearchServer
+from ..server import LOSS_REFIT_MODES, SearchServer
 from ..tokens import set_tokens_dir
 
 
@@ -34,6 +34,7 @@ def main(args: argparse.Namespace):
         args.db, template, train_time, args.default_spec,
         warmup_systems=warmup_systems,
         templates_json=templates_json,
+        loss_refit=args.loss_refit,
     )
 
     server.serve(api_key=args.api_key or '')
@@ -146,6 +147,17 @@ def init_args(parser: argparse.ArgumentParser, config):
              " or backend with no timing model yet can't be handed an"
              " hours-long run. Use for a new client or a new backend"
              " (the ladder replays on every server restart).",
+    )
+    parser.add_argument(
+        "--loss-refit",
+        type=str,
+        choices=LOSS_REFIT_MODES,
+        default=getattr(config, 'LOSS_REFIT', 'workers'),
+        help="where loss-model refits run: 'workers' grants one job"
+             " per 500 labeled runs to a client via /select,"
+             " 'server' fits in-process on the model thread (which"
+             " needs a fast JAX platform in the server process)."
+             " Defaults to config.LOSS_REFIT.",
     )
     parser.add_argument(
         "--api-key",

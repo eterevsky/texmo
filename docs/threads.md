@@ -63,9 +63,9 @@ wrapper.
   - Count: many (one per request).
   - Owns: nothing persistent.
   - Reads from: a per-request `DbReader`, only for the report-style
-    routes (`/`, `/compare`, `/throughput`, `/fastest`, and `/update`
-    when it rejects a form and re-renders the index instead of
-    redirecting). The hot paths
+    routes (`/`, `/compare`, `/throughput`, `/fastest`,
+    `/training_data`, and `/update` when it rejects a form and
+    re-renders the index instead of redirecting). The hot paths
     (`/select`, `/add`) never touch the DB directly, and `/latency`
     doesn't either.
   - Sends to:
@@ -77,8 +77,10 @@ wrapper.
       `/update`.
     - `ModelThread` via `train_queue` to notify it of newly added runs
       so it can update its own counters and decide on refits.
-  - No request handler fits or publishes a model; every refit happens
-    on ModelThread.
+  - `/submit_loss_model` additionally calls `save_predictor` and
+    `LossModelHolder.set_model` inline — see "Shared mutable objects".
+    That route is live in both refit modes; only the *granting* of
+    jobs on `/select` is gated on `loss_refit == 'workers'`.
 
 - **WriterThread** (`texmo/db/writer.py`)
   - Count: 1.
@@ -113,13 +115,16 @@ wrapper.
     `LossModelHolder` (replaced wholesale on refit).
   - Owns (private): per-(system, precision) run counters and refit
     counters (the latter drive the incremental-vs-full estimate
-    refresh cadence), plus the global labeled-run counter behind the
-    loss-refit cadence (`_LOSS_REFIT_EVERY`).
-  - Fits both predictors: per-pair timing fits (~30 s each) and the
-    full loss refit (~2 min, all labeled runs). Both are synchronous
-    on this thread, so everything else on `train_queue` waits;
-    that is the accepted cost of keeping fitting off the request
-    path and out of the clients.
+    refresh cadence), plus — only with `loss_refit_local` — the
+    global labeled-run counter behind the loss-refit cadence
+    (`_LOSS_REFIT_EVERY`, defined here and imported by `server.py`
+    for the grant path, so one constant drives both triggers).
+  - Always fits the timing model (~30 s per pair). It fits the loss
+    model too when `loss_refit_local` is set (server-mode refits,
+    ~2 min over all labeled runs); otherwise the server grants that
+    fit to a worker and this thread only handles the startup
+    `LossRefit`. Every fit is synchronous, so everything else on
+    `train_queue` waits behind it.
   - Reads from: its own `DbReader` for fitting runs, plus
     `train_queue` for incoming notifications.
   - Sends to: `WriterThread` via `write_queue` (through a
@@ -200,10 +205,11 @@ threads — they dispatch into the request-handler thread pool.
   - Messages (`TrainMessage = RunAdded | LossRefit | BootstrapTiming
     | Stop`):
     - `RunAdded(system, precision)` — Model owns the per-pair
-      counters and the global labeled-run counter, and decides when
-      to fit the timing model and when to refit the loss model.
-    - `LossRefit()` — force a loss-model refit now (startup only;
-      the cadence itself lives in the `RunAdded` handler).
+      counters and decides when to fit the timing model, and (in
+      server refit mode) when to refit the loss model.
+    - `LossRefit()` — force a loss-model refit now. Startup
+      fallback, honoured in both refit modes; the cadence itself
+      lives in the `RunAdded` handler.
     - `BootstrapTiming()` — run the full timing bootstrap (median
       backfill, per-pair refits, predictions for every conf without a
       median) on the Model thread.
@@ -262,11 +268,13 @@ is encapsulated behind a narrow interface.
   - Atomically-swappable holder for a `LossModel`. Refits replace the
     whole model wholesale, so the holder just owns one pointer and
     exposes `predict` that delegates to the current model.
-  - Writer: the Model thread only (`_refit_loss`, reached from the
-    `RunAdded` cadence or a startup `LossRefit`). A second writer
-    existed while refits ran on clients — the `/submit_loss_model`
-    handler, arbitrating by `run_count` under a lock — and went away
-    with that path.
+  - Writers: the Model thread (`_refit_loss`, reached from a startup
+    `LossRefit` or, in server refit mode, the `RunAdded` cadence)
+    **and** the `/submit_loss_model` request handler, which publishes
+    a worker-fitted model after a probe-predict and a `run_count`
+    freshness check. Two writers are safe here only because the write
+    is a single pointer swap; the `run_count` comparison that decides
+    whether to publish is done under `_refit_lock`.
   - Readers (Search): `is_ready()` for the gate, `predict(confs)` for
     the actual call.
   - Implementation: one attribute write swaps the pointer; atomic in
@@ -286,6 +294,17 @@ is encapsulated behind a narrow interface.
   or the new one; the server-side copies exist only for form rendering
   and `/compare`, and the search thread's copies may lag by one queue
   step.
+
+- **`SearchServer._refit_lock`** guards the refit bookkeeping
+  counters (`_refit_runs_since_grant`, `_refit_published_at`,
+  `_refit_granted_at`), which concurrent request handlers touch. Held
+  only for the few lines of arithmetic, never across fitting or I/O.
+  Maintained in both refit modes: the grant tally simply goes unread
+  when ModelThread owns the trigger. Submission freshness is NOT a
+  counter here — `submit_loss_model` compares against the `run_count`
+  of the model currently in the `LossModelHolder`, so an in-process
+  refit (which publishes without touching the server object) still
+  wins over a straggler submission.
 
 ## Database access (`texmo/db/`)
 

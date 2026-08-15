@@ -9,6 +9,7 @@ single-consumer Queue guarantees the work messages are processed before
 
 import dataclasses
 import datetime
+import os
 import pickle
 from queue import Queue
 
@@ -23,6 +24,7 @@ from texmo.precision import Precision
 from texmo.predict import loss_tree, model_thread
 from texmo.predict.loss_rnn import LossModelHolder
 from texmo.predict.model_thread import (
+    LossRefit,
     ModelThread,
     RunAdded,
     Stop,
@@ -84,6 +86,7 @@ def _seed_runs(
 
 def _run_thread(
     db_path: str, messages: list, loss_model: LossModelHolder | None = None,
+    loss_refit_local: bool = False,
 ):
     """Run ModelThread with messages + Stop; block until done.
 
@@ -100,6 +103,7 @@ def _run_thread(
         write_queue=write_queue,
         timing_model=TrainTimingModel(),
         loss_model=loss_model or LossModelHolder(),
+        loss_refit_local=loss_refit_local,
     )
     thread.start()
     for m in messages:
@@ -182,17 +186,11 @@ def test_refit_skips_when_below_min_samples(tmp_path, monkeypatch):
         assert reader.get_time_estimate(unrun_id, "rpi") is None
 
 
-def test_loss_refit_fires_once_per_cadence(tmp_path, monkeypatch):
-    """Labeled runs drive the loss refit: one fit per
-    `_LOSS_REFIT_EVERY` runs, published to the holder and to disk.
+def _stub_loss_fit(monkeypatch) -> list:
+    """Patch the loss fit to a stub; returns the list it appends to.
 
-    The real fit is minutes long, so the fit itself is stubbed -- what
-    matters here is the cadence and the publish plumbing.
-    """
-    db_path = str(tmp_path / "test.db")
-    with DbWriter(db_path):
-        pass
-    monkeypatch.setattr(model_thread, "_LOSS_REFIT_EVERY", 3)
+    The real fit is minutes long, so what these tests exercise is the
+    cadence and the publish plumbing, not the model."""
     fitted = []
 
     def _fake_train(reader):
@@ -200,18 +198,73 @@ def test_loss_refit_fires_once_per_cadence(tmp_path, monkeypatch):
         return _StubLossModel(len(fitted))
 
     monkeypatch.setattr(loss_tree, "train_loss_model", _fake_train)
+    return fitted
+
+
+def test_loss_refit_fires_once_per_cadence(tmp_path, monkeypatch):
+    """With the local trigger on, labeled runs drive the loss refit:
+    one fit per `LOSS_REFIT_EVERY` runs, published to the holder and
+    to disk."""
+    db_path = str(tmp_path / "test.db")
+    with DbWriter(db_path):
+        pass
+    monkeypatch.setattr(model_thread, "LOSS_REFIT_EVERY", 3)
+    fitted = _stub_loss_fit(monkeypatch)
 
     holder = LossModelHolder()
     _run_thread(
         db_path,
         [RunAdded(system="rpi", precision=Precision.FP32)] * 5,
         loss_model=holder,
+        loss_refit_local=True,
     )
 
     assert len(fitted) == 1, "expected exactly one refit at 5 runs, cadence 3"
     assert holder.is_ready()
     with open(predictor_path(db_path, 'loss'), 'rb') as f:
         assert pickle.load(f).tag == 1
+
+
+def test_no_local_loss_refit_when_workers_own_it(tmp_path, monkeypatch):
+    """With the local trigger off (the server grants the fit to a
+    worker instead) the same runs produce no fit here."""
+    db_path = str(tmp_path / "test.db")
+    with DbWriter(db_path):
+        pass
+    monkeypatch.setattr(model_thread, "LOSS_REFIT_EVERY", 3)
+    fitted = _stub_loss_fit(monkeypatch)
+
+    holder = LossModelHolder()
+    _run_thread(
+        db_path,
+        [RunAdded(system="rpi", precision=Precision.FP32)] * 5,
+        loss_model=holder,
+        loss_refit_local=False,
+    )
+
+    assert fitted == []
+    assert not holder.is_ready()
+    assert not os.path.exists(predictor_path(db_path, 'loss'))
+
+
+def test_startup_loss_refit_message_works_in_both_modes(
+    tmp_path, monkeypatch,
+):
+    """`LossRefit` is the startup fallback and predates the
+    distributed flow: it must fit even when workers own the cadence."""
+    db_path = str(tmp_path / "test.db")
+    with DbWriter(db_path):
+        pass
+    fitted = _stub_loss_fit(monkeypatch)
+
+    holder = LossModelHolder()
+    _run_thread(
+        db_path, [LossRefit()], loss_model=holder,
+        loss_refit_local=False,
+    )
+
+    assert len(fitted) == 1
+    assert holder.is_ready()
 
 
 def test_bootstrap_fits_all_pairs(tmp_path):

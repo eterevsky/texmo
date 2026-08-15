@@ -11,7 +11,7 @@ import numpy as np
 from .common import itoa3
 from .latency import timer
 from .tokens import get_tokenizer
-from .tokens.processing import apply_processing, process
+from .tokens.processing import apply_processing
 
 # os.pread (read at an explicit offset, no shared file cursor) is
 # Unix-only; on Windows we fall back to lseek+read (serialized by
@@ -30,7 +30,6 @@ class DataSet(object):
     def __init__(
         self,
         path: str | None = None,
-        path_processed: str | None = None,
         data: bytes | mmap.mmap | None = None,
         parallel_chunks: bool = True,
         read_mode: str = "mmap",
@@ -52,70 +51,30 @@ class DataSet(object):
 
         if data is not None:
             assert path is None
-            assert path_processed is None
             logging.info(f"Creating DataSet from data with len = {itoa3(len(data))}")
             self.data_file = None
-            self.processed_file = None
             self.data = data
-            self.processed_data = process(data)
-            logging.info(f"Processed size: {itoa3(len(self.processed_data))}")
         else:
             assert path is not None
             self.data_file, self.data = _open_mmap(path)
             logging.info(f"Creating DataSet from {path} ({itoa3(len(self.data))})")
-            if path_processed:
-                self.processed_file, self.processed_data = _open_mmap(path_processed)
-                logging.info(
-                    f"Using pre-processed data from {path_processed} ({itoa3(len(self.processed_data))})"
-                )
-            else:
-                self.processed_file = None
-                self.processed_data = None
 
-        # File descriptors for the pread path; None when the buffer is
+        # File descriptor for the pread path; None when the buffer is
         # an in-memory bytes object (pread then falls back to slicing).
         self.data_fd = self.data_file.fileno() if self.data_file is not None else None
-        self.processed_fd = (
-            self.processed_file.fileno() if self.processed_file is not None else None
-        )
 
         self.data_size = len(self.data)
-        self.processed_data_size = len(self.processed_data) if self.processed_data else None
 
     def __del__(self):
         if getattr(self, "data_file", None) is not None:
             self.data_file.close()
-        if getattr(self, "processed_file", None) is not None:
-            self.processed_file.close()
 
-    def _select_chunk_start(
-        self, processing: str
-    ) -> tuple[bytes | mmap.mmap, int | None, int, int, str]:
-        """
-        Args:
-            processing: the tokenset's processing pipeline name.
-
-        Returns:
-            (data buffer, its file descriptor or None, data size,
-             start offset, the pipeline still to apply to the chunk --
-             "raw" when the buffer is already processed)
-        """
-        # Only capswords-1 has a preprocessed on-disk buffer. Every
-        # other pipeline (capswords2 in particular, whose output the
-        # preprocessed file does NOT contain) is applied on the fly to
-        # the raw bytes.
-        if processing == "capswords" and self.processed_data:
-            data = self.processed_data
-            fd = self.processed_fd
-            size = self.processed_data_size
-            processing = "raw"
-        else:
-            data = self.data
-            fd = self.data_fd
-            size = self.data_size
-
-        start = random.randint(0, size)
-        return data, fd, size, start, processing
+    def _select_chunk_start(self) -> int:
+        """A random start offset into the raw buffer. Processing is
+        always applied to the chunk on the fly (the DataSetWrapper
+        thread pool absorbs the cost), so sampling never consults a
+        preprocessed copy."""
+        return random.randint(0, self.data_size)
 
     def _read(
         self, data: bytes | mmap.mmap, fd: int | None, start: int, size: int
@@ -144,24 +103,23 @@ class DataSet(object):
 
         samples = []
         while len(samples) < batch:
-            data, fd, data_size, start, chunk_processing = (
-                self._select_chunk_start(tokenset.processing))
+            start = self._select_chunk_start()
             # "gemma" is a vocabulary convention, not a byte transform:
-            # nothing is applied to the chunk, exactly as before.
-            need_processing = chunk_processing in ("capswords", "capswords2")
+            # nothing is applied to the chunk.
+            need_processing = tokenset.processing in ("capswords", "capswords2")
 
             if need_processing:
                 size = max(round(ntokens * tokenset.avg_bytes_per_token * 1.2), 16)
             else:
                 size = max(round(ntokens * tokenset.avg_proc_bytes_per_token * 1.2), 16)
 
-            assert size <= data_size
+            assert size <= self.data_size
 
             while True:
-                if start + size > data_size:
+                if start + size > self.data_size:
                     break
 
-                chunk = self._read(data, fd, start, size)
+                chunk = self._read(self.data, self.data_fd, start, size)
                 valid_start = 0
                 while 128 <= chunk[valid_start] < 192:
                     valid_start += 1
@@ -171,14 +129,14 @@ class DataSet(object):
                 chunk = chunk[valid_start : valid_end]
 
                 if need_processing:
-                    chunk = apply_processing(chunk_processing, chunk)
+                    chunk = apply_processing(tokenset.processing, chunk)
 
                 sample = tokenizer.tokenize_processed(chunk)
                 if len(sample) >= ntokens:
                     break
                 size *= 2
 
-            if start + size > data_size:
+            if start + size > self.data_size:
                 continue
             samples.append(sample[:ntokens])
 

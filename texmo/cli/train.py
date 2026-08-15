@@ -59,7 +59,7 @@ def parse_lr(x: str) -> float:
 def train(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
 
-    train_set = DataSet(path=args.data, path_processed=args.data_processed)
+    train_set = DataSet(path=args.data)
     lr = parse_lr(args.lr)
     decay = parse_lr(args.decay)
 
@@ -133,12 +133,6 @@ def init_args(parser: argparse.ArgumentParser, config):
         type=str,
         default=config.DATA,
         help=f"a file with (default: '{config.DATA}')",
-    )
-    parser.add_argument(
-        "--data-processed",
-        type=str,
-        help=f"training data that has been already processed with capswords filter (default: '{config.DATA_CAPS_WORDS}')",
-        default=config.DATA_CAPS_WORDS,
     )
 
     # Model

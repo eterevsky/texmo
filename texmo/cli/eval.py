@@ -30,7 +30,7 @@ from ..tokens import get_tokenizer, set_tokens_dir
 
 def eval_model(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
-    dataset = DataSet(path=args.data, path_processed=args.data_processed)
+    dataset = DataSet(path=args.data)
 
     t0 = time.perf_counter()
     md, weights = load_model(args.model)
@@ -74,10 +74,6 @@ def init_args(parser: argparse.ArgumentParser, config):
     parser.add_argument(
         '-d', '--data', default=config.DATA,
         help=f"data file to sample from (default: '{config.DATA}')")
-    parser.add_argument(
-        '--data-processed', default=config.DATA_CAPS_WORDS,
-        help='pre-processed (capswords) data file, if the tokenset '
-             'needs it')
     parser.add_argument(
         '--test-batch', type=int, default=1024,
         help='total number of test samples (default: 1024)')

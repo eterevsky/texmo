@@ -12,9 +12,7 @@ def main(args: argparse.Namespace):
     # pread sampling (no mmap readahead amplification) parallelized
     # across worker threads, so input throughput keeps up with the GPU
     # even for tiny models.
-    dataset = DataSet(
-        path=args.data, path_processed=args.data_processed,
-        read_mode="pread")
+    dataset = DataSet(path=args.data, read_mode="pread")
     dataset_wrapper = DataSetWrapper(
         dataset, num_workers=args.sample_threads)
 
@@ -42,12 +40,6 @@ def init_args(parser: argparse.ArgumentParser, config):
         type=str,
         default=config.DATA,
         help="a file with training data",
-    )
-    parser.add_argument(
-        "--data-processed",
-        type=str,
-        help=f"training data that has been already processed with capswords filter (default: '{config.DATA_CAPS_WORDS}')",
-        default=config.DATA_CAPS_WORDS,
     )
     parser.add_argument(
         "--tokens-dir",

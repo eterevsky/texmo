@@ -10,7 +10,7 @@ from ..tokens import get_tokenizer, set_tokens_dir
 def sample(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
 
-    dataset = DataSet(path=args.data, path_processed=args.data_processed)
+    dataset = DataSet(path=args.data)
     tokenizer = get_tokenizer(args.tokens)
     tokenset = tokenizer.tokenset
 
@@ -118,12 +118,6 @@ def sample_init_args(parser: argparse.ArgumentParser, config):
         default=config.DATA,
     )
     parser.add_argument(
-        "--data-processed",
-        type=str,
-        help="training data that has been already processed with capswords filter",
-        default=config.DATA_CAPS_WORDS,
-    )
-    parser.add_argument(
         "--tokens-dir",
         type=str,
         default=config.TOKENS_DIR,
@@ -153,7 +147,7 @@ def sample_init_args(parser: argparse.ArgumentParser, config):
 
 def benchmark(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
-    dataset = DataSet(path=args.data, path_processed=args.data_processed)
+    dataset = DataSet(path=args.data)
 
     ntokens = args.ntokens
     batch = args.batch
@@ -208,12 +202,6 @@ def benchmark_init_args(parser: argparse.ArgumentParser, config):
         type=str,
         help="a file with training data",
         default=config.DATA,
-    )
-    parser.add_argument(
-        "--data-processed",
-        type=str,
-        help="training data that has been already processed with capswords filter",
-        default=config.DATA_CAPS_WORDS,
     )
     parser.add_argument(
         "--tokens-dir",

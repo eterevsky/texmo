@@ -259,6 +259,25 @@ budget. Dream target: 32-64K weights.
   `Template`, so this is two optional bound overrides plus two form
   columns.
 
+* **Exclusion regexes for sub-searches** (2026-08-15 idea). A lot of
+  the top confs cluster around one structure — a byproduct of
+  neighbor search: whatever leads the frontier gets mutated the most,
+  so its shape colonizes the leaderboard whether or not the lead is
+  structural. The mirror of the positive sub-searches: give a % of
+  runs an *exclusion* regex, so that share of the search explores
+  only confs that do NOT match the currently dominant shape.
+
+  The sub-search machinery already fits — a `TemplateEntry` carries a
+  regex, a share, and a default; an include/exclude toggle per entry
+  (one flag on the entry, one checkbox column in the web form) turns
+  the same plumbing into "70% unrestricted, 10% transformers, 10%
+  anything-but-`mingru`". Things to settle: coverage keying for a
+  negated entry (per-entry coverage should just work, the matching
+  conf set is well-defined); the entry default must itself not match
+  the excluded regex (the existing default-vs-regex validation,
+  inverted); and neighbor generation stays unfiltered — only
+  selection is gated, same as positive entries today.
+
 * **Split `is_valid` into invalid vs search-ineligible.** Today one
   flag conflates "this model cannot run / makes no sense" with "this
   model runs fine but search shouldn't propose it" (off-whitelist

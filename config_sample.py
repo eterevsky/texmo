@@ -1,9 +1,6 @@
 # Default values for a number of common command-line arguments.
 
-import os
-
 DATA = "data/data.txt"
-DATA_CAPS_WORDS = "data/data_capswords.txt"
 TOKENS_DIR = "tokens"
 
 DB = "results/db.sqlite"
@@ -30,6 +27,18 @@ BACKEND = 'jax'
 # 'cuda,cpu'. Setting this explicitly avoids the warning about
 # failing to load the TPU plugin on Windows.
 JAX_PLATFORMS = 'cpu'
+
+# Whether JAX preallocates ~75% of GPU memory at first device use
+# (its default). Keep True on dedicated workers: the big stable pool
+# keeps synchronous cudaMalloc/cudaFree out of the training loop,
+# which matters for both throughput and per-step timing stability.
+# Set False on hosts that share the GPU with other work (e.g. the
+# search server on a desktop machine): memory is then allocated on
+# demand and the pool grows only to the high-water mark. False works
+# by exporting XLA_PYTHON_CLIENT_PREALLOCATE=false before the
+# backend initializes; True leaves JAX's own default (and any
+# environment variable you set yourself) untouched.
+JAX_PREALLOCATE = True
 
 # Number of background worker threads the client uses to sample
 # training data. Sampling is random-read latency bound; the client

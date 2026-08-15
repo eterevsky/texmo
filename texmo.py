@@ -1,4 +1,5 @@
 import argparse
+import os
 
 import jax
 import numpy as np
@@ -8,6 +9,11 @@ import config
 # Must happen before any JAX code runs.
 jax.config.update('jax_enable_x64', False)
 jax.config.update('jax_platforms', config.JAX_PLATFORMS)
+if not getattr(config, 'JAX_PREALLOCATE', True):
+    # Read at backend initialization, so setting it here (before any
+    # device use) is in time. Only the opt-out is exported; True
+    # defers to JAX's default and any externally set variable.
+    os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
 from texmo import latency
 from texmo.cli import bench, client, db, eval as eval_cli, loss, report

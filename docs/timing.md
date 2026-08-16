@@ -175,7 +175,7 @@ backend, or from JAX with `--no-scan` — is not compatible with the
 chunked-scan decomposition; before fitting
 the model on a system that previously ran in per-step mode, the
 caller should rename the system in the DB so the old runs land in a
-separate bucket (e.g. `whitebox` → `pre-scan-whitebox`).
+separate bucket (e.g. `<system>` → `pre-scan-<system>`).
 
 ## CLI
 

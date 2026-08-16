@@ -1,14 +1,16 @@
 """Per-system coverage report for the current global top confs.
 
 Walks the cosine-decay Pareto front and, for each conf, prints which
-of the active systems ({5060ti, m5, mini, pi5}) have a run on it.
-Summary at the end: how many confs are fully covered, and the total
-number of (conf, system) pairs that have ≥1 run.
+of the active systems have a run on it. Active = systems with a run
+among the most recent `_RECENT_RUNS` runs, excluding the `other`
+invalidation bucket; pass an explicit comma-separated list as the
+second argument to override.
 
-Run: `uv run python scripts/coverage.py [path/to/db.sqlite]`
+Run: `uv run python scripts/coverage.py [path/to/db.sqlite] [sys1,sys2,...]`
 """
 
 import os
+import sqlite3
 import sys
 
 # texmo is not an installed package; scripts/ must put the repo root
@@ -18,12 +20,32 @@ sys.path.insert(
 from texmo.common import INF
 from texmo.configuration import Precision, Template
 from texmo.db import DbReader
+from texmo.tokens import set_tokens_dir
+
+_RECENT_RUNS = 20000
 
 
-SYSTEMS = ['5060ti', 'm5', 'mini', 'pi5']
+def _active_systems(db_path: str) -> list[str]:
+    con = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True)
+    try:
+        rows = con.execute(
+            """
+            SELECT DISTINCT system FROM run
+            WHERE id > (SELECT MAX(id) - ? FROM run)
+              AND system != 'other'
+            ORDER BY system
+            """,
+            (_RECENT_RUNS,),
+        ).fetchall()
+    finally:
+        con.close()
+    return [s for (s,) in rows]
 
 
-def main(db_path: str):
+def main(db_path: str, systems: list[str] | None = None):
+    set_tokens_dir('tokens')
+    SYSTEMS = systems or _active_systems(db_path)
+    print(f'systems: {", ".join(SYSTEMS)}')
     template = Template(
         spec=None, precision=list(Precision),
         lr=(0, INF), length=(1, INF), batch=(1, INF),
@@ -66,4 +88,7 @@ def main(db_path: str):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1] if len(sys.argv) > 1 else 'results/db.sqlite')
+    main(
+        sys.argv[1] if len(sys.argv) > 1 else 'results/db.sqlite',
+        sys.argv[2].split(',') if len(sys.argv) > 2 else None,
+    )

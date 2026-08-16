@@ -135,7 +135,7 @@ def fastest_near_best(
     Wraps `top_confs_global` (the Pareto frontier across all systems)
     and `fastest_near_best_segments_any_system`. Each returned
     `ConfScore` carries the winning system + its median_time, so the
-    rendered row looks like the report's "12.2 s on m5" column.
+    rendered row looks like the report's "12.2 s on <system>" column.
     """
     pareto = list(db.top_confs_global(template))
     return db.fastest_near_best_segments_any_system(

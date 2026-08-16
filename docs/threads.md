@@ -59,6 +59,15 @@ wrapper.
 
 ## Threads
 
+Every thread the server starts is a **daemon**, including the writer:
+durability comes from the graceful path (`join()` posts `Stop` to
+each thread and waits for it), never from holding the interpreter
+open. The uniformity is itself load-bearing — cleanup for a server
+dropped without `join()` runs in `__del__`, which only refcounting
+reaches, so one non-daemon thread plus any accidental strong
+reference back to the server would turn a leak into a process that
+never exits.
+
 - **Werkzeug request handlers** (internal :5000, external :5001)
   - Count: many (one per request).
   - Owns: nothing persistent.
@@ -103,7 +112,9 @@ wrapper.
     and the thread still exits. The callback runs **on** the writer
     thread, which the shutdown then joins, so `SearchServer` spawns
     the actual `shutdown()` calls on a one-shot thread — same trick,
-    same reason, as `/stop`.
+    same reason, as `/stop` — and hands it over as a weak callback,
+    so the thread never holds the server in a reference cycle that
+    would keep `__del__` from ever running.
 
 - **SearchThread** (`texmo/search.py`)
   - Count: 1 (created in `SearchServer.__init__`).

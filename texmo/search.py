@@ -1315,7 +1315,11 @@ class SearchThread(threading.Thread):
         warmup_systems: Optional[Iterable[str]] = None,
         templates: Optional[TemplateSet] = None,
     ):
-        super().__init__()
+        # Daemon like every other server thread: this one is
+        # read-only, and durability belongs to the graceful path
+        # (`SearchServer.join` posts `Stop` and joins) rather than to
+        # holding the interpreter open.
+        super().__init__(daemon=True)
         # Search and the DbReader are built lazily on `run()` so the
         # reader is opened on the thread that uses it; that lets
         # `DbReader` enforce `check_same_thread=True`.

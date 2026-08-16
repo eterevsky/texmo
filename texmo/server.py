@@ -512,9 +512,9 @@ class SearchServer(object):
         # The callback must not hold `self` strongly: a bound method
         # would make SearchServer <-> WriterThread a reference cycle,
         # and `__del__` -- which is what stops these threads when a
-        # server is dropped without `join()` -- would then wait for a
-        # cyclic collection that interpreter shutdown never gets to,
-        # because it first blocks joining the non-daemon SearchThread.
+        # server is dropped without `join()` -- would then wait on a
+        # cyclic collection that may never come, leaving all three
+        # threads running against a server nobody can reach.
         server_ref = weakref.ref(self)
 
         def _writer_fatal():

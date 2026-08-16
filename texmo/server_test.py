@@ -3,6 +3,7 @@ import gzip
 import io
 import os
 import pickle
+import threading
 import time
 from queue import Queue
 
@@ -532,14 +533,44 @@ def test_server_wires_writer_panic_path(tmp_path):
         server.join()
 
 
+def test_every_server_thread_is_a_daemon(tmp_path):
+    """Every thread a server starts must be a daemon.
+
+    Cleanup for a server dropped without `join()` rests on `__del__`
+    (see the next test), which plain refcounting has to reach. Pair a
+    *non-daemon* thread with that and any accidental strong reference
+    back to the server -- a bound-method callback is enough -- stops
+    being a leak and becomes a process that never exits, since
+    interpreter shutdown joins non-daemon threads before it would
+    ever collect the cycle. Daemons keep that failure mode benign;
+    the graceful paths (`join`, `/stop`) post `Stop` and join
+    regardless, which is where durability actually comes from."""
+    path = str(tmp_path / "db.sqlite")
+    before = set(threading.enumerate())
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        for t in (server.writer_thread, server.search_thread,
+                  server.model_thread):
+            assert t.daemon, f"{type(t).__name__} is not a daemon"
+        # Anything else construction started, named or not.
+        started = [t for t in threading.enumerate() if t not in before]
+        assert started, "constructing a server should start threads"
+        assert [t for t in started if not t.daemon] == []
+    finally:
+        server.join()
+
+
 def test_dropped_server_stops_its_threads(tmp_path):
     """A server dropped without `join()` must still stop its threads.
 
     `__del__` posts the three Stop messages, so this only works while
     plain refcounting can free the server -- nothing may hold it in a
     reference cycle. (A bound method handed to WriterThread as the
-    fatal callback did exactly that, and since SearchThread is not a
-    daemon, the leftover thread wedged interpreter exit.) No
+    fatal callback did exactly that; back when SearchThread was the
+    one non-daemon thread it wedged interpreter exit outright.) No
     `gc.collect()` here on purpose: collecting the cycle by hand
     would hide the very regression this guards."""
     path = str(tmp_path / "db.sqlite")

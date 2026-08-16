@@ -1,7 +1,9 @@
 """Shared helpers for the predictors (timing, loss)."""
 
 from ..configuration import Configuration
+from ..layers.attn import AttnDef
 from ..layers.dense import DenseDef
+from ..layers.msr import MsrDef
 from ..layers.rnn import RnnDef
 from ..layers.split import SplitDef
 
@@ -16,7 +18,9 @@ def layer_type_id(layer) -> str:
 
     Dense and RNN include the activation (`dense.tanh`, `rnn.gelu`) so
     different activations get their own model parameters. Split
-    includes the op (`split.mul`). Other layers use the bare name.
+    includes the op (`split.mul`). Attn and msr include the
+    position-encoding variant (`attn.nope`, `msr.nope`). Other layers
+    use the bare name.
     """
     if isinstance(layer, DenseDef):
         # Bare dense (no activation) only occurs as a gate path inside
@@ -26,6 +30,11 @@ def layer_type_id(layer) -> str:
         return f"rnn.{layer._activation}"
     if isinstance(layer, SplitDef):
         return f"split.{layer.op}"
+    # attn / msr split by position encoding (`attn.nope`, `msr.nope`),
+    # same reasoning as the dense/rnn activation split: dropping the
+    # rotation is a different function, so it gets its own parameters.
+    if isinstance(layer, (AttnDef, MsrDef)) and layer.nope:
+        return f"{layer.name}.nope"
     return layer.name
 
 

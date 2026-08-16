@@ -64,10 +64,16 @@ class MsrJax(LayerJax):
     θ for low h both fall below bf16 precision around t ≈ 100.
     """
 
-    def __init__(self, input_size: int, dim: int, heads: int, dtype=jnp.float32):
+    def __init__(self, input_size: int, dim: int, heads: int, dtype=jnp.float32,
+                 nope: bool = False):
         super().__init__(input_size, heads * dim, dtype)
         self.dim = dim
         self.heads = heads
+        # NoPE: skip the interleaved-pair rotation on q/k. The decay
+        # (gamma^t) is untouched -- it is the retention mechanism, not a
+        # position encoding in the RoPE sense. Weightless either way, so
+        # num_weights and the state shapes are identical.
+        self.nope = nope
         self.gammas = jnp.array(_gammas(heads), dtype=jnp.float32)
         self.thetas = jnp.array(_thetas(dim), dtype=jnp.float32)
         # Lazy fp32 decay-matrix cache keyed by sequence length T.
@@ -107,8 +113,11 @@ class MsrJax(LayerJax):
         qkv = (weights['w_qkv'] @ x).reshape(3, H, D)
         q, k, v = qkv[0], qkv[1], qkv[2]
 
-        q_rot = _rope_jax_step(q, pos, self.thetas)
-        k_rot = _rope_jax_step(k, pos, self.thetas)
+        if self.nope:
+            q_rot, k_rot = q, k
+        else:
+            q_rot = _rope_jax_step(q, pos, self.thetas)
+            k_rot = _rope_jax_step(k, pos, self.thetas)
 
         gamma = self.gammas.reshape(H, 1, 1).astype(S.dtype)
         kv = k_rot[:, :, None] * v[:, None, :]
@@ -129,9 +138,12 @@ class MsrJax(LayerJax):
         K = jnp.transpose(qkv[:, :, 1], (0, 2, 1, 3))
         V = jnp.transpose(qkv[:, :, 2], (0, 2, 1, 3))
 
-        positions = jnp.arange(T, dtype=jnp.float32)
-        Q_rot = _rope_jax_seq(Q, positions, self.thetas)
-        K_rot = _rope_jax_seq(K, positions, self.thetas)
+        if self.nope:
+            Q_rot, K_rot = Q, K
+        else:
+            positions = jnp.arange(T, dtype=jnp.float32)
+            Q_rot = _rope_jax_seq(Q, positions, self.thetas)
+            K_rot = _rope_jax_seq(K, positions, self.thetas)
 
         scores = jnp.einsum('bhtd,bhsd->bhts', Q_rot, K_rot)
         decayed = scores * self._decay_matrix(T).astype(inputs.dtype)
@@ -143,18 +155,28 @@ class MsrJax(LayerJax):
 class MsrDef(LayerDef):
     name = "msr"
 
-    def __init__(self, dim: int, heads: int, input_size: int):
+    def __init__(self, dim: int, heads: int, input_size: int,
+                 nope: bool = False):
         super().__init__(input_size=input_size)
         self.dim = dim
         self.heads = heads
         self.size = heads * dim
+        self.nope = nope
 
     def __str__(self) -> str:
-        return f"msr.{self.dim}.{self.heads}"
+        s = f"msr.{self.dim}.{self.heads}"
+        return f"{s}.nope" if self.nope else s
 
     def is_valid(self) -> bool:
+        # dim >= 2 is purely the interleaved rotation pair: `_thetas`
+        # yields dim//2 frequencies, so dim 1 has none and the rotation
+        # is undefined. Nothing else needs it -- the state is
+        # (heads, dim, dim) and the projections scale with dim -- so
+        # `.nope` relaxes to dim >= 1 (a per-head 1x1 matrix state:
+        # degenerate, but well defined).
+        min_dim = 1 if self.nope else 2
         return (
-            is_power2_int(self.dim) and self.dim >= 2
+            is_power2_int(self.dim) and self.dim >= min_dim
             and is_power2_int(self.heads)
         )
 
@@ -171,4 +193,5 @@ class MsrDef(LayerDef):
         return self.num_weights + 2 * self.heads * self.dim * self.dim
 
     def build_jax(self, dtype) -> MsrJax:
-        return MsrJax(self.input_size, self.dim, self.heads, dtype)
+        return MsrJax(self.input_size, self.dim, self.heads, dtype,
+                      nope=self.nope)

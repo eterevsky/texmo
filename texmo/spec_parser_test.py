@@ -226,6 +226,8 @@ def test_str_roundtrip_nested_split():
     # search-invalid yet must still round-trip, because the DB holds
     # them and their neighbors are the migration path off them.
     "dense.8", "rnn.8", "dense.8.relu", "rnn.8.relu",
+    # Position-encoding variants: bare is RoPE, `.nope` drops it.
+    "attn.16.2.8", "attn.16.2.8.nope", "msr.8.2", "msr.8.2.nope",
 ])
 def test_every_neighbor_reparses(spec):
     """Whatever `neighbors()` emits must parse back.
@@ -240,6 +242,14 @@ def test_every_neighbor_reparses(spec):
         # Raises if the emitted spelling isn't parseable.
         reparsed = _build_layer_def(n, input_size=4)
         assert str(reparsed) == n, (spec, n)
+
+
+def test_bad_position_qualifier_rejected_at_parse():
+    """Only `nope` is a legal trailing qualifier -- notably there is no
+    `.rope`, since the bare spelling already means that."""
+    for spec in ("attn.16.2.8.rope", "attn.16.2.8.bogus", "msr.8.2.rope"):
+        with pytest.raises(ValueError, match="expected 'nope'"):
+            _build_layer_def(spec, input_size=4)
 
 
 def test_unknown_activation_rejected_at_parse():

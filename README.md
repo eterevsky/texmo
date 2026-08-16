@@ -139,7 +139,8 @@ The search composes models from these building blocks (see
   recurrence on top
 - `rglru.<blocks>` — Griffin / RecurrentGemma's gated linear recurrence
 - `msr.<dim>.<heads>` — multi-scale retention (linear attention)
-- `attn.<size>.<heads>.<window>` — sliding-window multi-query attention
+- `attn.<size>.<heads>.<window>[.nope]` — sliding-window multi-query
+  attention; rotary by default, `.nope` drops position encoding
   with rotary embeddings
 - `conv.<kernel>` — depthwise causal convolution over time
 - `suffix.<length>` — stack the last few positions

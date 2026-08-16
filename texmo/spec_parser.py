@@ -162,6 +162,23 @@ def _parse_split(spec: str, input_size: int) -> SplitDef:
     return SplitDef(op, branches, input_size=input_size)
 
 
+def _parse_nope(spec: str, parts: list[str], index: int) -> bool:
+    """Read the optional trailing `nope` qualifier on attn / msr.
+
+    Bare means RoPE; there is no explicit `.rope` spelling, so each
+    configuration has exactly one canonical form and existing DB specs
+    stay textually identical. Anything else in the slot is a typo and
+    fails here rather than silently parsing as the rotated form.
+    """
+    if len(parts) <= index:
+        return False
+    if parts[index] != "nope":
+        raise ValueError(
+            f"'{spec}': expected 'nope' or nothing after position "
+            f"{index - 1}, got '{parts[index]}'")
+    return True
+
+
 def _build_layer_def(spec: str, input_size: int) -> LayerDef:
     """Parse a layer spec string and return a LayerDef."""
     parts = spec.split(".")
@@ -200,7 +217,8 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
 
     if name == "msr":
         return MsrDef(
-            int(parts[1]), int(parts[2]), input_size=input_size)
+            int(parts[1]), int(parts[2]), input_size=input_size,
+            nope=_parse_nope(spec, parts, 3))
 
     if name == "norm":
         return NormDef(input_size=input_size)
@@ -234,7 +252,7 @@ def _build_layer_def(spec: str, input_size: int) -> LayerDef:
     if name == "attn":
         return AttnDef(
             int(parts[1]), int(parts[2]), int(parts[3]),
-            input_size=input_size)
+            input_size=input_size, nope=_parse_nope(spec, parts, 4))
 
     raise ValueError(f"Unknown layer type: {name}")
 

@@ -180,3 +180,97 @@ def test_mgru_includes_msr_neighbor():
     d = MgruDef(8, input_size=4)
     neighbors = list(d.neighbors())
     assert "msr.8.1" in neighbors
+
+
+# -- NoPE variant --
+
+def test_nope_def_str_validity_and_weights():
+    base = MsrDef(8, 2, input_size=6)
+    nope = MsrDef(8, 2, input_size=6, nope=True)
+    assert nope.nope
+    assert str(nope) == "msr.8.2.nope"
+    assert base.is_valid() and nope.is_valid()
+    # Rotation is weightless -- identical parameter count.
+    assert nope.num_weights == base.num_weights
+    # Non-rotary bounds are shared: heads must stay a power of 2.
+    assert not MsrDef(8, 3, input_size=6, nope=True).is_valid()
+
+
+def test_nope_actually_skips_the_rotation():
+    """Dropping the interleaved-pair rotation must move the output."""
+    base = MsrDef(8, 2, input_size=6).build_jax(jnp.float32)
+    nope = MsrDef(8, 2, input_size=6, nope=True).build_jax(jnp.float32)
+    w = base.init_weights(jax.random.PRNGKey(0))
+    x = jax.random.normal(jax.random.PRNGKey(1), (1, 12, 6))
+    assert not np.allclose(
+        np.asarray(base.forward(w, x)),
+        np.asarray(nope.forward(w, x)), atol=1e-4)
+
+
+def test_nope_jax_forward_matches_step():
+    layer = MsrDef(4, 2, input_size=8, nope=True).build_jax(jnp.float32)
+    weights = layer.init_weights(jax.random.PRNGKey(42))
+    inputs = jax.random.normal(jax.random.PRNGKey(43), (1, 6, 8))
+    fwd = layer.forward(weights, inputs)
+    state = layer.init_state()
+    for t in range(inputs.shape[1]):
+        state, out = layer.step(weights, state, inputs[0, t])
+        np.testing.assert_allclose(fwd[0, t], out, atol=1e-5)
+
+
+def test_nope_neighbors_toggle_flag_and_mgru_guard():
+    rope = list(MsrDef(8, 1, input_size=4).neighbors())
+    nope = list(MsrDef(8, 1, input_size=4, nope=True).neighbors())
+    # The toggle is its own edge, both directions.
+    assert "msr.8.1.nope" in rope
+    assert "msr.8.1" in nope
+    # Metaparameter mutations carry the flag.
+    assert "msr.4.1.nope" in nope
+    assert "msr.8.2.nope" in nope
+    # The attn swap is flag-preserving.
+    assert "attn.8.1.16" in rope
+    assert "attn.8.1.16.nope" in nope
+    # The mgru swap is RoPE-only: mgru has no position encoding for the
+    # flag to carry to, and its reverse edge names the bare spelling.
+    assert "mgru.8" in rope
+    assert "mgru.8" not in nope
+
+
+def test_nope_gets_its_own_predictor_type_id():
+    from texmo.predict.predict_common import layer_type_id
+    assert layer_type_id(MsrDef(8, 2, input_size=6)) == "msr"
+    assert layer_type_id(
+        MsrDef(8, 2, input_size=6, nope=True)) == "msr.nope"
+
+
+def test_nope_relaxes_the_rotary_floor():
+    """dim >= 2 exists only for the interleaved rotation pair
+    (`_thetas(1)` is empty), so nope relaxes to dim >= 1."""
+    assert _thetas(1) == []
+    assert not MsrDef(1, 1, input_size=4).is_valid()
+    assert MsrDef(1, 1, input_size=4, nope=True).is_valid()
+    assert MsrDef(1, 4, input_size=4, nope=True).is_valid()
+
+
+def test_nope_toggle_skipped_below_rotary_floor():
+    small = list(MsrDef(1, 1, input_size=4, nope=True).neighbors())
+    assert "msr.1.1" not in small
+    # Still connected to the rest of nope-space by growing.
+    assert "msr.2.1.nope" in small
+    # Above the floor the toggle is offered.
+    assert "msr.8.1" in list(
+        MsrDef(8, 1, input_size=4, nope=True).neighbors())
+
+
+def test_nope_dim_1_computes():
+    """A 1x1 per-head matrix state: degenerate but well defined."""
+    layer = MsrDef(1, 2, input_size=4, nope=True).build_jax(jnp.float32)
+    w = layer.init_weights(jax.random.PRNGKey(0))
+    x = jax.random.normal(jax.random.PRNGKey(1), (1, 5, 4))
+    fwd = np.asarray(layer.forward(w, x))
+    assert fwd.shape == (1, 5, 2)
+    assert np.all(np.isfinite(fwd))
+    state = layer.init_state()
+    for t in range(5):
+        state, out = layer.step(w, state, x[0, t])
+        np.testing.assert_allclose(np.asarray(out), fwd[0, t], atol=1e-5)

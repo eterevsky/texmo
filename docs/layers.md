@@ -254,7 +254,7 @@ varies.
   front-end feeds conv + RG-LRU).
 - Matches `transformers`' `RecurrentGemmaRglru` numerically.
 
-## MSR (`msr.<dim>.<heads>`)
+## MSR (`msr.<dim>.<heads>[.nope]`)
 
 Multi-Scale Retention (RetNet, Sun et al. 2023) — linear attention
 with a **fixed** per-head scalar decay, no softmax:
@@ -272,6 +272,18 @@ fastest, the last head slowest.
   unlike `attn`'s split-half. The decay and rotation tables stay in
   fp32: by `t ≈ 100` both the slow heads' `γ^t` and the smallest
   rotation angles have fallen below bf16 precision.
+- **`.nope`** drops that rotation entirely: `S_h = γ_h · k_h^T v_h`,
+  `o_h = q_h · S_h`. Everything else — the decay ladder, the state
+  shapes, the parallel/recurrent forms — is untouched, and since the
+  rotation is weightless `num_weights` is identical. The decay is
+  *not* removed: `γ^t` is the retention mechanism, not a position
+  encoding in the RoPE sense, so a `.nope` msr still discounts the
+  past by age. Bare spelling means RoPE; there is no `.rope` form.
+- The `dim ≥ 2` bound is **rotary-only** — `_thetas` yields `dim//2`
+  frequencies, so `dim = 1` has no pair and the rotation is undefined.
+  Nothing else needs it, so `.nope` relaxes to `dim ≥ 1`: a per-head
+  1×1 matrix state, degenerate but well defined. Bounds are therefore
+  per-flag, and `msr.1.H.nope` has no valid rope twin.
 - Training uses the parallel (quadratic) form — a `(T, T)` decay matrix
   applied to `Q_rot K_rot^T` — while `step` runs the recurrence, so
   inference state is `O(heads · dim^2)` and independent of length.
@@ -288,7 +300,7 @@ fastest, the last head slowest.
   to test that hypothesis, by swapping the scalar decay for a learned
   per-token delta-rule update.
 
-## Attention (`attn.<size>.<heads>.<window>`)
+## Attention (`attn.<size>.<heads>.<window>[.nope]`)
 
 Local (sliding-window) **multi-query** attention with partial rotary
 embeddings — the attention block of Griffin / RecurrentGemma, with
@@ -312,6 +324,19 @@ embeddings — the attention block of Griffin / RecurrentGemma, with
   unrotated. Pairs are split-half `(x_j, x_{j+rd/2})`, **not** the
   interleaved pairs `msr` uses. Angles are computed in float32, as is
   the softmax; scores are scaled by `head_dim^-0.5`.
+- **`.nope`** skips the rotation entirely — no position encoding at
+  all. Everything else (MQA, the banded mask, fp32 softmax, scaling,
+  weights, state shapes) is unchanged, and RoPE being weightless means
+  `num_weights` is identical. The causal mask still leaks position, so
+  this is NoPE in the literature's sense rather than a bag of words.
+  Bare spelling means RoPE; there is no `.rope` form, so every
+  pre-existing spec is textually unchanged.
+- Bounds are **per-flag**. `head_dim ≥ 4` exists only so the rotated
+  half holds a pair, so `.nope` relaxes to `head_dim ≥ 1` (heads must
+  still divide size — that part is structural). This opens shapes the
+  rope form can never reach: `attn.4.4.4.nope` runs at `head_dim = 1`,
+  attention well below the rotary floor, which is exactly the size
+  range texmo searches.
 - Banded causal mask: position `t` attends to `(t − window, t]`.
   Position 0 attends to itself only — the shift-pad initial vector
   plays the BOS role. **No leading padding is consumed**, so
@@ -612,8 +637,28 @@ Per-layer summary:
   `attn` needs a window that `msr` doesn't have, so the swap lands on
   a modest 16 (`_ATTN_SWAP_WINDOW`) and lets the window mutate from
   there — the one field the round trip doesn't preserve.
+- **attn.S.H.W ↔ attn.S.H.W.nope**, **msr.D.H ↔ msr.D.H.nope** — the
+  position-encoding toggle, a weightless edge that changes nothing but
+  the rotation. Every other mutation (size, heads, window, dim)
+  *preserves* the flag, and the msr ↔ attn swap above is
+  flag-preserving too (rope ↔ rope, nope ↔ nope, each using its own
+  per-flag floor so both classes stay exact images), so the two
+  variants form parallel search subgraphs joined by this toggle.
+  The edge is **one-way below the rotary floor**: rope → nope always
+  applies (dropping the rotation only relaxes bounds), but nope → rope
+  is skipped where the twin would be invalid (`head_dim < 4`,
+  `dim < 2`) rather than naming an invalid spec. That asymmetry is
+  intended — sub-floor shapes are reachable and remain connected to
+  the rest of nope-space through flag-preserving size/heads
+  mutations, e.g. `attn.16.4.4.nope → attn.16.8.4.nope →
+  attn.16.16.4.nope` walks head_dim 4 → 2 → 1.
 - **msr.X.1 ↔ mgru.X** — single-head retention has the same vector
   state width as mgru (skipped at `X = 1`, where msr has no RoPE pair).
+  RoPE form only: mgru has no position encoding for the flag to carry
+  over to, so a `.nope` msr toggles first. The conv/suffix ↔ attn
+  bridges are RoPE-only for the same reason — their forward edges name
+  the bare spelling, and restricting the reverse keeps every relation
+  an exact image.
 - **rglru.1 ↔ mgru.X, mingru.X** — the RG-LRU is size-preserving, so
   the swap only fires when the gated cell preserves size too
   (`size == input_size`), and it lands on the canonical single-block

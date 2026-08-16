@@ -139,15 +139,37 @@ class LayerDef(object):
             return
 
         if self.name == "msr":
-            # 2x dim (must stay >= 2 — RoPE needs at least one pair).
+            # The `.nope` qualifier (rotation off) rides along every
+            # metaparameter mutation; only its own toggle edge below
+            # changes it. Bare spelling means RoPE.
+            nope = ".nope" if self.nope else ""
+            # 2x dim. The floor is per-flag: RoPE needs at least one
+            # interleaved pair (dim >= 2), while nope has no pairs and
+            # bottoms out at a 1x1 per-head state.
+            min_dim = 1 if self.nope else 2
             for d in power2_neighbors(self.dim):
-                if d >= 2:
-                    yield f"msr.{d}.{self.heads}"
+                if d >= min_dim:
+                    yield f"msr.{d}.{self.heads}{nope}"
             # 2x heads (must stay >= 1).
             for h in power2_neighbors(self.heads):
-                yield f"msr.{self.dim}.{h}"
-            # Single-head msr swaps with mgru of the same size.
-            if self.heads == 1:
+                yield f"msr.{self.dim}.{h}{nope}"
+            # Weightless position-encoding toggle. Dropping the
+            # rotation only relaxes bounds, so rope -> nope always
+            # applies; the way back is skipped when the rope twin would
+            # be invalid (dim 1 has no rotation pair), yielding nothing
+            # rather than an invalid spec. Sub-rope dims stay connected
+            # to the rest of nope-space through the mutations above.
+            if not self.nope:
+                yield f"msr.{self.dim}.{self.heads}.nope"
+            elif self.dim >= 2:
+                yield f"msr.{self.dim}.{self.heads}"
+            # Single-head msr swaps with mgru of the same size. RoPE
+            # form only: mgru has no position encoding for the flag to
+            # carry over to, and the reverse edge (in the recurrent
+            # branch) names the bare spelling, so restricting to it
+            # keeps the pair an exact image. The nope form reaches
+            # mgru by toggling first.
+            if self.heads == 1 and not self.nope:
                 yield f"mgru.{self.dim}"
             # Attention-family swap: linear attention <-> softmax
             # attention at the same total width and head count. msr's
@@ -158,34 +180,58 @@ class LayerDef(object):
             # there is no equal-shape twin, so yield nothing. attn also
             # needs a window msr has no analogue for; start modest and
             # let it mutate.
-            if self.dim >= 4:
-                yield f"attn.{self.size}.{self.heads}.{_ATTN_SWAP_WINDOW}"
+            # The swap is flag-preserving: rope <-> rope, nope <-> nope.
+            # The twin's head_dim is this dim, so the guard follows the
+            # target's per-flag floor -- 4 for rope, 1 for nope -- and
+            # each flag class stays an exact image of itself.
+            if self.dim >= (1 if self.nope else 4):
+                yield (f"attn.{self.size}.{self.heads}."
+                       f"{_ATTN_SWAP_WINDOW}{nope}")
             return
 
         if self.name == "attn":
             # 2x mutations on all three metaparameters; is_valid
             # filters the boundary cases (head_dim >= 4, window >= 2).
+            # `.nope` rides along every metaparameter mutation (mirror
+            # of the msr case above).
+            nope = ".nope" if self.nope else ""
             for s in power2_neighbors(self.size):
-                yield f"attn.{s}.{self.heads}.{self.window}"
+                yield f"attn.{s}.{self.heads}.{self.window}{nope}"
             for h in power2_neighbors(self.heads):
-                yield f"attn.{self.size}.{h}.{self.window}"
+                yield f"attn.{self.size}.{h}.{self.window}{nope}"
             for w in power2_neighbors(self.window):
-                yield f"attn.{self.size}.{self.heads}.{w}"
+                yield f"attn.{self.size}.{self.heads}.{w}{nope}"
+            # Weightless position-encoding toggle (mirror of msr's):
+            # rope -> nope always applies since it only relaxes bounds,
+            # while nope -> rope is skipped below the rotary floor
+            # (head_dim < 4) rather than naming an invalid spec.
+            if not self.nope:
+                yield f"attn.{self.size}.{self.heads}.{self.window}.nope"
+            elif self.head_dim >= 4:
+                yield f"attn.{self.size}.{self.heads}.{self.window}"
             # Attention-family swap (mirror of the msr case above):
             # attn's total size splits into msr's per-head dim, so the
             # widths match (H * head_dim == size). head_dim is 0 when
             # heads doesn't divide size, so the >= 4 guard covers
             # divisibility too and keeps this edge the exact image of
             # the forward swap.
-            if self.head_dim >= 4:
-                yield f"msr.{self.head_dim}.{self.heads}"
+            # Flag-preserving, like the forward direction. The floor is
+            # the target msr's per-flag one (2 for rope, 1 for nope);
+            # head_dim is 0 when heads doesn't divide size, so either
+            # floor also covers divisibility.
+            if self.head_dim >= (1 if self.nope else 4):
+                yield f"msr.{self.head_dim}.{self.heads}{nope}"
             # Mirror of the suffix and conv swaps: single-head attn over
             # window W at the input width <-> suffix.W (hard concat of
             # the same span) and <-> conv.W (static FIR over it).
             # Guarded to the exact image of the forward swaps so the
             # relations stay symmetric. Both floors are 2 (attn's
             # window, conv's kernel), so W transfers without a guard.
-            if self.heads == 1 and self.size == self.input_size:
+            # RoPE form only: the forward bridges (in the suffix and
+            # conv branches) name the bare spelling, so the nope form
+            # has no bridge and reaches one by toggling first.
+            if (self.heads == 1 and self.size == self.input_size
+                    and not self.nope):
                 yield f"suffix.{self.window}"
                 yield f"conv.{self.window}"
             return

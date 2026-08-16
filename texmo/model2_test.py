@@ -797,6 +797,11 @@ def test_appends_are_size_preserving_snapped():
     "bits.1+bp|conv.2",
     "bits.1+bp|msr.4.1",
     "bits.1+bp|attn.4.1.4",
+    # NoPE variants: the prefill machinery is generic, but the position
+    # counters in the attn/msr step states only exist for the rotation,
+    # so pin that dropping it keeps the two paths in agreement.
+    "bits.1+bp|msr.4.1.nope",
+    "bits.1+bp|attn.4.1.4.nope",
     "bits.1+bp|rglru.1",
     "bits.1+bp|rglru.4",
     "bytes.emb.4|rnn.4.tanh",

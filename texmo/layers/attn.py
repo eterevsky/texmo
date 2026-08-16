@@ -1,7 +1,11 @@
 """Local (sliding-window) multi-query attention with rotary position
 embeddings -- the attention block of Griffin / RecurrentGemma.
 
-Spec: `attn.{size}.{heads}.{window}` with `head_dim = size / heads`.
+Spec: `attn.{size}.{heads}.{window}[.nope]` with
+`head_dim = size / heads`. The bare spelling applies RoPE; the
+optional trailing `.nope` drops position encoding entirely (see
+`AttnJax.nope`). There is deliberately no explicit `.rope` spelling --
+one canonical form per configuration.
 
     q = W_q x                      # (heads * head_dim,) -- h distinct heads
     k = W_k x                      # (head_dim,)         -- ONE shared head (MQA)
@@ -80,11 +84,17 @@ class AttnJax(LayerJax):
 
     def __init__(
         self, input_size: int, size: int, heads: int, window: int, dtype,
+        nope: bool = False,
     ):
         super().__init__(input_size, size, dtype)
         self.heads = heads
         self.head_dim = size // heads
         self.window = window
+        # NoPE: skip the rotation entirely. Everything else (MQA,
+        # banded mask, fp32 softmax, scaling, weights) is unchanged --
+        # RoPE is weightless, so the two variants have identical
+        # parameter counts and state shapes.
+        self.nope = nope
 
     def init_weights(self, rng: jax.Array) -> LayerWeights:
         k_q, k_k, k_v, k_o = jax.random.split(rng, 4)
@@ -121,10 +131,13 @@ class AttnJax(LayerJax):
         k = inputs @ weights['w_k'].T                     # (B, T, hd)
         v = inputs @ weights['w_v'].T                     # (B, T, hd)
 
+        # `positions` also drives the banded mask below, so it is
+        # needed either way; only the rotation is optional.
         positions = jnp.arange(T)
-        cos, sin = _rope_cos_sin(positions, _rotary_dim(hd))  # (T, rd)
-        q = _apply_rope(q, cos[None, :, None, :], sin[None, :, None, :])
-        k = _apply_rope(k, cos[None, :, :], sin[None, :, :])
+        if not self.nope:
+            cos, sin = _rope_cos_sin(positions, _rotary_dim(hd))  # (T, rd)
+            q = _apply_rope(q, cos[None, :, None, :], sin[None, :, None, :])
+            k = _apply_rope(k, cos[None, :, :], sin[None, :, :])
 
         # Scores vs the shared K head: (B, h, T, S), fp32 softmax.
         scale = float(hd) ** -0.5
@@ -151,9 +164,10 @@ class AttnJax(LayerJax):
         k = weights['w_k'] @ x                            # (hd,)
         v = weights['w_v'] @ x
 
-        cos, sin = _rope_cos_sin(pos, _rotary_dim(hd))    # (rd,)
-        q = _apply_rope(q, cos, sin)
-        k = _apply_rope(k, cos, sin)
+        if not self.nope:
+            cos, sin = _rope_cos_sin(pos, _rotary_dim(hd))    # (rd,)
+            q = _apply_rope(q, cos, sin)
+            k = _apply_rope(k, cos, sin)
 
         # Attend over [buffer, current] = `window` slots; only the last
         # min(pos, window-1) buffer entries hold real history.
@@ -183,27 +197,35 @@ class AttnDef(LayerDef):
 
     def __init__(
         self, size: int, heads: int, window: int, input_size: int,
+        nope: bool = False,
     ):
         super().__init__(input_size=input_size)
         self.size = size
         self.heads = heads
         self.window = window
         self.head_dim = size // heads if heads and size % heads == 0 else 0
+        self.nope = nope
 
     def __str__(self) -> str:
-        return f"attn.{self.size}.{self.heads}.{self.window}"
+        s = f"attn.{self.size}.{self.heads}.{self.window}"
+        return f"{s}.nope" if self.nope else s
 
     def is_valid(self) -> bool:
-        # head_dim >= 4 so the rotary half still has at least one
-        # rotatable pair; window >= 2 so there's some actual context.
+        # head_dim >= 4 so the rotary half (head_dim * _ROTARY_FRACTION)
+        # still holds at least one rotatable pair. That floor is purely
+        # about the rotation, so `.nope` -- which never splits dims into
+        # pairs -- relaxes to head_dim >= 1; only the structural
+        # requirement that heads divide size survives there. window >= 2
+        # so there's some actual context either way.
         # (RecurrentGemma's attn.2560.10.2048 is not search-valid --
         # non-power-of-2 -- and is loaded outside the search, like
         # rglru.10.)
+        min_head_dim = 1 if self.nope else 4
         return (
             is_power2_int(self.size)
             and is_power2_int(self.heads)
             and self.size % max(self.heads, 1) == 0
-            and self.head_dim >= 4
+            and self.head_dim >= min_head_dim
             and is_power2_int(self.window)
             and self.window >= 2
         )
@@ -227,4 +249,5 @@ class AttnDef(LayerDef):
 
     def build_jax(self, dtype) -> AttnJax:
         return AttnJax(
-            self.input_size, self.size, self.heads, self.window, dtype)
+            self.input_size, self.size, self.heads, self.window, dtype,
+            nope=self.nope)

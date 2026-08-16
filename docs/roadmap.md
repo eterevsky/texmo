@@ -85,18 +85,6 @@ Given a parameter budget N and compute budget T, answer:
   model price a variable-compute forward, and what the training
   objective charges per emitted bit.
 
-* **NoPE attention — no position encoding** (2026-08-16 idea, not
-  urgent). `attn` always applies rotary embeddings; a NoPE variant
-  drops them entirely. Causal LMs demonstrably work without explicit
-  position encoding (the causal mask leaks position; Haviv et al.
-  2022, Kazemnejad et al. 2023 — the latter finds NoPE length-
-  generalizes *better*), and at our window sizes (4–16) the rotation
-  may be pure overhead — we are dispatch- and elementwise-bound, and
-  RoPE is weightless, so dropping it changes cost but not
-  `num_weights`. To settle: the spelling (a variant flag on the attn
-  spec vs a separate type) and its neighbor edge (swap with plain
-  attn at equal shape), then let the search price it.
-
 ### Candidates to revisit
 
 * **HGRN2** (Qin et al. 2024, "Hierarchically Gated Recurrent
@@ -123,7 +111,7 @@ copying and is probably the capability that decides the weight
 budget. Dream target: 32-64K weights.
 
 **Milestone order (2026-08-16):** after the architecture tweaks
-(Swish, `bits.8.gen.X`, maybe NoPE) and the LittleLearner sidestep:
+(`bits.8.gen.X`) and the LittleLearner sidestep:
 
 1. **Conversation harness**: two models talk (not necessarily on
    texmo — Gemma-class and others via their own runtimes), each with

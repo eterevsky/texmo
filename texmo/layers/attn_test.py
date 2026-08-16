@@ -276,3 +276,136 @@ def test_predictors_handle_attn():
     assert feat[3] == 1.0            # simple-type one-hot
     assert feat[3 + 1 + 9] == 1.0    # shared slot: log2(heads=2)
     assert feat[3 + 1 + 10] == 4.0   # attn window: log2(16)
+
+
+# -- NoPE variant ------------------------------------------------------
+
+
+def test_nope_parses_and_round_trips():
+    ld = _build_layer_def("attn.16.2.8.nope", input_size=6)
+    assert isinstance(ld, AttnDef)
+    assert ld.nope
+    assert str(ld) == "attn.16.2.8.nope"
+    # The bare spelling stays RoPE; there is no explicit `.rope` form,
+    # so every pre-existing DB spec is textually unchanged.
+    assert not _build_layer_def("attn.16.2.8", input_size=6).nope
+
+
+def test_nope_validity_and_weights_match_base():
+    base = AttnDef(16, 2, 8, input_size=6)
+    nope = AttnDef(16, 2, 8, input_size=6, nope=True)
+    assert base.is_valid() and nope.is_valid()
+    # The rotation is weightless, so the variants cost exactly the same.
+    assert nope.num_weights == base.num_weights
+    # Non-rotary bounds are shared: window >= 2 binds either way.
+    assert not AttnDef(16, 2, 1, input_size=6, nope=True).is_valid()
+
+
+def test_nope_actually_skips_the_rotation():
+    """Position matters here, so dropping RoPE must move the output --
+    pins that the token isn't merely parsed and ignored."""
+    base = AttnJax(6, 16, 2, 8, dtype=jnp.float32)
+    nope = AttnJax(6, 16, 2, 8, dtype=jnp.float32, nope=True)
+    w = base.init_weights(jax.random.PRNGKey(0))
+    x = jax.random.normal(jax.random.PRNGKey(1), (1, 12, 6))
+    assert not np.allclose(
+        np.asarray(base.forward(w, x)),
+        np.asarray(nope.forward(w, x)), atol=1e-4)
+
+
+def test_nope_step_matches_forward():
+    layer = AttnJax(6, 16, 2, 4, dtype=jnp.float32, nope=True)
+    w = layer.init_weights(jax.random.PRNGKey(5))
+    T = 9  # > window, exercises the ring buffer
+    x = jax.random.normal(jax.random.PRNGKey(6), (1, T, 6))
+    fwd = np.asarray(layer.forward(w, x))[0]
+    state = layer.init_state()
+    for t in range(T):
+        state, y = layer.step(w, state, x[0, t])
+        np.testing.assert_allclose(np.asarray(y), fwd[t], atol=1e-4), t
+
+
+def test_nope_neighbors_toggle_and_flag_preservation():
+    rope = list(AttnDef(16, 2, 8, input_size=6).neighbors())
+    nope = list(AttnDef(16, 2, 8, input_size=6, nope=True).neighbors())
+    # The toggle is its own edge, in both directions.
+    assert "attn.16.2.8.nope" in rope
+    assert "attn.16.2.8" in nope
+    # Every metaparameter mutation carries the flag along.
+    for expect in ("attn.8.2.8.nope", "attn.32.2.8.nope",
+                   "attn.16.1.8.nope", "attn.16.4.8.nope",
+                   "attn.16.2.4.nope", "attn.16.2.16.nope"):
+        assert expect in nope, expect
+    assert not any(n.endswith(".nope") for n in rope
+                   if n != "attn.16.2.8.nope")
+    # The msr family swap is flag-preserving: rope<->rope, nope<->nope.
+    assert "msr.8.2" in rope
+    assert "msr.8.2.nope" in nope
+    assert "msr.8.2.nope" not in rope
+
+
+def test_nope_has_no_conv_or_suffix_bridge():
+    """The windowed bridges are RoPE-only: their forward edges (in the
+    suffix/conv branches) name the bare spelling, so restricting the
+    reverse keeps them exact images. nope reaches them by toggling."""
+    rope = list(AttnDef(8, 1, 4, input_size=8).neighbors())
+    assert "suffix.4" in rope and "conv.4" in rope
+    nope = list(AttnDef(8, 1, 4, input_size=8, nope=True).neighbors())
+    assert not any(n.startswith(("suffix", "conv")) for n in nope)
+
+
+def test_nope_gets_its_own_predictor_type_id():
+    from texmo.predict.predict_common import layer_type_id
+    assert layer_type_id(AttnDef(16, 2, 8, input_size=6)) == "attn"
+    assert layer_type_id(
+        AttnDef(16, 2, 8, input_size=6, nope=True)) == "attn.nope"
+
+
+def test_nope_relaxes_the_rotary_floor():
+    """head_dim >= 4 exists only so the rotated half holds a pair, so
+    nope drops below it -- attention at head_dim 1-2, which the rope
+    form can never reach."""
+    assert not AttnDef(4, 4, 4, input_size=6).is_valid()          # head_dim 1
+    assert AttnDef(4, 4, 4, input_size=6, nope=True).is_valid()
+    assert not AttnDef(16, 8, 4, input_size=6).is_valid()         # head_dim 2
+    assert AttnDef(16, 8, 4, input_size=6, nope=True).is_valid()
+    # Divisibility is structural, not rotary -- still required.
+    assert not AttnDef(16, 32, 4, input_size=6, nope=True).is_valid()
+
+
+def test_nope_toggle_skipped_below_rotary_floor():
+    """From a sub-floor nope conf the rope twin would be invalid, so
+    the toggle yields nothing rather than an invalid spec."""
+    small = list(AttnDef(4, 4, 4, input_size=6, nope=True).neighbors())
+    assert "attn.4.4.4" not in small
+    # ...and the msr swap stays inside the nope class as well.
+    assert not any(n.startswith("msr.") and not n.endswith(".nope")
+                   for n in small)
+    # Above the floor the toggle is offered as usual.
+    assert "attn.16.2.8" in list(
+        AttnDef(16, 2, 8, input_size=6, nope=True).neighbors())
+
+
+def test_nope_space_reaches_below_the_rope_floor():
+    """nope-space stays internally connected by flag-preserving
+    mutations, so head_dim 1 is reachable from a head_dim 4 conf."""
+    assert "attn.16.8.4.nope" in list(          # head_dim 4 -> 2
+        AttnDef(16, 4, 4, input_size=16, nope=True).neighbors())
+    assert "attn.16.16.4.nope" in list(         # head_dim 2 -> 1
+        AttnDef(16, 8, 4, input_size=16, nope=True).neighbors())
+    assert AttnDef(16, 16, 4, input_size=16, nope=True).is_valid()
+
+
+def test_nope_head_dim_1_computes():
+    """head_dim 1 is territory the rope form never reaches -- pin that
+    it actually runs and that step still tracks forward there."""
+    layer = AttnDef(4, 4, 4, input_size=6, nope=True).build_jax(jnp.float32)
+    w = layer.init_weights(jax.random.PRNGKey(0))
+    x = jax.random.normal(jax.random.PRNGKey(1), (1, 6, 6))
+    fwd = np.asarray(layer.forward(w, x))
+    assert fwd.shape == (1, 6, 4)
+    assert np.all(np.isfinite(fwd))
+    state = layer.init_state()
+    for t in range(6):
+        state, y = layer.step(w, state, x[0, t])
+        np.testing.assert_allclose(np.asarray(y), fwd[0, t], atol=1e-4)

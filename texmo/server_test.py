@@ -515,6 +515,48 @@ def test_server_mode_grants_no_refit_jobs(tmp_path, monkeypatch):
         server.join()
 
 
+def test_server_wires_writer_panic_path(tmp_path):
+    """A silently dead writer thread is the failure this guards: the
+    server must hand WriterThread a real fatal callback, and that
+    callback must be safe to call before `serve` binds any port."""
+    path = str(tmp_path / "db.sqlite")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        assert server.writer_thread._on_fatal is not None
+        # Nothing bound yet -> logs and returns rather than raising.
+        server.writer_thread._on_fatal()
+    finally:
+        server.join()
+
+
+def test_dropped_server_stops_its_threads(tmp_path):
+    """A server dropped without `join()` must still stop its threads.
+
+    `__del__` posts the three Stop messages, so this only works while
+    plain refcounting can free the server -- nothing may hold it in a
+    reference cycle. (A bound method handed to WriterThread as the
+    fatal callback did exactly that, and since SearchThread is not a
+    daemon, the leftover thread wedged interpreter exit.) No
+    `gc.collect()` here on purpose: collecting the cycle by hand
+    would hide the very regression this guards."""
+    path = str(tmp_path / "db.sqlite")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    threads = [
+        server.writer_thread, server.model_thread, server.search_thread,
+    ]
+    del server
+
+    for t in threads:
+        t.join(timeout=30)
+        assert not t.is_alive(), f"{t.name} outlived the server that owned it"
+
+
 def test_stale_select_answered_with_none_instantly(tmp_path):
     """A Select whose client read-timeout has expired is skipped (no
     conf produced -- it would go to a closed socket) but still gets

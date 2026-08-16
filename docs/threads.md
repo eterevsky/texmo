@@ -89,6 +89,21 @@ wrapper.
     default `check_same_thread=True` holds.
   - Reads from: its `write_queue`.
   - Sends to: nothing.
+  - **Panic path.** A write that raises is fatal — no retry tier,
+    since the 30 s `busy_timeout` already absorbs transient
+    contention, so what escapes (disk I/O error, disk full, a lock
+    that outlived the timeout) is unrecoverable. The loop catches it,
+    logs CRITICAL with the message type and the exception, and calls
+    the `on_fatal` callback `SearchServer` wired at construction;
+    that unbinds both listeners, so `serve` falls through to its
+    normal shutdown and clients hit connection errors and retry. The
+    unknown-message assert lands here too: a message nobody can write
+    is equally unrecoverable. Without a callback (bare constructions
+    in tests and admin tools) the CRITICAL log is the whole signal
+    and the thread still exits. The callback runs **on** the writer
+    thread, which the shutdown then joins, so `SearchServer` spawns
+    the actual `shutdown()` calls on a one-shot thread — same trick,
+    same reason, as `/stop`.
 
 - **SearchThread** (`texmo/search.py`)
   - Count: 1 (created in `SearchServer.__init__`).
@@ -169,6 +184,11 @@ threads — they dispatch into the request-handler thread pool.
   - SearchThread does **not** write. Anything bookkeeping-adjacent
     that needs to land in the DB is either posted by the `/add`
     handler or routed via ModelThread.
+  - Producers never learn whether a write succeeded — the proxy is
+    fire-and-forget. That is why an unrecoverable write takes the
+    whole server down (see WriterThread's panic path) instead of
+    being reported back: a queue nobody drains looks exactly like a
+    healthy server from the outside.
 
 - `requests_queue`
   - Producers: request handlers only. `/select` posts one `Select`
@@ -369,11 +389,6 @@ pickles next to the DB file, written atomically with rotation by
 
 ## Outstanding
 
-- **No I/O-error panic path on WriterThread.** An unrecoverable write
-  error propagates out of `run()`, closes the connection and kills the
-  thread silently; producers keep posting into a queue nobody drains.
-  The intent is to log the failure and trigger the same clean-shutdown
-  path as the `/stop` button so producers fail fast.
 - **A single Search thread.** The design supports N (`requests_queue`
   is a shared work queue and any consumer can serve any message; each
   would need its own persistent `DbReader` plus references to the

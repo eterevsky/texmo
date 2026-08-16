@@ -1,3 +1,6 @@
+import logging
+import sqlite3
+import threading
 from queue import Queue
 
 import numpy as np
@@ -5,7 +8,13 @@ import pytest
 
 from texmo.configuration import Configuration
 from texmo.db import DbReader, DbWriter
-from texmo.db.writer import DbWriterProxy, UpsertPredictedTimeEstimates
+from texmo.db.writer import (
+    AddRun,
+    DbWriterProxy,
+    Stop,
+    UpsertPredictedTimeEstimates,
+    WriterThread,
+)
 from texmo.spec_parser import parse_model2
 from texmo.precision import Precision
 from texmo.predict import build_loss_trend
@@ -963,6 +972,87 @@ def test_writer_proxy_chunks_upserts():
         assert isinstance(m, UpsertPredictedTimeEstimates)
         sizes.append(len(m.rows))
     assert sizes == [2, 2, 1]
+
+
+def _run_writer_thread(tmp_path, messages, on_fatal=None, timeout=10):
+    """Start a WriterThread over a fresh DB, post `messages`, join.
+
+    No trailing Stop: the caller decides whether this run ends by
+    Stop or by the panic path."""
+    db_path = str(tmp_path / "test.db")
+    with DbWriter(db_path):
+        pass  # apply the schema before the thread opens its own handle
+    q = Queue()
+    thread = WriterThread(db_path, q, on_fatal=on_fatal)
+    thread.start()
+    for m in messages:
+        q.put(m)
+    thread.join(timeout=timeout)
+    return thread, q
+
+
+def test_writer_thread_panics_on_fatal_write(tmp_path, monkeypatch, caplog):
+    """An escaped write error must not kill the thread quietly: it
+    logs CRITICAL, fires `on_fatal`, and stops the loop."""
+    def _boom(self, *args, **kwargs):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(DbWriter, "add_run", _boom)
+    fired = threading.Event()
+    conf, run = _make_conf_run()
+
+    with caplog.at_level(logging.CRITICAL):
+        thread, q = _run_writer_thread(
+            tmp_path, [AddRun(conf=conf, run=run, strategy=None,
+                              track_winner_change=False)],
+            on_fatal=fired.set)
+
+    assert fired.is_set(), "on_fatal was not called"
+    assert not thread.is_alive(), "writer thread outlived the fatal write"
+    critical = [r for r in caplog.records if r.levelno == logging.CRITICAL]
+    assert critical, "no CRITICAL log for the fatal write"
+    assert "AddRun" in critical[0].message
+    assert "disk I/O error" in critical[0].message
+
+
+def test_writer_thread_panics_without_callback(tmp_path, monkeypatch, caplog):
+    """No callback wired (bare constructions): still logs and exits,
+    just without taking anything else down."""
+    def _boom(self, *args, **kwargs):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(DbWriter, "add_run", _boom)
+    conf, run = _make_conf_run()
+
+    with caplog.at_level(logging.CRITICAL):
+        thread, _ = _run_writer_thread(
+            tmp_path, [AddRun(conf=conf, run=run, strategy=None,
+                              track_winner_change=False)])
+
+    assert not thread.is_alive()
+    assert any(r.levelno == logging.CRITICAL for r in caplog.records)
+
+
+def test_writer_thread_stop_is_not_a_panic(tmp_path):
+    """The ordinary Stop path is untouched by the panic wiring: the
+    writes before it land, and `on_fatal` never fires."""
+    fired = threading.Event()
+    conf, run = _make_conf_run(system="rpi")
+    db_path = str(tmp_path / "test.db")
+    with DbWriter(db_path):
+        pass
+    q = Queue()
+    thread = WriterThread(db_path, q, on_fatal=fired.set)
+    thread.start()
+    q.put(AddRun(conf=conf, run=run, strategy=None,
+                 track_winner_change=False))
+    q.put(Stop())
+    thread.join(timeout=10)
+
+    assert not thread.is_alive()
+    assert not fired.is_set(), "Stop must not look like a panic"
+    with DbReader(db_path) as reader:
+        assert reader.get_systems() == ["rpi"]
 
 
 def test_get_runs_for_timing_limit_returns_recent(db):

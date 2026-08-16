@@ -24,7 +24,7 @@ import logging
 import math
 import sqlite3
 import threading
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from queue import Queue
@@ -600,12 +600,29 @@ class WriterThread(threading.Thread):
 
     Opens its `DbWriter` on this thread (so `check_same_thread=True`
     holds) and serializes all writes from background producers.
+
+    A write that raises is **fatal**: there is no retry tier, because
+    the connection's 30 s `busy_timeout` already absorbs transient
+    contention, so what reaches us here (disk I/O error, disk full, a
+    lock that outlived the timeout) is unrecoverable. Dying quietly
+    is the worst outcome -- the server would keep answering reads and
+    acknowledging `/add` while every write piled up in a queue nobody
+    drains -- so we log CRITICAL and call `on_fatal`, whose job is to
+    bring the server down and make producers fail loudly. Without a
+    callback (bare constructions in tests, admin tools) the CRITICAL
+    log is the whole signal and the thread still exits.
     """
 
-    def __init__(self, db_path: Optional[str], queue: Queue):
+    def __init__(
+        self,
+        db_path: Optional[str],
+        queue: Queue,
+        on_fatal: Optional[Callable[[], None]] = None,
+    ):
         super().__init__(daemon=True)
         self._db_path = db_path
         self._queue = queue
+        self._on_fatal = on_fatal
 
     def run(self):
         writer = DbWriter(self._db_path)
@@ -613,25 +630,55 @@ class WriterThread(threading.Thread):
         try:
             while True:
                 m = self._queue.get()
-                match m:
-                    case AddRun(
-                        conf=conf, run=run, strategy=strategy,
-                        track_winner_change=track,
-                    ):
-                        writer.add_run(
-                            conf, run,
-                            strategy=strategy,
+                try:
+                    match m:
+                        case AddRun(
+                            conf=conf, run=run, strategy=strategy,
                             track_winner_change=track,
-                        )
-                    case UpsertPredictedTimeEstimates(rows=rows):
-                        writer.upsert_predicted_time_estimates(
-                            (r.conf_id, r.system, r.time_s) for r in rows)
-                    case UpdateAllScores():
-                        writer.update_all_scores()
-                    case Stop():
-                        logging.info("Stopping writer thread")
-                        break
-                    case _:
-                        assert False, f"Unknown write message: {m!r}"
+                        ):
+                            writer.add_run(
+                                conf, run,
+                                strategy=strategy,
+                                track_winner_change=track,
+                            )
+                        case UpsertPredictedTimeEstimates(rows=rows):
+                            writer.upsert_predicted_time_estimates(
+                                (r.conf_id, r.system, r.time_s)
+                                for r in rows)
+                        case UpdateAllScores():
+                            writer.update_all_scores()
+                        case Stop():
+                            logging.info("Stopping writer thread")
+                            break
+                        case _:
+                            assert False, f"Unknown write message: {m!r}"
+                except Exception as e:
+                    # Includes the unknown-message assert: reaching it
+                    # means a producer is posting something no one can
+                    # write, which is just as unrecoverable.
+                    logging.critical(
+                        f"Writer thread died on {type(m).__name__}: "
+                        f"{e!r}. Writes are no longer being drained; "
+                        f"shutting down.", exc_info=True)
+                    self._panic()
+                    break
         finally:
             writer.close()
+
+    def _panic(self):
+        """Hand the failure to the owner (normally SearchServer).
+
+        Runs ON this thread, and the shutdown sequence it triggers
+        joins this thread -- so the callback must not block on that
+        join. `SearchServer` satisfies this by spawning the actual
+        shutdown on a one-shot thread; keep any other implementation
+        non-blocking too. A callback that itself raises must not
+        strand the connection, hence the guard: `run`'s `finally`
+        still closes the writer either way."""
+        if self._on_fatal is None:
+            return
+        try:
+            self._on_fatal()
+        except Exception:
+            logging.critical(
+                "Writer thread's fatal callback raised", exc_info=True)

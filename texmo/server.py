@@ -8,6 +8,7 @@ import os
 import pickle
 import threading
 import time
+import weakref
 from datetime import datetime
 from itertools import zip_longest
 from queue import Queue
@@ -500,10 +501,29 @@ class SearchServer(object):
         self._refit_granted_at = 0.0
         logging.info(f"Loss-model refits run on: {self.loss_refit}")
 
+        # The two WSGI listeners, once `serve` binds them. The writer
+        # thread's panic path needs them to unbind the ports; empty
+        # until then (and in tests, which never call `serve`).
+        self._wsgi_servers: list = []
+
         # Writer thread first: producers below post to its queue and
         # we want a consumer ready before that happens.
         self.write_queue: Queue = Queue()
-        self.writer_thread = WriterThread(self.path, self.write_queue)
+        # The callback must not hold `self` strongly: a bound method
+        # would make SearchServer <-> WriterThread a reference cycle,
+        # and `__del__` -- which is what stops these threads when a
+        # server is dropped without `join()` -- would then wait for a
+        # cyclic collection that interpreter shutdown never gets to,
+        # because it first blocks joining the non-daemon SearchThread.
+        server_ref = weakref.ref(self)
+
+        def _writer_fatal():
+            server = server_ref()
+            if server is not None:
+                server._on_writer_fatal()
+
+        self.writer_thread = WriterThread(
+            self.path, self.write_queue, on_fatal=_writer_fatal)
         self.writer_thread.start()
 
         # Server-side handle the request handlers and `add_run` use to
@@ -1018,6 +1038,34 @@ class SearchServer(object):
             f"interval since previous model={ttoa3(interval)}")
         return {'accepted': True}
 
+    def _on_writer_fatal(self) -> None:
+        """Bring the server down after an unrecoverable write error.
+
+        The alternative is worse than being down: reads and `/add`
+        would keep succeeding while nothing drains the write queue.
+        Unbinding both ports makes clients fail their requests and
+        fall into their existing retry loops, and `serve` then
+        proceeds to its normal shutdown.
+
+        Called ON the writer thread, and the shutdown it starts ends
+        in `join()` -- which joins that same thread. So the actual
+        `shutdown()` calls go on a one-shot thread (exactly what
+        `/stop` does, and for the same reason) and this returns
+        immediately, letting the writer finish dying."""
+        logging.critical(
+            "Writer thread is gone -- shutting the server down so "
+            "producers fail fast instead of writing into the void")
+        servers = list(self._wsgi_servers)
+        if not servers:
+            # Nothing bound yet (a failure during startup, or a
+            # non-serving construction): the CRITICAL log above is
+            # the whole signal.
+            return
+        def _do_shutdown():
+            for srv in servers:
+                srv.shutdown()
+        threading.Thread(target=_do_shutdown, daemon=True).start()
+
     def join(self):
         # Producers first so no more writes / refits land on the
         # writer queue, then the writer drains and exits.
@@ -1176,6 +1224,9 @@ class SearchServer(object):
             '0.0.0.0', _INTERNAL_PORT, app, threaded=True)
         external_srv = make_server(
             '127.0.0.1', _EXTERNAL_PORT, app, threaded=True)
+        # Published for `_on_writer_fatal`, which unbinds both ports
+        # from the writer thread when a write turns out to be fatal.
+        self._wsgi_servers = [internal_srv, external_srv]
 
         @app.route("/stop", methods=["POST"])
         def _stop():

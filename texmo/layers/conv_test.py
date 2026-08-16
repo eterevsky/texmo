@@ -166,6 +166,14 @@ def test_neighbors_swap_to_suffix():
     assert "suffix.4" in neighbors
 
 
+def test_neighbors_swap_to_attn():
+    # conv.K <-> attn.<input_size>.1.K: the length-preserving pair of
+    # windowed mixers, span carried exactly. Depthwise conv preserves
+    # the width, so the attn twin is sized to the input.
+    d = ConvDef(4, input_size=8)
+    assert "attn.8.1.4" in list(d.neighbors())
+
+
 def test_suffix_swap_to_conv():
     from texmo.layers.suffix import SuffixDef
     d = SuffixDef(4, input_size=8)

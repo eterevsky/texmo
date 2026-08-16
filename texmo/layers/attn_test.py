@@ -6,8 +6,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from texmo.layer import _ATTN_SWAP_WINDOW
 from texmo.layers.attn import (
     AttnDef, AttnJax, _ROPE_BASE, _ROTARY_FRACTION)
+from texmo.layers.conv import ConvDef
+from texmo.layers.msr import MsrDef
+from texmo.layers.suffix import SuffixDef
 from texmo.spec_parser import _build_layer_def
 
 
@@ -155,9 +159,11 @@ def test_parse_and_model2_build():
 def test_neighbors_mutations_and_family_swaps():
     # 2x mutations on all three metaparameters + the msr swap.
     nbs = list(AttnDef(16, 2, 8, input_size=6).neighbors())
+    # The msr swap preserves total width, so attn.16.2 (head_dim 8)
+    # maps onto msr's *per-head* first field: msr.8.2 is also 16 wide.
     for expect in ("attn.8.2.8", "attn.32.2.8", "attn.16.1.8",
                    "attn.16.4.8", "attn.16.2.4", "attn.16.2.16",
-                   "msr.16.2"):
+                   "msr.8.2"):
         assert expect in nbs, expect
     # heads != 1 -> no suffix swap.
     assert not any(s.startswith("suffix") for s in nbs)
@@ -168,12 +174,66 @@ def test_neighbors_mutations_and_family_swaps():
 
 
 def test_msr_and_suffix_swap_to_attn():
-    from texmo.layers.msr import MsrDef
-    from texmo.layers.suffix import SuffixDef
-    assert "attn.8.2.16" in list(MsrDef(8, 2, input_size=6).neighbors())
+    # msr.8.2 is heads*dim = 16 wide, so its equal-shape attn twin is
+    # attn.16.2 (head_dim 8) -- not attn.8.2, which would be 8 wide.
+    assert "attn.16.2.16" in list(MsrDef(8, 2, input_size=6).neighbors())
     # suffix.L at input width D -> attn.D.1.L (learned-soft wrap of the
     # same span, sized to the suffix's input).
     assert "attn.8.1.4" in list(SuffixDef(4, input_size=8).neighbors())
+
+
+def test_msr_attn_swap_preserves_width_and_round_trips():
+    # Family swaps land on the equal-shape twin. msr's first field is
+    # the per-head dim (width H*D); attn's is the total size (head_dim
+    # = size/H). The swap therefore maps H*D <-> size in both
+    # directions, keeping both the width and the head count.
+    msr = MsrDef(8, 4, input_size=6)
+    assert msr.size == 32
+    fwd = f"attn.32.4.{_ATTN_SWAP_WINDOW}"
+    assert fwd in list(msr.neighbors())
+
+    attn = AttnDef(32, 4, _ATTN_SWAP_WINDOW, input_size=6)
+    assert attn.head_dim == 8
+    assert attn.size == msr.size
+    assert "msr.8.4" in list(attn.neighbors())
+    # Round trip: attn -> msr -> attn is the identity at the swap
+    # window (the window is the one field msr can't carry).
+    back = _build_layer_def("msr.8.4", input_size=6)
+    assert fwd in list(back.neighbors())
+
+    # No equal-shape twin below head_dim 4 (attn needs a rotary pair):
+    # yield nothing rather than an invalid spec, in both directions.
+    assert not any(
+        n.startswith("attn.")
+        for n in MsrDef(2, 4, input_size=6).neighbors())
+    assert not AttnDef(16, 8, 8, input_size=6).is_valid()   # head_dim 2
+    assert not any(
+        n.startswith("msr.")
+        for n in AttnDef(16, 8, 8, input_size=6).neighbors())
+
+
+def test_conv_attn_swap_is_exact_and_round_trips():
+    # Third side of the windowed triangle: conv and attn are the two
+    # length-preserving mixers over the same span, so kernel <-> window
+    # transfers field for field (both floors are 2, so no valid kernel
+    # maps to an invalid window or back).
+    src = ConvDef(4, input_size=8)
+    twin = "attn.8.1.4"
+    assert twin in list(src.neighbors())
+    # Round trip is the identity -- both the width and the span survive.
+    twin_def = _build_layer_def(twin, input_size=8)
+    assert str(twin_def) == twin
+    back = list(twin_def.neighbors())
+    assert str(src) in back                 # conv.4
+    assert "suffix.4" in back               # the other windowed swap
+    # Guarded to the exact image of the forward edge: no conv twin at
+    # multiple heads, nor when the layer doesn't preserve input width.
+    assert not any(
+        n.startswith("conv.")
+        for n in AttnDef(8, 2, 4, input_size=8).neighbors())
+    assert not any(
+        n.startswith("conv.")
+        for n in AttnDef(8, 1, 4, input_size=6).neighbors())
 
 
 def test_temporal_wrap_adjacency_invalid():

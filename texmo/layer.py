@@ -95,6 +95,13 @@ class LayerDef(object):
             # Type swap: conv.L <-> suffix.L (mirror of the suffix
             # case above).
             yield f"suffix.{self.kernel}"
+            # Type swap: conv.L <-> single-head attn over the same
+            # span -- the two length-preserving mixers, a learned
+            # static FIR vs a content-dependent lookup. Size = the
+            # conv's input width (depthwise preserves it), window =
+            # the kernel. Like the suffix edge, input widths that make
+            # the attn spec invalid are left to downstream is_valid.
+            yield f"attn.{self.input_size}.1.{self.kernel}"
             return
 
         if self.name in ("norm", "rmsnorm"):
@@ -143,9 +150,16 @@ class LayerDef(object):
             if self.heads == 1:
                 yield f"mgru.{self.dim}"
             # Attention-family swap: linear attention <-> softmax
-            # attention at matching size/heads (attn needs a window;
-            # start modest and let it mutate).
-            yield f"attn.{self.dim}.{self.heads}.{_ATTN_SWAP_WINDOW}"
+            # attention at the same total width and head count. msr's
+            # first field is the *per-head* dim, attn's is the total
+            # size, so the swap goes through self.size (= H*D), not
+            # self.dim. The swapped layer's head_dim is this dim, and
+            # attn needs head_dim >= 4 for a rotary pair -- below that
+            # there is no equal-shape twin, so yield nothing. attn also
+            # needs a window msr has no analogue for; start modest and
+            # let it mutate.
+            if self.dim >= 4:
+                yield f"attn.{self.size}.{self.heads}.{_ATTN_SWAP_WINDOW}"
             return
 
         if self.name == "attn":
@@ -157,14 +171,23 @@ class LayerDef(object):
                 yield f"attn.{self.size}.{h}.{self.window}"
             for w in power2_neighbors(self.window):
                 yield f"attn.{self.size}.{self.heads}.{w}"
-            # Attention-family swap (mirror of the msr case above).
-            yield f"msr.{self.size}.{self.heads}"
-            # Mirror of the suffix swap: single-head attn over window W
-            # at the input width <-> suffix.W (hard concat of the same
-            # span). Guarded to the exact image of the forward swap so
-            # the relation stays symmetric.
+            # Attention-family swap (mirror of the msr case above):
+            # attn's total size splits into msr's per-head dim, so the
+            # widths match (H * head_dim == size). head_dim is 0 when
+            # heads doesn't divide size, so the >= 4 guard covers
+            # divisibility too and keeps this edge the exact image of
+            # the forward swap.
+            if self.head_dim >= 4:
+                yield f"msr.{self.head_dim}.{self.heads}"
+            # Mirror of the suffix and conv swaps: single-head attn over
+            # window W at the input width <-> suffix.W (hard concat of
+            # the same span) and <-> conv.W (static FIR over it).
+            # Guarded to the exact image of the forward swaps so the
+            # relations stay symmetric. Both floors are 2 (attn's
+            # window, conv's kernel), so W transfers without a guard.
             if self.heads == 1 and self.size == self.input_size:
                 yield f"suffix.{self.window}"
+                yield f"conv.{self.window}"
             return
 
         if self.name == "rglru":

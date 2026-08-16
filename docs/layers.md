@@ -584,15 +584,27 @@ Per-layer summary:
   by a single attention head instead of concatenated. The reverse edge
   is guarded to the exact image of the forward one (`heads == 1` and
   `size == input_size`) so the relation stays symmetric.
-- **msr.D.H ↔ attn.D.H.16** — the attention-family swap, linear
-  attention against softmax attention. `attn` needs a window that `msr`
-  doesn't have, so the swap lands on a modest 16
-  (`_ATTN_SWAP_WINDOW`) and lets the window mutate from there. Note
-  the edge matches the two specs **field for field**, not by output
-  width: `msr`'s first field is the *per-head* `dim` (output width
-  `H·D`) while `attn`'s is the total `size` (output width `D`), so
-  `msr.8.4` (width 32) swaps to `attn.8.4.16` (width 8). The two are
-  exact spec-level inverses, and at `H = 1` the widths coincide.
+- **conv.K ↔ attn.<input_size>.1.K** — the third side of the windowed
+  triangle: unlike the two edges above, both of these are
+  *length-preserving*, a learned static FIR against a
+  content-dependent lookup over the same K positions. The span is
+  carried across exactly (`kernel ↔ window`; both floors are 2, so
+  every valid kernel is a valid window and back), and the reverse edge
+  reuses the suffix edge's exact-image guard, which makes the round
+  trip the identity. Without this edge conv reaches attn only through
+  `suffix`, a two-hop path that downsamples the time axis midway.
+- **msr.D.H ↔ attn.(H·D).H.16** — the attention-family swap, linear
+  attention against softmax attention. The edge matches the two specs
+  by **output width**, not field for field: `msr`'s first field is the
+  *per-head* `dim` (output width `H·D`) while `attn`'s is the total
+  `size` (head_dim `size/H`), so `msr.8.4` (width 32) swaps to
+  `attn.32.4.16` (width 32, head_dim 8) and back. Only at `H = 1` do
+  the two spellings coincide. The forward edge is guarded to `D ≥ 4`
+  and the reverse to `head_dim ≥ 4`, since `attn` needs a rotary pair;
+  below that there is no equal-shape twin and the swap is skipped.
+  `attn` needs a window that `msr` doesn't have, so the swap lands on
+  a modest 16 (`_ATTN_SWAP_WINDOW`) and lets the window mutate from
+  there — the one field the round trip doesn't preserve.
 - **msr.X.1 ↔ mgru.X** — single-head retention has the same vector
   state width as mgru (skipped at `X = 1`, where msr has no RoPE pair).
 - **rglru.1 ↔ mgru.X, mingru.X** — the RG-LRU is size-preserving, so

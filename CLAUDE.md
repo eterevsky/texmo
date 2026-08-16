@@ -88,6 +88,14 @@ Each layer module contains two classes:
   actually exists before reaching for it.
 - Imports live in the file preamble, never inline in functions.
 
+### Scratch space
+
+Temporary scripts and working data (analysis probes, fetched logs,
+one-off experiments) go in `scratch/` at the repo root (untracked) —
+not in the system temp directory, so they survive the session and
+stay inspectable. Scripts worth keeping graduate to `scripts/` (with
+its `sys.path` shim).
+
 ### Tools
 
 - Package manager: `uv`.

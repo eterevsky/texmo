@@ -72,8 +72,12 @@ def test_dense_layer_neighbor():
     assert neighbors == {
         conf.replace(model=_md("bytes|dense.2.gelu")),
         conf.replace(model=_md("bytes|rnn.1.gelu")),
-        # The activation toggle (relu retired; tanh <-> gelu <-> bare).
+        # The activation toggle: every other search-valid activation
+        # (relu retired). The bare form is a neighbor too but this
+        # template's regex requires an activation suffix, so it's
+        # filtered out before it gets here.
         conf.replace(model=_md("bytes|dense.1.tanh")),
+        conf.replace(model=_md("bytes|dense.1.silu")),
         conf.replace(cosine=True),
     }
 

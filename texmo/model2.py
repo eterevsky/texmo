@@ -190,9 +190,14 @@ class Model2Def:
 #   - gate: split.mul with a dense (or pass) second path slaved to the
 #     main path's size -- GeGLU/SwiGLU/self-gating.
 
-_APPEND_ACTS = ("gelu", "tanh")  # relu retired 2026-07
+# The search-valid activations (relu retired 2026-07, silu added
+# 2026-08). Kept in step with the `is_valid` whitelists in
+# layers/dense.py and layers/rnn.py.
+_APPEND_ACTS = ("gelu", "tanh", "silu")
 _APPEND_RECURRENT = ("gru", "mgru", "mingru", "lstm", "slstm", "mullstm")
-_GATE_ACTS = (None, "gelu", "tanh")
+# Same set plus the bare linear gate: `mul(dense.X.silu, dense.X)` is
+# SwiGLU, `mul(dense.X.gelu, dense.X)` GeGLU.
+_GATE_ACTS = (None, "gelu", "tanh", "silu")
 
 
 def _strs(layers: list[LayerDef]) -> list[str]:
@@ -326,12 +331,14 @@ def _seq_variants(
     # 8./9. Prepend a dense lead-in / remove it (symmetric). Same
     #       sizing rule as appends: size-preserving on the grid.
     prepend_size = floor_power2(input_size)
-    for act in ("tanh", "gelu"):
+    # The removal below is the exact inverse of this prepend, so the
+    # two activation sets have to stay identical.
+    for act in _APPEND_ACTS:
         yield [f"dense.{prepend_size}.{act}"] + strs
     if layers and layers[0].name == "dense":
         first = layers[0]
         if (first.size == floor_power2(input_size)
-                and first._activation in ("tanh", "gelu")):
+                and first._activation in _APPEND_ACTS):
             yield strs[1:]
 
     # 10. Introduce a residual split around a 1- or 2-layer span.

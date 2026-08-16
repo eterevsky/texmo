@@ -20,8 +20,39 @@ def test_num_weights():
 
 
 def test_unknown_activation_rejected():
+    # `elu` is genuinely absent from _JAX_ACTIVATIONS (silu was the
+    # example here until it was implemented, 2026-08).
     with pytest.raises(KeyError):
-        DenseDef(8, activation="silu", input_size=4)
+        DenseDef(8, activation="elu", input_size=4)
+
+
+def test_is_valid_activation_whitelist():
+    for act in ("tanh", "gelu", "silu"):
+        assert DenseDef(8, activation=act, input_size=4).is_valid(), act
+    # relu parses and runs but is retired from the search.
+    assert not DenseDef(8, activation="relu", input_size=4).is_valid()
+    # The bare form is valid only where a split branch opts in.
+    assert not DenseDef(8, input_size=4).is_valid()
+    assert DenseDef(8, input_size=4).is_valid(allow_bare=True)
+
+
+def test_neighbors_activation_cycle_is_complete():
+    # Every search-valid activation is one mutation from every other,
+    # so no activation is a dead end. The bare form joins the cycle for
+    # dense (it is the gate/linear path); size stays fixed throughout.
+    acts = ("tanh", "gelu", "silu")
+    for act in acts:
+        nbs = list(DenseDef(8, activation=act, input_size=4).neighbors())
+        for other in acts:
+            if other == act:
+                continue
+            assert f"dense.8.{other}" in nbs, (act, other)
+        assert "dense.8" in nbs                      # bare
+        assert f"dense.8.{act}" not in nbs           # no self-edge
+    # ...and the bare form reaches all three back.
+    bare = list(DenseDef(8, input_size=4).neighbors())
+    for act in acts:
+        assert f"dense.8.{act}" in bare, act
 
 
 def test_neighbors():
@@ -69,6 +100,19 @@ def test_jax_activation_relu():
         weights, jnp.array([[[3, 0, 0, 10]]], dtype=jnp.float32))
     # relu(-5 + 3) = 0, relu(-5 + 10) = 5
     np.testing.assert_allclose(out, [[[0, 5]]], atol=1e-6)
+
+
+def test_jax_activation_silu():
+    layer = DenseDef(2, activation="silu", input_size=4).build_jax(jnp.float32)
+    weights = {
+        'w': jnp.array([[1, 0, 0, 0], [0, 0, 0, 1]], dtype=jnp.float32),
+        'b': jnp.array([-5, -5], dtype=jnp.float32),
+    }
+    out = layer.forward(
+        weights, jnp.array([[[3, 0, 0, 10]]], dtype=jnp.float32))
+    # silu(x) = x * sigmoid(x); pre-activations are -2 and 5.
+    expect = [x / (1.0 + np.exp(-x)) for x in (-2.0, 5.0)]
+    np.testing.assert_allclose(out, [[expect]], atol=1e-6)
 
 
 def test_jax_bare_dense_is_linear():

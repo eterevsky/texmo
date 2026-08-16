@@ -10,6 +10,7 @@ _JAX_ACTIVATIONS = {
     "relu": jax_nn.relu,
     "tanh": jnp.tanh,
     "gelu": jax_nn.gelu,
+    "silu": jax_nn.silu,
 }
 
 
@@ -68,12 +69,13 @@ class DenseDef(LayerDef):
         # strictly worse than gelu in the DB) -- relu confs still
         # parse and run, but count as invalid like off-whitelist
         # inputs, and their neighbors propose the surviving
-        # activations.
+        # activations. silu joined the whitelist 2026-08 (it is the
+        # `S` in SwiGLU: `split.mul(dense.X.silu, dense.X)`).
         if not is_power2_int(self.size):
             return False
         if self._activation is None:
             return allow_bare
-        return self._activation in ("tanh", "gelu")
+        return self._activation in ("tanh", "gelu", "silu")
 
     @property
     def num_weights(self) -> int:

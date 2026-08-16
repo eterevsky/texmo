@@ -213,16 +213,21 @@ class LayerDef(object):
             act = f".{self._activation}" if self._activation else ""
             for s in power2_neighbors(self.size):
                 yield f"{self.name}.{s}{act}"
-            # Activation mutations at the same size. For dense the
-            # bare (linear) form is part of the cycle -- it is the
-            # tied-codec adapter and the gate/linear path, filtered by
-            # validity everywhere else. rnn has no bare form. A relu
-            # layer (retired, search-invalid) proposes the survivors,
-            # so existing relu lineages migrate instead of dying.
+            # Activation mutations at the same size: every activation
+            # other than the current one, so the whitelist forms a
+            # complete graph and each is one mutation from each. For
+            # dense the bare (linear) form is part of the cycle -- it
+            # is the tied-codec adapter and the gate/linear path,
+            # filtered by validity everywhere else. rnn has no bare
+            # form. A relu layer (retired, search-invalid) proposes the
+            # survivors, so existing relu lineages migrate instead of
+            # dying. Kept in step with the `is_valid` whitelists in
+            # layers/dense.py and layers/rnn.py -- importing them here
+            # would be a genuine cycle (both import this module).
             if self.name == "dense":
-                acts = (None, "tanh", "gelu")
+                acts = (None, "tanh", "gelu", "silu")
             else:
-                acts = ("tanh", "gelu")
+                acts = ("tanh", "gelu", "silu")
             for a in acts:
                 if a != self._activation:
                     suffix = f".{a}" if a else ""
@@ -252,7 +257,9 @@ class LayerDef(object):
             if self._activation == "tanh" and self.size > 1:
                 yield f"lrnn.{self.size}.2"
         elif self.name in _RECURRENT:
-            for act in ("gelu", "tanh"):
+            # Every search-valid rnn activation, matching the cycle
+            # above -- wherever one is offered, all are.
+            for act in ("gelu", "tanh", "silu"):
                 yield f"rnn.{self.size}.{act}"
             for other in _RECURRENT:
                 if other != self.name:

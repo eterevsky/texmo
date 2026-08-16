@@ -23,9 +23,20 @@ def test_def_properties_gelu():
     assert d.num_weights == 16 * (8 + 16) + 16
 
 
+def test_def_properties_silu():
+    d = RnnDef(16, activation="silu", input_size=8)
+    assert str(d) == "rnn.16.silu"
+    assert d.is_valid()
+
+
 def test_def_no_activation_invalid():
     d = RnnDef(32, input_size=16)
     assert not d.is_valid()
+
+
+def test_def_relu_retired_from_search():
+    # Parses and runs, but no longer search-valid (see DenseDef).
+    assert not RnnDef(32, activation="relu", input_size=16).is_valid()
 
 
 def test_def_non_power2_invalid():
@@ -45,6 +56,20 @@ def test_neighbors():
     assert "mingru.32" in neighbors
 
 
+def test_neighbors_activation_cycle_is_complete():
+    # Every search-valid rnn activation is one mutation from every
+    # other, so none is a dead end. rnn has no bare form.
+    acts = ("tanh", "gelu", "silu")
+    for act in acts:
+        nbs = list(RnnDef(8, activation=act, input_size=4).neighbors())
+        for other in acts:
+            if other == act:
+                continue
+            assert f"rnn.8.{other}" in nbs, (act, other)
+        assert f"rnn.8.{act}" not in nbs          # no self-edge
+        assert "rnn.8" not in nbs                 # no bare rnn
+
+
 def test_neighbors_size1():
     d = RnnDef(1, activation="gelu", input_size=4)
     neighbors = list(d.neighbors())
@@ -55,7 +80,7 @@ def test_neighbors_size1():
 
 # -- JAX --
 
-@pytest.mark.parametrize('activation', ['tanh', 'relu', 'gelu'])
+@pytest.mark.parametrize('activation', ['tanh', 'relu', 'gelu', 'silu'])
 def test_jax_forward_and_step(activation):
     d = RnnDef(8, activation=activation, input_size=4)
     layer = d.build_jax(jnp.float32)

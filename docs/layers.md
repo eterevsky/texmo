@@ -34,7 +34,9 @@ against a published parameter count for the "same" cell.
 Standard feed-forward layer: `out = activation(W_ih @ x + b)`.
 
 - Weights: `W_ih: (size, input_size)`, `b: (size,)`.
-- Activations: `relu`, `gelu`, `tanh`.
+- Activations: `gelu`, `tanh`, `silu`, or bare (no activation — the
+  linear path, legal only where its consumer won't absorb it). `relu`
+  is implemented but retired from the search.
 - Stateless.
 - `num_weights = size * input_size + size`.
 
@@ -43,7 +45,8 @@ Standard feed-forward layer: `out = activation(W_ih @ x + b)`.
 Elman RNN: `h = activation(W_ih @ x + W_hh @ h_prev + b)`.
 
 - Weights: `W_ih: (size, input_size)`, `W_hh: (size, size)`, `b: (size,)`.
-- Activations: `relu`, `gelu`, `tanh`.
+- Activations: `gelu`, `tanh`, `silu` (no bare form). `relu` is
+  implemented but retired from the search.
 - JAX: always uses `lax.scan` with the input projection hoisted out of
   the scan (single batched matmul over the full sequence for `W_ih @ x`).
 - `num_weights = size * (input_size + size) + size`.
@@ -521,8 +524,10 @@ residual connections and gating:
 - `split.add(F, pass)` / `split.cat(F, pass)` — residual, the skip
   analog: `x + F(x)` or `concat(F(x), x)`.
 - `split.mul(value, gate)` — gating (GeGLU / SwiGLU / self-gating):
-  `value(x) ⊙ gate(x)`, e.g. `split.mul(dense.X.gelu, dense.X)` or the
-  self-gate `split.mul(pass, dense.X.gelu)`.
+  `value(x) ⊙ gate(x)`, e.g. `split.mul(dense.X.gelu, dense.X)` for
+  GeGLU, `split.mul(dense.X.silu, dense.X)` for SwiGLU exactly (the
+  activation is the only difference between the two), or the self-gate
+  `split.mul(pass, dense.X.gelu)`.
 
 No learned weights of its own (`num_weights` = sum over branches);
 the runtime is `SplitJax`. Example:
@@ -553,12 +558,14 @@ Per-layer summary:
 
 - **dense ↔ rnn** — with the activation preserved. A *bare* (
   activation-less) dense has no cross-type swap; it stays a dense.
-- **dense activation cycle** — `dense.X` ↔ `dense.X.tanh` ↔
-  `dense.X.gelu` at the same size, the bare form included (it's the
-  tied-codec adapter and the gate/linear path, filtered by validity
-  everywhere else). `rnn` cycles between `tanh` and `gelu` only; it has
-  no bare form. A retired `relu` layer still proposes the survivors, so
-  existing relu lineages migrate instead of dying.
+- **dense activation cycle** — every search-valid activation is one
+  mutation from every other at the same size, so the set forms a
+  complete graph rather than a ring: `dense.X` ↔ `dense.X.tanh` ↔
+  `dense.X.gelu` ↔ `dense.X.silu` ↔ `dense.X`, the bare form included
+  (it's the tied-codec adapter and the gate/linear path, filtered by
+  validity everywhere else). `rnn` cycles the same three activations
+  but has no bare form. A retired `relu` layer still proposes the
+  survivors, so existing relu lineages migrate instead of dying.
 - **dense.X.tanh ↔ latent.X.2** — promotes a dense-tanh to its
   depth-recurrent twin (needs `X > 1`).
 - **rnn.X.tanh ↔ lrnn.X.2** — likewise for recurrent.

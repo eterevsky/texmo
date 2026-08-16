@@ -10,6 +10,7 @@ _JAX_ACTIVATIONS = {
     "relu": jax_nn.relu,
     "tanh": jnp.tanh,
     "gelu": jax_nn.gelu,
+    "silu": jax_nn.silu,
 }
 
 
@@ -93,9 +94,9 @@ class RnnDef(LayerDef):
 
     def is_valid(self) -> bool:
         # relu is retired (see DenseDef.is_valid): parses and runs,
-        # but no longer search-valid.
+        # but no longer search-valid. silu joined 2026-08.
         return (is_power2_int(self.size)
-                and self._activation in ("tanh", "gelu"))
+                and self._activation in ("tanh", "gelu", "silu"))
 
     @property
     def num_weights(self) -> int:

@@ -127,7 +127,8 @@ branch *and* the top chain. The Split-specific moves:
 
 **Gate family** (`_split_variants` mul branch, `_seq_variants` sec. 11, 14):
 - **Wrap a single layer** in `split.mul(layer, dense.size)`.
-- **Toggle the gate activation** (`{none, gelu, relu, tanh}`) and the
+- **Toggle the gate activation** (`{none, gelu, tanh, silu}` — the
+  search-valid set, `_GATE_ACTS`; `relu` is retired) and the
   **value↔pass self-gate** form.
 - **Append a trailing self-gate** `split.mul(pass, dense.size[.act])` on
   the running activation — reachable even from the empty chain (its

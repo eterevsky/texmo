@@ -85,30 +85,6 @@ Given a parameter budget N and compute budget T, answer:
   model price a variable-compute forward, and what the training
   objective charges per emitted bit.
 
-* **Swish / SiLU as a third activation** (2026-08-10 idea).
-  `x * sigmoid(x)` — the activation Llama-class models use, and the
-  `S` in SwiGLU. The search currently offers exactly two:
-  `_JAX_ACTIVATIONS` also holds `relu`, but it is retired (2026-07,
-  almost strictly worse than gelu in the DB), so `is_valid` admits
-  only `tanh` and `gelu` and the mutation cycle proposes only those.
-
-  Cheap to try — `jax.nn.silu` into `_JAX_ACTIVATIONS`, the name into
-  the `is_valid` whitelist, and the activation-swap cycle picks it up
-  for free. Two reasons it might earn its slot rather than just
-  widening the search: it is smooth and non-monotonic like gelu but
-  materially cheaper (one sigmoid vs gelu's erf/tanh approximation),
-  which matters because our models are dispatch- and elementwise-
-  bound rather than matmul-bound; and it is the natural partner for
-  the gated form the split machinery already expresses
-  (`split.mul(dense.X.silu, dense.X)` is SwiGLU exactly, where today
-  that reads `.gelu` and is GeGLU).
-
-  Watch for: a third activation multiplies the per-size mutation
-  fan-out, so check it does not dilute the search more than it
-  contributes — the relu retirement is the precedent for cutting one
-  back out. Settle it the same way, from the DB (see the layer-audit
-  bullet under Analysis).
-
 * **NoPE attention — no position encoding** (2026-08-16 idea, not
   urgent). `attn` always applies rotary embeddings; a NoPE variant
   drops them entirely. Causal LMs demonstrably work without explicit
@@ -241,7 +217,8 @@ budget. Dream target: 32-64K weights.
 
   The model card says **Qwen3 architecture** (2026-08-16). Against
   texmo's stack that means, to verify in the checkpoint config:
-  SiLU/SwiGLU (already scheduled above); **Q/K RMSNorm** (new —
+  SiLU/SwiGLU (already supported — `silu` is search-valid and
+  `split.mul(dense.X.silu, dense.X)` is SwiGLU); **Q/K RMSNorm** (new —
   per-head norm on queries and keys before RoPE); likely a **GQA
   knob** (`num_key_value_heads` — Qwen3-class is usually grouped,
   our attn is MQA-only with one shared K/V head) and **full rotary**

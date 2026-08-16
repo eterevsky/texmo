@@ -129,7 +129,7 @@ step than GPUs lose to under-used SMs.
 The search composes models from these building blocks (see
 [`docs/layers.md`](docs/layers.md) for equations and parameter counts):
 
-- `dense.<size>.<activation>` — feed-forward (tanh, gelu, or bare)
+- `dense.<size>.<activation>` — feed-forward (tanh, gelu, silu, or bare)
 - `rnn.<size>.<activation>` — vanilla recurrent
 - `gru.<size>`, `mgru.<size>`, `mingru.<size>` — gated recurrent variants
 - `lstm.<size>`, plus the xLSTM/mLSTM family `slstm.<size>`,

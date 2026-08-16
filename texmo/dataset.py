@@ -34,14 +34,15 @@ class DataSet(object):
         parallel_chunks: bool = True,
         read_mode: str = "mmap",
     ):
-        # read_mode selects how sample_tokens fetches a chunk:
-        #   "mmap"  -- slice the memory-mapped file (default)
-        #   "pread" -- read at an explicit offset via os.pread
-        # Temporary knob so benchmark-dataset can A/B the two. mmap's
-        # per-fault readahead reads ~128 KB for every random 400-byte
-        # sample (~16x amplification); pread reads only what's asked.
-        # pread is also the path that parallelizes across
-        # DataSetWrapper workers (see _read / DataSetWrapper).
+        # read_mode selects how samples are fetched:
+        #   "mmap"  -- map the file and slice it (default)
+        #   "pread" -- no mapping at all; read at explicit offsets
+        # mmap's per-fault readahead reads ~128 KB for every random
+        # 400-byte sample (~16x amplification), and the touched pages
+        # accumulate in the process working set for the file's whole
+        # life. pread reads only what's asked and leaves caching to
+        # the OS file cache; it's also the mode that parallelizes
+        # across DataSetWrapper workers (see _read / DataSetWrapper).
         self.read_mode = read_mode
 
         # Serializes the Windows lseek+read fallback when sampling runs
@@ -54,16 +55,24 @@ class DataSet(object):
             logging.info(f"Creating DataSet from data with len = {itoa3(len(data))}")
             self.data_file = None
             self.data = data
+            self.data_size = len(data)
+        elif read_mode == "pread":
+            assert path is not None
+            # No mapping: just the fd and the size.
+            self.data_file = open(path, "rb")
+            self.data = None
+            self.data_size = os.fstat(self.data_file.fileno()).st_size
+            logging.info(
+                f"Creating DataSet from {path} ({itoa3(self.data_size)}, pread)")
         else:
             assert path is not None
             self.data_file, self.data = _open_mmap(path)
-            logging.info(f"Creating DataSet from {path} ({itoa3(len(self.data))})")
+            self.data_size = len(self.data)
+            logging.info(f"Creating DataSet from {path} ({itoa3(self.data_size)})")
 
         # File descriptor for the pread path; None when the buffer is
         # an in-memory bytes object (pread then falls back to slicing).
         self.data_fd = self.data_file.fileno() if self.data_file is not None else None
-
-        self.data_size = len(self.data)
 
     def __del__(self):
         if getattr(self, "data_file", None) is not None:
@@ -165,19 +174,24 @@ class DataSet(object):
         samples = []
         while len(samples) < batch:
             start = random.randint(0, self.data_size - nbytes)
-            while start < self.data_size and 128 <= self.data[start] < 192:
-                start += 1
-            end = min(start + nbytes, self.data_size)
-            while end < self.data_size and 128 <= self.data[end] < 192:
-                end += 1
-
-            if end - start < nbytes:
+            # Fetch with a little slack: the sample starts past any
+            # UTF-8 continuation bytes and extends the end over them,
+            # each by at most a few bytes.
+            raw = self._read(self.data, self.data_fd, start, nbytes + 8)
+            vs = 0
+            while vs < len(raw) and 128 <= raw[vs] < 192:
+                vs += 1
+            ve = vs + nbytes
+            if ve > len(raw):
+                continue
+            while ve < len(raw) and 128 <= raw[ve] < 192:
+                ve += 1
+            if ve - vs < nbytes:
                 continue
 
-            # Always sampled from the raw buffer, so the tokenset's own
-            # pipeline applies (identity for "raw"/"gemma").
-            chunk = apply_processing(
-                tokenset.processing, self.data[start : end])
+            # Always sampled raw, so the tokenset's own pipeline
+            # applies (identity for "raw"/"gemma").
+            chunk = apply_processing(tokenset.processing, raw[vs:ve])
 
             sample = tokenizer.tokenize_processed(chunk)
             samples.append(sample)

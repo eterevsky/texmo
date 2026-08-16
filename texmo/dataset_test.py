@@ -64,6 +64,31 @@ def test_sample_bytes_hexbpe(dataset):
     assert (batch >= 0).all() and (batch < 32).all()
 
 
+def test_pread_mode_never_maps(tmp_path):
+    """pread mode keeps no mapping at all -- just the fd -- and both
+    sampling paths work off explicit reads."""
+    path = tmp_path / "data.txt"
+    path.write_bytes(_DATA * 50)
+    ds = DataSet(path=str(path), read_mode="pread")
+    assert ds.data is None
+    assert ds.data_size == len(_DATA) * 50
+
+    batch = ds.sample_tokens(8, 2, "bytes")
+    assert batch.shape == (2, 8)
+    batch, lengths = ds.sample_bytes(16, 2, "tokens.32.hexbpe")
+    assert batch.shape[0] == 2
+    assert (lengths > 0).all()
+
+
+def test_mmap_mode_still_maps(tmp_path):
+    path = tmp_path / "data.txt"
+    path.write_bytes(_DATA * 50)
+    ds = DataSet(path=str(path))
+    assert ds.data is not None
+    batch = ds.sample_tokens(8, 2, "bytes")
+    assert batch.shape == (2, 8)
+
+
 def test_wrapper_tokens(dataset):
     wrapper = DataSetWrapper(dataset)
     batch = wrapper.sample_tokens(8, 4, "bytes")

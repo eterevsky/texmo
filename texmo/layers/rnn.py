@@ -85,6 +85,14 @@ class RnnDef(LayerDef):
     def __init__(self, size: int, input_size: int, activation: str | None = None):
         super().__init__(input_size=input_size)
         self.size = size
+        # Reject an unknown activation name here rather than at
+        # build_jax time, where RnnJax's direct lookup would raise
+        # KeyError far from the spec that caused it (DenseDef does the
+        # same). None is the bare form: it parses, for continuity with
+        # any bare confs already in the DB, but is_valid rejects it --
+        # an rnn has no meaningful activation-less form.
+        if activation is not None and activation not in _JAX_ACTIVATIONS:
+            raise KeyError(activation)
         self._activation = activation
 
     def __str__(self) -> str:

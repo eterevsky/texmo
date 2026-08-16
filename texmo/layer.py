@@ -251,7 +251,15 @@ class LayerDef(object):
                 if self._activation == "tanh" and self.size > 1:
                     yield f"latent.{self.size}.2"
         elif self.name == "rnn":
-            yield f"dense.{self.size}.{self._activation}"
+            # A bare (activation-less) rnn is search-invalid but still
+            # parses, like a retired relu form, so its twin has to be
+            # spelled `dense.X` -- interpolating the activation
+            # unguarded emitted a literal "dense.X.None" that failed to
+            # re-parse. The reverse edge (dense branch above) stays
+            # guarded instead of mirrored: a bare dense has no rnn
+            # twin, because the bare rnn it would name is invalid.
+            act = f".{self._activation}" if self._activation else ""
+            yield f"dense.{self.size}{act}"
             for other in _RECURRENT:
                 yield f"{other}.{self.size}"
             if self._activation == "tanh" and self.size > 1:

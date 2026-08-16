@@ -39,6 +39,25 @@ def test_def_relu_retired_from_search():
     assert not RnnDef(32, activation="relu", input_size=16).is_valid()
 
 
+def test_def_unknown_activation_rejected():
+    # Fails here rather than as a KeyError from RnnJax at build time.
+    with pytest.raises(KeyError):
+        RnnDef(8, activation="elu", input_size=4)
+
+
+def test_bare_rnn_neighbors_are_parseable():
+    """A bare rnn is search-invalid but must still enumerate cleanly:
+    its dense twin is `dense.X`, never a literal "dense.X.None"."""
+    d = RnnDef(8, input_size=4)
+    assert not d.is_valid()
+    neighbors = list(d.neighbors())
+    assert "dense.8" in neighbors
+    assert not any(".None" in n for n in neighbors)
+    # The activation cycle is the migration path off the bare form.
+    for act in ("tanh", "gelu", "silu"):
+        assert f"rnn.8.{act}" in neighbors
+
+
 def test_def_non_power2_invalid():
     d = RnnDef(13, activation="tanh", input_size=8)
     assert not d.is_valid()

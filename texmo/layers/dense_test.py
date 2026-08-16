@@ -36,6 +36,15 @@ def test_is_valid_activation_whitelist():
     assert DenseDef(8, input_size=4).is_valid(allow_bare=True)
 
 
+def test_bare_dense_has_no_rnn_twin():
+    """Mirror of the bare-rnn case: the cross-type swap needs an
+    activation to carry over, and the `rnn.8` it would name is itself
+    the invalid bare form -- so the edge is skipped, not emitted."""
+    neighbors = list(DenseDef(8, input_size=4).neighbors())
+    assert not any(n.startswith("rnn") for n in neighbors)
+    assert "dense.8.tanh" in neighbors      # the activation cycle still applies
+
+
 def test_neighbors_activation_cycle_is_complete():
     # Every search-valid activation is one mutation from every other,
     # so no activation is a dead end. The bare form joins the cycle for

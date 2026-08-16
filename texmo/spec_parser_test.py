@@ -10,7 +10,7 @@ from texmo.layers.dense import DenseDef
 from texmo.layers.seq import LayerSeqDef
 from texmo.layers.split import SplitDef
 from texmo.spec_parser import (
-    parse_layer_list, _split_at_depth_0)
+    parse_layer_list, _build_layer_def, _split_at_depth_0)
 
 
 # -- _split_at_depth_0 -------------------------------------------------
@@ -214,6 +214,40 @@ def test_str_roundtrip_nested_split():
     spec = "split.mul(split.add(dense.8.gelu, pass), pass)"
     layers = parse_layer_list(spec, input_size=4)
     assert str(layers[0]) == spec
+
+
+# -- emitter/parser contract -------------------------------------------
+
+
+@pytest.mark.parametrize("spec", [
+    # Search-valid forms.
+    "dense.8.gelu", "dense.8.tanh", "dense.8.silu", "rnn.8.gelu",
+    # Quirky but parseable: bare forms and retired relu. These are
+    # search-invalid yet must still round-trip, because the DB holds
+    # them and their neighbors are the migration path off them.
+    "dense.8", "rnn.8", "dense.8.relu", "rnn.8.relu",
+])
+def test_every_neighbor_reparses(spec):
+    """Whatever `neighbors()` emits must parse back.
+
+    The invariant a bare `rnn.8` violated: its dense twin was
+    interpolated as a literal "dense.8.None", which `_build_layer_def`
+    rejected with KeyError -- so merely enumerating the neighbors of a
+    parseable spec raised.
+    """
+    layer = _build_layer_def(spec, input_size=4)
+    for n in layer.neighbors():
+        # Raises if the emitted spelling isn't parseable.
+        reparsed = _build_layer_def(n, input_size=4)
+        assert str(reparsed) == n, (spec, n)
+
+
+def test_unknown_activation_rejected_at_parse():
+    """Both activation-carrying layers fail at parse time with the bad
+    name, not later at weight-build time."""
+    for spec in ("dense.8.bogus", "rnn.8.bogus"):
+        with pytest.raises(KeyError, match="bogus"):
+            _build_layer_def(spec, input_size=4)
 
 
 # -- retired syntax ----------------------------------------------------

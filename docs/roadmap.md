@@ -10,7 +10,9 @@ Given a parameter budget N and compute budget T, answer:
 
 ## Architectures to add
 
-* **DeltaNet.** Linear-attention with delta-rule updates:
+* **DeltaNet** (sequencing open 2026-08-16 — not deprioritized, just
+  deciding which blocks land before the chatbot program and which
+  after). Linear-attention with delta-rule updates:
   `S_t = S_{t-1}·(I − β k_t k_t^T) + β k_t v_t^T`, with `β_t` learned
   per token. Content-dependent forgetting in key-space; equivalent
   to online L2 regression of values against keys (i.e. a closed-form
@@ -66,6 +68,22 @@ Given a parameter budget N and compute budget T, answer:
   where GPUs hurt us); and how it prices against the tied codec at
   equal weight count, since that is the current answer to the same
   problem.
+
+* **Bit/byte router — tokens reimplemented inside the model**
+  (2026-08-16 idea; for after the chatbot program). Adjacent to
+  `bits.8.gen.X`: an MoE-style router decides, per position, whether
+  the next bit/byte is produced by the cheap local output block or
+  by a pass through the whole model. The model then consumes text as
+  raw bits/bytes but emits variable-length bit/byte strings — easy
+  spans stream out of the local generator, hard points pay for the
+  full model. That is tokenization reinvented as a learned,
+  end-to-end part of the model (the tokenset ladder priced it as
+  stored weights; this prices it as routed compute), with a
+  speculative-decoding flavor in step mode. Open questions parked
+  with it: differentiability of the routing decision (straight-
+  through vs load-balancing losses), how num_weights and the time
+  model price a variable-compute forward, and what the training
+  objective charges per emitted bit.
 
 * **Swish / SiLU as a third activation** (2026-08-10 idea).
   `x * sigmoid(x)` — the activation Llama-class models use, and the
@@ -128,6 +146,37 @@ What's my name?" -> "Oleg"), which likely needs attention/suffix
 copying and is probably the capability that decides the weight
 budget. Dream target: 32-64K weights.
 
+**Milestone order (2026-08-16):** after the architecture tweaks
+(Swish, `bits.8.gen.X`, maybe NoPE) and the LittleLearner sidestep:
+
+1. **Conversation harness**: two models talk (not necessarily on
+   texmo — Gemma-class and others via their own runtimes), each with
+   its own system prompt; record, process, save as synthetic
+   training data.
+   - Optionally **force the models' hand**: constrain generation to
+     a small vocabulary by masking output logits. Subword plan
+     (2026-08-16, details deferred until the bridge is reached):
+     allow every token that is a *substring* of valid text — cheap
+     and prefix-safe by construction — then either clean up what
+     comes out or drop whole responses/dialogs marked invalid.
+     Grammar-constrained decoding (GBNF / outlines-style) remains
+     the heavyweight alternative if leakage is worse than expected.
+2. **`texmo.py chat`** (the REPL entry below): preamble + utterance
+   format, over the step path (which is now exactly forward-parity).
+3. **Tranches** of synthetic data under different instructions and
+   vocabulary limits.
+4. **Loss reconnaissance**: train search-sized models on the dialog
+   tranches, compare against books3 losses. NOTE: this is the
+   cross-corpus eval where per-corpus residual accounting goes live
+   — lossy tokensets' residual constants were computed from books3
+   frequencies, and `chunk_residual_bits` (see tokenset loose ends)
+   exists for exactly this.
+5. **Best possible model at ~16k weights** on the chosen tranche.
+6. *(optional)* **Web demo**: pure-JavaScript in-page chat with the
+   model. At 16k weights this is a few tens of KB of weights and
+   hand-rolled matmuls — trivially feasible; rides on the
+   model-store JSON export (first entry below).
+
 * **Save weights of Pareto-optimal models.** When a run's eval score
   is Pareto-optimal for its weight count (the server already
   computes `changed_winner` at add_run), export the model as a
@@ -187,12 +236,33 @@ budget. Dream target: 32-64K weights.
   entire distribution is elementary-school English emits exactly the
   narrow, simple text a 32–64K-weight model could actually learn,
   likely a better-matched teacher than a quantized 30B generalist
-  (see the synthetic-dialog entry above); (b) if the architecture
-  turns out close to something texmo runs (the page doesn't say —
-  check the checkpoints), a conversion à la RecurrentGemma for
-  local eval/generation, but only if it doesn't require too many
-  changes. First step either way: find the actual weights/license
-  and the architecture config.
+  (see the synthetic-dialog entry above); (b) a conversion à la
+  RecurrentGemma for local eval/generation, if the gap stays small.
+
+  The model card says **Qwen3 architecture** (2026-08-16). Against
+  texmo's stack that means, to verify in the checkpoint config:
+  SiLU/SwiGLU (already scheduled above); **Q/K RMSNorm** (new —
+  per-head norm on queries and keys before RoPE); likely a **GQA
+  knob** (`num_key_value_heads` — Qwen3-class is usually grouped,
+  our attn is MQA-only with one shared K/V head) and **full rotary**
+  (our attn rotates only a fraction, the Gemma convention) — the
+  open-model survey entry already names those two for Llama-class
+  ports; and full-context attention (window = context length —
+  mechanically just a big window). RoPE pair convention matches
+  (split-half, same as Gemma). So closer to four checkable deltas
+  than two; config.json settles it.
+
+  **Port probably skippable** (2026-08-16): none of the Qwen3
+  pieces would enter the search (the search space should not absorb
+  attention-tuning varieties for marginal gains), and the
+  conversation harness runs generator models on their own runtimes
+  anyway — so nothing actually needs LittleLearner inside texmo.
+  Keep it earmarked as a dialog-generator candidate via its own
+  runtime; the delta list above stays as the record if a
+  full-fidelity port (à la RecurrentGemma) is ever wanted, in which
+  case the pieces land as port-fidelity knobs the mutation cycle
+  never proposes — the "search-ineligible but valid" side of the
+  is_valid-split entry under Infrastructure.
 
 ## Analysis
 

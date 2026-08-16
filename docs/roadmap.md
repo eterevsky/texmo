@@ -178,6 +178,22 @@ budget. Dream target: 32-64K weights.
   sharing), (c) the next full-fidelity port candidate (Llama-class
   needs SiLU + a GQA knob + full rotary).
 
+* **Investigate LittleLearner** (2026-08-16 idea;
+  https://littlelearner-ll.github.io/). A 0.6B / 1.3B / 5B family
+  trained from scratch on "LittleCurriculum", an 88B-token corpus
+  distilled from FineWeb-Edu to K–5 reading level, with Base / GRPO /
+  "Chatty" variants. Two angles: (a) **earmarked as the
+  synthetic-dialog generator for the nano chatbot** — a model whose
+  entire distribution is elementary-school English emits exactly the
+  narrow, simple text a 32–64K-weight model could actually learn,
+  likely a better-matched teacher than a quantized 30B generalist
+  (see the synthetic-dialog entry above); (b) if the architecture
+  turns out close to something texmo runs (the page doesn't say —
+  check the checkpoints), a conversion à la RecurrentGemma for
+  local eval/generation, but only if it doesn't require too many
+  changes. First step either way: find the actual weights/license
+  and the architecture config.
+
 ## Analysis
 
 * **Layer audit: what works and what doesn't.** Mine the results DB
@@ -242,7 +258,9 @@ budget. Dream target: 32-64K weights.
       pretrained LMs (BOS) already work.
 
 * **Per-entry bounds for sub-searches** (2026-08-10, out of the
-  bits.1 scaling investigation). A sub-search entry carries only a
+  bits.1 scaling investigation; deprioritized 2026-08-16 — niche
+  until another region-targeted measurement is actually wanted; the
+  analysis below stays valid). A sub-search entry carries only a
   spec filter; `max_weights` and `train_time` stay shared with the
   main search, so an entry aimed at a *region* rather than a shape
   cannot reach it.

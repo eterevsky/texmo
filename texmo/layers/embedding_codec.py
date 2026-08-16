@@ -12,10 +12,13 @@ chain's LAST ACTIVATION is scored against the same rows directly,
   the `+bp`/`+bm` flags of OneHotCodec disappear; bytes and tokens
   have npositions == 1 and no P). Only value rows are scored at the
   output -- position rows there would cancel in the softmax.
-- `exp(y)` is the learned input scale, initialized to sqrt(X)
-  (y0 = ln(X)/2): rows sized to give O(1) logits have RMS ~1/sqrt(X),
-  and the scale repairs the input-side magnitude -- Gemma's exact
-  convention (inputs * sqrt(d), head unscaled).
+- `exp(y)` is the learned input scale, initialized to 1 (y0 = 0).
+  It was sqrt(X) -- Gemma's input-side repair for rows whose O(1)-
+  logit sizing leaves RMS ~1/sqrt(X) -- until 2026-08-16: fleet-wide
+  scale logs showed training walks the scale to ~O(1) regardless of
+  width, and an 89-conf frontier A/B measured no final-loss
+  difference between the two inits, so the intuitive one won (see
+  docs/tied_io.md).
 - There is NO implicit adapter and no `.direct` mode: scoring is
   always direct, which requires the chain's final width to equal X.
   A model that wants a projection before the table spells it as an
@@ -156,13 +159,16 @@ class EmbeddingCodecJax:
 
     def init_input_weights(self, rng: jax.Array):
         k_emb, k_pos = jax.random.split(rng)
-        # Rows ~ N(0, 1/X) per element: h @ E.T logits come out O(1),
-        # and the exp(y) input scale restores O(1) input activations.
+        # Rows ~ N(0, 1/X) per element: h @ E.T logits come out O(1).
+        # The learned exp(y) input scale starts at 1 and finds its own
+        # level (trained models settle near O(1) at every width; the
+        # sqrt(X) init this replaced measured as a no-op for final
+        # loss -- see the module docstring).
         scale = 1.0 / math.sqrt(self.size)
         w = {
             'emb': scale * jax.random.normal(
                 k_emb, (self.ntokens, self.size), dtype=self.dtype),
-            'y': jnp.asarray(0.5 * math.log(self.size), dtype=self.dtype),
+            'y': jnp.asarray(0.0, dtype=self.dtype),
         }
         if self.npositions > 1:
             w['pos'] = scale * jax.random.normal(

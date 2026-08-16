@@ -5,7 +5,8 @@ written: the component is called the **codec** — `OneHotCodec`
 (`layers/one_hot_codec.py`, the plain class below; the soft-cap is on
 by default after DB validation) and `EmbeddingCodec`
 (`layers/embedding_codec.py`, both tied rows of the table below;
-learned `exp(y)` input scale initialized to sqrt(d)), sharing
+learned `exp(y)` input scale initialized to 1 — sqrt(d) until
+2026-08-16, see the addendum below), sharing
 `layers/codec.py`. Mode-swap neighbors, emb width sync on structure
 mutations, and predictor featurization landed 2026-07-11; still
 pending: the Gemma end-to-end validation.
@@ -50,6 +51,34 @@ migration cost). Three realizations, the first two due to Oleg:
    adapter). `OneHotCodec` keeps its implicit dense head — a fixed
    codebook has nothing to score against, so there the head remains
    the only learnable output map.
+## Addendum (2026-08-16): scale init sqrt(d) → 1
+
+The sqrt(d) init was measured and retired. Two results, both from
+the fleet (analysis scripts in `scratch/`):
+
+1. **Training abandons sqrt(d).** ~195k `emb_scale.jsonl` records
+   across six machines: the learned `exp(y)` settles near **O(1) at
+   every width** — median absolute scale ~1.2/1.0/1.3/0.7/0.5/0.4 at
+   d = 1/2/4/8/16/32 against sqrt(d) up to 5.7, a fitted power law of
+   `scale ~ 1.09*d^-0.16` where the init predicts exponent +0.5.
+   Domain shifts the level (bytes ~1.6-2.4 > bits ~1.0-1.3 > tokens
+   ~0.6-0.8) but nothing approaches sqrt(d). Dynamics are
+   crash-then-recover: short runs undershoot the equilibrium, the
+   longest runs climb back toward ~1.
+2. **The init doesn't move final loss.** An 89-conf frontier A/B
+   (every emb.N>1 Pareto conf to 10k weights, one run per arm, same
+   machine): init-1 better on 45/89, median paired delta -0.0001 b/B
+   against a 0.017 run-noise scale — a wash overall, in every steps
+   bucket, and in both domains. Weak lean toward init-1 at emb.16
+   (better on 7/8, ~1x noise), the width where sqrt(d) strays
+   farthest from the equilibrium.
+
+So `y0 = 0`: the intuitive init at zero measured cost, and existing
+DB results stay comparable (the change is invisible at the
+final-loss level, which is what the search records). The Gemma
+conversion is unaffected — the converter writes its own
+`y = log(sqrt(2560))` into the stored weights.
+
 This is the decision log and migration plan from the 2026-07 design
 discussions; the user-facing description of how texmo IO works
 (including the parts designed here) lives in [`io.md`](io.md). The
@@ -125,15 +154,16 @@ continuity.
   is absolute mod-8 structure). `+bp` disappears from emb spellings:
   positions are always embedded. `bits.4.emb.8` = (16+2)*8 = 144 table
   weights.
-- **Input scale: one learned scalar, always on** (init sqrt(d)),
-  multiplying the lookup. The two roles of a shared table want
-  different magnitudes — loss pressure on logits drives rows to small
-  per-dim scale, while the input side wants stream-scale activations.
-  Gemma reconciles with a *fixed* sqrt(d) on input only (`x =
-  E[id]*sqrt(d)`; head unscaled); that constant is only right under
-  RMSNorm-everywhere, so texmo learns the scalar and the weight
-  converter sets it to sqrt(2560) for Gemma. No output-side
-  temperature (redundant against row scale).
+- **Input scale: one learned scalar, always on** (init 1; sqrt(d)
+  until 2026-08-16 — see the addendum below), multiplying the
+  lookup. The two roles of a shared table want different magnitudes —
+  loss pressure on logits drives rows to small per-dim scale, while
+  the input side wants stream-scale activations. Gemma reconciles
+  with a *fixed* sqrt(d) on input only (`x = E[id]*sqrt(d)`; head
+  unscaled); that constant is only right under RMSNorm-everywhere, so
+  texmo learns the scalar and the weight converter sets it to
+  sqrt(2560) for Gemma. No output-side temperature (redundant against
+  row scale).
 - The (known) next position's embedding is NOT added on the output
   side: candidates share the position, so its score contribution
   `<query, q_pos>` is constant across them and **cancels in softmax**

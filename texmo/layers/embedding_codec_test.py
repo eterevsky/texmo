@@ -86,10 +86,12 @@ def test_num_weights_with_positions():
     assert md.output.num_weights == 0
 
 
-def test_scale_init_is_sqrt_x():
+def test_scale_init_is_one():
+    # y0 = 0 (scale 1) since 2026-08-16; the sqrt(X) init measured as
+    # a no-op for final loss (see embedding_codec.py docstring).
     _, _, weights = _build("bytes.emb.16|dense.16.tanh")
     y = float(np.asarray(weights[0]['y']))
-    assert abs(math.exp(y) - 4.0) < 1e-5  # sqrt(16)
+    assert abs(math.exp(y) - 1.0) < 1e-5
 
 
 def test_head_is_tied_to_the_table():

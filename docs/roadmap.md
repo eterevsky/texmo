@@ -176,13 +176,6 @@ budget. Dream target: 32-64K weights.
   edges), promote the winners in append/swap priors, and settle
   pending conditionals (matGRU if matLSTM earns it).
 
-* **Embedding scale spread.** Every tied-codec run logs
-  (x, y, scale=exp(y), loss, spec) to results/emb_scale.jsonl on its
-  machine. Collect the files from the fleet and analyze the spread
-  of the learned input/output scale: does exp(y) stay near the
-  sqrt(X) init, does it depend on domain (bits vs bytes vs tokens),
-  width, or chain depth — and should the init (or a prior) change
-  accordingly.
 
 ## Infrastructure
 

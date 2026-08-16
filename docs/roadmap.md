@@ -226,37 +226,6 @@ budget. Dream target: 32-64K weights.
   have to hold. Revisit with caching / incremental candidate sets
   when it starts hurting client utilization.
 
-* **step/forward parity for consuming->stateful chains.** forward
-  drops the transient outputs of consuming layers (conv/suffix,
-  valid-trim), but step ticks all layers synchronously, so during the
-  total_padding warm-up any downstream STATEFUL layer ingests the
-  transients into its state (suffix.2-gru.4: |step-forward| ~0.33 at
-  position 0, decaying over the sample). Every conv/suffix->recurrent
-  model therefore trains (forward) on a slightly different function
-  than it evals (forward_recurrent = step path).
-
-  **This is the only known failing behaviour in the tree** — it is
-  pinned as the suite's only two xfails, and clearing them is the
-  deliverable:
-
-      model2_test.py::test_step_matches_forward_all_families
-        [bits.4.oh+bp|dense.8-conv.2-rglru.2]
-        [bits.1+bp|suffix.2-gru.4]
-
-  They are strict xfails, so whichever fix lands flips them to
-  passing on its own and the `xfail` markers come out with it. A
-  green-with-no-xfails suite is the acceptance test. Candidate fixes,
-  decision pending:
-  (a) make conv/suffix causal-pad internally (Gemma-style, no
-      consumption, no total_padding extras) -- a semantics change
-      for existing models;
-  (b) drop the synthetic no-beginning convention entirely (Oleg,
-      2026-07-13): train and eval on fragments that HAVE a first
-      token, and for from-scratch generation prompt with "\n" or
-      "\n\n" -- removes the max-entropy padding altogether, making
-      step == forward trivial and the model contract match how
-      pretrained LMs (BOS) already work.
-
 * **Per-entry bounds for sub-searches** (2026-08-10, out of the
   bits.1 scaling investigation; deprioritized 2026-08-16 — niche
   until another region-targeted measurement is actually wanted; the

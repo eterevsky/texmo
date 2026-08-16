@@ -61,21 +61,34 @@ class Model2Jax:
     def initial_step(self, weights) -> tuple[list, jax.Array]:
         """Predict the first token before any input has been seen.
 
-        Mirrors ModelJax.initial_step: feeds `total_padding` initial
-        vectors through the chain to warm up stateful sub-layers,
-        then projects the last activation through the output dense.
+        Prefills the `total_padding` prefix in forward semantics (see
+        LayerJax.prefill): the prefix is built exactly as
+        `codec.encode(..., padding=p)` builds it, then walked through
+        the chain layer by layer, each layer seeing the trimmed output
+        of the one before it. The resulting state is therefore the
+        state `forward` implicitly holds at position 0, and `logits0`
+        equals forward's position-0 logits.
+
+        This replaces a synchronous warm-up that ticked every layer p
+        times. That walk fed a consuming layer's transient outputs --
+        positions `forward` never emits -- into whatever stateful layer
+        followed it, permanently polluting that state (and double-
+        padding the consuming layer, which already zero-inits its own
+        buffer). The prefix walk drops those transients the way
+        training does.
         """
         input_state = self.codec.init_state()
-        layer_seq_state = self.layer_seq.init_state()
 
         p = self._total_padding
-        v = None
-        for i in range(p):
-            v = self.codec.initial_vector(weights[0], position=-p + i)
-            layer_seq_state, v = self.layer_seq.step(
-                weights[1], layer_seq_state, v)
+        prefix = jnp.stack([
+            self.codec.initial_vector(weights[0], position=-p + i)
+            for i in range(p)
+        ])
+        layer_seq_state, v = self.layer_seq.prefill(weights[1], prefix)
 
-        logits = self.codec.logits_step(weights[0], weights[-1], v)
+        # The chain consumes p-1 of the p prefix positions, leaving the
+        # single activation that predicts the first token.
+        logits = self.codec.logits_step(weights[0], weights[-1], v[-1])
         return [input_state, layer_seq_state], logits
 
     def step(

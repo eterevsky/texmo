@@ -19,9 +19,11 @@ class ConvJax(LayerJax):
     emitted by `forward` -- this matches the suffix-like convention
     the framework expects: every layer with `LayerDef.length == L`
     consumes L-1 positions, and `Model.total_padding` accumulates
-    them. For step-based inference the framework instead warms up
-    each stateful layer with L-1 padding iterations before any real
-    token, so `step` itself emits one output per call.
+    them. For step-based inference the framework prefills that padding
+    prefix instead (`Model2Jax.initial_step` -> `LayerJax.prefill`),
+    which loads this layer's buffer with the trailing L-1 prefix
+    positions and drops the transients, so `step` itself emits one
+    output per call.
 
     Input shape (B, T, D) -> output (B, T - L + 1, D).
     """

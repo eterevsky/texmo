@@ -73,6 +73,30 @@ class LayerSeqJax(LayerJax):
             v = layer.forward(lw, v)
         return v
 
+    def prefill(
+        self, weights: list[LayerWeights], inputs: jax.Array,
+    ) -> tuple[list[LayerState], jax.Array]:
+        """Prefill each sub-layer on its own upstream-trimmed prefix.
+
+        Threads the prefix through the chain the way `forward` threads
+        a sequence, so sub-layer i sees the *trimmed* output of layers
+        0..i-1 rather than a synchronous tick. That is what keeps a
+        consuming layer (conv/suffix) from feeding its transient
+        positions into a downstream stateful layer's state. The
+        returned list matches `init_state()` slot for slot, so `step`
+        consumes it unchanged.
+
+        Model2Def.total_padding (== this sequence's `length`) sizes the
+        incoming prefix so every sub-layer still has at least its own
+        `length` positions left after upstream trimming.
+        """
+        states: list[LayerState] = []
+        v = inputs
+        for layer, lw in zip(self.layers, weights):
+            ls, v = layer.prefill(lw, v)
+            states.append(ls)
+        return states, v
+
 
 class LayerSeqDef(LayerDef):
     """Ordered sequence of LayerDefs that behaves itself like a layer.

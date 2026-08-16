@@ -207,7 +207,7 @@ stabilisation for numerical bounds. JAX only.
 - Forward in JAX is a `lax.scan` over time — no parallel form like
   MSR's, since the exponential-gated cumulative product through
   `(f_st, i_st)` doesn't factor cleanly. The recurrent-eval path
-  (see `model_jax.forward_recurrent`) handles it the same way as
+  (see `model2_jax.forward_recurrent`) handles it the same way as
   any other scan-based layer.
 
 ## RG-LRU (`rglru.<blocks>`)

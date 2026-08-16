@@ -72,3 +72,37 @@ class LayerJax:
             (batch, seq_len, size).
         """
         raise NotImplementedError
+
+    def prefill(
+        self, weights: LayerWeights, inputs: jax.Array
+    ) -> tuple[LayerState, jax.Array]:
+        """Consume a prefix in forward semantics, keeping the state
+        `step` would continue from.
+
+        Args:
+            weights: from init_weights.
+            inputs: (prefix_len, input_size) -- unbatched, like `step`.
+
+        Returns:
+            (state, outputs) where `outputs` is exactly what `forward`
+            emits for this prefix -- so a consuming layer's transient
+            positions are trimmed away here, as they are in training --
+            and `state` is what `step` holds after ingesting every
+            prefix position.
+
+        The two halves come from the two existing paths, which every
+        layer's own tests already pin to agree: outputs from `forward`,
+        state by walking `step`. Walking `step` is safe here in a way
+        the old model-level warm-up was not, because the caller feeds
+        each layer its own upstream-trimmed prefix instead of ticking
+        the whole chain synchronously; the transient outputs are
+        dropped rather than propagated into a downstream state.
+
+        `init_state() is None` marks a stateless layer (see above), so
+        there is nothing to walk and the step loop is skipped.
+        """
+        state = self.init_state()
+        if state is not None:
+            for t in range(inputs.shape[0]):
+                state, _ = self.step(weights, state, inputs[t])
+        return state, self.forward(weights, inputs[jnp.newaxis])[0]

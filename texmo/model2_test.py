@@ -801,21 +801,26 @@ def test_appends_are_size_preserving_snapped():
     "bits.1+bp|rglru.4",
     "bytes.emb.4|rnn.4.tanh",
     "bits.2.emb.4|dense.4.tanh",
-    # KNOWN GAP: a consuming layer (conv/suffix, valid-trim in
-    # forward) followed by a STATEFUL layer breaks parity -- forward
-    # drops the transient outputs, but step ticks synchronously, so
-    # the downstream state ingests them during warm-up. Affects
-    # train (forward) vs eval (forward_recurrent) consistency for
-    # every such model; discovered by this sweep, resolution TBD
-    # (candidate: causal-pad conv/suffix internally, Gemma-style).
-    pytest.param(
-        "bits.4.oh+bp|dense.8-conv.2-rglru.2",
-        marks=pytest.mark.xfail(
-            reason="conv->stateful transient pollution", strict=True)),
-    pytest.param(
-        "bits.1+bp|suffix.2-gru.4",
-        marks=pytest.mark.xfail(
-            reason="suffix->stateful transient pollution", strict=True)),
+    # A consuming layer (conv/suffix, valid-trim in forward) followed
+    # by a STATEFUL one: forward drops the consuming layer's transient
+    # outputs, so the downstream state must never see them. The old
+    # synchronous warm-up ticked the whole chain and fed them in;
+    # initial_step now prefills the padding prefix in forward
+    # semantics instead (Model2Jax.initial_step -> LayerJax.prefill).
+    "bits.4.oh+bp|dense.8-conv.2-rglru.2",
+    "bits.1+bp|suffix.2-gru.4",
+    # Two consuming layers with a stateful one in between (padding
+    # accumulates to 3, and each consumer must trim on its own prefix).
+    "bits.1+bp|suffix.2-gru.4-conv.2",
+    # Consuming layer upstream of the matrix/KV-state families. These
+    # also pin position alignment: msr's and attn's step states carry a
+    # position counter, which must advance by the number of prefix
+    # positions the layer actually sees, not by total_padding.
+    "bits.4.oh+bp|dense.8-conv.2-dense.8.gelu-msr.4.1",
+    "bits.1+bp|suffix.2-dense.4.gelu-attn.4.1.4",
+    # Stateful branch inside a split fed by a consuming layer: the
+    # branch states have to land in the slots step() reads.
+    "bits.1+bp|conv.2-split.add(gru.4, pass)",
 ])
 def test_step_matches_forward_all_families(spec):
     _, model, weights = _build2(spec, seed=7)

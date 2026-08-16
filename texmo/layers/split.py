@@ -119,9 +119,12 @@ def _merged_size(op: str, branch_sizes: list[int]) -> int:
 def _align_branch_outputs(
     branch_outs: list[jax.Array], branch_consumed: list[int],
 ) -> list[jax.Array]:
+    # Slices the time axis positionally from the end (..., T, D) so the
+    # same helper serves batched forward (B, T, D) and the unbatched
+    # (T, D) prefix walk.
     target = max(branch_consumed)
     return [
-        out if c == target else out[:, target - c:, :]
+        out if c == target else out[..., target - c:, :]
         for out, c in zip(branch_outs, branch_consumed)
     ]
 
@@ -192,6 +195,26 @@ class SplitJax(LayerJax):
         aligned = _align_branch_outputs(
             branch_outs, self._branch_consumed)
         return _merge_all(self.op, aligned)
+
+    def prefill(
+        self, weights: list[LayerWeights], inputs: jax.Array,
+    ) -> tuple[list[LayerState], jax.Array]:
+        """Prefill every branch on the same prefix, then merge.
+
+        Mirrors `forward`: each branch walks the whole prefix
+        independently and the outputs are trimmed to the
+        most-consuming branch before the merge, so the returned
+        activation matches what `forward` produces at that position.
+        Per-branch states land in the same list slots `step` reads.
+        """
+        states: list[LayerState] = []
+        outs: list[jax.Array] = []
+        for branch, bw in zip(self.branches, weights):
+            bs, out = branch.prefill(bw, inputs)
+            states.append(bs)
+            outs.append(out)
+        aligned = _align_branch_outputs(outs, self._branch_consumed)
+        return states, _merge_all(self.op, aligned)
 
 
 class SplitDef(LayerDef):

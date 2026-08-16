@@ -91,6 +91,18 @@ Given a parameter budget N and compute budget T, answer:
   back out. Settle it the same way, from the DB (see the layer-audit
   bullet under Analysis).
 
+* **NoPE attention — no position encoding** (2026-08-16 idea, not
+  urgent). `attn` always applies rotary embeddings; a NoPE variant
+  drops them entirely. Causal LMs demonstrably work without explicit
+  position encoding (the causal mask leaks position; Haviv et al.
+  2022, Kazemnejad et al. 2023 — the latter finds NoPE length-
+  generalizes *better*), and at our window sizes (4–16) the rotation
+  may be pure overhead — we are dispatch- and elementwise-bound, and
+  RoPE is weightless, so dropping it changes cost but not
+  `num_weights`. To settle: the spelling (a variant flag on the attn
+  spec vs a separate type) and its neighbor edge (swap with plain
+  attn at equal shape), then let the search price it.
+
 ### Candidates to revisit
 
 * **HGRN2** (Qin et al. 2024, "Hierarchically Gated Recurrent
@@ -252,8 +264,10 @@ budget. Dream target: 32-64K weights.
   `Template`, so this is two optional bound overrides plus two form
   columns.
 
-* **Exclusion regexes for sub-searches** (2026-08-15 idea). A lot of
-  the top confs cluster around one structure — a byproduct of
+* **Exclusion regexes for sub-searches** (2026-08-15 idea;
+  deprioritized 2026-08-16 — the top confs have since diversified on
+  their own; revisit if one shape re-colonizes the leaderboard). A
+  lot of the top confs cluster around one structure — a byproduct of
   neighbor search: whatever leads the frontier gets mutated the most,
   so its shape colonizes the leaderboard whether or not the lead is
   structural. The mirror of the positive sub-searches: give a % of

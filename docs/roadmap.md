@@ -34,7 +34,14 @@ Given a parameter budget N and compute budget T, answer:
   ~1000-weight budgets, in-place adaptation may matter more than at
   scale.
 
-* **`bits.8.gen.X` — bitwise generative IO** (2026-08-08 idea). Not a
+* **`bits.8.gen.X` — bitwise generative IO** (2026-08-08 idea;
+  deferred 2026-08-17 to overlap with the chatbot program — a good
+  fit for the stretch while synthetic dialog data generates. Design
+  settled 2026-08-16: the generator is a dense-shaped cell
+  `state_n = tanh(W·[h, bit_{n-1}, state_{n-1}] + b)` with the logit
+  read out linearly — no activation on the logit, which would cap
+  bit confidence — `h` fed at every bit, state zero-initialized;
+  still open: the IO-ladder neighbor bridge). Not a
   hidden layer but a fourth IO kind (see [`io.md`](io.md)), replacing
   both ends of the model at once:
   - **Input**: the byte as 8 raw bit values — width 8, no one-hot, no

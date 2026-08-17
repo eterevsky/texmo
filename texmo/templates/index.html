@@ -36,6 +36,10 @@
             table.entry-form input.c-name {
                 width: 6rem;
             }
+            table.entry-form select.c-preset {
+                margin-bottom: 0.15rem;
+                max-width: 100%;
+            }
             table.entry-form input.c-share {
                 width: 4rem;
             }
@@ -103,6 +107,20 @@
                 });
             }
             document.addEventListener('DOMContentLoaded', updateShares);
+
+            // --- named regex presets ---------------------------------
+            // The dropdown is a filler, not a field: it has no `name`,
+            // so nothing about it is posted. It copies the stored
+            // pattern into this row's regex/default inputs, which stay
+            // the authoritative values for /update -- pick a preset,
+            // then edit it freely before submitting. "Unrestricted"
+            // carries empty data and so clears both.
+            function applyPreset(select) {
+                const opt = select.options[select.selectedIndex];
+                const row = select.closest('tr');
+                row.querySelector('.c-regex').value = opt.dataset.regex || '';
+                row.querySelector('.c-spec').value = opt.dataset.default || '';
+            }
 
             function copyCmd(el) {
                 const cmd = el.dataset.cmd;
@@ -209,6 +227,12 @@
                             <tr>
                                 <td><input type="text" name="entry_name" value="{{ e.name }}" class="c-name"></td>
                                 <td class="c-specs">
+                                    <label>preset<select class="c-preset" onchange="applyPreset(this)">
+                                        <option data-regex="" data-default="">{{ reserved_regex_name }}</option>
+                                        {% for p in regex_presets %}
+                                        <option data-regex="{{ p.regex }}" data-default="{{ p.default_spec }}">{{ p.name }}</option>
+                                        {% endfor %}
+                                    </select></label>
                                     <label>regex<input type="text" name="entry_regex" value="{{ e.regex }}" class="c-regex" placeholder="(blank = unrestricted)"></label>
                                     <label>default<input type="text" name="entry_default_spec" value="{{ e.default_spec }}" class="c-spec" placeholder="(blank = derived from the regex)"></label>
                                 </td>
@@ -222,6 +246,12 @@
                             <tr>
                                 <td><input type="text" name="entry_name" value="" class="c-name"></td>
                                 <td class="c-specs">
+                                    <label>preset<select class="c-preset" onchange="applyPreset(this)">
+                                        <option data-regex="" data-default="">{{ reserved_regex_name }}</option>
+                                        {% for p in regex_presets %}
+                                        <option data-regex="{{ p.regex }}" data-default="{{ p.default_spec }}">{{ p.name }}</option>
+                                        {% endfor %}
+                                    </select></label>
                                     <label>regex<input type="text" name="entry_regex" value="" class="c-regex" placeholder="(blank = unrestricted)"></label>
                                     <label>default<input type="text" name="entry_default_spec" value="" class="c-spec" placeholder="(blank = derived from the regex)"></label>
                                 </td>
@@ -237,7 +267,11 @@
                         (the % after each share is what it works out to). A blank regex means
                         unrestricted; a blank default spec is derived from the regex. Rows left
                         entirely blank are ignored &mdash; with none left, the search runs
-                        unrestricted as a single <code>main</code> entry.</small>
+                        unrestricted as a single <code>main</code> entry.
+                        The <em>preset</em> dropdown fills a row from
+                        <code>named_regexes.json</code> (hand-edited, next to
+                        <code>config.py</code>, re-read on every page load); what ends up in the
+                        regex and default boxes is what gets submitted.</small>
                     </td>
                 </tr>
                 <tr>

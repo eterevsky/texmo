@@ -1,0 +1,6 @@
+{
+  "transformers": {
+    "regex": ".*\\|(-?(split.add\\()?((rms)?norm-)?(attn|msr)(\\.(\\d|\\w)+)+(-(rms)?norm)?(,\\s*pass\\))?-(split.add\\()?((rms)?norm-)?dense\\.\\d+\\.\\w+-?(norm|rmsnorm)?(,\\s*pass\\))?)+(-(rms)?norm)?",
+    "default_spec": "bits.2.emb.1|msr.1.1.nope-dense.1.silu"
+  }
+}

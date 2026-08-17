@@ -310,10 +310,68 @@ a graph (score vs. weights, Pareto frontier), and a table of top configs.
   bad regex, a `default_spec` outside its own entry) is rejected with
   the error banner, leaves the running search alone, and comes back
   with the submitted values still in the fields.
+- **Preset dropdown** — per sub-search row, fills the regex and
+  default boxes from a saved pattern (see below). It has no `name`
+  attribute, so nothing about it is posted: the text boxes remain the
+  values `/update` reads, and a preset is a starting point you can
+  edit before submitting. `/compare` gets the same dropdown next to
+  each of its two spec-regex boxes.
 - **System dropdown** — filters the graph and table to configs that have
   at least one run on the selected system.
 - **Sub-search dropdown** — with a template set configured, filters the
   graph and table to one entry's frontier.
 - **Copy link** — each row has a "copy" link that copies a
   `uv run texmo.py train ...` command to the clipboard.
+
+### Named regex presets (`named_regexes.json`)
+
+Sub-search regexes worth keeping are long and fiddly, and the live
+template state is rebuilt on every `/update` — so without somewhere to
+put them, a pattern that took real effort to get right lives only as
+long as the browser tab. Presets are that place.
+
+The store is **hand-edited**: a JSON file named `named_regexes.json`
+in the repo top directory, next to `config.py` (per-host personal
+state, so it is gitignored — there is no UI for editing it, and the
+server never writes to it). `named_regexes_sample.json` is a
+committed starter — copy it over, like `config_sample.py` — carrying
+a real transformer-block pattern with the JSON escaping already
+right. Name → pattern, `default_spec` optional:
+
+```json
+{
+  "transformers": {
+    "regex": ".*\\|split\\.add\\(.*attn.*",
+    "default_spec": "bytes|split.add(norm-attn.8.2.8, pass)"
+  },
+  "recurrent": {"regex": ".*\\|.*(gru|lstm|rnn)\\..*"},
+  "tied codec": {"regex": ".*emb.*"}
+}
+```
+
+Remember that JSON needs its backslashes doubled: a regex
+`.*\|attn.*` is written `".*\\|attn.*"`.
+
+Behaviour worth knowing:
+
+- **Read fresh on every page render**, never cached. Edit the file,
+  refresh the page, the dropdown is current — no restart. (The file is
+  tiny; this costs nothing.)
+- **Lenient loading.** A hand-edited file must never take the page
+  down, so anything unusable is skipped with a `logging.warning`
+  naming the entry, and the rest still render. Skipped: entries whose
+  value isn't an object, entries with no `regex` (or a blank one), a
+  `regex` that doesn't compile (the DB's `REGEXP` bridge uses the same
+  `re` module, so it could never match anyway), blank names, and
+  duplicates. A file that doesn't parse as JSON, or isn't a
+  JSON object, means no presets at all — again with a warning. A
+  missing file is normal and silent.
+- **`Unrestricted` is reserved.** Every dropdown offers it first as
+  the virtual "no spec filter" choice (picking it clears the row), so
+  a stored entry by that name could never be selected and is skipped,
+  case-insensitively.
+- **`default_spec` is not validated at load time.** A typo there
+  surfaces on `/update`, where the existing entry validation reports
+  it in the error banner with the surrounding context — see
+  `TemplateEntry`.
 

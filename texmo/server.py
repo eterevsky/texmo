@@ -38,6 +38,7 @@ from .configuration import (
     default_from_template,
     format_lr,
 )
+from . import named_regexes
 from .db import ConfScore, DbReader, DbWriter
 from .db.writer import DbWriterProxy, Stop as WriterStop, WriterThread
 from .latency import get_report, report, timer
@@ -679,6 +680,10 @@ class SearchServer(object):
             show_entries=not templates.is_single,
             entry_names=templates.names,
             selected_entry=selected_entry or '',
+            # Re-read per render: the file is hand-edited outside the
+            # server, so anything cached would go stale silently.
+            regex_presets=named_regexes.load(),
+            reserved_regex_name=named_regexes.RESERVED_NAME,
             error=error,
         )
 
@@ -900,6 +905,8 @@ class SearchServer(object):
             top2=top2,
             entry_names=self.templates.names,
             show_entries=not self.templates.is_single,
+            regex_presets=named_regexes.load(),
+            reserved_regex_name=named_regexes.RESERVED_NAME,
         )
 
     def _maybe_grant_refit(self, system: str) -> Optional[dict]:

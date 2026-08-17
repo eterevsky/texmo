@@ -6,6 +6,7 @@
 !/data/pride*
 /gemma
 /log.txt
+/named_regexes.json
 /results
 /scratch
 /setup.txt

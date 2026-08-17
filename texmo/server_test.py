@@ -18,6 +18,7 @@ matplotlib.use('Agg')
 
 from texmo.common import INF
 from texmo.configuration import Configuration, Template
+from texmo import named_regexes
 from texmo.db import DbReader, DbWriter
 from texmo.spec_parser import parse_model2
 from texmo.precision import Precision
@@ -69,6 +70,8 @@ def _render(**overrides):
         systems=[],
         selected_system=None,
         entry_form=[_BLANK_ROW],
+        regex_presets=[],
+        reserved_regex_name=named_regexes.RESERVED_NAME,
         error=None,
     )
     defaults.update(overrides)
@@ -533,6 +536,87 @@ def test_server_wires_writer_panic_path(tmp_path):
         server.join()
 
 
+def _preset_names_in_select(html: str) -> list[str]:
+    """Option labels of the first preset dropdown in `html`."""
+    block = html.split('class="c-preset"', 1)[1].split('</select>', 1)[0]
+    return [
+        chunk.split('>', 1)[1].split('<', 1)[0].strip()
+        for chunk in block.split('<option')[1:]
+    ]
+
+
+def test_index_preset_dropdown_lists_unrestricted_first(tmp_path):
+    """Stored names come after the virtual 'Unrestricted' entry, in
+    alphabetical order, with their pattern on the option for the JS
+    filler to copy."""
+    html = _render(regex_presets=[
+        {'name': 'attention', 'regex': '.*attn.*',
+         'default_spec': 'bytes|attn.4.1'},
+        {'name': 'recurrent', 'regex': '.*gru.*', 'default_spec': ''},
+    ])
+    assert _preset_names_in_select(html) == [
+        named_regexes.RESERVED_NAME, 'attention', 'recurrent']
+    assert 'data-regex=".*attn.*"' in html
+    assert 'data-default="bytes|attn.4.1"' in html
+    # The dropdown is a filler, never a submitted field: /update reads
+    # entry_regex / entry_default_spec and must not see a preset name.
+    assert 'name="entry_preset"' not in html
+
+
+def test_index_preset_dropdown_with_no_presets(tmp_path):
+    html = _render(regex_presets=[])
+    assert _preset_names_in_select(html) == [named_regexes.RESERVED_NAME]
+
+
+def test_index_rereads_presets_on_every_render(tmp_path, monkeypatch):
+    """The file is hand-edited behind the server's back, so a refresh
+    has to show the edit -- nothing may cache it."""
+    store = tmp_path / 'named_regexes.json'
+    monkeypatch.setattr(named_regexes, 'PATH', str(store))
+    store.write_text(
+        '{"before": {"regex": ".*gru.*"}}', encoding='utf-8')
+    path = str(tmp_path / "db.sqlite")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        with _make_app().test_request_context():
+            first = server.index()
+            store.write_text(
+                '{"after": {"regex": ".*lstm.*"}}', encoding='utf-8')
+            second = server.index()
+    finally:
+        server.join()
+
+    assert 'before' in _preset_names_in_select(first)
+    assert _preset_names_in_select(second) == [
+        named_regexes.RESERVED_NAME, 'after']
+
+
+def test_compare_page_offers_the_same_presets(tmp_path, monkeypatch):
+    """compare.html has its own spec-regex boxes, so it gets the same
+    dropdown (filling the box, which stays authoritative)."""
+    store = tmp_path / 'named_regexes.json'
+    monkeypatch.setattr(named_regexes, 'PATH', str(store))
+    store.write_text(
+        '{"recurrent": {"regex": ".*gru.*"}}', encoding='utf-8')
+    path = str(tmp_path / "db.sqlite")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        with _make_app().test_request_context():
+            html = server.compare(MultiDict())
+    finally:
+        server.join()
+
+    assert 'recurrent' in html
+    assert 'data-regex=".*gru.*"' in html
+    assert named_regexes.RESERVED_NAME in html
+
+
 def test_every_server_thread_is_a_daemon(tmp_path):
     """Every thread a server starts must be a daemon.
 
@@ -679,10 +763,13 @@ def test_index_stacks_the_two_spec_inputs_in_one_column():
     html = _render(entry_form=[_BLANK_ROW])
     row = html.split('id="entry-rows"', 1)[1].split('</tbody>', 1)[0]
     cell = row.split('class="c-specs"', 1)[1].split('</td>', 1)[0]
-    # Both inputs in the SAME cell, each inside its own label.
+    # Both inputs in the SAME cell, each inside its own label, under
+    # the preset dropdown that fills them.
     assert cell.count('name="entry_regex"') == 1
     assert cell.count('name="entry_default_spec"') == 1
-    assert cell.count('<label>') == 2
+    assert cell.count('<label>') == 3
+    assert (cell.index('c-preset') < cell.index('class="c-regex"')
+            < cell.index('class="c-spec"'))
     assert 'input.c-regex,' in html and 'width: 100%;' in html
 
 
@@ -882,9 +969,15 @@ def test_search_server_update_rejects_a_bad_template_set(tmp_path):
         server.join()
 
 
-def test_search_server_index_filters_the_frontier_by_entry(tmp_path):
+def test_search_server_index_filters_the_frontier_by_entry(
+        tmp_path, monkeypatch):
     """The top-confs view can be narrowed to one sub-search by applying
     its regex at query time."""
+    # The tmp DB is non-empty at construction, so the startup LossRefit
+    # fallback would run the real 8000-step production fit (~70 s) with
+    # join() waiting for it. Stub it -- this test is about the index
+    # query, not the predictor.
+    monkeypatch.setattr(loss_tree, "train_loss_model", lambda reader: None)
     path = str(tmp_path / "test.db")
     conf_dense = Configuration(
         model=parse_model2("bytes|dense.4.gelu", precision=Precision.FP32),

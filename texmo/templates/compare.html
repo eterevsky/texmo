@@ -17,6 +17,15 @@
             }
         </style>
         <script>
+            // Named presets fill the spec-regex box; the box itself
+            // stays the value that gets submitted, so a preset is a
+            // starting point you can edit. See texmo/named_regexes.py.
+            function applyPreset(select, targetId) {
+                const opt = select.options[select.selectedIndex];
+                document.getElementById(targetId).value =
+                    opt.dataset.regex || '';
+            }
+
             function copyCmd(el) {
                 const cmd = el.dataset.cmd;
                 const flash = () => {
@@ -65,8 +74,18 @@
                 </tr>
                 <tr>
                     <td>Spec regex:</td>
-                    <td><input type="text" name="t1_spec" value="{{ form.t1_spec }}"></td>
-                    <td><input type="text" name="t2_spec" value="{{ form.t2_spec }}"></td>
+                    {% for prefix in ['t1', 't2'] %}
+                    <td>
+                        <input type="text" name="{{ prefix }}_spec" value="{{ form[prefix + '_spec'] }}" id="{{ prefix }}_spec">
+                        <br>
+                        <select onchange="applyPreset(this, '{{ prefix }}_spec')">
+                            <option data-regex="">{{ reserved_regex_name }}</option>
+                            {% for p in regex_presets %}
+                            <option data-regex="{{ p.regex }}">{{ p.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    {% endfor %}
                 </tr>
                 {% if show_entries %}
                 <tr>

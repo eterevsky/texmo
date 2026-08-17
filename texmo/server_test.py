@@ -182,7 +182,14 @@ def _make_template(spec="bytes|dense.32.gelu"):
     )
 
 
-def test_search_server_add_run_writes_median_estimate(tmp_path):
+def test_search_server_add_run_writes_median_estimate(
+        tmp_path, monkeypatch):
+    # Stub the async startup LossRefit: if it loses the race with
+    # this test's add_run, it sees a labeled run and does the real
+    # 8000-step fit with join() waiting (see the frontier-filter
+    # test).
+    monkeypatch.setattr(loss_tree, "train_loss_model",
+                        lambda reader: None)
     path = str(tmp_path / "test.db")
     server = SearchServer(
         path, _make_template(),
@@ -296,8 +303,15 @@ def test_search_server_update_default_spec_overrides_unresolvable_regex(tmp_path
         server.join()
 
 
-def test_search_server_add_run_does_not_overwrite_median_with_prediction(tmp_path):
+def test_search_server_add_run_does_not_overwrite_median_with_prediction(
+        tmp_path, monkeypatch):
     """A predicted estimate must not later replace a median estimate."""
+    # Stub the async startup LossRefit: if it loses the race with
+    # this test's add_run, it sees a labeled run and does the real
+    # 8000-step fit with join() waiting (see the frontier-filter
+    # test).
+    monkeypatch.setattr(loss_tree, "train_loss_model",
+                        lambda reader: None)
     path = str(tmp_path / "test.db")
 
     # Pre-seed a 'predicted' estimate for the conf we're about to run.
@@ -421,6 +435,12 @@ def test_client_refit_grant_and_submit(tmp_path, monkeypatch):
     with DbWriter(path):
         pass
     monkeypatch.setattr(server_mod, "LOSS_REFIT_EVERY", 1)
+    # Stub the async startup LossRefit: if it loses the race with
+    # this test's add_run, it sees a labeled run and does the real
+    # 8000-step fit with join() waiting (see the frontier-filter
+    # test).
+    monkeypatch.setattr(loss_tree, "train_loss_model",
+                        lambda reader: None)
     server = SearchServer(
         path, _make_template(),
         train_time=(1.0, 16.0), default_spec=None,
@@ -491,6 +511,12 @@ def test_server_mode_grants_no_refit_jobs(tmp_path, monkeypatch):
     with DbWriter(path):
         pass
     monkeypatch.setattr(server_mod, "LOSS_REFIT_EVERY", 1)
+    # Stub the async startup LossRefit: if it loses the race with
+    # this test's add_run, it sees a labeled run and does the real
+    # 8000-step fit with join() waiting (see the frontier-filter
+    # test).
+    monkeypatch.setattr(loss_tree, "train_loss_model",
+                        lambda reader: None)
     server = SearchServer(
         path, _make_template(),
         train_time=(1.0, 16.0), default_spec=None,

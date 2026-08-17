@@ -119,6 +119,7 @@ def build_throughput_graph(
     ax.legend(loc='best', fontsize='small')
     f = io.BytesIO()
     plt.savefig(f, format='png')
+    plt.close(_fig)
     return f.getvalue()
 
 
@@ -188,6 +189,7 @@ def build_fastest_loss_graph(
     ax.set_ylabel('loss at near-best (b/B)')
     f = io.BytesIO()
     plt.savefig(f, format='png')
+    plt.close(_fig)
     return f.getvalue()
 
 
@@ -220,4 +222,5 @@ def build_fastest_time_graph(
     ax.set_ylabel('fastest time to near-best loss')
     f = io.BytesIO()
     plt.savefig(f, format='png')
+    plt.close(_fig)
     return f.getvalue()

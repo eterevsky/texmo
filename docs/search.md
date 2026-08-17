@@ -32,7 +32,10 @@ against a mature general population and is starved before it can be
 fairly measured.
 
 Configured with `--templates <path.json>`, or row by row in the
-sub-search table on the index page (same thing, two spellings):
+sub-search table on the index page. The two are the same object, but
+not the same spelling: the JSON carries patterns inline, while a UI
+row names a **preset** and the server resolves it (see [Named regex
+presets](#named-regex-presets-named_regexesjson)).
 
 ```json
 [
@@ -296,30 +299,44 @@ a graph (score vs. weights, Pareto frontier), and a table of top configs.
   (atomic swap, not mutation). It holds the bounds shared by every
   entry (weights, layers, length, batch, steps, lr, time, precisions,
   decay types) and **no spec field**.
-- **Sub-search rows** — one row per entry: name, the two model specs
-  (regex and default, stacked full-width in one column since real ones
-  run 40-80 characters), and share, with Add / Remove buttons and a
-  live-computed normalized percentage next to each share. There is
-  always at least one row; with no sub-searches configured it is a
-  single `main` row whose blank regex means unrestricted. The four
-  fields post as parallel repeated fields (`entry_name`, `entry_regex`,
-  `entry_default_spec`, `entry_share`) and are zipped back by position;
-  rows left entirely blank are dropped. The set is rebuilt against the
-  new base template on every update; anything malformed (a nameless or
-  shareless row, a non-numeric or negative share, duplicate names, a
-  bad regex, a `default_spec` outside its own entry) is rejected with
-  the error banner, leaves the running search alone, and comes back
-  with the submitted values still in the fields.
-- **Preset dropdown** — per sub-search row, fills the regex and
-  default boxes from a saved pattern (see below). It has no `name`
-  attribute, so nothing about it is posted: the text boxes remain the
-  values `/update` reads, and a preset is a starting point you can
-  edit before submitting. `/compare` gets the same dropdown next to
-  each of its two spec-regex boxes.
+- **Sub-search table** — one row per entry, editing and monitoring in
+  the same place: a **preset** dropdown (the row's identity *and* its
+  spec filter), an editable **share** with a live-computed normalized
+  percentage, the row's **regex and default** rendered read-only
+  (stacked full-width in one column, since real ones run 40-80
+  characters), its **live stats** (nominal vs realized share, select
+  count, default conf, linking to that entry's frontier), and Remove.
+  Add appends a row on `Unrestricted` with an empty share.
+
+  Only two fields post — `entry_preset` and `entry_share`, as parallel
+  repeated fields zipped back by position. **The regex is not
+  submittable**: `/update` resolves each preset name against
+  `named_regexes.json` as of that request and snapshots the result
+  into the entry. There is always at least one row; with no
+  sub-searches configured it is a single `Unrestricted` row, which is
+  the `main` entry (see below). Rows still on `Unrestricted` with a
+  blank share are dropped as untouched. The set is rebuilt against the
+  new base template on every update; anything malformed (a shareless
+  row, a non-numeric or negative share, the same preset on two rows, a
+  preset that is no longer in the file, or a `default_spec` outside
+  its own entry) is rejected with the error banner, leaves the running
+  search alone, and comes back with the submitted rows still selected.
+- **Spec filter on `/compare`** — one control per column: the same
+  preset dropdown, posting `t1_preset` / `t2_preset` as the column's
+  whole spec filter. (It replaced three overlapping controls — a
+  free-text regex box, a dropdown that filled it, and a sub-search
+  select that overrode it — once sub-search entries became presets and
+  the three could disagree.) Names resolve fresh per render, so a
+  bookmarked compare URL naming a preset that has since been edited
+  out renders the form with an error line rather than failing, and
+  keeps the name selected so the link works again once the file does.
+  Compare uses the preset's regex only; `default_spec` seeds a
+  sub-search and means nothing to a query.
 - **System dropdown** — filters the graph and table to configs that have
   at least one run on the selected system.
 - **Sub-search dropdown** — with a template set configured, filters the
-  graph and table to one entry's frontier.
+  index graph and table to one entry's frontier by name (`?entry=`);
+  entry names are preset names now, except the unrestricted `main`.
 - **Copy link** — each row has a "copy" link that copies a
   `uv run texmo.py train ...` command to the clipboard.
 
@@ -352,11 +369,36 @@ right. Name → pattern, `default_spec` optional:
 Remember that JSON needs its backslashes doubled: a regex
 `.*\|attn.*` is written `".*\\|attn.*"`.
 
+Presets are the **only** way to name a spec filter in the UI: both the
+index form and the compare columns post preset names, never patterns.
+Iterating on a regex therefore means editing this file and reloading —
+which is also what makes the pattern reviewable and reusable instead
+of living in one browser tab.
+
 Behaviour worth knowing:
 
-- **Read fresh on every page render**, never cached. Edit the file,
-  refresh the page, the dropdown is current — no restart. (The file is
-  tiny; this costs nothing.)
+- **Read fresh on every page render and on every Update**, never
+  cached. Edit the file, refresh, the dropdown is current — no
+  restart. (The file is tiny; this costs nothing.)
+- **Resolved at Update, then snapshotted.** The entry keeps the regex
+  and default it was built with, so editing the file cannot quietly
+  change what a running search is doing. Until the next Update the two
+  can differ, and the row says so: a ⚠ marker whose tooltip explains
+  whether the preset has changed or disappeared. That is information,
+  never an error — nothing is rejected until you press Update.
+- **Entry names are preset names.** They key the select counters and
+  the per-(system, entry) coverage flags, so renaming a preset in the
+  file and re-applying it starts that entry's coverage bookkeeping
+  fresh. The `Unrestricted` row is the exception: it maps to the
+  historical `main` entry name, so the unrestricted search keeps its
+  identity and counters across the switch to presets.
+- **A name that no longer resolves** (deleted from the file, or an
+  entry that arrived via `--templates` / `--spec` and never was a
+  preset) still renders as a selectable option, so the form
+  round-trips and the row can be seen and fixed; pressing Update with
+  it still selected is what reports the error. When a `--spec` pattern
+  is textually equal to a preset's, the row starts on that preset
+  instead.
 - **Lenient loading.** A hand-edited file must never take the page
   down, so anything unusable is skipped with a `logging.warning`
   naming the entry, and the rest still render. Skipped: entries whose

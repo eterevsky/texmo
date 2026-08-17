@@ -32,6 +32,7 @@ from .configuration import (
     Bounds,
     Configuration,
     DecayType,
+    MAIN_ENTRY,
     Precision,
     Template,
     TemplateSet,
@@ -118,9 +119,13 @@ def build_graph(confs: list[Configuration]) -> bytes:
 
     plt.plot(xs, ys)
     plt.xlabel('weights')
-    plt.ylabel('enthropy, b/B')
+    plt.ylabel('entropy, b/B')
     f = io.BytesIO()
     plt.savefig(f, format='png')
+    # Every index render lands here; without the close the figures
+    # accumulate for the server's lifetime (pyplot keeps a global
+    # registry, so `_fig` going out of scope frees nothing).
+    plt.close(_fig)
     return f.getvalue()
 
 
@@ -199,6 +204,7 @@ def build_diff_graph(
 
     f = io.BytesIO()
     plt.savefig(f, format='png')
+    plt.close(_fig)
     return f.getvalue()
 
 
@@ -217,25 +223,26 @@ def _strip_prefix(form: dict, prefix: str) -> dict:
     return {k[len(head):]: v for k, v in form.items() if k.startswith(head)}
 
 
-def _template_from_compare_form(form: dict, prefix: str) -> Template:
+def _template_from_compare_form(
+    form: dict, prefix: str, spec: Optional[str],
+) -> Template:
     """Build a Template from prefixed compare-form fields, plumbing the
     shared `weights` value through unchanged.
 
-    Unlike the index form, a compare column DOES have its own spec box
-    (each column is a free-form query, not the live search), so the spec
-    is passed to `from_form` explicitly."""
+    The spec filter comes from the column's preset (resolved by the
+    caller), not from the form fields."""
     sub = _strip_prefix(form, prefix)
     sub['weights'] = form.get('weights', '')
-    return Template.from_form(sub, spec=sub.get('spec') or None)
+    return Template.from_form(sub, spec=spec)
 
 
-# The sub-search table posts four parallel repeated fields, one value
+# The sub-search table posts two parallel repeated fields, one value
 # per row per field; rows are reassembled by position. Order matches
-# the columns in index.html.
+# the columns in index.html. The regex and default spec are NOT
+# posted: they come from the named preset (see `_resolve_entry_rows`),
+# which is the whole point of presets-only sub-searches.
 _ENTRY_FORM_FIELDS = (
-    ('name', 'entry_name'),
-    ('regex', 'entry_regex'),
-    ('default_spec', 'entry_default_spec'),
+    ('preset', 'entry_preset'),
     ('share', 'entry_share'),
 )
 
@@ -256,20 +263,78 @@ def _entry_rows_from_form(params) -> list[dict]:
     ]
 
 
-def _apply_entry(
-    template: Template, name: str, templates: TemplateSet,
-) -> Template:
-    """Restrict a compare column to one sub-search: the entry's spec
-    filter replaces whatever the column's spec field held. An unknown
-    (or empty) name leaves the template alone; the main entry's empty
-    filter clears the column's spec, which is what "unrestricted"
-    means."""
-    if not name:
-        return template
-    entry = templates.by_name(name)
-    if entry is None:
-        return template
-    return template.with_spec(entry.spec)
+def _is_unrestricted(preset: str) -> bool:
+    """True for the virtual no-filter choice. A blank value counts:
+    a hand-built POST that omits the field means the same thing."""
+    return (not preset
+            or preset.strip().lower() == named_regexes.RESERVED_NAME.lower())
+
+
+def _lookup_preset(name: str, presets: list[dict]) -> Optional[dict]:
+    """The stored preset `name` selects, or None for the unrestricted
+    choice.
+
+    Raises ValueError when the name doesn't resolve any more -- the
+    file is hand-edited, so both the index form and a bookmarked
+    compare URL can outlive the entry they name.
+    """
+    if _is_unrestricted(name):
+        return None
+    for preset in presets:
+        if preset['name'] == name:
+            return preset
+    raise ValueError(
+        f'preset {name!r} is not in {named_regexes.PATH} any more')
+
+
+def _resolve_entry_rows(rows: list[dict], presets: list[dict]) -> list[dict]:
+    """Turn posted (preset, share) pairs into `TemplateSet.from_rows`
+    rows, looking each name up in the presets read for this request.
+
+    The resolved regex and default spec are snapshotted into the live
+    template set here, so later edits to the preset file cannot
+    quietly change a running search -- adopting them takes another
+    Update. The entry name is the preset name, except the
+    unrestricted row, which keeps the historical `main` identity so
+    its coverage keys and select counters survive the switch.
+
+    Raises ValueError (-> error banner, live template untouched) for a
+    name that no longer resolves, or for the same preset twice.
+    """
+    out: list[dict] = []
+    seen: dict[str, tuple[str, int]] = {}
+    for i, row in enumerate(rows):
+        preset = row['preset']
+        share = row['share']
+        unrestricted = _is_unrestricted(preset)
+        if unrestricted and not share:
+            # An untouched row from the Add button: ignore it rather
+            # than make the user delete it again.
+            continue
+        try:
+            entry = _lookup_preset(preset, presets)
+        except ValueError as exc:
+            raise ValueError(
+                f'sub-search row {i + 1}: {exc} -- re-add it there, or '
+                f'pick another preset for this row') from None
+        if entry is None:
+            name, regex, default_spec = MAIN_ENTRY, '', ''
+            shown = named_regexes.RESERVED_NAME
+        else:
+            name, shown = preset, preset
+            regex, default_spec = entry['regex'], entry['default_spec']
+        if name in seen:
+            first_shown, first_row = seen[name]
+            raise ValueError(
+                f'preset {first_shown!r} is selected by both row '
+                f'{first_row} and row {i + 1}; each sub-search needs '
+                f'its own preset')
+        seen[name] = (shown, i + 1)
+        out.append({
+            'name': name, 'regex': regex,
+            'default_spec': default_spec, 'share': share,
+        })
+    return out
 
 
 def _compare_defaults(live: Template) -> dict:
@@ -281,8 +346,7 @@ def _compare_defaults(live: Template) -> dict:
     )
     out = {'weights': weights_default}
     for prefix in ('t1', 't2'):
-        out[f'{prefix}_spec'] = ''
-        out[f'{prefix}_entry'] = ''
+        out[f'{prefix}_preset'] = named_regexes.RESERVED_NAME
         out[f'{prefix}_lr'] = ''
         out[f'{prefix}_length'] = ''
         out[f'{prefix}_batch'] = ''
@@ -585,28 +649,113 @@ class SearchServer(object):
             selected_entry=selected_entry,
         )
 
-    def _entry_rows(self, templates: TemplateSet) -> list[dict]:
-        """Per-entry display rows: nominal vs realized share.
+    def _entry_rows(
+        self, templates: TemplateSet, presets: list[dict],
+    ) -> list[dict]:
+        """One row per live entry: the editable bits (preset, share)
+        and the read-only ones (its snapshotted regex/default, plus
+        nominal vs realized share) in a single table.
 
         Realized share is `selects / total selects` from the search
         thread's in-memory counters (see `Search.entry_selects`), and
         `selects` is the raw count behind that percentage -- realized
         share means nothing until an entry has a few hundred selects,
         and the count is how you see whether it does.
+
+        Regex and default render from the ENTRY, never from the preset
+        file: the entry is what the search is actually running. Where
+        the two have since diverged the row carries a `stale` hint,
+        which is information, not an error -- nothing changes until
+        the user presses Update.
         """
+        by_name = {p['name']: p for p in presets}
+        preset_names = [p['name'] for p in presets]
         search = self.search_thread.search
         selects = {} if search is None else search.entry_selects
         total = sum(selects.get(e.name, 0) for e in templates)
         rows = []
         for entry in templates:
+            unrestricted = not entry.spec
+            preset = (named_regexes.RESERVED_NAME if unrestricted
+                      else entry.name)
+            options = list(preset_names)
+            stale = ''
+            if not unrestricted:
+                stored = by_name.get(entry.name)
+                if stored is None:
+                    # An entry from --spec or --templates carries a
+                    # pattern, not a preset name; when that pattern IS
+                    # a preset's, start the row on it.
+                    same = next(
+                        (p for p in presets if p['regex'] == entry.spec),
+                        None)
+                    if same is not None:
+                        preset = same['name']
+                    else:
+                        # Keep the row selectable so the form still
+                        # round-trips.
+                        options.insert(0, entry.name)
+                        stale = (
+                            f'{entry.name!r} is no longer in '
+                            f'{named_regexes.PATH}; Update will reject '
+                            f'this row until it comes back or you pick '
+                            f'another preset')
+                elif (stored['regex'] != (entry.spec or '')
+                      or stored['default_spec'] != (entry.default_spec or '')):
+                    stale = (
+                        f'{named_regexes.PATH} has changed since this was '
+                        f'applied; the search is still running the pattern '
+                        f'shown here. Press Update to adopt the new one.')
             n = selects.get(entry.name, 0)
             rows.append({
+                'preset': preset,
+                'options': options,
+                'share': f'{entry.share:g}',
+                'regex': entry.spec or '',
+                'default_spec': entry.default_spec or '',
+                'stale': stale,
                 'name': entry.name,
-                'regex': entry.spec or '(unrestricted)',
-                'share': f'{templates.nominal_share(entry):.0f}%',
+                'share_pct': f'{templates.nominal_share(entry):.0f}%',
                 'realized': f'{100.0 * n / total:.0f}%' if total else '—',
                 'selects': n,
                 'default': str(entry.default.model),
+            })
+        return rows
+
+    def _submitted_entry_rows(
+        self, form_rows: list[dict], presets: list[dict],
+    ) -> list[dict]:
+        """Re-render rows straight from a rejected POST, so the user
+        fixes what they submitted instead of retyping it.
+
+        There is no live entry behind these, so the stats cells stay
+        empty and regex/default show what the preset file says right
+        now -- the best available reading of what Update would apply.
+        """
+        by_name = {p['name']: p for p in presets}
+        preset_names = [p['name'] for p in presets]
+        rows = []
+        for row in form_rows:
+            preset = row['preset'] or named_regexes.RESERVED_NAME
+            unrestricted = _is_unrestricted(preset)
+            stored = None if unrestricted else by_name.get(preset)
+            options = list(preset_names)
+            stale = ''
+            if not unrestricted and stored is None:
+                options.insert(0, preset)
+                stale = f'{preset!r} is not in {named_regexes.PATH}'
+            rows.append({
+                'preset': preset,
+                'options': options,
+                'share': row['share'],
+                'regex': stored['regex'] if stored else '',
+                'default_spec': stored['default_spec'] if stored else '',
+                'stale': stale,
+                'name': '',
+                'share_pct': '',
+                'realized': '',
+                'selects': '',
+                'default': '',
             })
         return rows
 
@@ -632,6 +781,10 @@ class SearchServer(object):
 
         tmin, tmax = train_time
         train_time_str = f'{tmin}-{tmax}'
+
+        # Read per render: the file is hand-edited outside the server,
+        # so anything cached would go stale silently.
+        presets = named_regexes.load()
 
         # Frontier filter: with an entry selected, the top list is the
         # one THAT sub-search sees (its spec filter applied at query
@@ -675,15 +828,13 @@ class SearchServer(object):
             # Always at least one row -- the live set's, or on the
             # rejection path the submitted ones, so the user can fix
             # them in place rather than retype.
-            entry_form=entry_form or templates.rows(),
-            entries=self._entry_rows(templates),
+            entries=entry_form or self._entry_rows(templates, presets),
             show_entries=not templates.is_single,
             entry_names=templates.names,
             selected_entry=selected_entry or '',
-            # Re-read per render: the file is hand-edited outside the
-            # server, so anything cached would go stale silently.
-            regex_presets=named_regexes.load(),
+            preset_names=[p['name'] for p in presets],
             reserved_regex_name=named_regexes.RESERVED_NAME,
+            presets_path=named_regexes.PATH,
             error=error,
         )
 
@@ -693,6 +844,9 @@ class SearchServer(object):
         # value (CLI --default-spec on startup, or previous form value).
         new_default_spec = params.get('default_spec', '').strip()
         new_rows = _entry_rows_from_form(params)
+        # Resolved against the file as of THIS request; the values go
+        # into the live set and stay there until the next Update.
+        presets = named_regexes.load()
         new_template = None
         new_default = None
         new_templates = None
@@ -713,7 +867,7 @@ class SearchServer(object):
             # dropped; with no rows left this is one `main` entry
             # covering the whole (unrestricted) template.
             new_templates = TemplateSet.from_rows(
-                new_rows, new_template,
+                _resolve_entry_rows(new_rows, presets), new_template,
                 default_spec=new_default_spec or None, default=new_default)
             time_str = params.get("time", "")
             if time_str:
@@ -731,7 +885,7 @@ class SearchServer(object):
                 default_spec=new_default_spec or (
                     self._default_spec or ''),
                 train_time=new_train_time,
-                entry_form=new_rows,
+                entry_form=self._submitted_entry_rows(new_rows, presets),
                 error=str(exc),
             )
 
@@ -849,9 +1003,12 @@ class SearchServer(object):
         tables.
 
         Form layout: shared `weights`, then two namespaced columns
-        (`t1_*` / `t2_*`) for spec, lr, length, batch, steps, decay
-        types, precision, and per-template `max_time`.
+        (`t1_*` / `t2_*`) for preset, lr, length, batch, steps, decay
+        types, precision, and per-template `max_time`. Each column's
+        spec filter is a named preset -- one control, the same
+        vocabulary as the index form -- resolved fresh per render.
         """
+        presets = named_regexes.load()
         defaults = _compare_defaults(self.template)
         # If the form was submitted, unchecked checkboxes are absent
         # from `args` — falling back to defaults would re-check them.
@@ -869,33 +1026,56 @@ class SearchServer(object):
         top1: list[dict] = []
         top2: list[dict] = []
         max_weights: Optional[int] = None
+        error = None
+        columns: list[Template] = []
 
         if args:
             try:
                 max_weights = int(form['weights'])
             except (TypeError, ValueError):
                 max_weights = None
-            if max_weights is not None and max_weights > 0:
-                t1 = _apply_entry(
-                    _template_from_compare_form(form, 't1'),
-                    form.get('t1_entry', ''), self.templates)
-                t2 = _apply_entry(
-                    _template_from_compare_form(form, 't2'),
-                    form.get('t2_entry', ''), self.templates)
-                t1_max_time = _maybe_float(form.get('t1_time'))
-                t2_max_time = _maybe_float(form.get('t2_time'))
-                with DbReader(self.path) as ro_db:
-                    confs1 = list(ro_db.top_confs_global(
-                        t1, max_weights=max_weights, max_time=t1_max_time))
-                    confs2 = list(ro_db.top_confs_global(
-                        t2, max_weights=max_weights, max_time=t2_max_time))
-                env1 = _envelope(confs1)
-                env2 = _envelope(confs2)
-                graph = base64.b64encode(
-                    build_diff_graph(env1, env2, max_weights)
-                ).decode('ascii')
-                top1 = [_conf_row(c) for c in confs1]
-                top2 = [_conf_row(c) for c in confs2]
+
+        if max_weights is not None and max_weights > 0:
+            try:
+                for prefix in ('t1', 't2'):
+                    preset = _lookup_preset(
+                        form[f'{prefix}_preset'], presets)
+                    columns.append(_template_from_compare_form(
+                        form, prefix,
+                        preset['regex'] if preset else None))
+            except ValueError as exc:
+                # A bookmarked URL naming a preset that has since been
+                # edited out of the file: say so, render just the form.
+                error = str(exc)
+                columns = []
+
+        if columns:
+            t1, t2 = columns
+            t1_max_time = _maybe_float(form.get('t1_time'))
+            t2_max_time = _maybe_float(form.get('t2_time'))
+            with DbReader(self.path) as ro_db:
+                confs1 = list(ro_db.top_confs_global(
+                    t1, max_weights=max_weights, max_time=t1_max_time))
+                confs2 = list(ro_db.top_confs_global(
+                    t2, max_weights=max_weights, max_time=t2_max_time))
+            env1 = _envelope(confs1)
+            env2 = _envelope(confs2)
+            graph = base64.b64encode(
+                build_diff_graph(env1, env2, max_weights)
+            ).decode('ascii')
+            top1 = [_conf_row(c) for c in confs1]
+            top2 = [_conf_row(c) for c in confs2]
+
+        # An unresolvable name stays in its dropdown so the page still
+        # shows what was asked for and the URL round-trips.
+        preset_names = [p['name'] for p in presets]
+        preset_options = {}
+        for prefix in ('t1', 't2'):
+            selected = form[f'{prefix}_preset']
+            options = list(preset_names)
+            if not _is_unrestricted(selected) and selected not in options:
+                options.insert(0, selected)
+            preset_options[prefix] = options
 
         return render_template(
             "compare.html",
@@ -903,10 +1083,9 @@ class SearchServer(object):
             graph=graph,
             top1=top1,
             top2=top2,
-            entry_names=self.templates.names,
-            show_entries=not self.templates.is_single,
-            regex_presets=named_regexes.load(),
+            preset_options=preset_options,
             reserved_regex_name=named_regexes.RESERVED_NAME,
+            error=error,
         )
 
     def _maybe_grant_refit(self, system: str) -> Optional[dict]:

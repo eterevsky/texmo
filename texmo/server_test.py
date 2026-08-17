@@ -1,6 +1,7 @@
 import csv
 import gzip
 import io
+import json
 import os
 import pickle
 import threading
@@ -17,7 +18,7 @@ from werkzeug.datastructures import MultiDict
 matplotlib.use('Agg')
 
 from texmo.common import INF
-from texmo.configuration import Configuration, Template
+from texmo.configuration import MAIN_ENTRY, Configuration, Template
 from texmo import named_regexes
 from texmo.db import DbReader, DbWriter
 from texmo.spec_parser import parse_model2
@@ -35,10 +36,6 @@ def _make_app():
         template_folder=os.path.join(os.path.dirname(__file__), 'templates'),
         static_folder=os.path.join(os.path.dirname(__file__), 'static'),
     )
-
-
-_BLANK_ROW = {'name': 'main', 'regex': '', 'default_spec': '',
-              'share': '100'}
 
 
 def _render(**overrides):
@@ -69,9 +66,10 @@ def _render(**overrides):
         graph='',
         systems=[],
         selected_system=None,
-        entry_form=[_BLANK_ROW],
-        regex_presets=[],
+        entries=[_entry_display_row()],
+        preset_names=[],
         reserved_regex_name=named_regexes.RESERVED_NAME,
+        presets_path='named_regexes.json',
         error=None,
     )
     defaults.update(overrides)
@@ -223,9 +221,10 @@ def _form_params(entries=(), **overrides):
     """Build a minimal /update form.
 
     A `MultiDict`, like the real `request.form`: the sub-search table
-    posts four parallel repeated fields, and `entries` -- a list of
-    `(name, regex, default_spec, share)` tuples -- is spread across
-    them one value per row, in row order.
+    posts two parallel repeated fields, and `entries` -- a list of
+    `(preset, share)` tuples -- is spread across them one value per
+    row, in row order. The regex and default spec are no longer
+    posted at all; the server resolves them from the preset file.
     """
     params = {
         'default_spec': '',
@@ -241,19 +240,32 @@ def _form_params(entries=(), **overrides):
     }
     params.update(overrides)
     form = MultiDict(params)
-    for name, regex, default_spec, share in entries:
-        form.add('entry_name', name)
-        form.add('entry_regex', regex)
-        form.add('entry_default_spec', default_spec)
+    for preset, share in entries:
+        form.add('entry_preset', preset)
         form.add('entry_share', share)
     return form
 
 
-def test_search_server_update_invalid_regex_renders_error_no_crash(tmp_path):
-    """A sub-search regex that the auto-finder can't resolve must
-    produce an error-banner re-render, not a 500. The live template
-    stays untouched so the search keeps running.
+def _write_presets(tmp_path, monkeypatch, mapping):
+    """Point `named_regexes.PATH` at a tmp preset file holding
+    `mapping`. Never touches the real one at the repo root."""
+    store = tmp_path / 'named_regexes.json'
+    store.write_text(json.dumps(mapping), encoding='utf-8')
+    monkeypatch.setattr(named_regexes, 'PATH', str(store))
+    return store
+
+
+def test_search_server_update_unresolvable_preset_regex_no_crash(
+        tmp_path, monkeypatch):
+    """A preset whose regex the auto-finder can't resolve must produce
+    an error-banner re-render, not a 500. The live template stays
+    untouched so the search keeps running.
     """
+    _write_presets(tmp_path, monkeypatch, {
+        # A layer that's never in the auto-finder seed list, with no
+        # default spec to fall back on.
+        'exotic': {'regex': '.*norm-lrnn.*'},
+    })
     path = str(tmp_path / "test.db")
     server = SearchServer(
         path, _make_template(),
@@ -263,25 +275,26 @@ def test_search_server_update_invalid_regex_renders_error_no_crash(tmp_path):
     original_templates = server.templates
 
     with _make_app().test_request_context():
-        # Regex containing a layer that's never in the auto-finder
-        # seed list, with no default spec to fall back on.
-        result = server.update(_form_params(
-            entries=[('a', '.*norm-lrnn.*', '', '100')]))
+        result = server.update(_form_params(entries=[('exotic', '100')]))
 
     # Returns the rendered index page (a string), not a redirect.
     assert isinstance(result, str)
     assert "Couldn't apply template" in result
-    # The user's submitted regex is preserved in the form.
-    assert '.*norm-lrnn.*' in result
+    # The row that failed comes back selected, so it can be fixed.
+    assert 'exotic' in result
     # Live configuration unchanged.
     assert server.template is original_template
     assert server.templates is original_templates
 
 
-def test_search_server_update_default_spec_overrides_unresolvable_regex(tmp_path):
-    """If a sub-search regex doesn't resolve but the row carries a
-    valid default spec, the update succeeds and that is the seed.
-    """
+def test_search_server_update_preset_default_spec_seeds_the_entry(
+        tmp_path, monkeypatch):
+    """A preset regex that doesn't resolve on its own is fine when the
+    preset carries a default spec: that is the seed."""
+    _write_presets(tmp_path, monkeypatch, {
+        'exotic': {'regex': '.*norm-lrnn.*',
+                   'default_spec': 'bits.1+bp|gru.4-norm-lrnn.2.2'},
+    })
     path = str(tmp_path / "test.db")
     server = SearchServer(
         path, _make_template(),
@@ -289,16 +302,123 @@ def test_search_server_update_default_spec_overrides_unresolvable_regex(tmp_path
     )
     try:
         with _make_app().test_request_context():
-            result = server.update(_form_params(entries=[
-                ('a', '.*norm-lrnn.*', 'bits.1+bp|gru.4-norm-lrnn.2.2',
-                 '100'),
-            ]))
+            result = server.update(_form_params(
+                entries=[('exotic', '100')]))
 
         # Successful update returns a redirect, not an HTML string.
         assert not isinstance(result, str)
-        entry = server.templates.by_name('a')
+        # Entry names are preset names now.
+        entry = server.templates.by_name('exotic')
+        assert entry.spec == '.*norm-lrnn.*'
         assert entry.default_spec == 'bits.1+bp|gru.4-norm-lrnn.2.2'
         assert str(entry.default.model) == 'bits.1+bp|gru.4-norm-lrnn.2.2'
+    finally:
+        server.join()
+
+
+def test_update_snapshots_the_preset_so_later_edits_do_not_leak(
+        tmp_path, monkeypatch):
+    """Resolution happens at Update; editing the file afterwards must
+    not mutate a running search."""
+    store = _write_presets(tmp_path, monkeypatch, {
+        'recurrent': {'regex': '.*gru.*'},
+    })
+    path = str(tmp_path / "test.db")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        with _make_app().test_request_context():
+            server.update(_form_params(entries=[('recurrent', '100')]))
+        assert server.templates.by_name('recurrent').spec == '.*gru.*'
+
+        store.write_text(
+            json.dumps({'recurrent': {'regex': '.*lstm.*'}}),
+            encoding='utf-8')
+        # Still running what was applied...
+        assert server.templates.by_name('recurrent').spec == '.*gru.*'
+        # ...and the row says so, flagged as drifted from the file.
+        with _make_app().test_request_context():
+            html = server.index()
+        assert '.*gru.*' in html
+        assert 'has changed since this was applied' in html
+
+        # Adopting the new pattern takes another Update.
+        with _make_app().test_request_context():
+            server.update(_form_params(entries=[('recurrent', '100')]))
+        assert server.templates.by_name('recurrent').spec == '.*lstm.*'
+    finally:
+        server.join()
+
+
+def test_update_rejects_a_preset_that_left_the_file(tmp_path, monkeypatch):
+    """The name is the state, so a preset deleted from the file makes
+    the row unresolvable -- error banner, live template untouched."""
+    _write_presets(tmp_path, monkeypatch, {'gone': {'regex': '.*gru.*'}})
+    path = str(tmp_path / "test.db")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        with _make_app().test_request_context():
+            server.update(_form_params(entries=[('gone', '100')]))
+        applied = server.templates
+
+        _write_presets(tmp_path, monkeypatch, {'other': {'regex': '.*a.*'}})
+        with _make_app().test_request_context():
+            result = server.update(_form_params(entries=[('gone', '100')]))
+
+        assert isinstance(result, str)
+        assert "Couldn't apply template" in result
+        assert 'gone' in result
+        assert server.templates is applied
+    finally:
+        server.join()
+
+
+def test_update_rejects_the_same_preset_twice(tmp_path, monkeypatch):
+    """Two rows on one preset would be two entries with one name."""
+    _write_presets(tmp_path, monkeypatch, {'a': {'regex': '.*gru.*'}})
+    path = str(tmp_path / "test.db")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        with _make_app().test_request_context():
+            result = server.update(_form_params(
+                entries=[('a', '50'), ('a', '50')]))
+        assert isinstance(result, str)
+        assert "Couldn't apply template" in result
+        assert 'own preset' in result
+    finally:
+        server.join()
+
+
+def test_unrestricted_row_keeps_the_main_entry_identity(
+        tmp_path, monkeypatch):
+    """The virtual Unrestricted row is the historical `main` entry:
+    same name, so coverage keys and select counters carry over."""
+    _write_presets(tmp_path, monkeypatch, {'rec': {'regex': '.*gru.*'}})
+    path = str(tmp_path / "test.db")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        with _make_app().test_request_context():
+            server.update(_form_params(entries=[
+                (named_regexes.RESERVED_NAME, '70'), ('rec', '30')]))
+        assert server.templates.names == [MAIN_ENTRY, 'rec']
+        main = server.templates.by_name(MAIN_ENTRY)
+        assert main.spec is None  # no filter
+        # Renders back onto the reserved option, not a stored name.
+        with _make_app().test_request_context():
+            html = server.index()
+        row = _entry_row_html(html, 0)
+        assert f'<option selected>{named_regexes.RESERVED_NAME}' in row
     finally:
         server.join()
 
@@ -564,46 +684,70 @@ def test_server_wires_writer_panic_path(tmp_path):
 
 def _preset_names_in_select(html: str) -> list[str]:
     """Option labels of the first preset dropdown in `html`."""
-    block = html.split('class="c-preset"', 1)[1].split('</select>', 1)[0]
+    return _preset_names_in_select_for_row(html, 0)
+
+
+def _entry_row_html(html: str, i: int) -> str:
+    """The i-th `<tr>` of the merged sub-search table."""
+    body = html.split('id="entry-rows"', 1)[1].split('</tbody>', 1)[0]
+    return body.split('<tr>')[i + 1]
+
+
+def _preset_names_in_select_for_row(html: str, i: int) -> list[str]:
+    block = _entry_row_html(html, i).split(
+        '<select', 1)[1].split('</select>', 1)[0]
     return [
         chunk.split('>', 1)[1].split('<', 1)[0].strip()
         for chunk in block.split('<option')[1:]
     ]
 
 
+def _entry_display_row(**overrides):
+    """One merged-table row, shaped as `SearchServer._entry_rows`
+    builds them."""
+    row = dict(
+        preset=named_regexes.RESERVED_NAME,
+        options=[],
+        share='100',
+        regex='',
+        default_spec='',
+        stale='',
+        name=MAIN_ENTRY,
+        share_pct='100%',
+        realized='—',
+        selects=0,
+        default='bytes|dense.32.gelu',
+    )
+    row.update(overrides)
+    return row
+
+
 def test_index_preset_dropdown_lists_unrestricted_first(tmp_path):
-    """Stored names come after the virtual 'Unrestricted' entry, in
-    alphabetical order, with their pattern on the option for the JS
-    filler to copy."""
-    html = _render(regex_presets=[
-        {'name': 'attention', 'regex': '.*attn.*',
-         'default_spec': 'bytes|attn.4.1'},
-        {'name': 'recurrent', 'regex': '.*gru.*', 'default_spec': ''},
-    ])
+    """The dropdown IS the row's spec state: 'Unrestricted' first,
+    then the stored names alphabetically, posted as entry_preset."""
+    html = _render(entries=[_entry_display_row(
+        options=['attention', 'recurrent'])])
     assert _preset_names_in_select(html) == [
         named_regexes.RESERVED_NAME, 'attention', 'recurrent']
-    assert 'data-regex=".*attn.*"' in html
-    assert 'data-default="bytes|attn.4.1"' in html
-    # The dropdown is a filler, never a submitted field: /update reads
-    # entry_regex / entry_default_spec and must not see a preset name.
-    assert 'name="entry_preset"' not in html
+    assert 'name="entry_preset"' in html
+    # The regex is no longer enterable anywhere in the form.
+    assert 'name="entry_regex"' not in html
+    assert 'name="entry_default_spec"' not in html
 
 
 def test_index_preset_dropdown_with_no_presets(tmp_path):
-    html = _render(regex_presets=[])
+    html = _render(entries=[_entry_display_row()])
     assert _preset_names_in_select(html) == [named_regexes.RESERVED_NAME]
 
 
 def test_index_rereads_presets_on_every_render(tmp_path, monkeypatch):
     """The file is hand-edited behind the server's back, so a refresh
     has to show the edit -- nothing may cache it."""
-    store = tmp_path / 'named_regexes.json'
-    monkeypatch.setattr(named_regexes, 'PATH', str(store))
-    store.write_text(
-        '{"before": {"regex": ".*gru.*"}}', encoding='utf-8')
+    store = _write_presets(
+        tmp_path, monkeypatch, {'before': {'regex': '.*gru.*'}})
     path = str(tmp_path / "db.sqlite")
     server = SearchServer(
-        path, _make_template(),
+        path, _make_template(spec=None),
         train_time=(1.0, 16.0), default_spec=None,
     )
     try:
@@ -620,13 +764,72 @@ def test_index_rereads_presets_on_every_render(tmp_path, monkeypatch):
         named_regexes.RESERVED_NAME, 'after']
 
 
-def test_compare_page_offers_the_same_presets(tmp_path, monkeypatch):
-    """compare.html has its own spec-regex boxes, so it gets the same
-    dropdown (filling the box, which stays authoritative)."""
-    store = tmp_path / 'named_regexes.json'
-    monkeypatch.setattr(named_regexes, 'PATH', str(store))
-    store.write_text(
-        '{"recurrent": {"regex": ".*gru.*"}}', encoding='utf-8')
+def test_index_row_keeps_an_unknown_name_selectable(tmp_path, monkeypatch):
+    """An entry from --templates or --spec need not correspond to a
+    preset; its row still renders, still round-trips, and says why
+    Update would reject it."""
+    _write_presets(tmp_path, monkeypatch, {'other': {'regex': '.*lstm.*'}})
+    path = str(tmp_path / "db.sqlite")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+        templates_json=_TEMPLATES_JSON,
+    )
+    try:
+        with _make_app().test_request_context():
+            html = server.index()
+    finally:
+        server.join()
+
+    # 'rnn' comes from the templates file, not from the preset file.
+    assert _preset_names_in_select_for_row(html, 1) == [
+        named_regexes.RESERVED_NAME, 'rnn', 'other']
+    assert 'no longer in' in html
+
+
+def test_index_selects_a_preset_matching_a_cli_spec(tmp_path, monkeypatch):
+    """`--spec` seeds an entry carrying a raw pattern. When that
+    pattern is a preset's, the row starts on the preset instead of
+    stranding the user on an unknown name."""
+    _write_presets(
+        tmp_path, monkeypatch, {'recurrent': {'regex': '.*gru.*'}})
+    path = str(tmp_path / "db.sqlite")
+    server = SearchServer(
+        path, _make_template(spec='.*gru.*'),
+        train_time=(1.0, 16.0), default_spec='bytes|gru.4',
+    )
+    try:
+        with _make_app().test_request_context():
+            html = server.index()
+    finally:
+        server.join()
+
+    row = _entry_row_html(html, 0)
+    assert '<option selected>recurrent' in row
+    assert 'no longer in' not in row
+
+
+def _compare_selects(html: str) -> list[list[str]]:
+    """Option labels of each column's spec-filter dropdown."""
+    out = []
+    for prefix in ('t1', 't2'):
+        block = html.split(
+            f'name="{prefix}_preset"', 1)[1].split('</select>', 1)[0]
+        out.append([
+            chunk.split('>', 1)[1].split('<', 1)[0].strip()
+            for chunk in block.split('<option')[1:]
+        ])
+    return out
+
+
+def test_compare_page_offers_one_preset_selector_per_column(
+        tmp_path, monkeypatch):
+    """Each column has exactly one spec control now: the preset
+    dropdown. No free-text regex box, no separate entry override."""
+    _write_presets(tmp_path, monkeypatch, {
+        'recurrent': {'regex': '.*gru.*'},
+        'attention': {'regex': '.*attn.*'},
+    })
     path = str(tmp_path / "db.sqlite")
     server = SearchServer(
         path, _make_template(),
@@ -638,9 +841,90 @@ def test_compare_page_offers_the_same_presets(tmp_path, monkeypatch):
     finally:
         server.join()
 
-    assert 'recurrent' in html
-    assert 'data-regex=".*gru.*"' in html
-    assert named_regexes.RESERVED_NAME in html
+    assert _compare_selects(html) == [
+        [named_regexes.RESERVED_NAME, 'attention', 'recurrent'],
+        [named_regexes.RESERVED_NAME, 'attention', 'recurrent'],
+    ]
+    # The retired controls are gone for good.
+    assert 'name="t1_spec"' not in html
+    assert 'name="t1_entry"' not in html
+    assert 'applyPreset' not in html
+
+
+def test_compare_resolves_the_selected_preset(tmp_path, monkeypatch):
+    """The name picked in the dropdown is what filters that column."""
+    _write_presets(tmp_path, monkeypatch, {
+        'rnn': {'regex': r'.*\|rnn\..*'},
+    })
+    path = str(tmp_path / "test.db")
+    conf_dense = Configuration(
+        model=parse_model2("bytes|dense.4.gelu", precision=Precision.FP32),
+        lr=0.1, length=128, batch=32, steps=256, decay=1.0)
+    conf_rnn = Configuration(
+        model=parse_model2("bytes|rnn.8.tanh", precision=Precision.FP32),
+        lr=0.1, length=128, batch=32, steps=256, decay=1.0)
+    writer = DbWriter(path)
+    for conf, loss in ((conf_dense, 0.3), (conf_rnn, 0.5)):
+        for i in range(2):
+            writer.add_run(conf, Run(
+                system='a', step_loss=[0.1], loss=loss + 0.01 * i,
+                train_time=2.0))
+    writer.close()
+
+    server = SearchServer(
+        path, _make_template(spec=None),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        with _make_app().test_request_context():
+            # A submitted form carries its checkboxes explicitly:
+            # absent means unchecked, so defaults are not inherited.
+            html = server.compare(MultiDict({
+                'weights': '100000',
+                't1_preset': named_regexes.RESERVED_NAME,
+                't2_preset': 'rnn',
+                't1_fp32': 'on', 't2_fp32': 'on',
+                't1_decay_none': 'on', 't2_decay_none': 'on',
+            }))
+    finally:
+        server.join()
+
+    # Column 1 unfiltered sees the dense conf; column 2 is rnn-only.
+    table1, table2 = html.split('Template 2 &mdash;', 1)
+    assert 'bytes|dense.4.gelu' in table1
+    assert 'bytes|dense.4.gelu' not in table2
+    assert 'bytes|rnn.8.tanh' in table2
+    # The selection round-trips into the form.
+    assert _compare_selects(html)[1][:2] == [
+        named_regexes.RESERVED_NAME, 'rnn']
+    assert '<option selected>rnn' in html
+
+
+def test_compare_survives_a_preset_that_left_the_file(
+        tmp_path, monkeypatch):
+    """A bookmarked compare URL must outlive an edit to the preset
+    file: no 500, the name still shown, and a reason given."""
+    _write_presets(tmp_path, monkeypatch, {'stays': {'regex': '.*gru.*'}})
+    path = str(tmp_path / "db.sqlite")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        with _make_app().test_request_context():
+            html = server.compare(MultiDict({
+                'weights': '100000',
+                't1_preset': named_regexes.RESERVED_NAME,
+                't2_preset': 'vanished',
+            }))
+    finally:
+        server.join()
+
+    assert "Couldn't run the comparison" in html
+    assert 'vanished' in html
+    # Still selectable, so the URL round-trips once the file is fixed.
+    assert '<option selected>vanished' in html
+    assert 'Template 1 &mdash;' not in html
 
 
 def test_every_server_thread_is_a_daemon(tmp_path):
@@ -736,7 +1020,7 @@ def _entry_row_count(html: str) -> int:
     """Rows in the editable sub-search table (the `<template>` clone
     source sits outside `#entry-rows`, so it isn't counted)."""
     body = html.split('id="entry-rows"', 1)[1].split('</tbody>', 1)[0]
-    return body.count('name="entry_name"')
+    return body.count('name="entry_preset"')
 
 
 def test_index_has_no_base_spec_field():
@@ -750,30 +1034,30 @@ def test_index_has_no_base_spec_field():
         assert f'name="{field}"' in html
 
 
-def test_index_single_template_renders_one_blank_row():
-    """No sub-searches configured: one `main` row with a blank regex --
-    the unrestricted search that was already running, now visible and
-    editable -- and no realized-share table for a single entry."""
-    html = _render(show_entries=False, entries=[], entry_names=[],
-                   entry_form=[_BLANK_ROW])
-    assert '<caption>Sub-searches</caption>' not in html
+def test_index_single_template_renders_one_unrestricted_row():
+    """No sub-searches configured: one row sitting on Unrestricted --
+    the search that was already running, now visible and editable."""
+    html = _render(show_entries=False, entry_names=[],
+                   entries=[_entry_display_row()])
     assert _entry_row_count(html) == 1
-    assert 'value="main"' in html
+    assert f'<option selected>{named_regexes.RESERVED_NAME}' in html
     assert 'addEntryRow()' in html
     assert 'id="entry-row-template"' in html
 
 
 def test_index_renders_entry_form_rows():
-    html = _render(entry_form=[
-        {'name': 'main', 'regex': '', 'default_spec': '', 'share': '60'},
-        {'name': 'rnn', 'regex': r'.*\|rnn\..*',
-         'default_spec': 'bytes|rnn.8.tanh', 'share': '40'},
+    html = _render(entries=[
+        _entry_display_row(share='60'),
+        _entry_display_row(
+            preset='rnn', options=['rnn'], share='40',
+            regex=r'.*\|rnn\..*', default_spec='bytes|rnn.8.tanh',
+            name='rnn', share_pct='40%', realized='32%', selects=16),
     ])
     assert _entry_row_count(html) == 2
-    for field in ('entry_name', 'entry_regex', 'entry_default_spec',
-                  'entry_share'):
+    # Two posted fields per row, and only those two.
+    for field in ('entry_preset', 'entry_share'):
         assert f'name="{field}"' in html
-    assert 'value="main"' in html and 'value="rnn"' in html
+    assert '<option selected>rnn' in html
     assert 'value="60"' in html and 'value="40"' in html
     assert 'bytes|rnn.8.tanh' in html
     assert 'removeEntryRow(this)' in html
@@ -782,44 +1066,47 @@ def test_index_renders_entry_form_rows():
     assert 'normalized' in html
 
 
-def test_index_stacks_the_two_spec_inputs_in_one_column():
+def test_index_shows_the_two_specs_read_only_in_one_column():
     """Real regexes and specs run 40-80 characters, so the two share a
-    wide column, one full-width line each, instead of sitting in narrow
-    side-by-side cells."""
-    html = _render(entry_form=[_BLANK_ROW])
-    row = html.split('id="entry-rows"', 1)[1].split('</tbody>', 1)[0]
-    cell = row.split('class="c-specs"', 1)[1].split('</td>', 1)[0]
-    # Both inputs in the SAME cell, each inside its own label, under
-    # the preset dropdown that fills them.
-    assert cell.count('name="entry_regex"') == 1
-    assert cell.count('name="entry_default_spec"') == 1
-    assert cell.count('<label>') == 3
-    assert (cell.index('c-preset') < cell.index('class="c-regex"')
-            < cell.index('class="c-spec"'))
-    assert 'input.c-regex,' in html and 'width: 100%;' in html
+    wide column, one full-width line each. They are display-only now:
+    a row's pattern comes from the preset file, never from the form."""
+    html = _render(entries=[_entry_display_row(
+        preset='rnn', options=['rnn'], regex=r'.*\|rnn\..*',
+        default_spec='bytes|rnn.8.tanh', name='rnn')])
+    cell = _entry_row_html(html, 0).split(
+        'class="c-specs"', 1)[1].split('</td>', 1)[0]
+    assert cell.count('<label>') == 2
+    assert '<input' not in cell
+    assert cell.index('c-regex') < cell.index('class="c-spec"')
+    assert 'code.c-regex,' in html and 'width: 100%;' in html
 
 
-def test_index_renders_subsearch_table_and_filter():
+def test_index_renders_subsearch_stats_and_filter():
+    """The stats that used to sit in their own table live in the edit
+    row itself, so what a sub-search IS and how it is DOING read
+    together."""
     html = _render(
         show_entries=True,
         entry_names=['main', 'rnn'],
         selected_entry='rnn',
         entries=[
-            {'name': 'main', 'regex': '(unrestricted)', 'share': '60%',
-             'realized': '68%', 'selects': 34,
-             'default': 'bits.1+bp|'},
-            {'name': 'rnn', 'regex': '.*rnn.*', 'share': '40%',
-             'realized': '32%', 'selects': 16,
-             'default': 'bytes|rnn.8.tanh'},
+            _entry_display_row(
+                share='60', share_pct='60%', realized='68%', selects=34,
+                default='bits.1+bp|'),
+            _entry_display_row(
+                preset='rnn', options=['rnn'], share='40',
+                regex='.*rnn.*', name='rnn', share_pct='40%',
+                realized='32%', selects=16,
+                default='bytes|rnn.8.tanh'),
         ],
     )
-    assert '<caption>Sub-searches</caption>' in html
     # Nominal vs realized, side by side, plus the entry's default conf.
     assert '60%' in html and '68%' in html
     # The raw select count -- the sample size behind the realized %.
-    assert '<th>Selects</th>' in html
-    assert '<td>34</td>' in html and '<td>16</td>' in html
+    assert '34 selects' in html and '16 selects' in html
     assert 'bytes|rnn.8.tanh' in html
+    # Each live row links to its own frontier view.
+    assert 'href="/?entry=rnn"' in html
     # Per-entry frontier filter, with the current selection kept, side
     # by side with the system filter in one row of controls.
     assert '<option value="rnn" selected>rnn</option>' in html
@@ -895,13 +1182,21 @@ def test_search_server_loads_a_template_set(tmp_path):
         server.join()
 
 
+# The presets the multi-entry tests below resolve against.
+_PRESETS = {
+    'rnn': {'regex': r'.*\|rnn\..*', 'default_spec': 'bytes|rnn.8.tanh'},
+    'dense': {'regex': r'.*\|dense\..*'},
+}
+
 _ROWS = [
-    ('main', '', '', '60'),
-    ('rnn', r'.*\|rnn\..*', 'bytes|rnn.8.tanh', '40'),
+    ('Unrestricted', '60'),
+    ('rnn', '40'),
 ]
 
 
-def test_search_server_update_installs_a_template_set(tmp_path):
+def test_search_server_update_installs_a_template_set(
+        tmp_path, monkeypatch):
+    _write_presets(tmp_path, monkeypatch, _PRESETS)
     path = str(tmp_path / "test.db")
     server = SearchServer(
         path, _make_template(spec=None),
@@ -911,40 +1206,45 @@ def test_search_server_update_installs_a_template_set(tmp_path):
         with _make_app().test_request_context():
             result = server.update(_form_params(entries=_ROWS))
         assert not isinstance(result, str)   # redirect == accepted
-        assert server.templates.names == ['main', 'rnn']
+        # The unrestricted row keeps the historical `main` identity;
+        # every other entry is named for its preset.
+        assert server.templates.names == [MAIN_ENTRY, 'rnn']
+        assert server.templates.by_name('rnn').spec == r'.*\|rnn\..*'
         assert str(server.templates.by_name('rnn').default.model) == (
             'bytes|rnn.8.tanh')
         # N rows in -> the same N rows rendered back, values intact.
         with _make_app().test_request_context():
             html = server.index()
         assert _entry_row_count(html) == 2
-        assert '<caption>Sub-searches</caption>' in html
         assert 'bytes|rnn.8.tanh' in html
         assert 'value="60"' in html and 'value="40"' in html
     finally:
         server.join()
 
 
-def test_search_server_update_ignores_all_blank_rows(tmp_path):
-    """A stray row from the Add button (or the whole table left empty)
-    is dropped, not rejected -- and an emptied table means the plain
-    single unrestricted search."""
+def test_search_server_update_ignores_untouched_rows(
+        tmp_path, monkeypatch):
+    """A row straight from the Add button -- still on Unrestricted,
+    with no share -- is dropped, not rejected; and a table with only
+    those left means the plain single unrestricted search."""
+    _write_presets(tmp_path, monkeypatch, _PRESETS)
     path = str(tmp_path / "test.db")
     server = SearchServer(
         path, _make_template(spec=None),
         train_time=(1.0, 16.0), default_spec=None,
     )
     try:
-        rows = _ROWS + [('', '', '', ''), ('  ', '', '', ' ')]
+        rows = _ROWS + [('Unrestricted', ''), ('Unrestricted', '  ')]
         with _make_app().test_request_context():
             result = server.update(_form_params(entries=rows))
         assert not isinstance(result, str)
-        assert server.templates.names == ['main', 'rnn']
+        assert server.templates.names == [MAIN_ENTRY, 'rnn']
 
-        # Every row blank -> one unrestricted entry, rendered back as
-        # a single blank `main` row (never as no rows at all).
+        # Nothing left -> one unrestricted entry, rendered back as a
+        # single Unrestricted row (never as no rows at all).
         with _make_app().test_request_context():
-            result = server.update(_form_params(entries=[('', '', '', '')]))
+            result = server.update(
+                _form_params(entries=[('Unrestricted', '')]))
             assert not isinstance(result, str)
             html = server.index()
         assert server.templates.is_single
@@ -954,10 +1254,12 @@ def test_search_server_update_ignores_all_blank_rows(tmp_path):
         server.join()
 
 
-def test_search_server_update_rejects_a_bad_template_set(tmp_path):
+def test_search_server_update_rejects_a_bad_template_set(
+        tmp_path, monkeypatch):
     """Every malformed set must land on the error banner and leave the
     running search on its previous configuration -- with the submitted
     values still in the fields."""
+    _write_presets(tmp_path, monkeypatch, _PRESETS)
     path = str(tmp_path / "test.db")
     server = SearchServer(
         path, _make_template(spec=None),
@@ -967,15 +1269,13 @@ def test_search_server_update_rejects_a_bad_template_set(tmp_path):
     try:
         original = server.templates
         bad_sets = [
-            # A row with any field filled must validate fully.
-            [('', '', '', '60')],                       # no name
-            [('a', '', '', '')],                        # no share
-            [('a', '', '', 'lots')],                    # share not a number
-            [('a', '', '', '-1')],                      # negative share
-            [('a', '', '', '0'), ('b', '', '', '0')],   # nothing to draw
-            [('a', '', '', '1'), ('a', '', '', '1')],   # duplicate names
-            [('a', '.*(rnn', '', '1')],                 # uncompilable regex
-            [('a', r'.*\|rnn\..*', 'bytes|dense.4.gelu', '1')],
+            [('rnn', '')],                        # no share
+            [('rnn', 'lots')],                    # share not a number
+            [('rnn', '-1')],                      # negative share
+            [('rnn', '0'), ('dense', '0')],       # nothing to draw
+            [('rnn', '1'), ('rnn', '1')],         # same preset twice
+            [('Unrestricted', '1'), ('Unrestricted', '1')],  # ditto
+            [('vanished', '1')],                  # not in the file
         ]
         for rows in bad_sets:
             with _make_app().test_request_context():
@@ -987,10 +1287,10 @@ def test_search_server_update_rejects_a_bad_template_set(tmp_path):
             # ...and the rejected rows come back so the user can fix
             # them in place instead of retyping.
             assert _entry_row_count(result) == len(rows)
-            for name, regex, default_spec, share in rows:
-                for value in (name, regex, default_spec, share):
-                    if value.strip():
-                        assert f'value="{escape(value)}"' in result, value
+            for preset, share in rows:
+                if share.strip():
+                    assert f'value="{escape(share)}"' in result, share
+                assert f'<option selected>{escape(preset)}' in result
     finally:
         server.join()
 
@@ -1038,10 +1338,14 @@ def test_search_server_index_filters_the_frontier_by_entry(
         server.join()
 
 
-def test_search_server_single_entry_renders_one_row(tmp_path):
+def test_search_server_single_entry_renders_one_row(
+        tmp_path, monkeypatch):
     """With no sub-searches configured the table still shows one row
-    (blank regex = unrestricted) and no realized-share table; editing
-    that row's regex is how the search gets restricted."""
+    (Unrestricted = no filter); putting that row on a preset is how
+    the search gets restricted."""
+    _write_presets(tmp_path, monkeypatch, {
+        'rnn': {'regex': r'bytes\|rnn\..*'},
+    })
     path = str(tmp_path / "test.db")
     server = SearchServer(
         path, _make_template(spec=None),
@@ -1052,11 +1356,9 @@ def test_search_server_single_entry_renders_one_row(tmp_path):
         with _make_app().test_request_context():
             html = server.index()
         assert _entry_row_count(html) == 1
-        assert '<caption>Sub-searches</caption>' not in html
 
         with _make_app().test_request_context():
-            result = server.update(_form_params(
-                entries=[('main', r'bytes\|rnn\..*', '', '100')]))
+            result = server.update(_form_params(entries=[('rnn', '100')]))
             assert not isinstance(result, str)
             html = server.index()
         assert server.templates.is_single

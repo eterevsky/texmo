@@ -17,15 +17,6 @@
             }
         </style>
         <script>
-            // Named presets fill the spec-regex box; the box itself
-            // stays the value that gets submitted, so a preset is a
-            // starting point you can edit. See texmo/named_regexes.py.
-            function applyPreset(select, targetId) {
-                const opt = select.options[select.selectedIndex];
-                document.getElementById(targetId).value =
-                    opt.dataset.regex || '';
-            }
-
             function copyCmd(el) {
                 const cmd = el.dataset.cmd;
                 const flash = () => {
@@ -57,6 +48,12 @@
         <p><a href="/">&larr; back to index</a></p>
         <h1>Compare templates</h1>
 
+        {% if error %}
+        <p style="background:#fee; border:1px solid #c33; color:#900; padding:0.5rem 0.75rem; border-radius:4px;">
+            <strong>Couldn't run the comparison:</strong> {{ error }}
+        </p>
+        {% endif %}
+
         <form action="/compare" method="get">
             <table>
                 <caption>Shared</caption>
@@ -73,35 +70,18 @@
                     <th>Template 2</th>
                 </tr>
                 <tr>
-                    <td>Spec regex:</td>
+                    <td>Spec filter:</td>
                     {% for prefix in ['t1', 't2'] %}
                     <td>
-                        <input type="text" name="{{ prefix }}_spec" value="{{ form[prefix + '_spec'] }}" id="{{ prefix }}_spec">
-                        <br>
-                        <select onchange="applyPreset(this, '{{ prefix }}_spec')">
-                            <option data-regex="">{{ reserved_regex_name }}</option>
-                            {% for p in regex_presets %}
-                            <option data-regex="{{ p.regex }}">{{ p.name }}</option>
+                        <select name="{{ prefix }}_preset">
+                            <option{{ ' selected' if form[prefix + '_preset'] == reserved_regex_name }}>{{ reserved_regex_name }}</option>
+                            {% for name in preset_options[prefix] %}
+                            <option{{ ' selected' if name == form[prefix + '_preset'] }}>{{ name }}</option>
                             {% endfor %}
                         </select>
                     </td>
                     {% endfor %}
                 </tr>
-                {% if show_entries %}
-                <tr>
-                    <td>Sub-search:<br><small>(overrides the spec regex)</small></td>
-                    {% for prefix in ['t1', 't2'] %}
-                    <td>
-                        <select name="{{ prefix }}_entry">
-                            <option value="" {% if not form[prefix + '_entry'] %}selected{% endif %}>&mdash;</option>
-                            {% for name in entry_names %}
-                            <option value="{{ name }}" {% if name == form[prefix + '_entry'] %}selected{% endif %}>{{ name }}</option>
-                            {% endfor %}
-                        </select>
-                    </td>
-                    {% endfor %}
-                </tr>
-                {% endif %}
                 <tr>
                     <td>Sample length:</td>
                     <td><input type="text" name="t1_length" value="{{ form.t1_length }}"></td>

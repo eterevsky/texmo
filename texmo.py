@@ -16,8 +16,9 @@ if not getattr(config, 'JAX_PREALLOCATE', True):
     os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
 from texmo import latency
-from texmo.cli import bench, client, db, eval as eval_cli, loss, report
-from texmo.cli import sample, server, train
+from texmo.cli import bench, client, db, loss, report, sample, server, train
+from texmo.cli import eval as eval_cli
+from texmo.cli import generate as generate_cli
 from texmo.cli import time as predict_time
 
 
@@ -66,6 +67,12 @@ def parse_args():
              "(bits/byte on byte-fixed samples)",
     )
     eval_cli.init_args(parser_eval, config)
+
+    parser_generate = subparsers.add_parser(
+        "generate",
+        help="sample a continuation of a prefix from a stored model",
+    )
+    generate_cli.init_args(parser_generate, config)
 
     parser_updatedb = subparsers.add_parser(
         "db-update",

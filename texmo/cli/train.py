@@ -11,6 +11,12 @@ from ..model_store import save_model
 from ..precision import Precision
 from ..spec_parser import parse_model2
 from ..tokens import set_tokens_dir
+from .generate import (
+    add_prefix_args,
+    parse_temperatures,
+    print_continuations,
+    read_prefix,
+)
 
 
 def show_loss_graph(manager: Manager):
@@ -114,18 +120,13 @@ def train(args: argparse.Namespace):
         # loss — the model is likely broken and the sampler may crash on
         # NaN probabilities. An empty prefix also skips (there is no last
         # token to continue from).
-        if args.prefix and 0 < run.loss < 10:
-            temperatures = [
-                float(t) for t in args.temperature.split(',') if t.strip()
-            ]
-            for t in temperatures:
-                s = manager.continue_prefix(args.prefix, 256, temperature=t)
-                print(f'--- T = {t} ---')
-                try:
-                    print(s.decode('utf-8'))
-                except UnicodeDecodeError:
-                    print(s)
-            print()
+        prefix = read_prefix(args)
+        if prefix and 0 < run.loss < 10:
+            print_continuations(
+                lambda t: manager.continue_prefix(prefix, 256, temperature=t),
+                parse_temperatures(args.temperature),
+                print,
+            )
     finally:
         train_set_wrapper.join()
 
@@ -252,12 +253,8 @@ def init_args(parser: argparse.ArgumentParser, config):
     )
 
     # Evaluation
-    parser.add_argument(
-        "--prefix",
-        type=str,
-        default="Roses are red\nViolets are",
-        help="text prefix to be continued",
-    )
+    add_prefix_args(
+        parser, required=False, default="Roses are red\nViolets are")
     parser.add_argument(
         "--test-batch",
         type=int,

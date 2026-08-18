@@ -12,6 +12,7 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 
+from . import generate
 from .common import ttoa3
 from .configuration import Configuration
 from .layer_jax import LayerWeights
@@ -21,7 +22,6 @@ from .precision import Precision
 from .predict import LossTrend
 from .run import Run
 from .spec_parser import parse_model2
-from .tokens import get_tokenizer
 
 # Number of training steps batched into a single JIT'd `lax.scan`.
 # Removes the per-step Python overhead and the host-sync caused by
@@ -62,11 +62,6 @@ class ManagerJax(Manager):
 
         # JIT-compile combined loss+gradient computation (single fwd+bwd pass).
         self._loss_grad = jax.jit(jax.value_and_grad(self.model.loss_batch))
-        # JIT-compile the per-token inference step. Without this,
-        # continue_prefix and byte_distribution pay JAX's dispatch
-        # overhead (~10 ms) on every model.step call, which dominates
-        # for any reasonable continuation length.
-        self._step_jit = jax.jit(self.model.step)
         # JIT-compile a chunk of training steps (one fwd+bwd+update
         # per scan iteration). One Python dispatch + one host sync per
         # `_CHUNK_SIZE` steps, which is the main speedup vs the per-
@@ -273,21 +268,6 @@ class ManagerJax(Manager):
         self, prefix: str, length: int, temperature: float
     ) -> bytes:
         """Sample text continuation from the model."""
-        tokenizer = get_tokenizer(self.model_def.input.tokens_name)
-        prefix_tokens = tokenizer.tokenize(prefix.encode())
-
-        states, _ = self.model.initial_step(self.weights)
-        for c in prefix_tokens[:-1]:
-            states, _ = self._step_jit(self.weights, states, int(c))
-
-        c = int(prefix_tokens[-1])
-        rng = jax.random.PRNGKey(random.randrange(2**32))
-        out = []
-        for _ in range(length):
-            states, logits = self._step_jit(self.weights, states, c)
-            probs = jax.nn.softmax(logits / temperature)
-            rng, sub = jax.random.split(rng)
-            c = int(jax.random.choice(sub, self.model.ntokens, p=probs))
-            out.append(c)
-
-        return tokenizer.untokenize(list(prefix_tokens) + out)
+        return generate.continue_prefix(
+            self.model, self.weights, self.model_def.input.tokens_name,
+            prefix, length, temperature)

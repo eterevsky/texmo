@@ -23,7 +23,7 @@ dependencies = [
     "jax[cpu]>=0.11,<0.12; sys_platform != 'linux' or platform_machine != 'x86_64'",
     # Metal backend for JAX on Apple GPUs (github.com/eterevsky/metaljax,
     # MLX-based) -- gives Mac clients a GPU option next to CPU JAX.
-    "metaljax>=0.11.1; sys_platform == 'darwin'",
+    "metaljax>=0.11.5; sys_platform == 'darwin'",
     # Native Windows CUDA for JAX (github.com/eterevsky/winjax, PJRT
     # plugin loader; auto-registers cuda on import -- set
     # JAX_PLATFORMS=cpu to opt out). Same 0.12 ceiling as jax: winjax

@@ -124,6 +124,26 @@ budget. Dream target: 32-64K weights.
    texmo — Gemma-class and others via their own runtimes), each with
    its own system prompt; record, process, save as synthetic
    training data.
+   - **Harness built** (2026-08-18): `scripts/dialog_harness.py`,
+     with `scripts/dialog_sample_conf.json` (external endpoints) and
+     `scripts/dialog_sample_local_conf.json` (harness-managed
+     servers) as runnable example configs, and tests in
+     `texmo/dialog_harness_test.py` (there, not in `scripts/`,
+     because `testpaths = ["texmo"]`). Two participants, one JSON
+     config, dialogs appended as JSONL under `data/dialogs/`, one
+     record per dialog carrying both participants verbatim for
+     provenance; stop rule is a `min_dialog_bytes` budget with a
+     `max_turns` cap. One command goes from config to dialogs: a
+     participant gives either a `base_url` (an endpoint someone else
+     runs, untouched) or a `model_path`, and the harness starts
+     `llama-server` on that GGUF itself, on a free port, waits for
+     /health, and always tears it down again — two seats on one file
+     share a single server. Generators still run outside texmo: it
+     speaks OpenAI chat-completions and imports no inference
+     library. Still open for this milestone: pick the generator
+     model (see the open-model survey and LittleLearner entries),
+     generate real dialogs, and write the processing step that turns
+     them into a training corpus.
    - Optionally **force the models' hand**: constrain generation to
      a small vocabulary by masking output logits. Subword plan
      (2026-08-16, details deferred until the bridge is reached):
@@ -132,6 +152,12 @@ budget. Dream target: 32-64K weights.
      comes out or drop whole responses/dialogs marked invalid.
      Grammar-constrained decoding (GBNF / outlines-style) remains
      the heavyweight alternative if leakage is worse than expected.
+     The harness already reserves the slot: each participant's
+     `extra` dict is merged verbatim into the request body (last, so
+     it can override the sampling params), which is where
+     `logit_bias` or llama.cpp's `grammar` goes — and it is recorded
+     with every dialog, so a tranche always says which constraint
+     produced it.
 2. **`texmo.py chat`** (the REPL entry below): preamble + utterance
    format, over the step path (which is now exactly forward-parity).
 3. **Tranches** of synthetic data under different instructions and

@@ -1,0 +1,29 @@
+{
+  "participants": [
+    {
+      "name": "child",
+      "model_path": "models/Qwen3-8B-Q6_K.gguf",
+      "model": "qwen3-8b",
+      "system_prompt": "You are a curious six-year-old child talking with your teacher. You ask simple questions about the world: animals, weather, food, why things work. Use short sentences and easy words. Say one or two sentences per turn. Write only what the child says, with no name label and no stage directions.",
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "max_tokens": 120,
+      "extra": {"chat_template_kwargs": {"enable_thinking": false}}
+    },
+    {
+      "name": "teacher",
+      "model_path": "models/Qwen3-8B-Q6_K.gguf",
+      "model": "qwen3-8b",
+      "system_prompt": "You are a kind, patient teacher talking with a curious six-year-old child. Answer with simple, true explanations. Use short sentences and easy words, and never words a six-year-old would not know. Say two or three sentences per turn, then sometimes ask the child an easy question back. Write only what the teacher says, with no name label and no stage directions.",
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "max_tokens": 160,
+      "extra": {"chat_template_kwargs": {"enable_thinking": false}}
+    }
+  ],
+  "opener": {"text": "Hi! Can I ask you a question?"},
+  "min_dialog_bytes": 2000,
+  "max_turns": 64,
+  "n_dialogs": 1,
+  "server": {"ngl": 99, "args": ["-c", "8192"]}
+}

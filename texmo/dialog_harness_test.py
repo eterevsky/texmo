@@ -29,6 +29,7 @@ sys.path.append(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "scripts"))
 import dialog_harness
+import dialog_text
 
 
 class _FakeResponse:
@@ -883,3 +884,158 @@ def test_run_dialog_honours_a_base_urls_override():
         conf, session, "hash", ["http://a:1/v1", "http://b:2"])
     assert session.calls[0]["url"] == "http://b:2/v1/chat/completions"
     assert session.calls[1]["url"] == "http://a:1/v1/chat/completions"
+
+
+# --- dialog_text: rendering JSONL as readable text ------------------
+
+def _dialog_record(names, turns):
+    return {"participants": [{"name": n} for n in names], "turns": turns}
+
+
+def _write_jsonl(path, records):
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        for record in records:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return str(path)
+
+
+_TWO_DIALOGS = [
+    _dialog_record(
+        ["child", "teacher"],
+        [{"speaker": 0, "text": "Hi! Can I ask you a question?"},
+         {"speaker": 1, "text": "Of course! What would you like to know?"}]),
+    _dialog_record(
+        ["child", "teacher"],
+        [{"speaker": 0, "text": "Why is the sky blue?"}]),
+]
+
+_TWO_DIALOGS_TEXT = (
+    "====\n"
+    "child\n"
+    "Hi! Can I ask you a question?\n"
+    "\n"
+    "teacher\n"
+    "Of course! What would you like to know?\n"
+    "\n"
+    "====\n"
+    "child\n"
+    "Why is the sky blue?\n"
+    "\n"
+    "====\n"
+)
+
+
+def test_render_matches_the_requested_layout():
+    # A rule before each dialog, a closing rule at the end, and every
+    # turn as name / text / blank line.
+    assert dialog_text.render(_TWO_DIALOGS) == _TWO_DIALOGS_TEXT
+
+
+def test_render_of_nothing_is_a_single_rule():
+    assert dialog_text.render([]) == "====\n"
+
+
+def test_speaker_names_come_from_each_records_own_participants():
+    records = [
+        _dialog_record(["child", "teacher"], [{"speaker": 1, "text": "a"}]),
+        _dialog_record(["ann", "bob"], [{"speaker": 1, "text": "b"}]),
+    ]
+    text = dialog_text.render(records)
+    assert "teacher\na\n" in text
+    assert "bob\nb\n" in text
+
+
+def test_speaker_name_falls_back_to_bot_index():
+    turns = [{"speaker": 0, "text": "x"}, {"speaker": 1, "text": "y"}]
+    # No participants at all.
+    assert dialog_text.render([{"turns": turns}]) == (
+        "====\nbot0\nx\n\nbot1\ny\n\n====\n")
+    # Participants present but unusable, one way each.
+    assert dialog_text.speaker_name({"participants": []}, 0) == "bot0"
+    assert dialog_text.speaker_name({"participants": "child"}, 0) == "bot0"
+    assert dialog_text.speaker_name({"participants": ["child"]}, 0) == "bot0"
+    assert dialog_text.speaker_name({"participants": [{}]}, 0) == "bot0"
+    assert dialog_text.speaker_name({"participants": [{"name": ""}]}, 0) == (
+        "bot0")
+    assert dialog_text.speaker_name(_dialog_record(["ann"], []), 1) == "bot1"
+
+
+def test_unparseable_lines_are_skipped_with_a_warning(tmp_path):
+    path = tmp_path / "mixed.jsonl"
+    good = json.dumps(_TWO_DIALOGS[0], ensure_ascii=False)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(good + "\n")
+        f.write("{not json at all\n")      # e.g. a killed writer
+        f.write("\n")                      # blank: ignored silently
+        f.write("[1, 2, 3]\n")             # valid JSON, wrong shape
+        f.write(good + "\n")
+
+    warnings = []
+    records = list(dialog_text.read_records(str(path), warn=warnings.append))
+
+    # Both good records survive; the file is not abandoned.
+    assert len(records) == 2
+    assert len(warnings) == 2
+    assert "mixed.jsonl:2" in warnings[0]
+    assert "mixed.jsonl:4" in warnings[1]
+    assert "not a JSON object" in warnings[1]
+
+
+def test_warnings_go_to_stderr_not_the_output(tmp_path, capsys):
+    path = tmp_path / "broken.jsonl"
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("{oops\n")
+    list(dialog_text.read_records(str(path)))
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "skipping unparseable line" in captured.err
+
+
+def test_multiple_inputs_concatenate_in_order(tmp_path):
+    first = _write_jsonl(tmp_path / "a.jsonl", [_TWO_DIALOGS[0]])
+    second = _write_jsonl(tmp_path / "b.jsonl", [_TWO_DIALOGS[1]])
+    out = str(tmp_path / "both.txt")
+
+    assert dialog_text.main([first, second, "--out", out]) == 0
+    with open(out, encoding="utf-8") as f:
+        assert f.read() == _TWO_DIALOGS_TEXT
+
+    # Reversed inputs -> reversed dialogs.
+    dialog_text.main([second, first, "--out", out])
+    with open(out, encoding="utf-8") as f:
+        reversed_text = f.read()
+    assert (reversed_text.index("Why is the sky blue?")
+            < reversed_text.index("Can I ask you a question?"))
+
+
+def test_out_file_is_utf8_even_for_typographic_model_output(tmp_path):
+    fancy = "It’s “blue” — mostly. éè 日"
+    path = _write_jsonl(
+        tmp_path / "fancy.jsonl",
+        [_dialog_record(["child"], [{"speaker": 0, "text": fancy}])])
+    out = str(tmp_path / "fancy.txt")
+
+    dialog_text.main([path, "--out", out])
+
+    with open(out, encoding="utf-8") as f:
+        assert fancy in f.read()
+    # Written as UTF-8 bytes, not escapes or cp1252.
+    with open(out, "rb") as f:
+        assert "’".encode("utf-8") in f.read()
+
+
+def test_stdout_is_the_default_destination(tmp_path, capsys):
+    path = _write_jsonl(tmp_path / "a.jsonl", _TWO_DIALOGS)
+    assert dialog_text.main([path]) == 0
+    assert capsys.readouterr().out == _TWO_DIALOGS_TEXT
+
+
+def test_renders_what_the_harness_actually_writes(tmp_path):
+    # End to end: record a dialog with the harness, then read it back.
+    conf = _make_conf()
+    out = str(tmp_path / "dialogs.jsonl")
+    dialog_harness.run(conf, out, 1, session=_FakeSession(["0123456789"]))
+
+    text = dialog_text.render(list(dialog_text.read_records(out)))
+    assert text.startswith("====\nchild\nHi!\n\nteacher\n0123456789\n\n")
+    assert text.endswith("====\n")

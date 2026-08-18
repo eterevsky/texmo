@@ -1,8 +1,11 @@
 import os
+import random
+from threading import Thread
 
 import numpy as np
 import pytest
 
+import texmo.dataset
 from texmo.dataset import DataSet, DataSetWrapper
 from texmo.tokens import set_tokens_dir
 
@@ -87,6 +90,106 @@ def test_mmap_mode_still_maps(tmp_path):
     assert ds.data is not None
     batch = ds.sample_tokens(8, 2, "bytes")
     assert batch.shape == (2, 8)
+
+
+def _make_ascii_file(tmp_path, size: int = 64 * 1024) -> tuple[str, bytes]:
+    """A file of printable ASCII (no UTF-8 continuation bytes, so a
+    "bytes" sample is exactly the slice that was read) with no repeats
+    long enough for a torn read to look like a valid slice."""
+    data = bytes(random.Random(17).choices(range(33, 127), k=size))
+    path = tmp_path / "ascii.txt"
+    path.write_bytes(data)
+    return str(path), data
+
+
+def _sample_concurrently(wrapper: DataSetWrapper, nthreads: int, rounds: int):
+    """Drive `wrapper.sample_tokens` from several threads; returns the
+    batches and any exception raised on a worker's caller thread."""
+    batches = []
+    errors = []
+
+    def _run():
+        try:
+            for _ in range(rounds):
+                batches.append(wrapper.sample_tokens(32, 4, "bytes"))
+        except Exception as e:
+            errors.append(e)
+
+    threads = [Thread(target=_run) for _ in range(nthreads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return batches, errors
+
+
+def _assert_valid_slices(batches, data: bytes):
+    assert batches
+    for batch in batches:
+        assert batch.shape == (4, 32)
+        for row in batch:
+            assert bytes(row.tolist()) in data
+
+
+def test_pread_concurrent_sampling(tmp_path):
+    path, data = _make_ascii_file(tmp_path)
+    wrapper = DataSetWrapper(
+        DataSet(path=path, read_mode="pread"), num_workers=4)
+    try:
+        batches, errors = _sample_concurrently(wrapper, nthreads=4, rounds=8)
+    finally:
+        wrapper.join()
+    assert errors == []
+    _assert_valid_slices(batches, data)
+
+
+def test_pread_concurrent_sampling_without_os_pread(tmp_path, monkeypatch):
+    """The no-os.pread path (always taken on Windows) reads through a
+    per-thread fd; sharing one file cursor would tear these samples."""
+    monkeypatch.setattr(texmo.dataset, "_HAS_PREAD", False)
+    path, data = _make_ascii_file(tmp_path)
+    wrapper = DataSetWrapper(
+        DataSet(path=path, read_mode="pread"), num_workers=4)
+    try:
+        batches, errors = _sample_concurrently(wrapper, nthreads=4, rounds=8)
+    finally:
+        wrapper.join()
+    assert errors == []
+    _assert_valid_slices(batches, data)
+
+
+def test_pread_reads_are_thread_isolated(tmp_path, monkeypatch):
+    """Every thread must get the bytes at the offset *it* asked for.
+    A shared file cursor would hand a thread another thread's offset --
+    still a valid slice of the file, so only exact offsets catch it."""
+    monkeypatch.setattr(texmo.dataset, "_HAS_PREAD", False)
+    path, data = _make_ascii_file(tmp_path, 1 << 20)
+    ds = DataSet(path=path, read_mode="pread")
+    mismatches = []
+
+    def _run(i: int):
+        for r in range(500):
+            start = (i * 7919 + r * 61) % (len(data) - 512)
+            got = ds._read(ds.data, ds.data_fd, start, 400)
+            if got != data[start : start + 400]:
+                mismatches.append((i, r))
+
+    threads = [Thread(target=_run, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert mismatches == []
+
+
+def test_pread_switched_on_after_construction(tmp_path, monkeypatch):
+    """cli/sample.py's A/B benchmark flips read_mode on a DataSet built
+    in mmap mode, so per-thread fds must open lazily from the path."""
+    monkeypatch.setattr(texmo.dataset, "_HAS_PREAD", False)
+    path, data = _make_ascii_file(tmp_path, 8 * 1024)
+    ds = DataSet(path=path)
+    ds.read_mode = "pread"
+    _assert_valid_slices([ds.sample_tokens(32, 4, "bytes")], data)
 
 
 def test_wrapper_tokens(dataset):

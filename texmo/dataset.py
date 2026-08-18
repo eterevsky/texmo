@@ -4,7 +4,7 @@ import mmap
 import os
 import random
 from queue import Queue
-from threading import Lock, Thread
+from threading import Lock, Thread, local
 
 import numpy as np
 
@@ -14,10 +14,11 @@ from .tokens import get_tokenizer
 from .tokens.processing import apply_processing
 
 # os.pread (read at an explicit offset, no shared file cursor) is
-# Unix-only; on Windows we fall back to lseek+read (serialized by
-# _read_lock). pread also releases the GIL and is safe to call
-# concurrently on a shared fd, which is what lets multiple
-# DataSetWrapper worker threads overlap their I/O waits.
+# Unix-only; on Windows we fall back to lseek+read on a per-thread fd
+# (see DataSet._thread_fd). pread also releases the GIL and is safe to
+# call concurrently on a shared fd, which is what lets multiple
+# DataSetWrapper worker threads overlap their I/O waits; lseek+read is
+# equally parallel as long as no two threads share a file cursor.
 _HAS_PREAD = hasattr(os, "pread")
 
 
@@ -45,10 +46,11 @@ class DataSet(object):
         # across DataSetWrapper workers (see _read / DataSetWrapper).
         self.read_mode = read_mode
 
-        # Serializes the Windows lseek+read fallback when sampling runs
-        # on multiple DataSetWrapper threads. os.pread is atomic and
-        # needs no lock, so this is uncontended on Unix.
-        self._read_lock = Lock()
+        # Kept so the no-os.pread path can open per-thread file handles
+        # lazily, including when read_mode is flipped to "pread" after
+        # construction (see cli/sample.py's A/B benchmark).
+        self.path = path
+        self._local = local()
 
         if data is not None:
             assert path is None
@@ -85,6 +87,22 @@ class DataSet(object):
         preprocessed copy."""
         return random.randint(0, self.data_size)
 
+    def _thread_fd(self) -> int:
+        """A file descriptor owned by the calling thread. lseek+read on
+        a shared fd would race on the file cursor, and serializing it
+        instead would make DataSetWrapper's workers take turns."""
+        fd = getattr(self._local, "fd", None)
+        if fd is None:
+            # buffering=0: samples are small and random, so a buffered
+            # reader would fetch a whole block per read.
+            file = open(self.path, "rb", buffering=0)
+            # Held on the thread-local so the fd outlives this call and
+            # is closed when the thread dies.
+            self._local.file = file
+            fd = file.fileno()
+            self._local.fd = fd
+        return fd
+
     def _read(
         self, data: bytes | mmap.mmap, fd: int | None, start: int, size: int
     ) -> bytes:
@@ -92,11 +110,9 @@ class DataSet(object):
         if self.read_mode == "pread" and fd is not None:
             if _HAS_PREAD:
                 return os.pread(fd, size, start)
-            # Windows fallback: lseek+read isn't atomic, so serialize
-            # it for the multi-worker case (no-op cost single-threaded).
-            with self._read_lock:
-                os.lseek(fd, start, os.SEEK_SET)
-                return os.read(fd, size)
+            fd = self._thread_fd()
+            os.lseek(fd, start, os.SEEK_SET)
+            return os.read(fd, size)
         return data[start : start + size]
 
     def sample_tokens(self, ntokens: int, batch: int, tokenset_name: str) -> np.ndarray:

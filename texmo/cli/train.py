@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ..configuration import Configuration
-from ..dataset import DataSet
+from ..dataset import DataSet, DataSetWrapper
 from ..manager import Manager, create_manager
 from ..model_store import save_model
 from ..precision import Precision
@@ -59,67 +59,75 @@ def parse_lr(x: str) -> float:
 def train(args: argparse.Namespace):
     set_tokens_dir(args.tokens_dir)
 
-    train_set = DataSet(path=args.data)
+    # pread sampling (no mmap readahead amplification) parallelized
+    # across worker threads, so input throughput keeps up with the GPU
+    # even for tiny models.
+    train_set = DataSet(path=args.data, read_mode="pread")
+    train_set_wrapper = DataSetWrapper(
+        train_set, num_workers=args.sample_threads)
     lr = parse_lr(args.lr)
     decay = parse_lr(args.decay)
 
-    if args.model_path is not None:
-        raise NotImplementedError("Loading pre-trained models is not supported yet")
-    else:
-        if args.cosine and decay != 1.0:
-            raise SystemExit(
-                "--cosine requires --decay 1 (cosine schedule already "
-                "decays LR to 0 over `steps`)")
-        conf = Configuration(
-            parse_model2(
-                args.spec, precision=Precision(args.precision)),
-            lr=lr,
-            length=args.length,
-            batch=args.batch,
-            steps=args.steps,
-            decay=decay,
-            cosine=args.cosine,
+    try:
+        if args.model_path is not None:
+            raise NotImplementedError("Loading pre-trained models is not supported yet")
+        else:
+            if args.cosine and decay != 1.0:
+                raise SystemExit(
+                    "--cosine requires --decay 1 (cosine schedule already "
+                    "decays LR to 0 over `steps`)")
+            conf = Configuration(
+                parse_model2(
+                    args.spec, precision=Precision(args.precision)),
+                lr=lr,
+                length=args.length,
+                batch=args.batch,
+                steps=args.steps,
+                decay=decay,
+                cosine=args.cosine,
+            )
+            manager = create_manager(
+                args.backend,
+                conf=conf,
+                system=args.system,
+                dataset=train_set_wrapper,
+                test_sample_len=args.test_sample_len,
+                test_batch=args.test_batch,
+            )
+            # JAX backend defaults to the chunked-scan trainer; --no-scan
+            # forces the per-step path for benchmarking.
+            if args.no_scan and hasattr(manager, 'scan_train'):
+                manager.scan_train = False
+
+        run, final_conf = manager.train_and_eval(
+            args.steps,
+            args.time,
         )
-        manager = create_manager(
-            args.backend,
-            conf=conf,
-            system=args.system,
-            dataset=train_set,
-            test_sample_len=args.test_sample_len,
-            test_batch=args.test_batch,
-        )
-        # JAX backend defaults to the chunked-scan trainer; --no-scan
-        # forces the per-step path for benchmarking.
-        if args.no_scan and hasattr(manager, 'scan_train'):
-            manager.scan_train = False
 
-    run, final_conf = manager.train_and_eval(
-        args.steps,
-        args.time,
-    )
+        if args.output is not None:
+            if args.backend != 'jax':
+                raise SystemExit('--output requires the jax backend')
+            save_model(args.output, conf.model, manager.weights)
+            logging.info(f'Saved model to {args.output}')
 
-    if args.output is not None:
-        if args.backend != 'jax':
-            raise SystemExit('--output requires the jax backend')
-        save_model(args.output, conf.model, manager.weights)
-        logging.info(f'Saved model to {args.output}')
-
-    # Skip text sampling if training diverged or produced a nonsensical
-    # loss — the model is likely broken and the sampler may crash on
-    # NaN probabilities. An empty prefix also skips (there is no last
-    # token to continue from).
-    if args.prefix and 0 < run.loss < 10:
-        temperatures = [
-            float(t) for t in args.temperature.split(',') if t.strip()
-        ]
-        for t in temperatures:
-            s = manager.continue_prefix(args.prefix, 256, temperature=t)
-            print(f'--- T = {t} ---')
-            try:
-                print(s.decode('utf-8'))
-            except UnicodeDecodeError:
-                print(s)
-        print()
+        # Skip text sampling if training diverged or produced a nonsensical
+        # loss — the model is likely broken and the sampler may crash on
+        # NaN probabilities. An empty prefix also skips (there is no last
+        # token to continue from).
+        if args.prefix and 0 < run.loss < 10:
+            temperatures = [
+                float(t) for t in args.temperature.split(',') if t.strip()
+            ]
+            for t in temperatures:
+                s = manager.continue_prefix(args.prefix, 256, temperature=t)
+                print(f'--- T = {t} ---')
+                try:
+                    print(s.decode('utf-8'))
+                except UnicodeDecodeError:
+                    print(s)
+            print()
+    finally:
+        train_set_wrapper.join()
 
     if not args.no_graph:
         show_loss_graph(manager)
@@ -133,6 +141,13 @@ def init_args(parser: argparse.ArgumentParser, config):
         type=str,
         default=config.DATA,
         help=f"a file with (default: '{config.DATA}')",
+    )
+    parser.add_argument(
+        "--sample-threads",
+        type=int,
+        default=getattr(config, "SAMPLE_THREADS", 8),
+        help="background worker threads for data sampling "
+             "(default: config.SAMPLE_THREADS, else 8)",
     )
 
     # Model

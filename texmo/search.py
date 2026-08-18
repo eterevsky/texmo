@@ -277,19 +277,22 @@ PICK_ME_MIN_RUNS = 2
 _COVERAGE_STICKY_THRESHOLD = 5
 
 # Bounds on the predicted-best BFS. Unbounded, the visited set grows
-# ~k^depth with the per-conf neighbor count k, and each visited conf
-# costs a conf_neighbors call (~25ms: every mutation is re-parsed), a
-# timing predict, and a get_conf_id query -- a fat seed at depth 3 was
-# observed to hold the single SearchThread for 7+ minutes, timing out
+# ~k^depth with the per-conf neighbor count k -- the depth-3 ball from
+# a typical seed is ~200k confs -- and each visited conf costs a
+# conf_neighbors call, a timing predict, and a get_conf_id query
+# (~170us per conf measured end to end, all of it pure Python). A fat
+# seed at depth 3 was observed, back when that path cost ~25ms per
+# conf, to hold the single SearchThread for 7+ minutes, timing out
 # every client (they retry, the queue grows, and each queued select has
 # its own chance of another depth-3: the stall self-perpetuates).
 # _BFS_FRONTIER_CAP random-samples each BFS level (keeps the depth-N
 # reachability diverse instead of truncating by enumeration order);
 # _BFS_TIME_BUDGET is the hard wall-clock stop for the expansion loop.
 # A clipped BFS still yields a valid, slightly less exhaustive
-# candidate set. Typical calls (p50 ~1.5s) don't hit either bound.
+# candidate set. _BFS_VISITED_CAP is the binding bound at depth 3, at
+# ~1.7s per select.
 _BFS_FRONTIER_CAP = 256
-_BFS_VISITED_CAP = 4096
+_BFS_VISITED_CAP = 10_000
 _BFS_TIME_BUDGET_S = 5.0
 
 
@@ -988,13 +991,19 @@ class Search(object):
                     next_frontier.append(n)
             if clipped or not next_frontier:
                 break
-            # Sample oversized levels so depth-N reachability stays
-            # diverse instead of truncating by enumeration order (which
-            # would bias expansion toward the first layers' mutations).
-            # Sampled-out confs stay in `visited` and still get scored.
+            # Frontier order decides which parents expand before the
+            # visited cap trips, and the seed rarely changes between
+            # selects: unrandomized, the cap would truncate the same
+            # enumeration-order prefix every time (biased toward the
+            # first layers' mutations) and the rest of the ball would
+            # never be scored. random.sample already returns its picks
+            # shuffled; sampled-out confs stay in `visited` and still
+            # get scored.
             if len(next_frontier) > _BFS_FRONTIER_CAP:
                 next_frontier = random.sample(
                     next_frontier, _BFS_FRONTIER_CAP)
+            else:
+                random.shuffle(next_frontier)
             frontier = next_frontier
         if clipped:
             logging.info(

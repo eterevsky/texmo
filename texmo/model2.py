@@ -135,9 +135,8 @@ class Model2Def:
         mutations that normalize to the same model are yielded once, and
         self is excluded.
         """
-        cap = self.codec.cap
         for p in self.precision.neighbors:
-            yield parse_model2(self.spec, p, cap=cap)
+            yield parse_model2(self.spec, p)
 
         raw_seen: set[str] = set()
         seen: set[str] = {self.spec}
@@ -145,15 +144,15 @@ class Model2Def:
             if raw in raw_seen:
                 continue
             raw_seen.add(raw)
-            model = parse_model2(raw, self.precision, cap=cap)
-            model = self._sync_emb_width(model, cap)
+            model = parse_model2(raw, self.precision)
+            model = self._sync_emb_width(model)
             if model.spec in seen:
                 continue
             seen.add(model.spec)
             if model.is_valid():
                 yield model
 
-    def _sync_emb_width(self, model: Self, cap: bool) -> Self:
+    def _sync_emb_width(self, model: Self) -> Self:
         """Structure mutations own the emb-width sync: a variant that
         resized the chain's last layer arrives with a stale X, because
         the parser never repairs specs (see embedding_codec.py).
@@ -168,8 +167,7 @@ class Model2Def:
             return model
         layers_spec = model.spec.split('|', 1)[1]
         input_spec = str(codec.with_emb_size(codec.last_width))
-        return parse_model2(
-            f'{input_spec}|{layers_spec}', self.precision, cap=cap)
+        return parse_model2(f'{input_spec}|{layers_spec}', self.precision)
 
     def build_jax(self) -> Model2Jax:
         return Model2Jax(

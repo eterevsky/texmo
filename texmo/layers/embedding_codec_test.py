@@ -6,13 +6,12 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from texmo.layers.codec import _LOGIT_CAP
 from texmo.precision import Precision
 from texmo.spec_parser import parse_model2
 
 
-def _build(spec, cap=True):
-    md = parse_model2(spec, Precision.FP32, cap=cap)
+def _build(spec):
+    md = parse_model2(spec, Precision.FP32)
     model = md.build_jax()
     weights = model.init_weights(jax.random.PRNGKey(0))
     return md, model, weights
@@ -101,8 +100,8 @@ def test_head_is_tied_to_the_table():
     h = jnp.array([0.01, -0.02, 0.03, 0.005], dtype=jnp.float32)
     base = np.asarray(codec.logits(weights[0], None, h))
     assert base.shape == (256,)
-    # Doubling the shared table doubles the (small, uncapped-regime)
-    # logits computed from the same activation.
+    # Doubling the shared table doubles the logits computed from the
+    # same activation.
     w2 = dict(weights[0])
     w2['emb'] = weights[0]['emb'] * 2.0
     doubled = np.asarray(codec.logits(w2, None, h))
@@ -154,12 +153,22 @@ def test_padding_continues_positions_negatively():
     assert np.allclose(enc[0, 0], expected, atol=1e-5)
 
 
-def test_cap_applies_by_default():
+def test_logits_are_the_raw_tied_scores():
+    # No soft-cap since 2026-08-19 (see docs/io.md): the tied scoring
+    # matmul is the whole output path, so it stays exactly linear in
+    # the table however large the scores get.
     md, model, weights = _build("bytes.emb.4|dense.4.tanh")
-    weights[0]['emb'] = weights[0]['emb'] * 1e4  # blow up the table
+    codec = md.codec.build_jax()
+    h = jnp.array([300.0, -200.0, 100.0, 50.0], dtype=jnp.float32)
+    base = np.asarray(codec.logits(weights[0], None, h))
+    assert np.max(np.abs(base)) > 30.0
+    big = dict(weights[0])
+    big['emb'] = weights[0]['emb'] * 1e4
+    assert np.allclose(
+        np.asarray(codec.logits(big, None, h)), 1e4 * base, rtol=1e-4)
+    # The whole model still produces finite logits and loss.
     batch = jnp.zeros((1, 4), dtype=jnp.int32)
-    logits = np.asarray(model.forward(weights, batch))
-    assert np.all(np.abs(logits) <= _LOGIT_CAP)
+    assert np.all(np.isfinite(np.asarray(model.forward(weights, batch))))
     assert np.isfinite(float(model.loss_batch(weights, batch)))
 
 

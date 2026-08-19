@@ -10,29 +10,11 @@ Implementations (same API, chosen by the pre-`|` spec):
 - `embedding_codec.EmbeddingCodec{Def,Jax}` (upcoming) -- learned
   embedding table tied between input and output (`*.emb.X[.direct]`).
 
-This module holds what they share. Logit soft-capping:
-
-    logits = CAP * tanh(logits / CAP),   CAP = 30
-
-(the RecurrentGemma value). Monotone, so greedy sampling is unchanged;
-bounds the maximum loss (~86 bits/token instead of inf) and kills
-gradients on runaway logits. ON by default, validated against the
-result DB (2026-07, ~500 seed-paired confs retrained both ways):
-loss-neutral on healthy confs (rank of capped runs among DB losses
-uniform, mean 0.504 +- 0.018; paired geometric-mean loss ratio
-0.998 +- 0.004), no change in overall divergence rate (its mechanism
-only tames runaway logits, not hidden-state NaNs), but it rescues the
-logit-blow-up failure mode -- including confs that had never converged
-in the DB -- and bounds the loss when divergence happens anyway.
-`parse_model2(..., cap=False)` opts out for experiments and for
-comparison with the legacy uncapped runtime.
+This module holds what they share. Logits are the raw head output:
+the logit soft-cap that lived here was removed 2026-08-19 (see
+docs/io.md for the measurement that retired it).
 """
-import jax
-import jax.numpy as jnp
-
 from ..tokens import get_tokenizer
-
-_LOGIT_CAP = 30.0
 
 # tokens_name -> stats['extra_weights'], memoized because num_weights
 # is called constantly during search and must stay a dict lookup.
@@ -67,8 +49,3 @@ def tokenset_extra_weights(ntokens: int, variation: str | None) -> int:
     extra = int((tokenizer.tokenset.stats or {}).get('extra_weights', 0))
     _EXTRA_WEIGHTS[name] = extra
     return extra
-
-
-def cap_logits(logits: jax.Array) -> jax.Array:
-    """Soft-cap logits to (-CAP, CAP)."""
-    return _LOGIT_CAP * jnp.tanh(logits / _LOGIT_CAP)

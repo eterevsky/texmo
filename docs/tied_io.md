@@ -2,17 +2,20 @@
 
 Status: **implemented.** Naming settled after this record was
 written: the component is called the **codec** — `OneHotCodec`
-(`layers/one_hot_codec.py`, the plain class below; the soft-cap is on
-by default after DB validation) and `EmbeddingCodec`
+(`layers/one_hot_codec.py`, the plain class below) and
+`EmbeddingCodec`
 (`layers/embedding_codec.py`, both tied rows of the table below;
 learned `exp(y)` input scale initialized to 1 — sqrt(d) until
 2026-08-16, see the addendum below), sharing
 `layers/codec.py`. Mode-swap neighbors, emb width sync on structure
 mutations, and predictor featurization landed 2026-07-11; still
 pending: the Gemma end-to-end validation.
-**See the 2026-07-11 addendum below: the adapter default recorded in
-this document was reversed before the class ever reached the DB —
-emb is always direct.**
+**Two things recorded below were later reversed.** (1) The adapter
+default — see the 2026-07-11 addendum: it was reversed before the
+class ever reached the DB, emb is always direct. (2) The logit
+soft-cap — every `cap`/`30*tanh(.../30)` in the body below is
+historical; it was removed from the codebase on 2026-08-19 (see the
+"Soft-capping — RETIRED" section and [`io.md`](io.md)).
 
 ## Addendum (2026-07-11): always direct, the adapter is gone
 
@@ -176,7 +179,15 @@ continuity.
 - ntokens == 2 (bits.1): single logit = score difference
   `<query, e1 - e0>`, keeping the existing sigmoid-trick convention.
 
-## Soft-capping — always on, all classes
+## Soft-capping — RETIRED 2026-08-19
+
+**The cap described here was removed from the codebase entirely; there
+is no `cap` flag. See the "Removed: the logit soft-cap" note in
+[`io.md`](io.md) for the measurement that retired it — briefly, the
+"fewer diverged runs" claim below did not survive an unbiased sample
+(2 rescued / 2 caused of 8 blow-ups), and the cap's matmul + bias +
+constant-scale shape was the trigger for an XLA:GPU cuBLASLt
+miscompilation. The original reasoning, preserved:**
 
 `logits = 30*tanh(logits/30)` after the head. Infrastructure, not a
 searchable knob: at equilibrium it is loss-invisible for our regime
@@ -186,6 +197,10 @@ is monotone (greedy sampling unchanged), and its real effects are
 bounded max loss (~86 bits/token instead of inf) and vanishing
 gradients at extremes — fewer diverged runs. DB comparability with
 pre-cap results is safe.
+
+The loss-invisibility half held up (±0.1% on converged runs). It was
+the divergence-rescue half — the only thing the cap was actually
+carried for — that did not.
 
 ## Validity
 
@@ -243,9 +258,14 @@ drops — the first place the two diverge.
 ## Gemma fidelity mapping
 
 `tokens.256000.gemma.emb.2560.direct` + final `rmsnorm` as the last
-chain layer + cap 30 + input scale loaded as sqrt(2560):
-`logits = 30*tanh((h @ E.T)/30)`, inputs `E[id]*sqrt(d)`, no biases
-anywhere in the IO. Exact.
+chain layer + input scale loaded as sqrt(2560): `logits = h @ E.T`,
+inputs `E[id]*sqrt(d)`, no biases anywhere in the IO.
+
+Exact except for Gemma's `final_softcap=30`, which the port used to
+match via the default cap and no longer applies (retired 2026-08-19,
+above). Greedy decoding is unaffected — argmax is invariant under a
+monotone map, so the token-for-token HF validation still holds — but
+eval perplexity drifts slightly from the reference.
 
 ## Implementation order
 

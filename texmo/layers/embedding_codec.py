@@ -5,7 +5,7 @@ on the way in, token ids look up their rows; on the way out, the
 chain's LAST ACTIVATION is scored against the same rows directly,
 
     input   v_t = exp(y) * (E[token] + P[t mod npositions])
-    output  logits = cap(h @ E.T)
+    output  logits = h @ E.T
 
 - `E` is the (ntokens, X) value table; `P` is the (npositions, X)
   position table for sub-byte chunk inputs (positions are ADDED, so
@@ -63,7 +63,7 @@ import jax.numpy as jnp
 
 from ..common import is_power2_int
 from ..precision import Precision
-from .codec import cap_logits, tokenset_extra_weights
+from .codec import tokenset_extra_weights
 
 # Mode swaps back to the blessed fixed-codebook inputs, per chunk
 # width. Input swaps carry the chain unchanged, so the final width --
@@ -146,13 +146,11 @@ class EmbeddingCodecJax:
         ntokens: int,
         npositions: int,
         emb_size: int,
-        cap: bool,
         dtype,
     ):
         self.ntokens = ntokens
         self.npositions = npositions
         self.size = emb_size
-        self.cap = cap
         self.dtype = dtype
 
     # -- weights ----------------------------------------------------------
@@ -228,10 +226,7 @@ class EmbeddingCodecJax:
         against the value rows of the shared table. `weights` (the
         head slot) is always None here; the parameter keeps the codec
         API uniform."""
-        out = h @ input_weights['emb'].T
-        if self.cap:
-            out = cap_logits(out)
-        return out
+        return h @ input_weights['emb'].T
 
     def logits_step(self, input_weights, weights, h: jax.Array) -> jax.Array:
         return self.logits(input_weights, weights, h)
@@ -254,14 +249,12 @@ class EmbeddingCodecDef:
         emb_size: int,
         variation: str | None = None,
         precision: Precision = Precision.FP32,
-        cap: bool = True,
     ):
         self.nbits = nbits
         self.ntokens = ntokens
         self.emb_size = emb_size
         self.variation = variation
         self.precision = precision
-        self.cap = cap
         self.size = emb_size  # width fed to the layer chain
         self.head: TiedHead | None = None
         self.last_width: int | None = None
@@ -277,7 +270,6 @@ class EmbeddingCodecDef:
     def from_spec(
         spec: str,
         precision: Precision = Precision.FP32,
-        cap: bool = True,
     ) -> 'EmbeddingCodecDef':
         parts = spec.split('.')
         if parts[0] == 'tokens':
@@ -285,7 +277,7 @@ class EmbeddingCodecDef:
                 raise ValueError(f"bad input spec: '{spec}'")
             return EmbeddingCodecDef(
                 nbits=None, ntokens=int(parts[1]), emb_size=int(parts[4]),
-                variation=parts[2], precision=precision, cap=cap)
+                variation=parts[2], precision=precision)
         if parts[0] == 'bytes':
             if len(parts) != 3 or parts[1] != 'emb':
                 raise ValueError(f"bad input spec: '{spec}'")
@@ -302,7 +294,7 @@ class EmbeddingCodecDef:
             raise ValueError(f"bad embedding size in '{spec}'")
         return EmbeddingCodecDef(
             nbits=nbits, ntokens=2 ** nbits, emb_size=emb_size,
-            precision=precision, cap=cap)
+            precision=precision)
 
     def with_emb_size(self, emb_size: int) -> 'EmbeddingCodecDef':
         """Copy with a different table width. Used by neighbor
@@ -310,8 +302,7 @@ class EmbeddingCodecDef:
         changed the chain's final width."""
         return EmbeddingCodecDef(
             nbits=self.nbits, ntokens=self.ntokens, emb_size=emb_size,
-            variation=self.variation, precision=self.precision,
-            cap=self.cap)
+            variation=self.variation, precision=self.precision)
 
     def set_head_width(self, last_width: int) -> None:
         self.last_width = last_width
@@ -372,5 +363,4 @@ class EmbeddingCodecDef:
     def build_jax(self) -> EmbeddingCodecJax:
         return EmbeddingCodecJax(
             ntokens=self.ntokens, npositions=self.npositions,
-            emb_size=self.emb_size, cap=self.cap,
-            dtype=self.precision.jax_dtype)
+            emb_size=self.emb_size, dtype=self.precision.jax_dtype)

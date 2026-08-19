@@ -44,15 +44,11 @@ from .layers.suffix import SuffixDef
 from .precision import Precision
 
 
-def parse_model2(spec: str, precision: Precision, cap: bool = True):
+def parse_model2(spec: str, precision: Precision):
     """Top-level spec parser. Returns a `Model2Def`.
 
     Splits the spec on `|` into the codec's input spec and the layer
     chain, builds each part, and stitches them together.
-
-    `cap` enables logit soft-capping (see layers/codec.py). On by
-    default; cap=False is for experiments and for comparing against
-    the legacy uncapped runtime.
     """
     # Imported here to break the circular module dependency:
     # model2.py imports the parser indirectly via downstream code
@@ -64,9 +60,9 @@ def parse_model2(spec: str, precision: Precision, cap: bool = True):
     # `.emb.` selects the tied-embedding codec; everything else is a
     # fixed codebook. Same API either way.
     if '.emb.' in input_spec:
-        codec = EmbeddingCodecDef.from_spec(input_spec, precision, cap=cap)
+        codec = EmbeddingCodecDef.from_spec(input_spec, precision)
     else:
-        codec = OneHotCodecDef.from_spec(input_spec, precision, cap=cap)
+        codec = OneHotCodecDef.from_spec(input_spec, precision)
     layers = parse_layer_list(layers_spec, codec.size)
 
     layer_seq = LayerSeqDef(layers, input_size=codec.size)

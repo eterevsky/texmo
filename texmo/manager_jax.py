@@ -246,8 +246,7 @@ class ManagerJax(Manager):
         weights32 = jax.tree.map(
             lambda x: x.astype(jnp.float32), self.weights)
         model32 = parse_model2(
-            self.model_def.spec, Precision.FP32,
-            cap=self.model_def.codec.cap).build_jax()
+            self.model_def.spec, Precision.FP32).build_jax()
 
         batch, lengths = self.dataset.sample_bytes(
             nbytes=self.test_sample_len,

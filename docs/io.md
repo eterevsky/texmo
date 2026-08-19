@@ -48,15 +48,45 @@ the codec — a chain layer's output is never used as logits directly.
 - **Binary special case.** When `ntokens <= 2` (bits.1) the head
   produces a single logit x, treated as `[x, 0]` — the log-odds /
   sigmoid trick.
-- **Soft-capping.** All heads apply `logits = 30*tanh(logits/30)`.
-  This is infrastructure, not a modeling knob: it is invisible to the
-  loss at equilibrium and monotone (greedy sampling unchanged), but it
-  bounds the maximum loss and kills gradients on runaway logits.
-  *Status: on by default, validated against the result DB (2026-07,
-  ~500 seed-paired confs): loss-neutral on healthy confs, rescues the
-  logit-blow-up divergence mode, no effect on divergence born in
-  hidden-layer state. `parse_model2(..., cap=False)` opts out for
-  experiments.*
+- **No soft-capping.** Logits are the raw head output. Nothing sits
+  between the head and the cross-entropy — see the note below for the
+  cap that used to.
+
+### Removed: the logit soft-cap (2026-08-19)
+
+From 2026-07 to 2026-08-19 every head applied
+`logits = 30*tanh(logits/30)` (the RecurrentGemma value), on the
+theory that it was free insurance: monotone, so greedy sampling is
+unchanged, loss-invisible at equilibrium, but bounding the maximum
+loss and killing gradients on runaway logits. It is gone, not
+defaulted off — there is no `cap` flag anywhere.
+
+Two findings retired it. **It did not buy convergence.** The original
+2026-07 validation compared capped runs against the DB's existing
+population, which selects for confs that already converged. A 3-way
+study (no cap / correct cap / the miscompiled cap below) on an
+*unbiased* sample of historically-divergent confs found the correct
+cap roughly convergence-neutral: of 8 blow-ups it rescued 2 and
+caused 2. On runs that converged either way it was loss-neutral to
+within ±0.1%, confirming the equilibrium argument — which is exactly
+why it also cannot help.
+
+**It was a miscompilation magnet.** The cap's shape — a matmul
+followed by a bias and a constant scale — is precisely the fusion
+pattern that triggered an XLA:GPU cuBLASLt alpha/bias miscompilation,
+which cost days of debugging (the miscompiled cap was the third arm
+of the study). A component with no measured benefit is not worth
+carrying a class of silent wrong-answer bugs for.
+
+Data and per-conf numbers live in `scratch/cap_study/` (untracked
+scratch, this machine only).
+
+*Side effect, accepted:* `models/recurrentgemma-2b.json` previously
+picked up the default cap, which matched Gemma's native
+`final_softcap=30`. Without it the port's eval perplexity drifts
+slightly from the reference. Greedy token matching is unaffected —
+argmax is invariant under a monotone map — so the port's
+token-for-token validation against HF still holds.
 
 ## Kind 1: bit chunks, one-hot family — `bits.N[.oh][+bp]`, `bytes`
 
@@ -110,7 +140,7 @@ positions are always embedded).
 
 The same table is **tied** into the output, and scoring is always
 **direct**: the chain's last activation is scored against the value
-rows, `logits = cap*tanh(h @ E.T / cap)`, which requires the chain's
+rows, `logits = h @ E.T`, which requires the chain's
 final width to equal d. There is no implicit adapter and no `.direct`
 mode: a model that wants a projection before the table spells it as
 an explicit trailing bare `dense.d` — the exact same bias-linear map

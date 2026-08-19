@@ -2,8 +2,8 @@
 
 Values are encoded by a fixed (parameter-free) code -- one-hot or
 binary bits, optionally with binary position-within-byte bits (`+bp`)
--- and decoded by an independent learnable dense head, optionally
-soft-capped (see codec.py). The name reflects the specs in actual use
+-- and decoded by an independent learnable dense head. The name
+reflects the specs in actual use
 (`bytes`, `bits.1+bp`, `bits.2.oh+bp`, `bits.4.oh+bp`, `tokens.*.oh`);
 the grammar still parses the other bits variants, but `is_valid`
 rejects them.
@@ -21,14 +21,13 @@ UART framing instead of a transmitted counter. Both are fixed position
 codebooks indexed by `t mod positions`, so they share all machinery.
 
 The binary special case (ntokens <= 2) produces a single logit x
-treated as [x, 0]; the padding happens after the cap (tanh(0) == 0, so
-the order is immaterial).
+treated as [x, 0].
 """
 import jax
 import jax.numpy as jnp
 
 from ..precision import Precision
-from .codec import cap_logits, tokenset_extra_weights
+from .codec import tokenset_extra_weights
 from .dense import DenseDef, DenseJax
 
 # Number of bits used to encode the bit-chunk position within a byte.
@@ -100,7 +99,7 @@ class OneHotCodecJax:
     Encoding: a codebook lookup for bit-chunk inputs (`nbits` set), or
     `jax.nn.one_hot` for tokenized inputs (`nbits is None` -- a 256k
     vocabulary never materializes a table). Decoding: the dense head,
-    optionally soft-capped, padded to two logits in the binary case.
+    padded to two logits in the binary case.
 
     The input side is parameter-free; weights live in the model
     pytree's slots 0 (always None here) and 2 (the head), so existing
@@ -116,7 +115,6 @@ class OneHotCodecJax:
         bm: bool,
         ntokens: int,
         head: DenseJax,
-        cap: bool,
         dtype,
     ):
         self.nbits = nbits
@@ -125,7 +123,6 @@ class OneHotCodecJax:
         self.bm = bm
         self.ntokens = ntokens
         self.head = head
-        self.cap = cap
         self.dtype = dtype
         self._pad_output = ntokens <= 2
         self._pos = bp or bm
@@ -244,8 +241,6 @@ class OneHotCodecJax:
     def logits(self, input_weights, weights, h: jax.Array) -> jax.Array:
         """(..., K) hidden activations -> (..., ntokens) logits."""
         out = self.head.forward(weights, h)
-        if self.cap:
-            out = cap_logits(out)
         if self._pad_output:
             pad_widths = [(0, 0)] * (out.ndim - 1) + [(0, 1)]
             out = jnp.pad(out, pad_widths)
@@ -253,8 +248,6 @@ class OneHotCodecJax:
 
     def logits_step(self, input_weights, weights, h: jax.Array) -> jax.Array:
         _, out = self.head.step(weights, None, h)
-        if self.cap:
-            out = cap_logits(out)
         if self._pad_output:
             out = jnp.pad(out, (0, 1))
         return out
@@ -284,7 +277,6 @@ class OneHotCodecDef:
         ntokens: int,
         variation: str | None = None,
         precision: Precision = Precision.FP32,
-        cap: bool = True,
     ):
         self.nbits = nbits
         self.one_hot = one_hot
@@ -293,7 +285,6 @@ class OneHotCodecDef:
         self.ntokens = ntokens
         self.variation = variation
         self.precision = precision
-        self.cap = cap
         self.head: DenseDef | None = None
 
         if nbits is None:
@@ -311,7 +302,6 @@ class OneHotCodecDef:
     def from_spec(
         spec: str,
         precision: Precision = Precision.FP32,
-        cap: bool = True,
     ) -> 'OneHotCodecDef':
         if spec == '' or spec == 'bytes':
             spec = 'bits.8.oh'
@@ -330,7 +320,7 @@ class OneHotCodecDef:
             one_hot = len(main) > 2 and main[2] == 'oh'
             return OneHotCodecDef(
                 nbits=nbits, one_hot=one_hot, bp=bp, bm=bm,
-                ntokens=2 ** nbits, precision=precision, cap=cap)
+                ntokens=2 ** nbits, precision=precision)
         if spec.startswith('tokens.'):
             parts = spec.split('.')
             if len(parts) != 4 or parts[3] != 'oh':
@@ -340,7 +330,7 @@ class OneHotCodecDef:
                     f"EmbeddingCodec (not implemented yet)")
             return OneHotCodecDef(
                 nbits=None, one_hot=True, bp=False, ntokens=int(parts[1]),
-                variation=parts[2], precision=precision, cap=cap)
+                variation=parts[2], precision=precision)
         raise ValueError(f"Unknown input type: '{spec}'")
 
     def set_head_width(self, last_width: int) -> None:
@@ -408,4 +398,4 @@ class OneHotCodecDef:
             nbits=self.nbits, one_hot=self.one_hot, bp=self.bp,
             bm=self.bm, ntokens=self.ntokens,
             head=self.head.build_jax(self.precision.jax_dtype),
-            cap=self.cap, dtype=self.precision.jax_dtype)
+            dtype=self.precision.jax_dtype)

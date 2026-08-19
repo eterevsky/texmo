@@ -1,61 +1,35 @@
-"""Tests for OneHotCodec (fixed codebooks + head + optional cap)."""
+"""Tests for OneHotCodec (fixed codebooks + head)."""
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from texmo.layers.codec import _LOGIT_CAP, cap_logits
 from texmo.layers.embedding_codec import EmbeddingCodecDef
 from texmo.layers.one_hot_codec import OneHotCodecDef
 from texmo.precision import Precision
 from texmo.spec_parser import parse_model2
 
 
-def _tiny_model(spec="bytes|dense.8.gelu", cap=True):
-    md = parse_model2(spec, Precision.FP32, cap=cap)
+def _tiny_model(spec="bytes|dense.8.gelu"):
+    md = parse_model2(spec, Precision.FP32)
     model = md.build_jax()
     weights = model.init_weights(jax.random.PRNGKey(0))
     return md, model, weights
 
 
-def test_cap_logits_shape_and_bounds():
-    x = jnp.array([-1e6, -10.0, -1.0, 0.0, 1.0, 10.0, 1e6])
-    y = np.asarray(cap_logits(x))
-    # <=: tanh saturates to exactly 1.0 in fp32 for huge inputs.
-    assert np.all(np.abs(y) <= _LOGIT_CAP)
-    # Near-identity for small logits, saturating for huge ones.
-    assert abs(y[2] - (-1.0)) < 1e-3 and abs(y[4] - 1.0) < 1e-3
-    assert y[0] < -29.99 and y[6] > 29.99
-    # Monotone (greedy sampling unchanged).
-    assert np.all(np.diff(y) > 0)
-
-
-def test_logits_uncapped_when_disabled():
-    _, model, weights = _tiny_model(cap=False)
-    # Blown-up head weights: raw logits far beyond the cap must
-    # survive when the cap is explicitly turned off.
-    weights[2]['w'] = weights[2]['w'] * 1e5
-    batch = jax.random.randint(
-        jax.random.PRNGKey(1), (2, 8), 0, 256).astype(jnp.int32)
-    logits = np.asarray(model.forward(weights, batch))
-    assert np.max(np.abs(logits)) > _LOGIT_CAP
-
-
-def test_forward_logits_capped_by_default():
+def test_logits_are_the_raw_head_output():
+    # No soft-cap since 2026-08-19 (see docs/io.md): blown-up head
+    # weights reach the logits untouched.
     _, model, weights = _tiny_model()
     weights[2]['w'] = weights[2]['w'] * 1e5
     batch = jax.random.randint(
         jax.random.PRNGKey(1), (2, 8), 0, 256).astype(jnp.int32)
     logits = np.asarray(model.forward(weights, batch))
-    assert np.all(np.abs(logits) <= _LOGIT_CAP)
-    assert np.max(np.abs(logits)) > _LOGIT_CAP * 0.9  # cap actually bit
-    # Loss stays finite even with a pathological head.
-    assert np.isfinite(float(model.loss_batch(weights, batch)))
+    assert np.max(np.abs(logits)) > 1e3
 
 
-@pytest.mark.parametrize("cap", (False, True))
-def test_step_matches_forward(cap):
-    _, model, weights = _tiny_model("bits.1+bp|rnn.4.tanh", cap=cap)
+def test_step_matches_forward():
+    _, model, weights = _tiny_model("bits.1+bp|rnn.4.tanh")
     batch = jax.random.randint(
         jax.random.PRNGKey(2), (1, 10), 0, 2).astype(jnp.int32)
     fwd = np.asarray(model.forward(weights, batch))
@@ -66,13 +40,12 @@ def test_step_matches_forward(cap):
         assert np.allclose(np.asarray(logits), fwd[0, t + 1], atol=1e-5), t
 
 
-def test_binary_head_pads_after_cap():
+def test_binary_head_pads_the_reference_logit():
     _, model, weights = _tiny_model("bits.1+bp|dense.4.tanh")
     batch = jnp.zeros((1, 6), dtype=jnp.int32)
     logits = np.asarray(model.forward(weights, batch))
     assert logits.shape[-1] == 2
     assert np.all(logits[..., 1] == 0.0)  # the padded reference logit
-    assert np.all(np.abs(logits[..., 0]) <= _LOGIT_CAP)
 
 
 def test_num_weights_unchanged_by_pairing():

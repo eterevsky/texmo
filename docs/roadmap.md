@@ -224,30 +224,6 @@ budget. Dream target: 32-64K weights.
 
 ## Analysis
 
-* **Cross-corpus rank transferability** (2026-08-21, needed by the
-  chatbot program). We pick architectures by books3 loss and train
-  them on SODA. Framing (Oleg): each conf has a *distribution* of
-  losses over runs, so the object of interest is the pairwise win
-  function W(C1, C2) = P(loss(R1) < loss(R2)) over run pairs — the
-  question is how W changes when the training corpus changes: does
-  it stay (approximately) the same, and where it moves, by how much.
-  Design: a stratified conf sample (frontier + random, mixed
-  families; include bits.* which are corpus-independent by
-  construction), REQUIRING several runs per (conf, corpus) — the
-  books3 side comes free from the DB's existing run distributions
-  (that is literally the function the search ranks by); the SODA
-  side needs ~3+ fresh runs per conf. Report W_books3 vs W_soda per
-  pair, plus summaries (agreement rate weighted by |W - 1/2|,
-  calibration of one against the other). Caveats to respect:
-  corpus-tuned
-  tokensets (shift, hexbpe merges, bytes-per-token stats) are fitted
-  on books3 — compare via raw eval b/B (which needs no stats) and
-  keep cross-tokenset pairs separate from within-tokenset pairs;
-  SODA-parallel tokenset builds are the follow-up if transfer looks
-  tokenset-limited. (Folding itself is settled: measured 2026-08-20,
-  case/specials cost a contextual model only ~0.02-0.04 b/B, so no
-  lossy preprocessing for chatbot corpora — see io.md.)
-
 * **Re-check logit capping under bf16** (2026-08-21, waits on run
   mass). The cap was removed after the fp32 3-way study found it
   convergence-neutral (io.md records the decision), but bf16 — just

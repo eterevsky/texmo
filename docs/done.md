@@ -7,6 +7,13 @@ short record with pointers — not a second copy of the design docs.
 
 ## 2026-08
 
+* **Cross-corpus rank transferability study** (2026-08-21). 35 confs
+  x 3 fresh SODA runs against the DB's books3 run distributions.
+  Result — books3 selection holds on SODA, with the gap-transfer
+  rule and the >= 64-token caveat — recorded in
+  [`findings.md`](findings.md); raw data in the machine-local
+  scratch/transfer_study/ (untracked).
+
 * **Roadmap triage — three entries dropped** (2026-08-21, settled
   without being built):
   - **Per-entry bounds for sub-searches** — niche until another

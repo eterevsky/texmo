@@ -55,6 +55,8 @@ Detailed docs live in [`docs/`](docs/):
 - [`roadmap.md`](docs/roadmap.md) — planned features; open work only.
 - [`done.md`](docs/done.md) — dated log of completed roadmap items,
   newest first.
+- [`findings.md`](docs/findings.md) — important empirical results
+  that keep informing decisions; the knowledge, not the work log.
 - [`links.md`](docs/links.md) — bare list of reference papers and
   repos.
 

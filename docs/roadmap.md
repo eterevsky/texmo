@@ -92,6 +92,43 @@ Given a parameter budget N and compute budget T, answer:
   model price a variable-compute forward, and what the training
   objective charges per emitted bit.
 
+* **Spec-only "potential loss" predictor** (2026-08-21 idea, not
+  started). Predict the best loss a *spec* could reach, marginalizing
+  out the metaparameters, so selection can run in two stages under a
+  weight budget W: first pick the most promising architecture, then
+  separately optimize (lr, batch, length, steps) for it. Motivation:
+  saturation time keeps growing (top confs at ~5 min of training,
+  10-min limit), so spending runs on metaparameter wiggling of
+  unpromising specs is the expensive part. v0 needs no new model:
+  the tree predictor already conditions on metaparams, so "potential
+  loss" is a min over a small metaparam grid of its predictions —
+  distill into a true spec-only model later only if the grid is too
+  slow or noisy at select time.
+
+* **Cross-corpus rank transferability** (2026-08-21, needed by the
+  chatbot program). We pick architectures by books3 loss and train
+  them on SODA. Framing (Oleg): each conf has a *distribution* of
+  losses over runs, so the object of interest is the pairwise win
+  function W(C1, C2) = P(loss(R1) < loss(R2)) over run pairs — the
+  question is how W changes when the training corpus changes: does
+  it stay (approximately) the same, and where it moves, by how much.
+  Design: a stratified conf sample (frontier + random, mixed
+  families; include bits.* which are corpus-independent by
+  construction), REQUIRING several runs per (conf, corpus) — the
+  books3 side comes free from the DB's existing run distributions
+  (that is literally the function the search ranks by); the SODA
+  side needs ~3+ fresh runs per conf. Report W_books3 vs W_soda per
+  pair, plus summaries (agreement rate weighted by |W - 1/2|,
+  calibration of one against the other). Caveats to respect:
+  corpus-tuned
+  tokensets (shift, hexbpe merges, bytes-per-token stats) are fitted
+  on books3 — compare via raw eval b/B (which needs no stats) and
+  keep cross-tokenset pairs separate from within-tokenset pairs;
+  SODA-parallel tokenset builds are the follow-up if transfer looks
+  tokenset-limited. (Folding itself is settled: measured 2026-08-20,
+  case/specials cost a contextual model only ~0.02-0.04 b/B, so no
+  lossy preprocessing for chatbot corpora — see io.md.)
+
 ### Candidates to revisit
 
 * **HGRN2** (Qin et al. 2024, "Hierarchically Gated Recurrent
@@ -160,8 +197,20 @@ budget. Dream target: 32-64K weights.
      produced it.
 2. **`texmo.py chat`** (the REPL entry below): preamble + utterance
    format, over the step path (which is now exactly forward-parity).
+2b. **Nonsense-rate eval** (2026-08-21): a big model (Gemma-class via
+   the dialog harness) makes smalltalk with a texmo model; a judge
+   pass marks each small-model response nonsense / not. Working goal:
+   the smallest model with nonsense < 90% on simple smalltalk. Needs
+   a texmo-side OpenAI-compatible endpoint so the harness can seat a
+   texmo model unchanged. This metric gates the data experiments in
+   milestone 3 — "does dumbed-down data help" is unanswerable
+   without it.
 3. **Tranches** of synthetic data under different instructions and
-   vocabulary limits.
+   vocabulary limits. (Skepticism on record 2026-08-21: training may
+   already extract the simplest patterns from natural SODA, and the
+   TinyStories-style precedent operates at 100x our weight budgets —
+   test one constrained-vocab tranche against equal-bytes SODA on the
+   nonsense metric before investing further.)
 4. **Loss reconnaissance**: train search-sized models on the dialog
    tranches, compare against books3 losses. NOTE: this is the
    cross-corpus eval where per-corpus residual accounting goes live

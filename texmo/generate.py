@@ -28,6 +28,36 @@ def jit_step(model: Model2Jax):
     return jax.jit(model.step)
 
 
+def sample_tokens(
+    model: Model2Jax,
+    weights,
+    tokenizer,
+    prefix: str,
+    temperature: float,
+):
+    """Prefill `prefix`, then yield sampled token ids indefinitely.
+
+    A generator, so the caller decides when to stop -- at a token
+    count (`continue_prefix`) or at a turn boundary (`texmo.chat`).
+    The states live in the frame between yields, so nothing is
+    recomputed per token.
+    """
+    prefix_tokens = tokenizer.tokenize(prefix.encode())
+    step = jit_step(model)
+    states, _ = model.initial_step(weights)
+    for c in prefix_tokens[:-1]:
+        states, _ = step(weights, states, int(c))
+
+    c = int(prefix_tokens[-1])
+    rng = jax.random.PRNGKey(random.randrange(2**32))
+    while True:
+        states, logits = step(weights, states, c)
+        probs = jax.nn.softmax(logits / temperature)
+        rng, sub = jax.random.split(rng)
+        c = int(jax.random.choice(sub, model.ntokens, p=probs))
+        yield c
+
+
 def continue_prefix(
     model: Model2Jax,
     weights,
@@ -43,21 +73,9 @@ def continue_prefix(
     character).
     """
     tokenizer = get_tokenizer(tokens_name)
-    prefix_tokens = tokenizer.tokenize(prefix.encode())
-
-    step = jit_step(model)
-    states, _ = model.initial_step(weights)
-    for c in prefix_tokens[:-1]:
-        states, _ = step(weights, states, int(c))
-
-    c = int(prefix_tokens[-1])
-    rng = jax.random.PRNGKey(random.randrange(2**32))
-    out = []
+    out = list(tokenizer.tokenize(prefix.encode()))
+    tokens = sample_tokens(model, weights, tokenizer, prefix, temperature)
     for _ in range(length):
-        states, logits = step(weights, states, c)
-        probs = jax.nn.softmax(logits / temperature)
-        rng, sub = jax.random.split(rng)
-        c = int(jax.random.choice(sub, model.ntokens, p=probs))
-        out.append(c)
+        out.append(next(tokens))
 
-    return tokenizer.untokenize(list(prefix_tokens) + out)
+    return tokenizer.untokenize(out)

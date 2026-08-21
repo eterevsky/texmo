@@ -5,13 +5,15 @@ are about the contract (bytes out, prefix kept, RNG seeding), not the
 text.
 """
 
+import itertools
 import random
 
 import jax
 
-from texmo.generate import continue_prefix, jit_step
+from texmo.generate import continue_prefix, jit_step, sample_tokens
 from texmo.precision import Precision
 from texmo.spec_parser import parse_model2
+from texmo.tokens import get_tokenizer
 
 SPEC = 'bits.4.oh+bp|dense.4.gelu'
 
@@ -54,6 +56,18 @@ def test_continue_prefix_length_grows_with_tokens():
     long = continue_prefix(
         model, weights, tokens_name, 'hi', length=64, temperature=1.0)
     assert len(long) > len(short)
+
+
+def test_sample_tokens_yields_on_demand():
+    """The generator has no length of its own: it prefills once and
+    keeps yielding for as long as it is pulled."""
+    model, weights, tokens_name = _make_model()
+    tokenizer = get_tokenizer(tokens_name)
+    stream = sample_tokens(model, weights, tokenizer, 'hi', 1.0)
+    ids = list(itertools.islice(stream, 5))
+    assert len(ids) == 5
+    assert all(0 <= c < model.ntokens for c in ids)
+    assert len(list(itertools.islice(stream, 3))) == 3
 
 
 def test_jit_step_cached_per_model():

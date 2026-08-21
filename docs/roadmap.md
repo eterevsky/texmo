@@ -129,7 +129,17 @@ Given a parameter budget N and compute budget T, answer:
   case/specials cost a contextual model only ~0.02-0.04 b/B, so no
   lossy preprocessing for chatbot corpora — see io.md.)
 
-### Candidates to revisit
+* **Re-check logit capping under bf16** (2026-08-21, waits on run
+  mass). The cap was removed after the fp32 3-way study found it
+  convergence-neutral (io.md records the decision), but bf16 — just
+  enabled in the search template — has an 8-bit mantissa and a very
+  different rounding/overflow regime, so a soft-cap could matter
+  there where it did not in fp32. Once enough bf16 runs (and bf16
+  divergences) accumulate, re-run the nocap-vs-cap comparison on
+  bf16 divergent confs before considering the question closed for
+  that precision. The fp32 harness pattern lives in the machine-local
+  scratch/cap_study (untracked; rebuildable from the io.md
+  description if lost).
 
 * **HGRN2** (Qin et al. 2024, "Hierarchically Gated Recurrent
   Network"). Adds depth-dependent gating — lower layers have
@@ -204,7 +214,11 @@ budget. Dream target: 32-64K weights.
    a texmo-side OpenAI-compatible endpoint so the harness can seat a
    texmo model unchanged. This metric gates the data experiments in
    milestone 3 — "does dumbed-down data help" is unanswerable
-   without it.
+   without it. This is the middle rung of the coherency-measurement
+   ladder (absorbed the former standalone "Coherency eval" entry):
+   cross-entropy on the dialog distribution as the cheap proxy →
+   judge-scored nonsense rate → a fixed script of probe dialogs with
+   exact/fuzzy answer matching if the judge proves too coarse.
 3. **Tranches** of synthetic data under different instructions and
    vocabulary limits. (Skepticism on record 2026-08-21: training may
    already extract the simplest patterns from natural SODA, and the
@@ -249,13 +263,6 @@ budget. Dream target: 32-64K weights.
     escape), sketched 2026-07-20. The 128 rung is no longer empty
     (fold-128 and hexbpe-128 both exist), so it has to earn its
     place against them.
-
-* **Coherency eval.** Working assumption to start: cross-entropy
-  over the dialog training distribution is a workable proxy for
-  coherency (possibly too optimistic). If it proves insufficient,
-  escalate to a fixed script of probe dialogs scored automatically
-  (exact/fuzzy answer match) so search/training can see progress
-  toward the chatbot goal directly.
 
 * **Synthetic dialog data from a big open model.** Generate the
   narrow dialog training distribution with the best locally-runnable

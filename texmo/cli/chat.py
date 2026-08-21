@@ -139,7 +139,8 @@ def _repl(args, model, weights, tokens_name, dialog, out, log) -> None:
 
         prompt = build_prompt(
             dialog, utterance, args.user_name, args.bot_name)
-        out.write(f'{args.bot_name}:')
+        # Blank line between the turns, as the dialog format has it.
+        out.write(f'\n{args.bot_name}:')
         out.flush()
 
         t0 = time.perf_counter()

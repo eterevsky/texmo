@@ -52,7 +52,9 @@ Detailed docs live in [`docs/`](docs/):
   `scripts/make_best_models.py`.
 - [`decay_and_checkpoints.md`](docs/decay_and_checkpoints.md) — design
   notes on LR decay interacting with intermediate checkpoints.
-- [`roadmap.md`](docs/roadmap.md) — planned features.
+- [`roadmap.md`](docs/roadmap.md) — planned features; open work only.
+- [`done.md`](docs/done.md) — dated log of completed roadmap items,
+  newest first.
 - [`links.md`](docs/links.md) — bare list of reference papers and
   repos.
 

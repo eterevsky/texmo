@@ -1,5 +1,8 @@
 # Roadmap
 
+Open work only. Anything finished (or settled without being built)
+moves to [`done.md`](done.md).
+
 ## Grand goal
 
 Given a parameter budget N and compute budget T, answer:
@@ -76,6 +79,25 @@ Given a parameter budget N and compute budget T, answer:
   equal weight count, since that is the current answer to the same
   problem.
 
+* **Hex generative IO — `bits.8.gen`'s two-step sibling**
+  (2026-08-21 idea). Same move as `bits.8.gen.X` but one hexadecimal
+  digit at a time instead of one bit:
+  - **Input**: the byte as two 16-value one-hots concatenated —
+    width 32, one position per byte, no table.
+  - **Output**: the byte generated as two hex digits. The first is a
+    plain dense head over the chain's last activation `h` (16-way);
+    the second is a dense head over `[h, onehot(first digit)]`
+    (16-way). `P(hi) * P(lo | hi)` chain-rules into an exact 256-way
+    byte distribution — lossless, 1.0 bytes/token, no `+bp` phase
+    bookkeeping.
+
+  Against `bits.8.gen.X`: two sequential mini-steps per byte instead
+  of eight (the dispatch cost flagged in that entry shrinks 4x), no
+  generator state cell and therefore no new metaparameter — the IO
+  is fully determined by the chain width. Cost is `O(32·X)` on the
+  input and `O(16·X + 16·(X+16))` on the output — bigger than the
+  bit generator, still far below a 256-way head.
+
 * **Bit/byte router — tokens reimplemented inside the model**
   (2026-08-16 idea; for after the chatbot program). Adjacent to
   `bits.8.gen.X`: an MoE-style router decides, per position, whether
@@ -92,18 +114,115 @@ Given a parameter budget N and compute budget T, answer:
   model price a variable-compute forward, and what the training
   objective charges per emitted bit.
 
-* **Spec-only "potential loss" predictor** (2026-08-21 idea, not
-  started). Predict the best loss a *spec* could reach, marginalizing
-  out the metaparameters, so selection can run in two stages under a
-  weight budget W: first pick the most promising architecture, then
-  separately optimize (lr, batch, length, steps) for it. Motivation:
-  saturation time keeps growing (top confs at ~5 min of training,
-  10-min limit), so spending runs on metaparameter wiggling of
-  unpromising specs is the expensive part. v0 needs no new model:
-  the tree predictor already conditions on metaparams, so "potential
-  loss" is a min over a small metaparam grid of its predictions —
-  distill into a true spec-only model later only if the grid is too
-  slow or noisy at select time.
+* **HGRN2** (Qin et al. 2024, "Hierarchically Gated Recurrent
+  Network"). Adds depth-dependent gating — lower layers have
+  lower forget rates (longer memory), upper layers shorter. The
+  gain comes mostly in multi-layer models; less obviously useful
+  at our typical 1-2 hidden-layer regime, so deferred until we
+  have a baseline that benefits from depth.
+* **LRU** (Orvieto et al. 2023, "Resurrecting Recurrent Neural
+  Networks for Long Sequences", DeepMind). Linear recurrence with
+  complex eigenvalues + input-dependent gating — essentially S4D-
+  with-input-dependent-gates. Revisit after S4D so we have a
+  baseline structured-recurrence to compare against.
+
+## Tiny chatbot program (2026-07 ideas)
+
+Context: with the tied codec in search, embedded models win over
+one-hot starting around w~100 (searched up to w~200). Long-term
+goal: the smallest model that is minimally coherent as a chatbot —
+answers "Hi / Who are you? / Do you prefer dogs or cats?" style
+exchanges sensibly; stretch goal: copy-from-context ("I'm Oleg.
+What's my name?" -> "Oleg"), which likely needs attention/suffix
+copying and is probably the capability that decides the weight
+budget. Dream target: 32-64K weights.
+
+**Milestone order (2026-08-16):** after the architecture tweaks
+(`bits.8.gen.X`):
+
+1. **Conversation harness**: two models talk (not necessarily on
+   texmo — Gemma-class and others via their own runtimes), each with
+   its own system prompt; record, process, save as synthetic
+   training data. The harness itself is built (2026-08-18, see
+   [`done.md`](done.md)); still open for this milestone: pick the
+   generator model (see the open-model survey entry), generate real dialogs, and write the processing step
+   that turns them into a training corpus.
+   - Optionally **force the models' hand**: constrain generation to
+     a small vocabulary by masking output logits. Subword plan
+     (2026-08-16, details deferred until the bridge is reached):
+     allow every token that is a *substring* of valid text — cheap
+     and prefix-safe by construction — then either clean up what
+     comes out or drop whole responses/dialogs marked invalid.
+     Grammar-constrained decoding (GBNF / outlines-style) remains
+     the heavyweight alternative if leakage is worse than expected.
+     The harness already reserves the slot: each participant's
+     `extra` dict is merged verbatim into the request body (last, so
+     it can override the sampling params), which is where
+     `logit_bias` or llama.cpp's `grammar` goes — and it is recorded
+     with every dialog, so a tranche always says which constraint
+     produced it.
+2. **Nonsense-rate eval** (2026-08-21): a big model (Gemma-class via
+   the dialog harness) makes smalltalk with a texmo model; a judge
+   pass marks each small-model response nonsense / not. Working goal:
+   the smallest model with nonsense < 90% on simple smalltalk. Needs
+   a texmo-side OpenAI-compatible endpoint so the harness can seat a
+   texmo model unchanged. This metric gates the data experiments in
+   milestone 3 — "does dumbed-down data help" is unanswerable
+   without it. This is the middle rung of the coherency-measurement
+   ladder (absorbed the former standalone "Coherency eval" entry):
+   cross-entropy on the dialog distribution as the cheap proxy →
+   judge-scored nonsense rate → a fixed script of probe dialogs with
+   exact/fuzzy answer matching if the judge proves too coarse.
+3. **Tranches** of synthetic data under different instructions and
+   vocabulary limits. (Skepticism on record 2026-08-21: training may
+   already extract the simplest patterns from natural SODA, and the
+   TinyStories-style precedent operates at 100x our weight budgets —
+   test one constrained-vocab tranche against equal-bytes SODA on the
+   nonsense metric before investing further.)
+4. **Loss reconnaissance**: train search-sized models on the dialog
+   tranches, compare against books3 losses. NOTE: this is the
+   cross-corpus eval where per-corpus residual accounting goes live
+   — lossy tokensets' residual constants were computed from books3
+   frequencies, and `chunk_residual_bits` (see tokenset loose ends)
+   exists for exactly this.
+5. **Best possible model at ~16k weights** on the chosen tranche.
+6. *(optional)* **Web demo**: pure-JavaScript in-page chat with the
+   model. At 16k weights this is a few tens of KB of weights and
+   hand-rolled matmuls — trivially feasible; rides on the
+   model-store JSON export (first entry below).
+
+* **Save weights of Pareto-optimal models** (deprioritized
+  2026-08-21: search runs on books3, chat models train on SODA — not
+  transferable). When a run's eval score is Pareto-optimal for its
+  weight count (the server already computes `changed_winner` at
+  add_run), export the model as a model_store JSON — a few KB inline
+  at search sizes. Especially for w>1000 where retraining costs
+  minutes. Also enables inspecting learned weights (embedding scale,
+  table geometry), warm starts, and chat demos.
+
+* **Chat format in the model JSON.** `texmo.py chat` hardcodes the
+  `Name: utterance` turn format; move it into an optional `"chat"`
+  section of the model manifest, so customized formats (Gemma
+  few-shot prompting — note our conversion is the base model, not
+  instruct) ride with the model.
+
+* **Synthetic dialog data from a big open model.** Generate the
+  narrow dialog training distribution with the best locally-runnable
+  open-weights model (30B-class, quantized, llama.cpp/vLLM — outside
+  texmo infra; a texmo path is a bonus). Output-permissive licenses
+  (Gemma-style terms) keep the data provenance clean, unlike
+  API-generated text with no-train clauses. Tiny models want narrow,
+  heavily repeated data — the generation budget is small.
+
+* **Open-model survey (do before the synthetic-data step).** Review
+  the top open-weights models beyond Gemma — DeepSeek, GLM, current
+  HF leaderboard — for (a) the synthetic-data generator pick, (b)
+  architecture worth porting down (DeepSeek's latent attention /
+  KV compression; the SmolLM/MobileLLM small-model tricks like layer
+  sharing), (c) the next full-fidelity port candidate (Llama-class
+  needs SiLU + a GQA knob + full rotary).
+
+## Analysis
 
 * **Cross-corpus rank transferability** (2026-08-21, needed by the
   chatbot program). We pick architectures by books3 loss and train
@@ -141,185 +260,6 @@ Given a parameter budget N and compute budget T, answer:
   scratch/cap_study (untracked; rebuildable from the io.md
   description if lost).
 
-* **HGRN2** (Qin et al. 2024, "Hierarchically Gated Recurrent
-  Network"). Adds depth-dependent gating — lower layers have
-  lower forget rates (longer memory), upper layers shorter. The
-  gain comes mostly in multi-layer models; less obviously useful
-  at our typical 1-2 hidden-layer regime, so deferred until we
-  have a baseline that benefits from depth.
-* **LRU** (Orvieto et al. 2023, "Resurrecting Recurrent Neural
-  Networks for Long Sequences", DeepMind). Linear recurrence with
-  complex eigenvalues + input-dependent gating — essentially S4D-
-  with-input-dependent-gates. Revisit after S4D so we have a
-  baseline structured-recurrence to compare against.
-
-## Tiny chatbot program (2026-07 ideas)
-
-Context: with the tied codec in search, embedded models win over
-one-hot starting around w~100 (searched up to w~200). Long-term
-goal: the smallest model that is minimally coherent as a chatbot —
-answers "Hi / Who are you? / Do you prefer dogs or cats?" style
-exchanges sensibly; stretch goal: copy-from-context ("I'm Oleg.
-What's my name?" -> "Oleg"), which likely needs attention/suffix
-copying and is probably the capability that decides the weight
-budget. Dream target: 32-64K weights.
-
-**Milestone order (2026-08-16):** after the architecture tweaks
-(`bits.8.gen.X`) and the LittleLearner sidestep:
-
-1. **Conversation harness**: two models talk (not necessarily on
-   texmo — Gemma-class and others via their own runtimes), each with
-   its own system prompt; record, process, save as synthetic
-   training data.
-   - **Harness built** (2026-08-18): `scripts/dialog_harness.py`,
-     with `scripts/dialog_sample_conf.json` (external endpoints) and
-     `scripts/dialog_sample_local_conf.json` (harness-managed
-     servers) as runnable example configs, and tests in
-     `texmo/dialog_harness_test.py` (there, not in `scripts/`,
-     because `testpaths = ["texmo"]`). Two participants, one JSON
-     config, dialogs appended as JSONL under `data/dialogs/`, one
-     record per dialog carrying both participants verbatim for
-     provenance; stop rule is a `min_dialog_bytes` budget with a
-     `max_turns` cap. One command goes from config to dialogs: a
-     participant gives either a `base_url` (an endpoint someone else
-     runs, untouched) or a `model_path`, and the harness starts
-     `llama-server` on that GGUF itself, on a free port, waits for
-     /health, and always tears it down again — two seats on one file
-     share a single server. Generators still run outside texmo: it
-     speaks OpenAI chat-completions and imports no inference
-     library. Still open for this milestone: pick the generator
-     model (see the open-model survey and LittleLearner entries),
-     generate real dialogs, and write the processing step that turns
-     them into a training corpus.
-   - Optionally **force the models' hand**: constrain generation to
-     a small vocabulary by masking output logits. Subword plan
-     (2026-08-16, details deferred until the bridge is reached):
-     allow every token that is a *substring* of valid text — cheap
-     and prefix-safe by construction — then either clean up what
-     comes out or drop whole responses/dialogs marked invalid.
-     Grammar-constrained decoding (GBNF / outlines-style) remains
-     the heavyweight alternative if leakage is worse than expected.
-     The harness already reserves the slot: each participant's
-     `extra` dict is merged verbatim into the request body (last, so
-     it can override the sampling params), which is where
-     `logit_bias` or llama.cpp's `grammar` goes — and it is recorded
-     with every dialog, so a tranche always says which constraint
-     produced it.
-2. **`texmo.py chat`** (the REPL entry below): preamble + utterance
-   format, over the step path (which is now exactly forward-parity).
-2b. **Nonsense-rate eval** (2026-08-21): a big model (Gemma-class via
-   the dialog harness) makes smalltalk with a texmo model; a judge
-   pass marks each small-model response nonsense / not. Working goal:
-   the smallest model with nonsense < 90% on simple smalltalk. Needs
-   a texmo-side OpenAI-compatible endpoint so the harness can seat a
-   texmo model unchanged. This metric gates the data experiments in
-   milestone 3 — "does dumbed-down data help" is unanswerable
-   without it. This is the middle rung of the coherency-measurement
-   ladder (absorbed the former standalone "Coherency eval" entry):
-   cross-entropy on the dialog distribution as the cheap proxy →
-   judge-scored nonsense rate → a fixed script of probe dialogs with
-   exact/fuzzy answer matching if the judge proves too coarse.
-3. **Tranches** of synthetic data under different instructions and
-   vocabulary limits. (Skepticism on record 2026-08-21: training may
-   already extract the simplest patterns from natural SODA, and the
-   TinyStories-style precedent operates at 100x our weight budgets —
-   test one constrained-vocab tranche against equal-bytes SODA on the
-   nonsense metric before investing further.)
-4. **Loss reconnaissance**: train search-sized models on the dialog
-   tranches, compare against books3 losses. NOTE: this is the
-   cross-corpus eval where per-corpus residual accounting goes live
-   — lossy tokensets' residual constants were computed from books3
-   frequencies, and `chunk_residual_bits` (see tokenset loose ends)
-   exists for exactly this.
-5. **Best possible model at ~16k weights** on the chosen tranche.
-6. *(optional)* **Web demo**: pure-JavaScript in-page chat with the
-   model. At 16k weights this is a few tens of KB of weights and
-   hand-rolled matmuls — trivially feasible; rides on the
-   model-store JSON export (first entry below).
-
-* **Save weights of Pareto-optimal models.** When a run's eval score
-  is Pareto-optimal for its weight count (the server already
-  computes `changed_winner` at add_run), export the model as a
-  model_store JSON — a few KB inline at search sizes. Especially for
-  w>1000 where retraining costs minutes. Also enables inspecting
-  learned weights (embedding scale, table geometry), warm starts,
-  and chat demos.
-
-* **Rudimentary chat command.** REPL over the step path: "User: " /
-  "Bot: " line prefixes, stop on newline or a character cap,
-  temperature knob. The chat format lives in the model JSON (an
-  optional "chat" section) so customized formats (Gemma few-shot
-  prompting — note our conversion is the base model, not instruct)
-  ride with the model.
-
-* **Tokenset loose ends.** The families themselves are built and
-  documented in [`io.md`](io.md); what is left:
-  - **Decode policy for lossy generation**: sample within a group vs
-    print the canonical head character (currently head character).
-  - **Per-eval-slice residual accounting**: decided against for now
-    (the corpus-average constant is exact in expectation);
-    `chunk_residual_bits` is ready if a cross-corpus eval appears.
-  - **A Unicode-char-level set** (chars, not bytes, behind a shift /
-    escape), sketched 2026-07-20. The 128 rung is no longer empty
-    (fold-128 and hexbpe-128 both exist), so it has to earn its
-    place against them.
-
-* **Synthetic dialog data from a big open model.** Generate the
-  narrow dialog training distribution with the best locally-runnable
-  open-weights model (30B-class, quantized, llama.cpp/vLLM — outside
-  texmo infra; a texmo path is a bonus). Output-permissive licenses
-  (Gemma-style terms) keep the data provenance clean, unlike
-  API-generated text with no-train clauses. Tiny models want narrow,
-  heavily repeated data — the generation budget is small.
-
-* **Open-model survey (do before the synthetic-data step).** Review
-  the top open-weights models beyond Gemma — DeepSeek, GLM, current
-  HF leaderboard — for (a) the synthetic-data generator pick, (b)
-  architecture worth porting down (DeepSeek's latent attention /
-  KV compression; the SmolLM/MobileLLM small-model tricks like layer
-  sharing), (c) the next full-fidelity port candidate (Llama-class
-  needs SiLU + a GQA knob + full rotary).
-
-* **Investigate LittleLearner** (2026-08-16 idea;
-  https://littlelearner-ll.github.io/). A 0.6B / 1.3B / 5B family
-  trained from scratch on "LittleCurriculum", an 88B-token corpus
-  distilled from FineWeb-Edu to K–5 reading level, with Base / GRPO /
-  "Chatty" variants. Two angles: (a) **earmarked as the
-  synthetic-dialog generator for the nano chatbot** — a model whose
-  entire distribution is elementary-school English emits exactly the
-  narrow, simple text a 32–64K-weight model could actually learn,
-  likely a better-matched teacher than a quantized 30B generalist
-  (see the synthetic-dialog entry above); (b) a conversion à la
-  RecurrentGemma for local eval/generation, if the gap stays small.
-
-  The model card says **Qwen3 architecture** (2026-08-16). Against
-  texmo's stack that means, to verify in the checkpoint config:
-  SiLU/SwiGLU (already supported — `silu` is search-valid and
-  `split.mul(dense.X.silu, dense.X)` is SwiGLU); **Q/K RMSNorm** (new —
-  per-head norm on queries and keys before RoPE); likely a **GQA
-  knob** (`num_key_value_heads` — Qwen3-class is usually grouped,
-  our attn is MQA-only with one shared K/V head) and **full rotary**
-  (our attn rotates only a fraction, the Gemma convention) — the
-  open-model survey entry already names those two for Llama-class
-  ports; and full-context attention (window = context length —
-  mechanically just a big window). RoPE pair convention matches
-  (split-half, same as Gemma). So closer to four checkable deltas
-  than two; config.json settles it.
-
-  **Port probably skippable** (2026-08-16): none of the Qwen3
-  pieces would enter the search (the search space should not absorb
-  attention-tuning varieties for marginal gains), and the
-  conversation harness runs generator models on their own runtimes
-  anyway — so nothing actually needs LittleLearner inside texmo.
-  Keep it earmarked as a dialog-generator candidate via its own
-  runtime; the delta list above stays as the record if a
-  full-fidelity port (à la RecurrentGemma) is ever wanted, in which
-  case the pieces land as port-fidelity knobs the mutation cycle
-  never proposes — the "search-ineligible but valid" side of the
-  is_valid-split entry under Infrastructure.
-
-## Analysis
-
 * **Layer audit: what works and what doesn't.** Mine the results DB
   for which layer types and motifs actually show up on or near the
   Pareto frontier (per weight bucket), which only ever ride along,
@@ -331,49 +271,18 @@ budget. Dream target: 32-64K weights.
 
 ## Infrastructure
 
-* **select_conf latency.** The numbers below are a **2026-07-18
-  report and are now stale** — they predate the server work that
-  followed (incremental timing refresh, chunked upserts, dropping
-  stale `Select` messages, refit cadence 100 -> 400). Re-measure
-  before acting on them: avg 6.5 s at 76% of server wall time;
-  `SearchServer.select` at 171% (overlapping requests queue ~8 s on
-  top); worst inner offender `_select_uncovered_top` (avg 4.4 s, max
-  79 s), then `_select_predicted_best` / `_select_top_neighbor`
-  (~1.5-3 s each); `timing._refresh_estimates.iter_confs` ~1 min per
-  refresh.
-
-  Two things that have changed the picture since: a `top_confs_global`
-  call still costs ~3.6 s unrestricted, and a spec regex adds ~33% on
-  top (4.8 s measured 2026-08-08) because `REGEXP` is a Python
-  callback per row — and multi-template search now issues those
-  per-entry, multiplying the distinct query shapes any cache would
-  have to hold. Revisit with caching / incremental candidate sets
-  when it starts hurting client utilization.
-
-* **Per-entry bounds for sub-searches** (2026-08-10, out of the
-  bits.1 scaling investigation; deprioritized 2026-08-16 — niche
-  until another region-targeted measurement is actually wanted; the
-  analysis below stays valid). A sub-search entry carries only a
-  spec filter; `max_weights` and `train_time` stay shared with the
-  main search, so an entry aimed at a *region* rather than a shape
-  cannot reach it.
-
-  Worked example: 10% of the search on `bits\.1.*` to measure scaling
-  past 4000 weights produced 53 runs there out of ~10k, and one
-  frontier conf. Not a run-count gate — the 4000-8000 frontier holds
-  one conf at `min_num_runs=1` as well. The heavy confs are dominated
-  on merit because they train short: they beat the 3.033 bar from
-  4096 steps and reach **2.848** at 32768 (144 s, well inside a 480 s
-  budget), but only 7 runs exist at that step count. The cause is
-  compounding log-uniform draws — P(t big enough) ~19% x P(weight
-  ceiling > 4000) ~15% x the 10% share ~= 0.3% of selects.
-
-  Letting an entry override `max_weights` and `train_time` (that
-  entry at `-w 4000-8000 -t 120-480`) points its whole share at the
-  cell being measured — roughly 30x the sampling rate there, with no
-  effect on the main search. `TemplateEntry` already owns a
-  `Template`, so this is two optional bound overrides plus two form
-  columns.
+* **Spec-only "potential loss" predictor** (2026-08-21 idea, not
+  started). Predict the best loss a *spec* could reach, marginalizing
+  out the metaparameters, so selection can run in two stages under a
+  weight budget W: first pick the most promising architecture, then
+  separately optimize (lr, batch, length, steps) for it. Motivation:
+  saturation time keeps growing (top confs at ~5 min of training,
+  10-min limit), so spending runs on metaparameter wiggling of
+  unpromising specs is the expensive part. v0 needs no new model:
+  the tree predictor already conditions on metaparams, so "potential
+  loss" is a min over a small metaparam grid of its predictions —
+  distill into a true spec-only model later only if the grid is too
+  slow or noisy at select time.
 
 * **Exclusion regexes for sub-searches** (2026-08-15 idea;
   deprioritized 2026-08-16 — the top confs have since diversified on

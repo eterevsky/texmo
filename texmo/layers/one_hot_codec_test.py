@@ -209,9 +209,12 @@ def test_hexbpe_bridges_the_bit_ladder_and_fold():
     assert "tokens.32.hexbpe.oh" in md.input.neighbors(4)
     md = parse_model2("tokens.32.hexbpe.oh|rnn.4.tanh", Precision.FP32)
     assert md.input.is_valid()
+    # Both hex-pair arms joined the list 2026-08-22 (32-wide IO on
+    # both sides; hexbpe mixes whole bytes with hex-digit fallbacks).
     assert md.input.neighbors(4) == (
         "bits.4.oh+bp", "tokens.32.fold.oh", "tokens.64.hexbpe.oh",
-        "tokens.32.shift.oh", "tokens.32.hexbpe.emb.4")
+        "tokens.32.shift.oh", "bits.4.pair.add", "bits.4.pair.16",
+        "tokens.32.hexbpe.emb.4")
 
 
 def test_hexbpe_chain_is_symmetric():

@@ -79,33 +79,35 @@ Given a parameter budget N and compute budget T, answer:
   equal weight count, since that is the current answer to the same
   problem.
 
-* **`bits.4.pair.add` follow-ups** (the additive arm landed
-  2026-08-21 — see [`done.md`](done.md) and [`io.md`](io.md) kind 4
-  for what it is).
+* **Hex-pair family follow-ups** (both arms landed — `.add`
+  2026-08-21, `.K` 2026-08-22; see [`done.md`](done.md) and
+  [`io.md`](io.md) kind 4 for what they are).
 
-  **Context**: `.add` is the *additive* arm of the pair family, the
-  k=0-style baseline. Its pure-multiplicative sibling
-  `bits.4.pair.K` — coupling through k shared gated channels,
-  design settled — is next, and the family name is never spelled
-  bare so the two never get confused. Registered forecast (Oleg,
-  2026-08-22): `.K` will almost always beat `.add` for some k. The
-  search referees.
+  **The open question is which arm wins, and where.** `.add` is the
+  additive, context-free baseline (the k=0 point of the same CP
+  factorization); `.K` couples through k shared gated channels and
+  is the only one of the two that can make `P(lo | hi)` depend on
+  the hidden state. Registered forecast (Oleg, 2026-08-22): `.K`
+  will almost always beat `.add` for some k. The search referees —
+  the arm toggle sits at the weight-comparable k = 16 precisely so
+  the comparison is parameterization-vs-parameterization.
 
-  Two open questions, both waiting on frontier evidence:
-  - **What the context-free conditional costs.** The (16, 16)
-    coupling `D[:, hi]` captures the static byte inventory but not
-    context-dependent hi/lo coupling — `D` does not see `h`. That
-    gap is exactly what `bits.4.pair.K` attacks; if it turns out to
-    matter *within* the additive arm, the escalation there is a
-    small nonlinear mixer on the second head (a low-rank
-    `h × onehot(hi)` interaction), not abandoning the
-    factorization.
-  - **Richer neighbor wiring.** v1 has exactly one toggle bridge,
-    with `bits.4.oh+bp`. The natural further edges — `bytes`,
-    `tokens.128.fold.oh`, an emb-mode analog, and the `.add ↔ .K`
-    arm swap once the sibling exists — are cheap to add and
-    deliberately unbuilt until the kind earns a place on the
-    frontier.
+  Still open beyond that:
+  - **Where the k ladder settles.** k doubles/halves with a floor
+    of 4 and no cap. Whether the frontier wants small k (a couple
+    of coupling channels) or large k (approaching the full
+    interaction tensor) is unmeasured, and may well move with X.
+  - **Richer neighbor wiring.** The family hangs off `bits.4.oh+bp`
+    and `tokens.32.hexbpe.oh` (both arms, both directions — hexbpe
+    added 2026-08-22: 32-wide IO on both sides, and its encoding is
+    itself a mix of whole bytes and hex digits). The remaining
+    candidates — `bytes`, `tokens.128.fold.oh`, an emb-mode analog
+    — are cheap to add and deliberately unbuilt until the family
+    earns a place on the frontier.
+  - **Head cost in the timing model.** Both arms are charged as a
+    256-way dense (`_output_component` has one `output` key for
+    every codec), which overstates them several-fold. Harmless
+    while the family is rare; worth a real key if it sticks.
 
 * **Bit/byte router — tokens reimplemented inside the model**
   (2026-08-16 idea; for after the chatbot program). Adjacent to

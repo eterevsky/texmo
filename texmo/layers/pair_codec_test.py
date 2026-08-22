@@ -1,5 +1,6 @@
-"""Tests for PairCodec (`bits.4.pair.add`: the additive arm of the
-hex-pair IO family, over whole bytes)."""
+"""Tests for PairCodec, the hex-pair IO family over whole bytes:
+the additive arm `bits.4.pair.add` and the multiplicative arm
+`bits.4.pair.K`."""
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -271,14 +272,20 @@ def test_end_to_end_trains_on_repetitive_data():
 
 def test_toggle_bridge_with_bits4_oh_is_bidirectional():
     md = parse_model2('bits.4.pair.add|rnn.8.gelu', Precision.FP32)
-    assert md.input.neighbors(8) == ('bits.4.oh+bp',)
+    # The additive arm's edges: out of the family to the two adjacent
+    # 32-wide representations, and across to the multiplicative arm at
+    # the weight-comparable k.
+    assert md.input.neighbors(8) == (
+        'bits.4.oh+bp', 'tokens.32.hexbpe.oh', 'bits.4.pair.16')
     back = parse_model2('bits.4.oh+bp|rnn.8.gelu', Precision.FP32)
     assert 'bits.4.pair.add' in back.input.neighbors(8)
-    # Nothing else reaches the pair codec in v1.
+    # Only bits.4.oh+bp and hexbpe-32 reach the pair family.
     for spec in ('bytes', 'bits.1+bp', 'bits.2.oh+bp',
-                 'tokens.32.fold.oh', 'tokens.32.hexbpe.oh'):
+                 'tokens.32.fold.oh', 'tokens.32.shift.oh',
+                 'tokens.64.hexbpe.oh'):
         other = parse_model2(f'{spec}|rnn.8.gelu', Precision.FP32)
-        assert 'bits.4.pair.add' not in other.input.neighbors(8), spec
+        nbs = other.input.neighbors(8)
+        assert not any(n.startswith('bits.4.pair') for n in nbs), spec
 
 
 def test_neighbor_models_parse_and_stay_valid():
@@ -296,3 +303,339 @@ def test_direct_from_spec_rejects_other_codecs_specs():
         PairCodecDef.from_spec('bytes')
     with pytest.raises(ValueError):
         OneHotCodecDef.from_spec('bits.4.pair.add')
+
+
+# =========================================================================
+# The multiplicative arm: bits.4.pair.K
+# =========================================================================
+
+MSPEC = 'bits.4.pair.16|dense.8.gelu'
+
+
+def _randomize_mult_head(weights, seed=11):
+    """Fill the zero-initialized biases so the static coupling and the
+    lo prior are both live -- init leaves b_v and b_u at zero."""
+    kv, ku = jax.random.split(jax.random.PRNGKey(seed))
+    w = list(weights)
+    head = dict(w[2])
+    head['b_v'] = 0.5 * jax.random.normal(kv, head['b_v'].shape)
+    head['b_u'] = 0.5 * jax.random.normal(ku, head['b_u'].shape)
+    w[2] = head
+    return w
+
+
+def _nbs(spec):
+    md = parse_model2(f'{spec}|rnn.8.gelu', Precision.FP32)
+    return md.input.neighbors(8)
+
+
+def test_mult_parse_fields_and_roundtrip():
+    for k in (4, 8, 16, 64, 256):
+        spec = f'bits.4.pair.{k}|dense.8.gelu'
+        md = parse_model2(spec, Precision.FP32)
+        assert isinstance(md.codec, PairCodecDef)
+        assert md.codec.k == k
+        assert str(md.codec) == f'bits.4.pair.{k}'
+        assert md.spec == spec
+        assert parse_model2(md.spec, Precision.FP32).spec == spec
+        assert md.is_valid()
+        # The input side is the additive arm's, verbatim.
+        assert md.codec.size == 32
+        assert md.codec.ntokens == 256
+        assert md.codec.tokens_name == 'bytes'
+        assert md.output.size == 256
+        assert md.output.input_size == 8
+
+
+def test_mult_k_must_be_a_power_of_two_at_least_four():
+    # Below 4 channels the lo digit barely sees h; off-grid k is a typo.
+    for bad_k in (1, 2, 3, 5, 6, 12, 20, 100):
+        with pytest.raises(ValueError, match='power of two'):
+            parse_model2(f'bits.4.pair.{bad_k}|dense.8.gelu', Precision.FP32)
+    for good_k in (4, 8, 16, 64):
+        md = parse_model2(f'bits.4.pair.{good_k}|dense.8.gelu',
+                          Precision.FP32)
+        assert md.is_valid(), good_k
+
+
+def test_mult_bad_spellings_rejected():
+    for bad in ('bits.4.pair.16+bp', 'bits.4.pair.16+bm',
+                'bits.4.pair.16.emb.8', 'bits.4.pair.-16',
+                'bits.4.pair.16.add', 'bits.4.pair.k',
+                'bits.8.pair.16', 'bits.4.pair.16.32'):
+        with pytest.raises(ValueError):
+            parse_model2(f'{bad}|dense.8.gelu', Precision.FP32)
+
+
+def test_mult_family_error_names_both_arms():
+    with pytest.raises(ValueError, match='FAMILY') as exc:
+        PairCodecDef.from_spec('bits.4.pair')
+    msg = str(exc.value)
+    assert 'bits.4.pair.add' in msg and 'bits.4.pair.16' in msg
+
+
+def test_mult_num_weights_formula():
+    # w1 (16X) + b1 (16) + v (kX) + b_v (k) + a (16k) + u (16k)
+    # + b_u (16) = (16 + k)X + 33k + 32.
+    for k in (4, 8, 16, 64):
+        for x in (1, 8, 32):
+            md = parse_model2(f'bits.4.pair.{k}|dense.{x}.gelu',
+                              Precision.FP32)
+            assert md.codec.num_weights == (16 + k) * x + 33 * k + 32
+            assert md.codec.num_mults == md.codec.num_weights
+    # k = 16 is the weight-comparable point: same X-slope as .add
+    # (32X + 560 vs 32X + 288), which is why the toggle edge sits there.
+    for x in (8, 32):
+        mult = parse_model2(f'bits.4.pair.16|dense.{x}.gelu',
+                            Precision.FP32).codec.num_weights
+        add = parse_model2(f'bits.4.pair.add|dense.{x}.gelu',
+                           Precision.FP32).codec.num_weights
+        assert mult == 32 * x + 560
+        assert add == 32 * x + 288
+        assert mult - add == 272  # a constant: identical X-slope
+    # The declared count matches the actual pytree.
+    md, _, weights = _build(MSPEC)
+    total = sum(int(np.asarray(v).size) for v in jax.tree.leaves(weights))
+    assert md.num_weights == (32 * 8 + 8) + (32 * 8 + 560)
+    assert total == md.num_weights
+    assert weights[0] is None  # parameter-free input codebook
+
+
+def test_mult_shares_the_additive_input_side():
+    add = parse_model2('bits.4.pair.add|dense.8.gelu',
+                       Precision.FP32).codec.build_jax()
+    mult = parse_model2(MSPEC, Precision.FP32).codec.build_jax()
+    tokens = jnp.array([[0x00, 0x4A, 0xFF, 0x10]], dtype=jnp.int32)
+    assert np.array_equal(
+        np.asarray(add.encode(None, tokens, padding=2)),
+        np.asarray(mult.encode(None, tokens, padding=2)))
+    assert mult.init_state() is None
+
+
+# -- the composed contract, multiplicative arm ----------------------------
+
+
+def test_mult_composed_logits_are_normalized_log_probs():
+    md, model, weights = _build('bits.4.pair.16|rnn.8.gelu')
+    weights = _randomize_mult_head(weights)
+    codec = md.codec.build_jax()
+    h = jnp.array([0.7, -1.3, 0.2, 2.0, -0.5, 0.1, 1.1, -0.9])
+    logits = np.asarray(codec.logits(None, weights[2], h))
+    assert logits.shape == (256,)
+    assert abs(float(jax.nn.logsumexp(jnp.asarray(logits)))) < 1e-5
+    batch = jax.random.randint(
+        jax.random.PRNGKey(1), (2, 6), 0, 256).astype(jnp.int32)
+    fwd = model.forward(weights, batch)
+    assert fwd.shape == (2, 6, 256)
+    assert np.allclose(
+        np.asarray(jax.nn.logsumexp(fwd, axis=-1)), 0.0, atol=1e-5)
+
+
+def test_mult_cross_entropy_is_ce_hi_plus_ce_lo_given_hi():
+    """The chain rule, by hand from the gated channels."""
+    md, _, weights = _build('bits.4.pair.8|rnn.8.gelu')
+    weights = _randomize_mult_head(weights)
+    head = weights[2]
+    codec = md.codec.build_jax()
+    h = jnp.array([0.3, 1.4, -0.7, 0.05, -1.2, 0.9, 0.4, -0.3])
+    logits = np.asarray(codec.logits(None, head, h))
+
+    t = np.asarray(h @ head['w1'].T + head['b1'])
+    g = np.asarray(h @ head['v'].T + head['b_v'])
+    a, u, b_u = (np.asarray(head[n]) for n in ('a', 'u', 'b_u'))
+
+    def log_softmax(v):
+        v = v - v.max()
+        return v - np.log(np.exp(v).sum())
+
+    for byte in (0, 1, 15, 16, 0x4A, 200, 255):
+        hi, lo = byte >> 4, byte & 15
+        ce_hi = -log_softmax(t)[hi]
+        ce_lo = -log_softmax(u @ (g * a[:, hi]) + b_u)[lo]
+        ce = -(logits[byte] - float(jax.nn.logsumexp(jnp.asarray(logits))))
+        assert abs(ce - (ce_hi + ce_lo)) < 1e-4, hex(byte)
+
+
+def test_mult_einsum_grid_matches_the_per_hi_loop():
+    """The closed-form (16 hi, 16 lo) grid against the definition, one
+    hi at a time -- this is what pins the einsum's axis order."""
+    md, _, weights = _build('bits.4.pair.8|rnn.8.gelu')
+    weights = _randomize_mult_head(weights)
+    head = weights[2]
+    codec = md.codec.build_jax()
+    h = jax.random.normal(jax.random.PRNGKey(5), (8,))
+    grid = np.asarray(codec._lo_logits(head, h))
+    assert grid.shape == (16, 16)
+    g = np.asarray(h @ head['v'].T + head['b_v'])
+    a, u, b_u = (np.asarray(head[n]) for n in ('a', 'u', 'b_u'))
+    for hi in range(16):
+        assert np.allclose(grid[hi], u @ (g * a[:, hi]) + b_u, atol=1e-5)
+    # Batched leading axes go through the same path, position by position.
+    hb = jax.random.normal(jax.random.PRNGKey(6), (2, 3, 8))
+    gridb = np.asarray(codec._lo_logits(head, hb))
+    assert gridb.shape == (2, 3, 16, 16)
+    for i in range(2):
+        for j in range(3):
+            one = np.asarray(codec._lo_logits(head, hb[i, j]))
+            assert np.allclose(gridb[i, j], one, atol=1e-5)
+
+
+def _grid(codec, head, h):
+    p = np.exp(np.asarray(codec.logits(None, head, h)))
+    return p.reshape(16, 16)
+
+
+def _is_outer_product(p, atol):
+    return np.allclose(p, p.sum(1)[:, None] * p.sum(0)[None, :], atol=atol)
+
+
+def test_mult_static_coupling_lives_in_b_v():
+    """With V = 0 the head is h-independent -- and `b_v * a[:, hi]`
+    still generates a genuine rank-k static coupling, the additive
+    arm's D-equivalent. Zero b_v as well and the grid collapses to
+    rank 1."""
+    md, _, weights = _build('bits.4.pair.4|rnn.8.gelu')
+    codec = md.codec.build_jax()
+    head = dict(weights[2])
+    head['v'] = jnp.zeros_like(head['v'])
+    h = jnp.array([0.9, -0.2, 0.4, 1.5, -1.0, 0.2, 0.7, -0.6])
+
+    # b_v = 0 too: u(hi) = b_u for every hi -> identical conditionals
+    # -> the joint grid is an outer product.
+    assert _is_outer_product(_grid(codec, head, h), 1e-6)
+
+    # Switch b_v on: still no dependence on h, but the conditionals now
+    # differ per hi, so the grid is no longer rank 1.
+    head['b_v'] = jax.random.normal(jax.random.PRNGKey(9),
+                                    head['b_v'].shape)
+    p = _grid(codec, head, h)
+    assert not _is_outer_product(p, 1e-3)
+    # ...and it really is h-independent: another h, same conditionals.
+    h2 = jnp.array([-1.1, 0.8, 0.0, -0.3, 1.9, -0.7, 0.2, 1.2])
+    q = _grid(codec, head, h2)
+    cond = lambda m: m / m.sum(axis=1, keepdims=True)
+    assert np.allclose(cond(p), cond(q), atol=1e-5)
+
+
+def test_mult_coupling_is_context_dependent():
+    """The whole point of the arm: with V live, P(lo | hi) reshapes
+    with the hidden state -- which the additive arm's static D cannot
+    do, since there every hi shares one h-dependent lo head."""
+    md, _, weights = _build('bits.4.pair.16|rnn.8.gelu')
+    weights = _randomize_mult_head(weights)
+    codec = md.codec.build_jax()
+    cond = lambda h: (lambda m: np.log(m / m.sum(axis=1, keepdims=True)))(
+        _grid(codec, weights[2], h))
+    deltas = cond(jax.random.normal(jax.random.PRNGKey(21), (8,))) - cond(
+        jax.random.normal(jax.random.PRNGKey(22), (8,)))
+    # Not one shared shift: the per-hi conditionals move differently.
+    assert deltas.std(axis=0).max() > 1e-3
+
+
+# -- parity, gradients, training ------------------------------------------
+
+
+def test_mult_step_matches_forward():
+    _, model, weights = _build('bits.4.pair.16|rnn.8.gelu')
+    weights = _randomize_mult_head(weights)
+    batch = jax.random.randint(
+        jax.random.PRNGKey(2), (1, 10), 0, 256).astype(jnp.int32)
+    fwd = np.asarray(model.forward(weights, batch))
+    states, logits0 = model.initial_step(weights)
+    assert np.allclose(np.asarray(logits0), fwd[0, 0], atol=1e-5)
+    for t in range(9):
+        states, logits = model.step(weights, states, batch[0, t])
+        assert np.allclose(np.asarray(logits), fwd[0, t + 1], atol=1e-5), t
+
+
+def test_mult_gradients_reach_every_head_block():
+    _, model, weights = _build('bits.4.pair.8|rnn.8.gelu')
+    batch = jax.random.randint(
+        jax.random.PRNGKey(3), (2, 16), 0, 256).astype(jnp.int32)
+    grads = jax.grad(model.loss_batch)(weights, batch)
+    for key in ('w1', 'b1', 'v', 'b_v', 'a', 'u', 'b_u'):
+        assert float(jnp.abs(grads[2][key]).sum()) > 0, key
+    assert any(float(jnp.abs(g).sum()) > 0 for g in jax.tree.leaves(grads[1]))
+
+
+def test_mult_end_to_end_trains_on_repetitive_data():
+    import optax
+
+    _, model, weights = _build('bits.4.pair.16|rnn.16.gelu')
+    data = jnp.asarray(
+        np.tile(np.frombuffer(b'abcabcabc ', dtype=np.uint8), (4, 8)),
+        dtype=jnp.int32)
+    loss0 = float(model.loss_batch(weights, data))
+    assert np.isfinite(loss0)
+    opt = optax.adam(0.05)
+    state = opt.init(weights)
+    for _ in range(40):
+        grads = jax.grad(model.loss_batch)(weights, data)
+        updates, state = opt.update(grads, state)
+        weights = optax.apply_updates(weights, updates)
+    loss1 = float(model.loss_batch(weights, data))
+    assert loss1 < loss0 - 2.0, (loss0, loss1)
+
+
+# -- search wiring, multiplicative arm ------------------------------------
+
+
+def test_mult_k_ladder_and_toggle_edges():
+    # k = 16 carries the cross-family edges plus both k rungs.
+    assert _nbs('bits.4.pair.16') == (
+        'bits.4.oh+bp', 'tokens.32.hexbpe.oh', 'bits.4.pair.add',
+        'bits.4.pair.8', 'bits.4.pair.32')
+    # Other k values are pure k-ladder rungs.
+    assert _nbs('bits.4.pair.8') == ('bits.4.pair.4', 'bits.4.pair.16')
+    assert _nbs('bits.4.pair.32') == ('bits.4.pair.16', 'bits.4.pair.64')
+    # Floor at 4: no k/2 edge below it. No cap at the top.
+    assert _nbs('bits.4.pair.4') == ('bits.4.pair.8',)
+    assert _nbs('bits.4.pair.256') == ('bits.4.pair.128', 'bits.4.pair.512')
+
+
+def test_mult_every_edge_is_reciprocal():
+    for spec in ('bits.4.pair.add', 'bits.4.pair.4', 'bits.4.pair.8',
+                 'bits.4.pair.16', 'bits.4.pair.32', 'bits.4.oh+bp',
+                 'tokens.32.hexbpe.oh'):
+        for nb in _nbs(spec):
+            in_family = (nb.startswith('bits.4.pair')
+                         or spec.startswith('bits.4.pair'))
+            if not in_family:
+                continue
+            assert spec in _nbs(nb), (spec, nb)
+
+
+def test_mult_bridges_the_one_hot_ladder_both_ways():
+    back = _nbs('bits.4.oh+bp')
+    assert 'bits.4.pair.16' in back
+    # Only k = 16 hangs off the ladder; other rungs go through it.
+    for k in (4, 8, 32, 64):
+        assert f'bits.4.pair.{k}' not in back
+
+
+def test_hexbpe32_borders_both_arms():
+    """32-wide IO on both sides, and hexbpe's encoding is itself a mix
+    of whole-byte tokens and hex-digit fallbacks -- adjacent enough to
+    cross in one step instead of routing through the bit ladder."""
+    hexbpe = _nbs('tokens.32.hexbpe.oh')
+    assert 'bits.4.pair.add' in hexbpe
+    assert 'bits.4.pair.16' in hexbpe
+    # Both directions, and only at the weight-comparable k.
+    assert 'tokens.32.hexbpe.oh' in _nbs('bits.4.pair.add')
+    assert 'tokens.32.hexbpe.oh' in _nbs('bits.4.pair.16')
+    for k in (4, 8, 32, 64):
+        assert f'bits.4.pair.{k}' not in hexbpe
+        assert 'tokens.32.hexbpe.oh' not in _nbs(f'bits.4.pair.{k}')
+    # The rest of hexbpe-32's own ladder is untouched.
+    for keep in ('bits.4.oh+bp', 'tokens.32.fold.oh',
+                 'tokens.64.hexbpe.oh', 'tokens.32.shift.oh'):
+        assert keep in hexbpe, keep
+
+
+def test_mult_neighbor_models_parse_and_stay_valid():
+    md = parse_model2('bits.4.pair.16|rnn.8.gelu', Precision.FP32)
+    specs = [str(n) for n in md.neighbors()]
+    for expected in ('bits.4.oh+bp|rnn.8.gelu', 'bits.4.pair.add|rnn.8.gelu',
+                     'bits.4.pair.8|rnn.8.gelu', 'bits.4.pair.32|rnn.8.gelu'):
+        assert expected in specs, expected
+    assert all(parse_model2(s, Precision.FP32).is_valid() for s in specs)

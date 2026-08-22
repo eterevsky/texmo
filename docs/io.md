@@ -200,19 +200,19 @@ This is the kind that runs pretrained RecurrentGemma:
 chain reproduces the reference head exactly (inputs scaled by
 sqrt(2560), `logits = 30*tanh(h @ E.T / 30)`, no biases).
 
-## Kind 4: hex pair, additive arm — `bits.4.pair.add`
+## Kind 4: hex pair — `bits.4.pair.{add,K}`
 
-*Status: implemented 2026-08-21 as `PairCodec`
-(`layers/pair_codec.py`) and search-reachable through one toggle
-bridge with `bits.4.oh+bp` (both directions). No metaparameters, no
-`emb` variant, no `+bp`/`+bm` — those are parse errors.*
+*Status: implemented as `PairCodec` (`layers/pair_codec.py`) — the
+additive arm 2026-08-21, the multiplicative arm 2026-08-22 — and
+search-reachable from `bits.4.oh+bp` (both directions, both arms).
+No `emb` variant and no `+bp`/`+bm` — those are parse errors.*
 
-*The `.add` names the **additive** arm of the pair family (renamed
-from the bare `bits.4.pair` on 2026-08-22, before anything was
-committed): the multiplicative sibling `bits.4.pair.K` is a separate
-kind with its own spec, so the arm is always explicit and the bare
+*The suffix names the **arm**, and it is never optional: the bare
 family name `bits.4.pair` is itself a parse error rather than a
-silent default to this arm.*
+silent default to either. `.add` is the additive arm (renamed from
+the bare name on 2026-08-22); `.K` — a literal integer, e.g.
+`bits.4.pair.16` — is the multiplicative one, with k its only
+metaparameter.*
 
 A **whole-byte** kind: one position per byte, like `bytes`, but with
 both ends factorized through the byte's two hexadecimal digits,
@@ -221,24 +221,47 @@ both ends factorized through the byte's two hexadecimal digits,
 **Input** is parameter-free and 32 wide: `concat(onehot16(hi),
 onehot16(lo))`. Same 16-symbol alphabet as `bits.4`, read a whole
 byte at a time — so none of the `+bp` phase bookkeeping, and no
-table.
+table. Identical in both arms.
 
-**Output** is two 16-way dense heads over the chain's last
-activation `h`, plus a coupling matrix:
+**Output** is a 16-way dense head for the high nibble, shared by both
+arms,
 
     t = W1 @ h + b1                    16 logits for hi
-    s = W2 @ h + b2                    16 base logits for lo
-    lo | hi ~ softmax(s + D[:, hi])    D is (16, 16)
 
-so `P(byte) = P(hi) · P(lo | hi)` — an exact distribution over all
-256 byte values. Lossless, 1.0 bytes per token, residual 0.
+plus a conditional head `u(hi)` for the low nibble, which is the
+*only* place the arms differ:
 
-**The model contract is unchanged.** Rather than exposing two
-sequential mini-steps to the training loop, the codec *composes* the
-heads into ordinary 256-way byte logits:
+    .add   u(hi) = W2 @ h + b2 + D[:, hi]           D is (16, 16)
+    .K     u(hi) = U @ ((V @ h + b_v) ⊙ A[:, hi]) + b_u
+
+so `P(byte) = P(hi) · P(lo | hi)` with `P(lo | hi) = softmax(u(hi))`
+— an exact distribution over all 256 byte values. Lossless, 1.0 bytes
+per token, residual 0.
+
+The `.add` conditional is a shared lo head plus a **static** per-hi
+offset. The `.K` conditional runs k shared channels: `V` reads k
+features off `h`, `A[:, hi]` scales them for this high nibble, `U`
+writes the result back onto the 16 lo logits. There is no `W2`, no
+`b2` and no `D` — the coupling is **purely multiplicative**, which is
+what makes it context-dependent. The gate is raw bilinear with no
+activation, matching `split.mul` and mullstm and keeping the grid
+closed-form.
+
+`.K`'s **biases are load-bearing, not decoration**: `b_v ⊙ A[:, hi]`
+is `h`-independent, so it reproduces exactly the rank-k static
+coupling that `D` *is* in the additive arm, and `b_u` is the lo
+prior. Drop them and the arm loses `.add`'s capability instead of
+generalizing it. There is deliberately **no** bias on the `A` side: a
+channel whose `A` row is near-constant across hi already emulates an
+h-linear, hi-independent term, so an explicit A-bias is a marginal
+freedom we skip.
+
+**The model contract is unchanged** in both arms. Rather than
+exposing two sequential mini-steps to the training loop, the codec
+*composes* the heads into ordinary 256-way byte logits:
 
     logits[hi*16 + lo] = log_softmax(t)[hi]
-                       + log_softmax(s + D[:, hi])[lo]
+                       + log_softmax(u(hi))[lo]
 
 Those 256 numbers are already log-probabilities (`logsumexp == 0`),
 and by the chain rule a plain softmax cross-entropy against the byte
@@ -253,38 +276,71 @@ change to what a model is.
 model — the reason sub-byte inputs exist at all (see "why sub-byte"
 above) — and this removes it while keeping byte-level granularity.
 
-    num_weights = 2·16·X + 16·16 + 32 = 32X + 288
+    .add   num_weights = 2·16·X + 16·16 + 32 = 32X + 288
+    .K     num_weights = (16+k)·X + 33k + 32
 
-against `256X + 256` for the byte head it replaces. The crossover is
-at X = 1/7, i.e. it is cheaper at every width the search can reach:
-4.2x at X = 8 (544 vs 2304), 6.4x at X = 32 (1312 vs 8448), 8x
-asymptotically. The 288 constant is the fixed `16x16 + biases` block,
-which no width amortizes away, and it is what keeps this kind from
-being free at tiny X the way `bits.4.oh+bp`'s 16-way head is.
+against `256X + 256` for the byte head both replace. `.add`'s
+crossover is at X = 1/7, i.e. it is cheaper at every width the search
+can reach: 4.2x at X = 8 (544 vs 2304), 6.4x at X = 32 (1312 vs
+8448), 8x asymptotically. The fixed constant is what no width
+amortizes away, and it is what keeps this kind from being free at
+tiny X the way `bits.4.oh+bp`'s 16-way head is.
 
-**The limitation, and what the name marks**: the conditional is
-*additive* and context-free — `D[:, hi]` does not depend on `h`, which
-is exactly what the `.add` in the spec announces. What `D` can
+**k = 16 is the weight-comparable point**: `32X + 560` against
+`.add`'s `32X + 288` — the *same* X-slope, differing by a constant
+272. That is why the arm-toggle neighbor edge sits exactly there, and
+why a search comparison at k = 16 reads as parameterization-vs-
+parameterization rather than capacity-vs-capacity.
+
+**What separates the arms**: `.add`'s conditional is *additive* and
+context-free — `D[:, hi]` does not depend on `h`, which is exactly
+what the `.add` in the spec announces. What `D` can
 learn is the static byte inventory: which low nibbles follow which
 high nibble in this corpus at all (the ASCII letter blocks, the digit
 block, the UTF-8 continuation range). What it cannot learn is
 context-*dependent* hi/lo coupling — "given this hidden state and
 this high nibble, the low nibble distribution reshapes". A model that
 needs that must smuggle it through `h`, which the additive form
-cannot represent per-hi. That gap is the thing to measure; if it
-bites, the escalation is a gated-bilinear term on the second head,
-`U · ((V·h) ⊙ (A·onehot(hi)))` — the rank-k CP factorization of the
+cannot represent per-hi.
+
+That gap is what `.K` closes. Its gated-bilinear term
+`U · ((V·h + b_v) ⊙ A[:, hi])` is the rank-k CP factorization of the
 full `h × hi → lo` interaction tensor at `k·(X + 32)` weights, with
-k=0 being exactly this kind, and the pure-multiplicative arm
-`bits.4.pair.K` its k>0 sibling (details in the roadmap follow-up) —
-rather than abandoning the factorization. `D` is zero-initialized,
-so an untrained model starts at `P(lo | hi) = P(lo)`.
+k=0 being exactly the additive arm — so the two are points on one
+family curve rather than rival designs, and the search referees which
+k (if any) pays. Registered forecast (Oleg, 2026-08-22): `.K` will
+almost always beat `.add` for some k.
+
+Both arms start close to independence: `.add`'s `D` is
+zero-initialized, so an untrained model has `P(lo | hi) = P(lo)`
+exactly; `.K` zero-initializes `b_v` and `b_u`, so its *static*
+coupling starts flat while the h-dependent part starts at the ordinary
+xavier scale.
 
 Origin: the two-step sibling of the planned `bits.8.gen.X` bitwise
 generator (see [`roadmap.md`](roadmap.md)) — the same move at one hex
 digit per mini-step instead of one bit, which in the composed form
 collapses to zero mini-steps and needs no generator state cell, hence
-no new metaparameter.
+no per-bit generator state.
+
+**Search wiring**: the family hangs off two neighbors, both arms
+bridging to each (`bits.4.oh+bp ↔ .add`, `bits.4.oh+bp ↔ .16`,
+`tokens.32.hexbpe.oh ↔ .add`, `tokens.32.hexbpe.oh ↔ .16`).
+`bits.4.oh+bp` is the same 16-symbol alphabet read sub-byte.
+**hexbpe-32** is adjacent for a different reason: 32-wide IO on both
+sides, and hexbpe's encoding is itself a *mix* of whole-byte tokens
+and hex-digit fallbacks — exactly the two granularities this codec
+holds at once — so the search can cross between the representations
+directly instead of routing through the bit ladder.
+
+Inside the family, `bits.4.pair.add ↔ bits.4.pair.16` is the arm
+toggle (only at the weight-comparable k — every cross-family edge
+lands on that k too, for the same reason), and `.K` walks its own
+ladder by doubling or halving k, floored at 4 (below that the lo
+digit barely sees `h`) with no cap, since `max_weights` prunes the
+top end. k off that grid is a parse error, not merely invalid —
+unlike the dense/emb widths there is no legacy population or
+pretrained model spelled with one.
 
 ## Fold tokensets: lossy folding with honest accounting
 

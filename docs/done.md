@@ -7,6 +7,22 @@ short record with pointers — not a second copy of the design docs.
 
 ## 2026-08
 
+* **`bits.4.pair.K` — the multiplicative hex-pair arm** (2026-08-22).
+  The sibling the `.add` rename anticipated, built the day after it.
+  Same input side and same composed-256-logit contract; the low
+  nibble's conditional becomes `U @ ((V@h + b_v) ⊙ A[:, hi]) + b_u`
+  — k shared channels gated per high nibble, no `W2`/`b2`/`D` — so
+  `P(lo | hi)` finally depends on the hidden state. The whole
+  (16 hi, 16 lo) grid is one einsum, no per-hi loop and no second
+  dispatch. `(16+k)X + 33k + 32` weights; k a power of two >= 4
+  (off-grid k is a parse error), no cap. Edges: `bits.4.oh+bp ↔
+  .16`, the arm toggle `.add ↔ .16` at the weight-comparable k, and
+  a doubling/halving k ladder floored at 4, plus
+  `tokens.32.hexbpe.oh ↔` both arms (32-wide IO on both sides, and
+  hexbpe's encoding is itself a mix of whole bytes and hex digits).
+  `.add` is byte-identical — the arms share one class and differ in
+  one method. [`io.md`](io.md) kind 4 is now the family section.
+
 * **`bits.4.pair.add` — hex-pair IO, a fourth IO kind** (2026-08-21).
   Built the same day it was proposed as "hex generative IO". One
   position per byte; input is two concatenated 16-value one-hots

@@ -50,21 +50,30 @@ _INPUT_NEIGHBORS = {
     'bits.1+bm': ('bits.1+bp',),
     'bits.1+bp': ('bits.2.oh+bp',),
     'bits.2.oh+bp': ('bits.1+bp', 'bits.4.oh+bp'),
-    # bits.4.pair.add (2026-08-21) is the same 16-symbol hex alphabet
-    # read a whole byte at a time; the toggle is the additive pair
-    # codec's only edge in v1 (see layers/pair_codec.py -- keep the
-    # two in sync). The multiplicative sibling bits.4.pair.K will
-    # want its own edges.
+    # The hex-pair family (2026-08-21/22) is the same 16-symbol hex
+    # alphabet read a whole byte at a time. Both arms hang off this
+    # rung: the additive one, and the multiplicative one at its
+    # weight-comparable k = 16 (other k values are reached along the
+    # pair codec's own k ladder). See layers/pair_codec.py -- keep the
+    # two sides in sync.
     'bits.4.oh+bp': ('bits.2.oh+bp', 'bytes', 'tokens.32.fold.oh',
-                     'tokens.32.hexbpe.oh', 'bits.4.pair.add'),
+                     'tokens.32.hexbpe.oh', 'bits.4.pair.add',
+                     'bits.4.pair.16'),
     # The tokenset ladder hangs off the bit ladder at the nearest
     # rung (32 tokens ~ bits.4's 16) and continues up the hexbpe chain
     # 32 -> 64 -> 128 -> 256. Keep in sync with the emb-mode bridges
     # in embedding_codec.
     'tokens.32.fold.oh': ('bits.4.oh+bp', 'tokens.32.hexbpe.oh',
                               'tokens.32.shift.oh'),
+    # hexbpe-32 also borders both hex-pair arms (2026-08-22): 32-wide
+    # IO on both sides, and hexbpe's encoding is itself a MIX of
+    # whole-byte tokens and hex-digit fallbacks -- the same two
+    # granularities the pair codec holds at once. Genuinely adjacent
+    # representations, so the search crosses directly rather than
+    # routing through the bit ladder.
     'tokens.32.hexbpe.oh': ('bits.4.oh+bp', 'tokens.32.fold.oh',
-                            'tokens.64.hexbpe.oh', 'tokens.32.shift.oh'),
+                            'tokens.64.hexbpe.oh', 'tokens.32.shift.oh',
+                            'bits.4.pair.add', 'bits.4.pair.16'),
     'tokens.64.hexbpe.oh': ('tokens.32.hexbpe.oh', 'tokens.128.hexbpe.oh',
                             'tokens.64.shift.oh'),
     'tokens.128.hexbpe.oh': ('tokens.64.hexbpe.oh', 'tokens.256.hexbpe.oh',

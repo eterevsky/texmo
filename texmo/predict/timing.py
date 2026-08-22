@@ -258,6 +258,13 @@ def _input_component(input_def, batch: int, length: int) -> Component:
     # would each need their own runs to fit.
     if '.emb.' in type_id:
         type_id = type_id[:type_id.index('.emb.') + len('.emb')]
+    # Same argument for the hex-pair arms: every arm and every k feeds
+    # the chain through the identical 32-wide fixed codebook gather,
+    # so they share one key. (Their differing HEAD cost is a separate
+    # component.) Without this the k ladder would mint an unseen
+    # scan-dispatch key per rung, and an unseen key predicts 0.
+    elif type_id.startswith('bits.4.pair.'):
+        type_id = 'bits.4.pair'
     return Component(
         type_id=type_id,
         features=np.array(_features_input(batch, length)),

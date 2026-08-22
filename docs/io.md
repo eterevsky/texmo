@@ -336,11 +336,20 @@ directly instead of routing through the bit ladder.
 Inside the family, `bits.4.pair.add ↔ bits.4.pair.16` is the arm
 toggle (only at the weight-comparable k — every cross-family edge
 lands on that k too, for the same reason), and `.K` walks its own
-ladder by doubling or halving k, floored at 4 (below that the lo
-digit barely sees `h`) with no cap, since `max_weights` prunes the
-top end. k off that grid is a parse error, not merely invalid —
-unlike the dense/emb widths there is no legacy population or
-pretrained model spelled with one.
+ladder by doubling or halving k, down to k = 1 and with no cap, since
+`max_weights` prunes the top end.
+
+**Every k >= 1 is valid**, and every one of them runs. There is no
+grid rule in `is_valid` and no floor: the search moves along the
+powers of two purely because that is what the ladder edges generate.
+An off-grid k — `bits.4.pair.5`, say — is a perfectly good model, it
+is simply one no mutation will ever propose, so it stays a
+hand-built experiment. Such a conf does get *outgoing* edges to the
+nearest rungs below and above (the `bits.1+bm` migration-bridge
+precedent), so a hand-built population can walk onto the grid while
+nothing walks back off it. The one integer that is not a k is 0: the
+zero-channel head is the additive arm, spelled `.add`, and
+`bits.4.pair.0` is a parse error.
 
 ## Fold tokensets: lossy folding with honest accounting
 

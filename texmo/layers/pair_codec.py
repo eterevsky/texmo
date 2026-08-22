@@ -100,7 +100,12 @@ explicit, so nothing silently defaults.
 import jax
 import jax.numpy as jnp
 
-from ..common import is_power2_int
+from ..common import (
+    ceil_power2,
+    floor_power2,
+    is_power2_int,
+    power2_neighbors,
+)
 from ..layer_jax import xavier_uniform
 from ..precision import Precision
 
@@ -116,10 +121,17 @@ _NTOKENS = _NHEX * _NHEX
 _SPEC_ADD = 'bits.4.pair.add'
 _FAMILY = 'bits.4.pair'
 
-# k floor: below 4 channels the lo digit barely sees `h` at all, and
-# the arm degenerates toward a worse-parameterized `.add`. No upper
-# cap -- max_weights prunes the top end like any other width.
-_MIN_K = 4
+# k is unconstrained: ANY integer k >= 1 parses, runs and is valid.
+# The power-of-two structure lives entirely in the neighbor ladder
+# (k <-> 2k / k <-> k/2, walking down to 1), so search moves along the
+# power-of-two grid because that is what the edges generate -- not
+# because anything else is rejected. Which k is worth having is the
+# search's call, per house convention. No cap either: max_weights
+# prunes the top end like any other width.
+#
+# k = 0 is the one integer that is not a k at all: the zero-channel
+# head is the additive arm, spelled `.add`.
+
 # The k at which `.K` is weight-comparable with `.add` (32X + 560 vs
 # 32X + 288, same X-slope), hence the only k that carries the
 # arm-toggle edge and the bridge down to the one-hot ladder.
@@ -348,13 +360,12 @@ class PairCodecDef:
     ) -> 'PairCodecDef':
         """Parse `bits.4.pair.add` or `bits.4.pair.{k}`.
 
-        Unlike the dense/emb widths -- where the power-of-2 rule is a
-        search rule and off-grid values stay load-only -- k is
-        rejected outright here. There is no legacy population spelled
-        with an off-grid k and no pretrained model to load, so a bad k
-        is a typo, and the family's strict single-spelling style says
-        to fail on it rather than build a model that `is_valid` will
-        silently drop.
+        Any integer k >= 1 parses, runs and is valid; the power-of-two
+        grid the search walks is a property of the neighbor edges, not
+        of validity (see `neighbors`).
+
+        k = 0 is the sole rejection: the zero-channel head is not a
+        degenerate k, it is a different arm, and it is spelled `.add`.
         """
         if spec == _SPEC_ADD:
             return PairCodecDef(k=None, precision=precision)
@@ -373,11 +384,11 @@ class PairCodecDef:
                 f"integer (no +bp/+bm -- one position per byte -- and "
                 f"no emb variant)")
         k = int(arm)
-        if not is_power2_int(k) or k < _MIN_K:
+        if k < 1:
             raise ValueError(
-                f"'{spec}': k must be a power of two >= {_MIN_K}; "
-                f"below that the lo digit barely sees the hidden "
-                f"state. No upper cap -- max_weights prunes the top.")
+                f"'{spec}': k must be at least 1. The zero-channel "
+                f"head is not a degenerate k -- it is the additive "
+                f"arm, spelled '{_SPEC_ADD}'.")
         return PairCodecDef(k=k, precision=precision)
 
     def set_head_width(self, last_width: int) -> None:
@@ -404,8 +415,10 @@ class PairCodecDef:
 
     def is_valid(self) -> bool:
         # Validity is purely structural: the head follows the chain's
-        # final width, and k was already checked at parse time (see
-        # `from_spec`), so anything that parsed is valid.
+        # final width, and every k the parser accepts (any integer
+        # >= 1) is a real, runnable model. Nothing here filters k --
+        # the search stays on the power-of-two grid because that is
+        # what `neighbors` generates, not because other k are barred.
         return True
 
     def neighbors(self, last_width: int) -> tuple[str, ...]:
@@ -415,21 +428,32 @@ class PairCodecDef:
         32-wide representations (`_OUT_OF_FAMILY`) and across to each
         other. The multiplicative arm carries those cross-family
         edges and the arm toggle only at the weight-comparable
-        k = _TOGGLE_K; every k additionally moves along the k ladder
-        by doubling/halving -- the same 2x rule layer widths use,
-        with a floor at _MIN_K and no cap.
+        k = _TOGGLE_K.
+
+        The k ladder itself is the ordinary width rule --
+        `power2_neighbors`: double and halve, walking down to k = 1 --
+        so a search that starts on a power of two stays on one. That
+        is the ONLY thing that keeps search on the grid; every k is
+        perfectly valid.
+
+        An off-grid k (only reachable by hand, since no edge emits
+        one) gets outgoing edges to the nearest rungs below and above
+        and nothing else -- the `bits.1+bm` migration-bridge
+        precedent, letting a hand-built population walk onto the grid
+        while nothing walks back off it.
 
         `last_width` is unused (no width follows the chain here); the
         parameter keeps the codec API uniform.
         """
         if self.k is None:
             return _OUT_OF_FAMILY + (f'{_FAMILY}.{_TOGGLE_K}',)
+        if not is_power2_int(self.k):
+            rungs = (floor_power2(self.k), ceil_power2(self.k))
+            return tuple(dict.fromkeys(f'{_FAMILY}.{r}' for r in rungs))
         nbs = []
         if self.k == _TOGGLE_K:
             nbs += [*_OUT_OF_FAMILY, _SPEC_ADD]
-        if self.k > _MIN_K:
-            nbs.append(f'{_FAMILY}.{self.k // 2}')
-        nbs.append(f'{_FAMILY}.{self.k * 2}')
+        nbs += [f'{_FAMILY}.{n}' for n in power2_neighbors(self.k)]
         return tuple(nbs)
 
     def build_jax(self) -> PairCodecJax:

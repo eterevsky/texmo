@@ -25,12 +25,16 @@ short record with pointers — not a second copy of the design docs.
   — k shared channels gated per high nibble, no `W2`/`b2`/`D` — so
   `P(lo | hi)` finally depends on the hidden state. The whole
   (16 hi, 16 lo) grid is one einsum, no per-hi loop and no second
-  dispatch. `(16+k)X + 33k + 32` weights; k a power of two >= 4
-  (off-grid k is a parse error), no cap. Edges: `bits.4.oh+bp ↔
+  dispatch. `(16+k)X + 33k + 32` weights; any k >= 1 parses, runs and
+  is valid (k = 0 is the additive arm, not a degenerate k), with the
+  power-of-two grid coming from the ladder edges rather than from a
+  validity rule. Edges: `bits.4.oh+bp ↔
   .16`, the arm toggle `.add ↔ .16` at the weight-comparable k, and
-  a doubling/halving k ladder floored at 4, plus
+  a doubling/halving k ladder down to k = 1, plus
   `tokens.32.hexbpe.oh ↔` both arms (32-wide IO on both sides, and
   hexbpe's encoding is itself a mix of whole bytes and hex digits).
+  An off-grid k gets outgoing-only edges to its nearest rungs, so a
+  hand-built population can migrate onto the grid.
   `.add` is byte-identical — the arms share one class and differ in
   one method. [`io.md`](io.md) kind 4 is now the family section.
 

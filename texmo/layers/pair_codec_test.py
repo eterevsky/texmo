@@ -347,15 +347,41 @@ def test_mult_parse_fields_and_roundtrip():
         assert md.output.input_size == 8
 
 
-def test_mult_k_must_be_a_power_of_two_at_least_four():
-    # Below 4 channels the lo digit barely sees h; off-grid k is a typo.
-    for bad_k in (1, 2, 3, 5, 6, 12, 20, 100):
-        with pytest.raises(ValueError, match='power of two'):
-            parse_model2(f'bits.4.pair.{bad_k}|dense.8.gelu', Precision.FP32)
-    for good_k in (4, 8, 16, 64):
-        md = parse_model2(f'bits.4.pair.{good_k}|dense.8.gelu',
-                          Precision.FP32)
-        assert md.is_valid(), good_k
+def test_every_k_at_least_one_parses_and_is_valid():
+    """Nothing about k is a validity rule: the search walks the powers
+    of two because that is what the ladder edges generate, not because
+    other k are rejected. Off-grid k stays available by hand."""
+    for k in (1, 2, 3, 4, 5, 12, 64, 100):
+        md = parse_model2(f'bits.4.pair.{k}|dense.8.gelu', Precision.FP32)
+        assert md.codec.k == k
+        assert md.spec == f'bits.4.pair.{k}|dense.8.gelu'
+        assert md.is_valid(), k
+        assert md.codec.num_weights == (16 + k) * 8 + 33 * k + 32
+
+
+def test_k_zero_is_the_additive_arm_not_a_degenerate_k():
+    with pytest.raises(ValueError, match='additive arm'):
+        parse_model2('bits.4.pair.0|dense.8.gelu', Precision.FP32)
+
+
+def test_k_one_actually_runs():
+    """Parsing is not enough -- the smallest possible coupling has to
+    build, forward, and produce a finite normalized loss."""
+    md, model, weights = _build('bits.4.pair.1|rnn.8.gelu')
+    assert md.codec.k == 1
+    assert md.codec.num_weights == (16 + 1) * 8 + 33 + 32
+    batch = jax.random.randint(
+        jax.random.PRNGKey(31), (2, 12), 0, 256).astype(jnp.int32)
+    logits = model.forward(weights, batch)
+    assert logits.shape == (2, 12, 256)
+    assert np.allclose(
+        np.asarray(jax.nn.logsumexp(logits, axis=-1)), 0.0, atol=1e-5)
+    loss = float(model.loss_batch(weights, batch))
+    assert np.isfinite(loss) and loss > 0
+    # A single channel still gradient-flows through every block.
+    grads = jax.grad(model.loss_batch)(weights, batch)
+    for key in ('w1', 'b1', 'v', 'b_v', 'a', 'u', 'b_u'):
+        assert float(jnp.abs(grads[2][key]).sum()) > 0, key
 
 
 def test_mult_bad_spellings_rejected():
@@ -588,13 +614,46 @@ def test_mult_k_ladder_and_toggle_edges():
     # Other k values are pure k-ladder rungs.
     assert _nbs('bits.4.pair.8') == ('bits.4.pair.4', 'bits.4.pair.16')
     assert _nbs('bits.4.pair.32') == ('bits.4.pair.16', 'bits.4.pair.64')
-    # Floor at 4: no k/2 edge below it. No cap at the top.
-    assert _nbs('bits.4.pair.4') == ('bits.4.pair.8',)
+    # The ladder runs all the way down to 1 and has no cap.
+    assert _nbs('bits.4.pair.4') == ('bits.4.pair.2', 'bits.4.pair.8')
+    assert _nbs('bits.4.pair.2') == ('bits.4.pair.1', 'bits.4.pair.4')
+    assert _nbs('bits.4.pair.1') == ('bits.4.pair.2',)  # no half-edge
     assert _nbs('bits.4.pair.256') == ('bits.4.pair.128', 'bits.4.pair.512')
 
 
+def test_off_grid_k_gets_outgoing_migration_edges_only():
+    """No edge ever emits an off-grid k, so one can only be built by
+    hand -- and when it is, it gets outgoing edges to the nearest
+    rungs below and above so the population can walk onto the grid.
+    The bits.1+bm migration-bridge precedent."""
+    assert _nbs('bits.4.pair.3') == ('bits.4.pair.2', 'bits.4.pair.4')
+    assert _nbs('bits.4.pair.5') == ('bits.4.pair.4', 'bits.4.pair.8')
+    assert _nbs('bits.4.pair.12') == ('bits.4.pair.8', 'bits.4.pair.16')
+    assert _nbs('bits.4.pair.100') == ('bits.4.pair.64', 'bits.4.pair.128')
+    # Off-grid k carries no cross-family or arm-toggle edges...
+    for k in (3, 5, 12, 100):
+        nbs = _nbs(f'bits.4.pair.{k}')
+        assert 'bits.4.oh+bp' not in nbs
+        assert 'tokens.32.hexbpe.oh' not in nbs
+        assert 'bits.4.pair.add' not in nbs
+    # ...and nothing anywhere points back at one.
+    for spec in ('bits.4.pair.add', 'bits.4.pair.1', 'bits.4.pair.2',
+                 'bits.4.pair.4', 'bits.4.pair.8', 'bits.4.pair.16',
+                 'bits.4.pair.64', 'bits.4.oh+bp', 'tokens.32.hexbpe.oh'):
+        for nb in _nbs(spec):
+            if nb.startswith('bits.4.pair.') and nb != 'bits.4.pair.add':
+                k = int(nb.rsplit('.', 1)[1])
+                assert k & (k - 1) == 0, (spec, nb)
+    # Migration targets really are reachable, valid models.
+    for nb in _nbs('bits.4.pair.5'):
+        assert parse_model2(f'{nb}|rnn.8.gelu', Precision.FP32).is_valid()
+
+
 def test_mult_every_edge_is_reciprocal():
-    for spec in ('bits.4.pair.add', 'bits.4.pair.4', 'bits.4.pair.8',
+    # On-grid k only: the off-grid migration bridges are deliberately
+    # one-way (see test_off_grid_k_gets_outgoing_migration_edges_only).
+    for spec in ('bits.4.pair.add', 'bits.4.pair.1', 'bits.4.pair.2',
+                 'bits.4.pair.4', 'bits.4.pair.8',
                  'bits.4.pair.16', 'bits.4.pair.32', 'bits.4.oh+bp',
                  'tokens.32.hexbpe.oh'):
         for nb in _nbs(spec):

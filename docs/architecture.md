@@ -44,8 +44,9 @@ fork-and-merge. This subsumes the retired flat representation's
 skip syntax itself is retired) and adds gating (`split.mul`). See
 [`split.md`](split.md). It holds:
 
-- A codec (`OneHotCodecDef` or `EmbeddingCodecDef`) owning both model
-  ends — input encoding and logit head (see [`io.md`](io.md))
+- A codec (`OneHotCodecDef`, `EmbeddingCodecDef` or `PairCodecDef`)
+  owning both model ends — input encoding and logit head (see
+  [`io.md`](io.md))
 - The `LayerSeqDef` hidden chain
 - A `precision` (Precision enum; `precision.py`)
 

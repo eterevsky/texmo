@@ -10,8 +10,8 @@ spec is split-form (or skip-free).
 
 Weights layout: `[input_weights, layer_seq_weights, output_weights]`.
 Slots 0 and 2 belong to the codec (see layers/codec.py): OneHotCodec's
-fixed codebooks are parameter-free and keep None in slot 0,
-EmbeddingCodec will put its table there, and slot 2 holds the head.
+and PairCodec's fixed codebooks are parameter-free and keep None in
+slot 0, EmbeddingCodec puts its table there, and slot 2 holds the head.
 `layer_seq_weights` is itself a list (one entry per child layer in the
 LayerSeqJax), so the full pytree is
 `[input_or_None, [w_layer_0, w_layer_1, ...], w_head]` -- JAX treats
@@ -30,6 +30,7 @@ import optax
 
 from .layers.embedding_codec import EmbeddingCodecJax
 from .layers.one_hot_codec import OneHotCodecJax
+from .layers.pair_codec import PairCodecJax
 from .layers.seq import LayerSeqJax
 
 _1_BY_LOG2 = 1.0 / math.log(2.0)
@@ -38,7 +39,7 @@ _1_BY_LOG2 = 1.0 / math.log(2.0)
 class Model2Jax:
     def __init__(
         self,
-        codec: OneHotCodecJax | EmbeddingCodecJax,
+        codec: OneHotCodecJax | EmbeddingCodecJax | PairCodecJax,
         layer_seq: LayerSeqJax,
         total_padding: int = 1,
     ):

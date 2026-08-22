@@ -20,14 +20,15 @@ from .layer import LayerDef, _ATTN_SWAP_WINDOW
 from .layers.dense import DenseDef
 from .layers.embedding_codec import EmbeddingCodecDef, TiedHead
 from .layers.one_hot_codec import OneHotCodecDef
+from .layers.pair_codec import PairCodecDef, PairHead
 from .layers.seq import LayerSeqDef
 from .layers.split import SplitDef
 from .model2_jax import Model2Jax
 from .precision import Precision
 from .spec_parser import parse_model2
 
-# The two codec implementations share one API (layers/codec.py).
-CodecDef = OneHotCodecDef | EmbeddingCodecDef
+# The codec implementations share one API (layers/codec.py).
+CodecDef = OneHotCodecDef | EmbeddingCodecDef | PairCodecDef
 
 
 class Model2Def:
@@ -70,7 +71,7 @@ class Model2Def:
         return self.codec
 
     @property
-    def output(self) -> DenseDef | TiedHead:
+    def output(self) -> DenseDef | TiedHead | PairHead:
         return self.codec.head
 
     def __str__(self) -> str:

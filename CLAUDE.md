@@ -23,8 +23,8 @@ Detailed docs live in [`docs/`](docs/):
   (`skip.X.add` / `skip.X.cat`), superseded by `split` and no longer
   parsed; kept for the merge semantics Split inherits.
 - [`io.md`](docs/io.md) — how models turn token ids into logits: the
-  model contract and the three IO kinds (one-hot bit chunks, embedded
-  bit chunks, tokenized), what/how/why for each.
+  model contract and the four IO kinds (one-hot bit chunks, embedded
+  bit chunks, tokenized, hex pair), what/how/why for each.
 - [`tied_io.md`](docs/tied_io.md) — design record for the tied
   codec (`EmbeddingCodec`): decision log, rejected alternatives,
   mutation consequences, Gemma fidelity mapping. Implemented; kept

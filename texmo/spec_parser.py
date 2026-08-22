@@ -4,7 +4,7 @@ One entry point: `parse_model2(spec, precision) -> Model2Def`.
 The full Model2 grammar:
 
     spec        := [input_spec] "|" layer_list
-    input_spec  := "" | "bytes" | "bits." ...
+    input_spec  := "" | "bytes" | "bits.4.pair.add" | "bits." ...
     layer_list  := layer ("-" layer)*
     layer       := simple_layer | split_layer
     split_layer := "split." op "(" branch ("," branch)* ")"
@@ -34,6 +34,7 @@ from .layers.msr import MsrDef
 from .layers.mullstm import MulLstmDef
 from .layers.norm import NormDef
 from .layers.one_hot_codec import OneHotCodecDef
+from .layers.pair_codec import PairCodecDef
 from .layers.rglru import RglruDef
 from .layers.rmsnorm import RmsNormDef
 from .layers.rnn import RnnDef
@@ -57,9 +58,12 @@ def parse_model2(spec: str, precision: Precision):
     from .model2 import Model2Def
 
     input_spec, layers_spec = _split_input_and_layers(spec)
-    # `.emb.` selects the tied-embedding codec; everything else is a
-    # fixed codebook. Same API either way.
-    if '.emb.' in input_spec:
+    # `.pair` selects the hex-pair family (the arm -- `.add` today --
+    # is the codec's own business), `.emb.` the tied-embedding codec;
+    # everything else is a fixed codebook. Same API either way.
+    if '.pair' in input_spec:
+        codec = PairCodecDef.from_spec(input_spec, precision)
+    elif '.emb.' in input_spec:
         codec = EmbeddingCodecDef.from_spec(input_spec, precision)
     else:
         codec = OneHotCodecDef.from_spec(input_spec, precision)

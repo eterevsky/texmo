@@ -79,24 +79,33 @@ Given a parameter budget N and compute budget T, answer:
   equal weight count, since that is the current answer to the same
   problem.
 
-* **Hex generative IO — `bits.8.gen`'s two-step sibling**
-  (2026-08-21 idea). Same move as `bits.8.gen.X` but one hexadecimal
-  digit at a time instead of one bit:
-  - **Input**: the byte as two 16-value one-hots concatenated —
-    width 32, one position per byte, no table.
-  - **Output**: the byte generated as two hex digits. The first is a
-    plain dense head over the chain's last activation `h` (16-way);
-    the second is a dense head over `[h, onehot(first digit)]`
-    (16-way). `P(hi) * P(lo | hi)` chain-rules into an exact 256-way
-    byte distribution — lossless, 1.0 bytes/token, no `+bp` phase
-    bookkeeping.
+* **`bits.4.pair.add` follow-ups** (the additive arm landed
+  2026-08-21 — see [`done.md`](done.md) and [`io.md`](io.md) kind 4
+  for what it is).
 
-  Against `bits.8.gen.X`: two sequential mini-steps per byte instead
-  of eight (the dispatch cost flagged in that entry shrinks 4x), no
-  generator state cell and therefore no new metaparameter — the IO
-  is fully determined by the chain width. Cost is `O(32·X)` on the
-  input and `O(16·X + 16·(X+16))` on the output — bigger than the
-  bit generator, still far below a 256-way head.
+  **Context**: `.add` is the *additive* arm of the pair family, the
+  k=0-style baseline. Its pure-multiplicative sibling
+  `bits.4.pair.K` — coupling through k shared gated channels,
+  design settled — is next, and the family name is never spelled
+  bare so the two never get confused. Registered forecast (Oleg,
+  2026-08-22): `.K` will almost always beat `.add` for some k. The
+  search referees.
+
+  Two open questions, both waiting on frontier evidence:
+  - **What the context-free conditional costs.** The (16, 16)
+    coupling `D[:, hi]` captures the static byte inventory but not
+    context-dependent hi/lo coupling — `D` does not see `h`. That
+    gap is exactly what `bits.4.pair.K` attacks; if it turns out to
+    matter *within* the additive arm, the escalation there is a
+    small nonlinear mixer on the second head (a low-rank
+    `h × onehot(hi)` interaction), not abandoning the
+    factorization.
+  - **Richer neighbor wiring.** v1 has exactly one toggle bridge,
+    with `bits.4.oh+bp`. The natural further edges — `bytes`,
+    `tokens.128.fold.oh`, an emb-mode analog, and the `.add ↔ .K`
+    arm swap once the sibling exists — are cheap to add and
+    deliberately unbuilt until the kind earns a place on the
+    frontier.
 
 * **Bit/byte router — tokens reimplemented inside the model**
   (2026-08-16 idea; for after the chatbot program). Adjacent to

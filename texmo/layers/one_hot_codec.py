@@ -50,8 +50,13 @@ _INPUT_NEIGHBORS = {
     'bits.1+bm': ('bits.1+bp',),
     'bits.1+bp': ('bits.2.oh+bp',),
     'bits.2.oh+bp': ('bits.1+bp', 'bits.4.oh+bp'),
+    # bits.4.pair.add (2026-08-21) is the same 16-symbol hex alphabet
+    # read a whole byte at a time; the toggle is the additive pair
+    # codec's only edge in v1 (see layers/pair_codec.py -- keep the
+    # two in sync). The multiplicative sibling bits.4.pair.K will
+    # want its own edges.
     'bits.4.oh+bp': ('bits.2.oh+bp', 'bytes', 'tokens.32.fold.oh',
-                     'tokens.32.hexbpe.oh'),
+                     'tokens.32.hexbpe.oh', 'bits.4.pair.add'),
     # The tokenset ladder hangs off the bit ladder at the nearest
     # rung (32 tokens ~ bits.4's 16) and continues up the hexbpe chain
     # 32 -> 64 -> 128 -> 256. Keep in sync with the emb-mode bridges
@@ -317,7 +322,13 @@ class OneHotCodecDef:
             nbits = int(main[1])
             if nbits not in (1, 2, 4, 8):
                 raise ValueError(f"bad chunk width in '{spec}'")
-            one_hot = len(main) > 2 and main[2] == 'oh'
+            # Only `.oh` may follow the chunk width. Anything else is
+            # another codec's spelling (`.emb.X`, `.pair.*`) or a typo;
+            # silently reading it as the bare-bits form would hand back
+            # a wrong model instead of an error.
+            if len(main) > 3 or (len(main) == 3 and main[2] != 'oh'):
+                raise ValueError(f"bad input spec: '{spec}'")
+            one_hot = len(main) > 2
             return OneHotCodecDef(
                 nbits=nbits, one_hot=one_hot, bp=bp, bm=bm,
                 ntokens=2 ** nbits, precision=precision)

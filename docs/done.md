@@ -7,6 +7,22 @@ short record with pointers — not a second copy of the design docs.
 
 ## 2026-08
 
+* **`bits.4.pair.add` — hex-pair IO, a fourth IO kind** (2026-08-21).
+  Built the same day it was proposed as "hex generative IO". One
+  position per byte; input is two concatenated 16-value one-hots
+  (width 32, parameter-free); output is two 16-way heads plus a
+  static (16, 16) coupling matrix, composed by the codec into
+  ordinary 256-way byte log-probabilities so the model contract, the
+  loss, sampling and the step path are all untouched.
+  `32X + 288` weights against a byte head's `256X + 256`.
+  `layers/pair_codec.py`; design, cost table and the accepted
+  context-free-conditional limitation in [`io.md`](io.md) (kind 4).
+  Search-reachable through one toggle bridge with `bits.4.oh+bp`.
+  Named `.add` (2026-08-22) for the ADDITIVE arm of the pair family
+  — the bare family name `bits.4.pair` is a parse error — ahead of
+  the multiplicative sibling `bits.4.pair.K`; the follow-ups stay on
+  the roadmap.
+
 * **Cross-corpus rank transferability study** (2026-08-21). 35 confs
   x 3 fresh SODA runs against the DB's books3 run distributions.
   Result — books3 selection holds on SODA, with the gap-transfer

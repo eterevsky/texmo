@@ -189,6 +189,22 @@ budget. Dream target: 32-64K weights.
 
 ## Analysis
 
+* **1-D scalar sweeps: X -> loss curves** (2026-08-22 idea, sparked
+  by the off-grid-k discussion). Fix a spec family parametrized by
+  one scalar — e.g. `bits.4.oh+bp|rnn.X.tanh` over X — run each
+  value several times (loss *distributions*, not points, per the
+  transferability framing), and plot X -> loss at finer granularity
+  than the search's power-of-two rungs, including off-grid X. The
+  machinery mostly exists: off-grid values parse and run today
+  (`is_valid` gates only what search proposes), and the sweep
+  harness pattern (per-conf subprocesses, resumable JSONL, the
+  W<1000-on-CPU / W>=1000-on-GPU device split) is established in
+  the cap/transfer studies. What it buys: the true shape of the
+  loss-vs-size curve within a family (smooth power law? steps?
+  plateaus?), whether the power-of-two ladder skips structure worth
+  finer rungs, and clean per-family scaling exponents to hold
+  against the global frontier fit.
+
 * **Re-check logit capping under bf16** (2026-08-21, waits on run
   mass). The cap was removed after the fp32 3-way study found it
   convergence-neutral (io.md records the decision), but bf16 — just

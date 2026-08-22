@@ -9,9 +9,10 @@ Implementations (same API, chosen by the pre-`|` spec):
   binary bits) in, independent learnable dense head out.
 - `embedding_codec.EmbeddingCodec{Def,Jax}` -- learned embedding
   table tied between input and output (`*.emb.X`).
-- `pair_codec.PairCodec{Def,Jax}` -- whole-byte hex pair, additive
-  arm (`bits.4.pair.add`): two 16-way one-hots in, two 16-way heads
-  out, composed into 256 byte log-probabilities.
+- `pair_codec.PairCodec{Def,Jax}` -- whole-byte hex pair
+  (`bits.4.pair.add` / `bits.4.pair.K`): two 16-way one-hots in, a
+  16-way hi head plus a per-hi lo conditional out (additive or
+  gated-multiplicative), composed into 256 byte log-probabilities.
 
 This module holds what they share. Logits are the raw head output:
 the logit soft-cap that lived here was removed 2026-08-19 (see

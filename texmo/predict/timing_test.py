@@ -425,3 +425,118 @@ def test_dot_ignores_stale_weight_lengths():
     length for that type; they must contribute zero, not crash."""
     assert _dot({"latent": np.ones(12)}, "latent", [1.0] * 15) == 0.0
     assert _dot({"latent": np.ones(15)}, "latent", [1.0] * 15) == 15.0
+
+
+# -- Output-head mult accounting ----------------------------------------
+
+
+def _output_features(spec, batch=4, length=16):
+    comps = featurize(_conf(spec, batch=batch, length=length))
+    out = comps[-1]
+    assert out.type_id == "output"
+    return out.features
+
+
+def test_output_head_features_unchanged_for_existing_families():
+    """REGRESSION GUARD. The 'output' key is shared by every codec and
+    its fitted weights depend on the features meaning one fixed thing.
+    Any change here silently invalidates the persisted timing model,
+    so these vectors are pinned to literals rather than recomputed.
+
+    Shape: [1, L, B*L, IS, IS*L, IS*B*L, OS, OS*L, OS*B*L,
+            M, M*L, M*B*L] with M the head's mult count -- which for
+    every family below is exactly IS*OS.
+    """
+    b, l_ = 4, 16
+    bl = b * l_
+
+    # One-hot dense head: bytes, X = 8 -> 256 logits.
+    is_, os_ = 8, 256
+    m = is_ * os_  # 2048
+    np.testing.assert_array_equal(
+        _output_features("bytes|dense.8.gelu", b, l_),
+        [1, l_, bl, is_, is_ * l_, is_ * bl, os_, os_ * l_, os_ * bl,
+         m, m * l_, m * bl])
+
+    # Sub-byte one-hot head: bits.4.oh+bp, X = 8 -> 16 logits.
+    is_, os_ = 8, 16
+    m = is_ * os_  # 128
+    np.testing.assert_array_equal(
+        _output_features("bits.4.oh+bp|dense.8.gelu", b, l_),
+        [1, l_, bl, is_, is_ * l_, is_ * bl, os_, os_ * l_, os_ * bl,
+         m, m * l_, m * bl])
+
+    # Tied head: bytes.emb.8 -> the scoring matmul, X = 8, 256 rows.
+    is_, os_ = 8, 256
+    m = is_ * os_  # 2048
+    np.testing.assert_array_equal(
+        _output_features("bytes.emb.8|dense.8.tanh", b, l_),
+        [1, l_, bl, is_, is_ * l_, is_ * bl, os_, os_ * l_, os_ * bl,
+         m, m * l_, m * bl])
+
+    # Tokenized one-hot head: 32 tokens, X = 4.
+    is_, os_ = 4, 32
+    m = is_ * os_  # 128
+    np.testing.assert_array_equal(
+        _output_features("tokens.32.hexbpe.oh|dense.4.tanh", b, l_),
+        [1, l_, bl, is_, is_ * l_, is_ * bl, os_, os_ * l_, os_ * bl,
+         m, m * l_, m * bl])
+
+
+def test_pair_head_is_charged_its_real_mults_not_a_256_way_dense():
+    """The hex-pair heads reach 256 logits through two 16-way heads, so
+    the dense figure (256*X) over-charges them 5-6x. The base block
+    still carries the true 256 logit width (softmax/reshape work)."""
+    b, l_ = 4, 16
+    bl = b * l_
+    x = 32
+    os_ = 256
+
+    for spec, mults in (
+        (f"bits.4.pair.add|dense.{x}.gelu", 32 * x + 288),
+        (f"bits.4.pair.16|dense.{x}.gelu", (16 + 16) * x + 33 * 16 + 32),
+        (f"bits.4.pair.4|dense.{x}.gelu", (16 + 4) * x + 33 * 4 + 32),
+    ):
+        feats = _output_features(spec, b, l_)
+        np.testing.assert_array_equal(
+            feats,
+            [1, l_, bl, x, x * l_, x * bl, os_, os_ * l_, os_ * bl,
+             mults, mults * l_, mults * bl])
+        # Well below what the old ntokens-shaped assumption charged.
+        assert mults < x * os_ / 4
+        # ...and it is exactly the codec's own published figure.
+        md = parse_model2(spec, precision=Precision.FP32)
+        assert md.codec.num_mults == mults
+
+
+def test_pair_head_mults_track_k_and_width():
+    """k and X both move the head cost -- the old features saw neither
+    (256*X regardless of k)."""
+    def m(spec):
+        return int(_output_features(spec)[9])
+
+    assert m("bits.4.pair.4|dense.8.gelu") < m("bits.4.pair.64|dense.8.gelu")
+    assert m("bits.4.pair.16|dense.8.gelu") < m("bits.4.pair.16|dense.32.gelu")
+    # The additive arm sits just under .16 at equal width (32X+288 vs
+    # 32X+560) -- the weight-comparable pairing the toggle edge uses.
+    assert (m("bits.4.pair.16|dense.32.gelu")
+            - m("bits.4.pair.add|dense.32.gelu")) == 272
+
+
+def test_pair_conf_featurizes_and_predicts_end_to_end():
+    """The whole pipeline runs for both arms: keys, feature widths,
+    and a finite total-time prediction."""
+    for spec in ("bits.4.pair.add|rnn.8.gelu", "bits.4.pair.16|rnn.8.gelu"):
+        comps = featurize(_conf(spec, batch=4, length=16))
+        # Both arms share ONE input key (identical 32-wide gather).
+        assert comps[0].type_id == "bits.4.pair"
+        assert comps[-1].type_id == "output"
+        assert comps[-1].features.shape == (12,)
+        per_key = {c.type_id: np.ones(c.features.shape) for c in comps}
+        w = Weights(
+            init=per_key, step=per_key,
+            scan_full={"bits.4.pair": np.ones(3)},
+            scan_short={"bits.4.pair": np.ones(4)},
+        )
+        t = predict_total_time(w, _conf(spec, batch=4, length=16))
+        assert np.isfinite(t) and t > 0

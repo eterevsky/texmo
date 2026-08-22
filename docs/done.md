@@ -7,6 +7,17 @@ short record with pointers — not a second copy of the design docs.
 
 ## 2026-08
 
+* **Bit/byte router — dropped for now** (2026-08-22, settled without
+  being built). The MoE-style "tokenization as routed compute" idea
+  (2026-08-16): a router deciding per position whether the next
+  bit/byte comes from a cheap local generator or a full model pass.
+  Dropped because the input side has no good construction — the
+  output function is makeable, but consuming the model's own
+  variable-length bit/byte emissions would need something like a
+  second RNN collecting input bits, which is far-fetched. To be
+  reintroduced if a better idea appears; the full entry lives in
+  this file's git history.
+
 * **`bits.4.pair.K` — the multiplicative hex-pair arm** (2026-08-22).
   The sibling the `.add` rename anticipated, built the day after it.
   Same input side and same composed-256-logit contract; the low
@@ -23,6 +34,24 @@ short record with pointers — not a second copy of the design docs.
   `.add` is byte-identical — the arms share one class and differ in
   one method. [`io.md`](io.md) kind 4 is now the family section.
 
+  The timing model was fixed to match (2026-08-22): its single
+  `output` key charged every codec's head as one `isize*osize`
+  matmul, so both pair arms were billed as a 256-way dense — 5-6x
+  their real cost at the widths search uses. Over-predicted step
+  time feeds `predict_max_steps`, which would have quietly
+  shortchanged the family's step budgets on its first frontier
+  outing. `_output_component` now takes the head's mult count from
+  the codec (`_head_mults`); the dense and tied heads keep exactly
+  `isize*osize`, so their features — and the fitted weights that
+  depend on them — are bit-for-bit unchanged.
+
+  Follow-ups cleared from the roadmap 2026-08-22 — the open
+  questions (which arm wins and where; where the k ladder settles;
+  richer wiring: `bytes`, `tokens.128.fold.oh`, an emb-mode analog)
+  are the search's to answer now, with Oleg watching its frontier
+  debut. Registered forecast (Oleg, 2026-08-22): `.K` will almost
+  always beat `.add` for some k.
+
 * **`bits.4.pair.add` — hex-pair IO, a fourth IO kind** (2026-08-21).
   Built the same day it was proposed as "hex generative IO". One
   position per byte; input is two concatenated 16-value one-hots
@@ -36,8 +65,8 @@ short record with pointers — not a second copy of the design docs.
   Search-reachable through one toggle bridge with `bits.4.oh+bp`.
   Named `.add` (2026-08-22) for the ADDITIVE arm of the pair family
   — the bare family name `bits.4.pair` is a parse error — ahead of
-  the multiplicative sibling `bits.4.pair.K`; the follow-ups stay on
-  the roadmap.
+  the multiplicative sibling `bits.4.pair.K` (see the entry above,
+  which carries the family's follow-ups).
 
 * **Cross-corpus rank transferability study** (2026-08-21). 35 confs
   x 3 fresh SODA runs against the DB's books3 run distributions.

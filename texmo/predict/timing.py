@@ -50,6 +50,7 @@ from ..layers.matlstm import MatLstmDef
 from ..layers.msr import MsrDef
 from ..layers.mullstm import MulLstmDef
 from ..layers.norm import NormDef
+from ..layers.pair_codec import PairHead
 from ..layers.rglru import RglruDef
 from ..layers.rmsnorm import RmsNormDef
 from ..layers.rnn import RnnDef
@@ -88,6 +89,56 @@ def _features_dense(isize: int, osize: int, batch: int, length: int) -> list[flo
         isize * osize * length,
         isize * osize * length * batch,
     ]
+
+
+def _features_head(
+    isize: int, osize: int, mults: int, batch: int, length: int
+) -> list[float]:
+    """Output-head features: the ordinary dense block, but with the
+    matmul triple driven by an EXPLICIT mult count instead of the
+    implicit isize*osize.
+
+    The base block still uses the real logit width -- the head really
+    does produce `osize` numbers per token, and the elementwise work
+    (softmax, reshape) scales with that however the scores were
+    computed.
+
+    For the dense head and the tied head `mults` IS isize*osize (see
+    `_head_mults`), so their feature vectors are bit-for-bit what the
+    old `_features_dense` call produced and the fitted weights for the
+    shared 'output' key stay valid. Only the hex-pair heads, which
+    reach 256 logits through two 16-way heads rather than one 256-way
+    matmul, get a different number.
+    """
+    return _features_base(isize, osize, batch, length) + [
+        mults,
+        mults * length,
+        mults * length * batch,
+    ]
+
+
+def _head_mults(output_def) -> int:
+    """Multiplies per token in the output head.
+
+    The default -- isize*osize -- is exact for every head that is one
+    matmul from the last activation to the logits: OneHotCodec's dense
+    head and EmbeddingCodec's tied scoring matmul.
+
+    The hex-pair heads are not that shape. They reach the same 256
+    logits through a 16-way hi head plus a per-hi lo conditional
+    (`32X + 288` for `.add`, `(16+k)X + 33k + 32` for `.K`), which is
+    5-6x below 256X at the widths the search uses. Charging them the
+    dense figure over-predicts their step time, and since
+    `predict_max_steps` divides a time budget by the predicted step
+    cost, that silently shortchanges the family's step budgets. The
+    codec already publishes the honest number as `head.num_weights`
+    (== the Def's `num_mults`; the pair codec's input side is a
+    parameter-free gather, so the whole head belongs here and nothing
+    is double-counted).
+    """
+    if isinstance(output_def, PairHead):
+        return output_def.num_weights
+    return output_def.input_size * output_def.size
 
 
 def _features_suffix(
@@ -307,11 +358,14 @@ def _layer_component(layer, batch: int, length: int) -> Component:
 
 
 def _output_component(output_def, batch: int, length: int) -> Component:
+    # One shared 'output' key across every codec, so the features must
+    # mean the same thing for all of them -- hence the explicit mult
+    # count rather than an ntokens-shaped assumption (see _head_mults).
     return Component(
         type_id="output",
-        features=np.array(
-            _features_dense(output_def.input_size, output_def.size, batch, length)
-        ),
+        features=np.array(_features_head(
+            output_def.input_size, output_def.size,
+            _head_mults(output_def), batch, length)),
     )
 
 

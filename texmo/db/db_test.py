@@ -11,6 +11,7 @@ from texmo.db import DbReader, DbWriter
 from texmo.db.writer import (
     AddRun,
     DbWriterProxy,
+    FrontierVersion,
     Stop,
     UpsertPredictedTimeEstimates,
     WriterThread,
@@ -1053,6 +1054,50 @@ def test_writer_thread_stop_is_not_a_panic(tmp_path):
     assert not fired.is_set(), "Stop must not look like a panic"
     with DbReader(db_path) as reader:
         assert reader.get_systems() == ["rpi"]
+
+
+def test_writer_thread_publishes_frontier_flips(tmp_path):
+    """`changed_winner` is computed inside the writer's transaction
+    and `DbWriterProxy` drops the return value, so this thread is the
+    only place a frontier move can be published. The search thread's
+    frontier-seed queues invalidate on it."""
+    version = FrontierVersion()
+    assert version.value == 0
+    db_path = str(tmp_path / "test.db")
+    with DbWriter(db_path):
+        pass
+    q = Queue()
+    thread = WriterThread(db_path, q, frontier_version=version)
+    thread.start()
+
+    # First tracked run on an empty DB: nothing won at that (W, T)
+    # before, this conf does after -- a flip.
+    conf, run = _make_conf_run(system="rpi")
+    run.train_time = 2.0
+    q.put(AddRun(conf=conf, run=run, strategy=None,
+                 track_winner_change=True))
+    # A second run of the SAME conf leaves the winner where it was.
+    _, run2 = _make_conf_run(system="rpi", loss=3.5)
+    run2.train_time = 2.0
+    q.put(AddRun(conf=conf, run=run2, strategy=None,
+                 track_winner_change=True))
+    # An untracked write (bulk import) says nothing either way.
+    _, run3 = _make_conf_run(system="rpi", loss=1.0)
+    run3.train_time = 2.0
+    q.put(AddRun(conf=conf, run=run3, strategy=None,
+                 track_winner_change=False))
+    q.put(Stop())
+    thread.join(timeout=10)
+
+    assert not thread.is_alive()
+    assert version.value == 1
+
+
+def test_writer_thread_without_a_frontier_version(tmp_path):
+    """Bare constructions (tests, admin tools) pass none; the write
+    path must not care."""
+    thread, q = _run_writer_thread(tmp_path, [Stop()])
+    assert not thread.is_alive()
 
 
 def test_get_runs_for_timing_limit_returns_recent(db):

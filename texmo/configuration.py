@@ -616,10 +616,12 @@ def default_from_template(
 # configured.
 MAIN_ENTRY = 'main'
 
-_ENTRY_KEYS = frozenset({'name', 'share', 'regex', 'default_spec'})
+_ENTRY_KEYS = frozenset({'name', 'share', 'regex', 'default_spec', 'seed'})
 
-# The same four fields as the web form's per-row inputs, in column
-# order (see `TemplateSet.from_rows` / `.rows`).
+# The TEXT fields of a web-form row, in column order (see
+# `TemplateSet.from_rows` / `.rows`). `seed` is a separate boolean and
+# is deliberately not here: an all-blank row is dropped, and a ticked
+# Seed box on a row with nothing else in it is still nothing.
 _ROW_KEYS = ('name', 'regex', 'default_spec', 'share')
 
 
@@ -632,10 +634,17 @@ class TemplateEntry(object):
     `default_spec` or derived by `default_from_template`. Without it a
     brand-new sub-space has nothing to hand out and its budget would
     quietly drain back into the general search.
+
+    `seed` turns on frontier seeding for this entry: while it is set,
+    selects are served from a queue of never-run confs one neighbor
+    hop off the unrestricted frontier, ahead of the normal strategy
+    lottery (see `Search._select_frontier_seed`). It is a switch, not
+    a budget -- the entry's share still governs how fast the queue
+    drains.
     """
 
     __slots__ = ('name', 'share', 'spec', 'default_spec', 'template',
-                 'default', 'min_layers')
+                 'default', 'min_layers', 'seed')
 
     def __init__(
         self,
@@ -645,6 +654,7 @@ class TemplateEntry(object):
         spec: Optional[str] = None,
         default_spec: Optional[str] = None,
         default: Optional[Configuration] = None,
+        seed: bool = False,
     ):
         name = (name or '').strip()
         if not name:
@@ -656,6 +666,7 @@ class TemplateEntry(object):
         self.share = float(share)
         self.spec = spec or None
         self.default_spec = default_spec or None
+        self.seed = bool(seed)
 
         try:
             self.template = base.with_spec(self.spec)
@@ -696,13 +707,16 @@ class TemplateEntry(object):
             out['regex'] = self.spec
         if self.default_spec:
             out['default_spec'] = self.default_spec
+        if self.seed:
+            out['seed'] = True
         return out
 
     def __str__(self) -> str:
         spec = self.spec if self.spec else '(unrestricted)'
+        seed = ', seed' if self.seed else ''
         return (
             f'TemplateEntry({self.name!r}, share={self.share:g}, '
-            f'spec={spec}, default={self.default.model})'
+            f'spec={spec}, default={self.default.model}{seed})'
         )
 
 
@@ -786,7 +800,8 @@ class TemplateSet(object):
 
             [{"name": "main", "share": 60},
              {"name": "attn", "share": 40, "regex": ".*attn.*",
-              "default_spec": "bytes|split.add(attn.4.1)"}]
+              "default_spec": "bytes|split.add(attn.4.1)",
+              "seed": true}]
 
         Raises ValueError on anything malformed -- callers surface that
         to the user and keep running on the previous set.
@@ -825,12 +840,18 @@ class TemplateSet(object):
                     raise ValueError(
                         f'entry {name!r}: "{key}" must be a string, got '
                         f'{value!r}')
+            seed = item.get('seed', False)
+            if not isinstance(seed, bool):
+                raise ValueError(
+                    f'entry {name!r}: "seed" must be true or false, got '
+                    f'{seed!r}')
             entries.append(TemplateEntry(
                 base,
                 name=name,
                 share=share,
                 spec=item.get('regex'),
                 default_spec=item.get('default_spec'),
+                seed=seed,
             ))
         return TemplateSet(entries)
 
@@ -884,6 +905,7 @@ class TemplateSet(object):
                 share=share,
                 spec=(row.get('regex') or '').strip(),
                 default_spec=(row.get('default_spec') or '').strip(),
+                seed=bool(row.get('seed')),
             ))
         return TemplateSet(entries)
 
@@ -900,6 +922,7 @@ class TemplateSet(object):
             'regex': e.spec or '',
             'default_spec': e.default_spec or '',
             'share': f'{e.share:g}',
+            'seed': e.seed,
         } for e in self.entries]
 
     def __str__(self) -> str:

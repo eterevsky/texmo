@@ -7,6 +7,41 @@ short record with pointers — not a second copy of the design docs.
 
 ## 2026-08
 
+* **Frontier seeding for sub-searches** (2026-08-23). A per-entry
+  **Seed** checkbox that fixes the propagation problem `bits.4.pair.*`
+  exposed the week before: a new family lands with its own share of
+  the budget and is still visited three times in its first day,
+  because the only way into it is a handful of bridge edges the
+  neighbor walk has to stumble onto at random. While Seed is on, the
+  entry is served from a queue instead of its strategy lottery: the
+  unrestricted Pareto frontier, expanded by `conf_neighbors` under the
+  entry's template, filtered to what the entry admits and has **zero
+  recorded runs** — each run once, ahead of the coverage walk, with
+  the source's metaparams riding along (so a family's head arrives
+  pre-tuned, not at the sub-space's cold default) and `steps` reduced
+  per requesting system by the timing model. No budget knob: the
+  entry's share governs the drain rate and run-once bounds the spend.
+  Recorded as strategy `frontier_seed`.
+
+  The queue is cached — the sweep is one `conf_neighbors` call per
+  frontier conf — and invalidated by the frontier moving, by draining
+  once, or by an `/update`. "The frontier moved" needed a new
+  cross-thread signal: `changed_winner` is computed inside the
+  writer's transaction and `DbWriterProxy` drops it, so `WriterThread`
+  now bumps a shared `FrontierVersion` counter the search thread
+  reads. A counter rather than a queue message deliberately — the
+  value coalesces, so a burst of flips costs one rebuild rather than
+  one message each, and `search` imports `db`, not the reverse. See
+  [`search.md`](search.md#frontier-seeding) and
+  [`threads.md`](threads.md).
+
+  The UI wrinkle worth remembering: an unchecked checkbox posts
+  nothing, so `entry_seed` could not join the positionally-zipped
+  `entry_preset` / `entry_share` fields — one ticked row three down
+  would have landed on row 0. Each box carries its own row index as
+  its value instead, kept current by the `updateShares` walk the table
+  already ran on load / Add / Remove.
+
 * **Bit/byte router — dropped for now** (2026-08-22, settled without
   being built). The MoE-style "tokenization as routed compute" idea
   (2026-08-16): a router deciding per position whether the next

@@ -735,9 +735,9 @@ def test_template_set_single_trusts_an_explicit_default():
 # --- template sets from the web form's rows --------------------------
 
 
-def _row(name='', regex='', default_spec='', share=''):
+def _row(name='', regex='', default_spec='', share='', seed=False):
     return {'name': name, 'regex': regex,
-            'default_spec': default_spec, 'share': share}
+            'default_spec': default_spec, 'share': share, 'seed': seed}
 
 
 def test_from_rows_builds_the_entries():
@@ -780,7 +780,7 @@ def test_from_rows_with_no_rows_is_one_unrestricted_entry():
         assert ts.entries[0].template is base
         assert ts.rows() == [{
             'name': 'main', 'regex': '', 'default_spec': '',
-            'share': '100'}]
+            'share': '100', 'seed': False}]
 
 
 def test_from_rows_requires_every_field_of_a_touched_row():
@@ -821,13 +821,14 @@ def test_rows_round_trip_through_from_rows():
     ts = TemplateSet.from_rows([
         _row('main', share='60'),
         _row('attn', regex=_ATTN_REGEX, default_spec=_ATTN_SPEC,
-             share='20.5'),
+             share='20.5', seed=True),
     ], base)
     rows = ts.rows()
     assert rows == [
-        {'name': 'main', 'regex': '', 'default_spec': '', 'share': '60'},
+        {'name': 'main', 'regex': '', 'default_spec': '', 'share': '60',
+         'seed': False},
         {'name': 'attn', 'regex': _ATTN_REGEX,
-         'default_spec': _ATTN_SPEC, 'share': '20.5'},
+         'default_spec': _ATTN_SPEC, 'share': '20.5', 'seed': True},
     ]
     again = TemplateSet.from_rows(rows, base)
     assert again.names == ts.names
@@ -836,6 +837,7 @@ def test_rows_round_trip_through_from_rows():
         assert a.spec == b.spec
         assert a.default_spec == b.default_spec
         assert a.default == b.default
+        assert a.seed == b.seed
 
 
 def test_rows_and_json_describe_the_same_set():

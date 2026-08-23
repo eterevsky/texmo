@@ -41,7 +41,8 @@ presets](#named-regex-presets-named_regexesjson)).
 [
   {"name": "main", "share": 60},
   {"name": "attn", "share": 20, "regex": ".*\\|split\\.add\\(.*attn.*",
-   "default_spec": "bytes|split.add(norm-attn.8.2.8, pass)"}
+   "default_spec": "bytes|split.add(norm-attn.8.2.8, pass)",
+   "seed": true}
 ]
 ```
 
@@ -51,6 +52,8 @@ presets](#named-regex-presets-named_regexesjson)).
   conf that agrees with the entry. Omitted, it is derived by
   `default_from_template` against the entry's template, which fails
   loudly at configuration time if nothing matches.
+- `seed` (default false) turns on [frontier
+  seeding](#frontier-seeding) for the entry.
 
 `select_conf` draws one entry per call, weighted by share, right after
 the (template-blind) pick_me and warmup steps. Everything below the
@@ -90,9 +93,81 @@ views can be filtered to one entry, which just applies its regex at
 query time. Nothing about which entry produced a run is recorded in
 the DB.
 
+### Frontier seeding
+
+A share of the budget is not enough on its own for a brand-new family.
+`bits.4.pair.*` landed with its own sub-search and was still visited
+three times in its first day, because the only way *into* it is a
+handful of bridge edges (`bits.4.oh+bp ↔ .16`, `tokens.32.hexbpe.oh
+↔`) that the neighbor walk has to stumble onto at random. Seeding
+walks those edges deliberately instead.
+
+Per entry, a **Seed** checkbox (`"seed": true` in `--templates`). While
+it is on, `select_conf` serves that entry from a queue instead of
+running its strategy lottery:
+
+1. Take the Pareto frontier of the **unrestricted** template — the
+   same `top_confs_global` list the index page shows, within the
+   server's weight bounds. Not the entry's own frontier: the point is
+   to carry what the general search has found *into* the sub-space.
+2. `conf_neighbors(source, entry.template)` for each frontier conf,
+   keeping what the entry's full `match` admits (`conf_neighbors`
+   re-checks the spec on model mutations only, so a steps or lr
+   neighbor of an off-regex source is still off-regex), that is valid,
+   and that is not a retired input.
+3. Drop anything with a recorded run anywhere. Zero runs is what makes
+   this **run-once**; anything already measured is somebody else's job.
+4. Shuffle, cap at `_SEED_QUEUE_CAP` (200), cache.
+
+A seeded candidate keeps its **source's metaparams** — a spec mutation
+inherits `(lr, batch, length, steps)` — so a new family's head arrives
+pre-tuned rather than at the sub-space's cold default. Before it goes
+out, `_cap_seed_steps` checks the timing model for the *requesting*
+system and reduces `steps` to the largest power of two that fits the
+time limit; with no fit for that `(system, precision)` the conf goes
+unchanged (the first run on a new pair is what seeds the predictor),
+and an unfittable candidate is floored rather than dropped, matching
+`_cap_steps`.
+
+Seeding sits **first inside the entry**, ahead of the coverage walk
+and the lottery — deliberately, since the coverage walk's sticky flag
+can fire at 100%. It yields as soon as the queue is empty, and the
+switch stays on: no extra budget knob, because the entry's share
+already governs the drain rate and run-once bounds the total spend.
+The picked conf is recorded as strategy `frontier_seed`.
+
+**Cache and invalidation.** The sweep is one `conf_neighbors` call per
+frontier conf (~200 of them), so it must not run per select. Each
+entry's queue is cached and rebuilt when:
+
+- **the frontier moves** — `DbWriter.add_run` already samples the
+  winning conf at `(system, train_time, num_weights)` before and after
+  each insert (the `changed_winner` column), and the writer thread
+  publishes each flip by bumping a shared `FrontierVersion` counter
+  the search thread reads (see [`threads.md`](threads.md));
+- **the queue drains** — one rebuild to see whether the sweep still
+  has anything. A queue that was built *empty* is not stale, so a
+  sub-space with no live bridge edges doesn't pay for the sweep on
+  every select;
+- **the entry changes** — `set_templates` drops every cached queue,
+  since an `/update` rebuilds all entries and may have moved the
+  shared bounds under them.
+
+Each candidate's zero-run status is re-checked at pop time: the queue
+can be minutes old, another worker may have run it since, and run-once
+means once.
+
+The row's live stats show how many candidates are left. Leave Seed on
+only while a sub-search is still new — the queue refills whenever the
+frontier moves, so on a broad entry it never stops.
+
 ## Search strategies
 
-`Search.select_conf(system)` first picks a time budget `t` (log-uniform
+Two strategies run before any of this, inside the drawn sub-search
+entry: [frontier seeding](#frontier-seeding) when its queue has
+anything left, then the coverage walk.
+
+`Search.select_conf(system)` then picks a time budget `t` (log-uniform
 within the configured range) and a weight budget `max_weights`
 (log-uniform between the template's min weights and
 `min(8 × top_conf.weights, template max weights)`), then tries the
@@ -302,14 +377,22 @@ a graph (score vs. weights, Pareto frontier), and a table of top configs.
 - **Sub-search table** — one row per entry, editing and monitoring in
   the same place: a **preset** dropdown (the row's identity *and* its
   spec filter), an editable **share** with a live-computed normalized
-  percentage, the row's **regex and default** rendered read-only
-  (stacked full-width in one column, since real ones run 40-80
-  characters), its **live stats** (nominal vs realized share, select
-  count, default conf, linking to that entry's frontier), and Remove.
-  Add appends a row on `Unrestricted` with an empty share.
+  percentage, a **Seed** checkbox ([frontier
+  seeding](#frontier-seeding)), the row's **regex and default**
+  rendered read-only (stacked full-width in one column, since real
+  ones run 40-80 characters), its **live stats** (nominal vs realized
+  share, select count, seed queue remaining, default conf, linking to
+  that entry's frontier), and Remove. Add appends a row on
+  `Unrestricted` with an empty share.
 
-  Only two fields post — `entry_preset` and `entry_share`, as parallel
-  repeated fields zipped back by position. **The regex is not
+  Two fields post positionally — `entry_preset` and `entry_share`, as
+  parallel repeated fields zipped back by position. `entry_seed`
+  cannot join them: a browser posts nothing at all for an unchecked
+  box, so an unticked row wouldn't hold a slot and every later row's
+  flag would shift up one. Each box carries **its own row index** as
+  its value instead (the page's `updateShares`, which already walks
+  every row on load / Add / Remove, keeps those current), so the
+  posted list simply names the ticked rows. **The regex is not
   submittable**: `/update` resolves each preset name against
   `named_regexes.json` as of that request and snapshots the result
   into the entry. There is always at least one row; with no

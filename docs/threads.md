@@ -9,8 +9,9 @@ a single dedicated thread, and Search is stateless and read-only.
 > mutated by another thread is sent through a **Queue**.
 
 The few legitimately shared-mutable objects (`TrainTimingModel`,
-`LossModelHolder`, `latency` measures) are encapsulated behind narrow
-interfaces with clearly identified writer threads.
+`LossModelHolder`, `FrontierVersion`, `latency` measures) are
+encapsulated behind narrow interfaces with clearly identified writer
+threads.
 
 ## Message format
 
@@ -97,7 +98,11 @@ never exits.
     all write-transaction state. Opens it inside `run()`, so sqlite's
     default `check_same_thread=True` holds.
   - Reads from: its `write_queue`.
-  - Sends to: nothing.
+  - Sends to: nothing through a queue. It does bump the shared
+    `FrontierVersion` when an `AddRun` reports a winner flip — see
+    "Shared mutable objects"; that is the one signal only this thread
+    can produce, since `add_run` computes it inside its own
+    transaction and `DbWriterProxy` is fire-and-forget.
   - **Panic path.** A write that raises is fatal — no retry tier,
     since the 30 s `busy_timeout` already absorbs transient
     contention, so what escapes (disk I/O error, disk full, a lock
@@ -124,6 +129,8 @@ never exits.
     - `DbReader` for query work.
     - The shared `TrainTimingModel` and `LossModelHolder` instances
       (writer is the Model thread; see "Shared mutable objects").
+    - The shared `FrontierVersion` (writer is the Writer thread),
+      which invalidates the per-entry frontier-seed queues.
     - `requests_queue` for incoming commands.
   - Sends to: the matching per-system queue in `confs_by_system`,
     dropping each produced `SearchResult` (or `None`) onto it.
@@ -312,6 +319,25 @@ is encapsulated behind a narrow interface.
     CPython, no lock needed. Readers may briefly see a stale-but-
     consistent snapshot.
 
+- **`FrontierVersion`** (lives next to `WriterThread` in
+  `db/writer.py`, since `search` imports `db` and not the reverse)
+  - A monotonic count of Pareto-winner flips: "the frontier moved".
+  - Writer (Writer thread only): `bump()`, called when an `AddRun`'s
+    `changed_winner` comes back true. That bool is computed inside the
+    write transaction and `DbWriterProxy` drops it, so this thread is
+    the only place it can be published.
+  - Readers (Search): `value`, compared against the reading each
+    frontier-seed queue was built at (`Search._seed_queue`).
+  - Deliberately **not** a queue message, which the house rule would
+    otherwise prefer. The value coalesces: a burst of flips costs one
+    cache rebuild instead of one message each, and a reader that
+    wasn't looking misses nothing. One writer plus a plain int
+    attribute assignment (atomic in CPython) is the whole
+    synchronization story — the same shape as `LossModelHolder`'s
+    pointer swap. Constructed in `server.py` and handed to both
+    threads; a `Search` built without one (tests, one-off analysis)
+    makes its own, which never moves.
+
 - **Latency** (the dedicated thread above)
   - `_measures` is owned by the thread; never touched directly.
   - The module exposes a `Timer` context manager (posts a `_Record`
@@ -348,8 +374,8 @@ type system enforces the read/write boundary. Code layout:
 - `texmo/db/reader.py` — `DbReader` class, plus `ConfScore` /
   `ConfWithRuns` (only produced by reads) and read-only SQL
   constants.
-- `texmo/db/writer.py` — `DbWriter`, `DbWriterProxy`, `WriterThread`
-  and the write-side SQL constants.
+- `texmo/db/writer.py` — `DbWriter`, `DbWriterProxy`, `WriterThread`,
+  `FrontierVersion` and the write-side SQL constants.
 - `texmo/db/schema.sql` — the schema (used to bootstrap the writer
   connection on a fresh DB).
 
@@ -440,4 +466,7 @@ result. Along the way:
 
 `track_winner_change` stayed inside the writer so the (before, after)
 sampling is atomic with the run insert. The result is recorded in the
-`changed_winner` column; the caller doesn't see it.
+`changed_winner` column; the caller doesn't see it. Since 2026-08 the
+writer thread also publishes each flip through `FrontierVersion` — the
+first thing it sends anywhere, and still not a queue (see "Shared
+mutable objects" for why).

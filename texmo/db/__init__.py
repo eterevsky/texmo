@@ -15,6 +15,8 @@ guess which methods cross it.
 """
 
 from .reader import ConfScore, ConfWithRuns, DbReader
-from .writer import DbWriter
+from .writer import DbWriter, FrontierVersion
 
-__all__ = ['ConfScore', 'ConfWithRuns', 'DbReader', 'DbWriter']
+__all__ = [
+    'ConfScore', 'ConfWithRuns', 'DbReader', 'DbWriter', 'FrontierVersion',
+]

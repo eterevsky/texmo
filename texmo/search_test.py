@@ -843,12 +843,14 @@ def _make_search_with(path, templates, warmup_systems=None):
     )
 
 
-def _two_entry_set(default_spec=_CONF_B_SPEC, main_share=50, rnn_share=50):
+def _two_entry_set(default_spec=_CONF_B_SPEC, main_share=50, rnn_share=50,
+                   seed=False):
     base = _make_template()
     return TemplateSet([
         TemplateEntry(base, name='main', share=main_share),
         TemplateEntry(base, name='rnn', share=rnn_share,
-                      spec=_RNN_REGEX, default_spec=default_spec),
+                      spec=_RNN_REGEX, default_spec=default_spec,
+                      seed=seed),
     ])
 
 
@@ -1064,3 +1066,246 @@ def test_set_templates_seeds_counters_for_every_entry(tmp_path):
     search = _make_search_with(path, _two_entry_set())
     assert set(search.entry_selects) == {'main', 'rnn'}
     assert set(search.entry_selects.values()) == {0}
+
+
+# --- frontier seeding -------------------------------------------------
+#
+# The unrestricted frontier holds one dense conf, which the `rnn` entry
+# can't see at all. `conf_neighbors` bridges the two with exactly one
+# edge, dense.4.gelu -> rnn.4.gelu -- and that single edge is the whole
+# reason this strategy exists: the random walk crosses it a handful of
+# times a day.
+
+_BRIDGE_SPEC = "bytes|rnn.4.gelu"
+
+
+def _seeded_search(path, seed=True):
+    """A two-entry search whose `rnn` entry has Seed on, over a DB
+    holding one dense frontier conf."""
+    _seed_runs(path, _make_conf(steps=256, spec=_CONF_A_SPEC),
+               system='a', n=2)
+    templates = _two_entry_set(seed=seed)
+    return _make_search_with(path, templates), templates
+
+
+def _count_calls(monkeypatch, search):
+    """Count `top_confs_global` queries -- one per seed-queue build."""
+    calls: list[int] = []
+    real = search._db.top_confs_global
+    monkeypatch.setattr(
+        search._db, 'top_confs_global',
+        lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+    return calls
+
+
+def test_frontier_seed_queue_is_the_never_run_bridges(tmp_path):
+    """Candidates are neighbors of the UNRESTRICTED frontier that the
+    entry admits -- carrying the source's metaparams, not the
+    sub-space's cold default."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    search, templates = _seeded_search(path)
+    rnn = templates.by_name('rnn')
+    confs = search._frontier_seed_confs(rnn)
+    assert [str(c.model) for c in confs] == [_BRIDGE_SPEC]
+    # The dense source ran at 256 steps, batch 32; the entry's own
+    # default is a much smaller conf. Seeding inherits the former.
+    assert (confs[0].steps, confs[0].batch) == (256, 32)
+    assert confs[0] != rnn.default
+    # Nothing off-regex leaks in, however it was reached.
+    assert all(rnn.template.match(c) for c in confs)
+
+
+def test_frontier_seed_queue_skips_confs_that_have_runs(tmp_path):
+    """Run-once: anything the fleet has already measured is somebody
+    else's job."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    _seed_runs(path, _make_conf(steps=256, spec=_BRIDGE_SPEC),
+               system='a', n=1)
+    search, templates = _seeded_search(path)
+    assert search._frontier_seed_confs(templates.by_name('rnn')) == []
+
+
+def test_frontier_seed_queue_is_cached_until_the_frontier_moves(
+    tmp_path, monkeypatch,
+):
+    """The sweep is ~200 `conf_neighbors` calls; it must not run per
+    select. A winner flip (the writer bumping `frontier_version`) is
+    what makes it run again."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    search, templates = _seeded_search(path)
+    rnn = templates.by_name('rnn')
+    calls = _count_calls(monkeypatch, search)
+
+    first = search._seed_queue(rnn)
+    assert len(calls) == 1
+    assert search._seed_queue(rnn) is first
+    assert search._seed_queue(rnn) is first
+    assert len(calls) == 1
+
+    search.frontier_version.bump()
+    second = search._seed_queue(rnn)
+    assert len(calls) == 2
+    assert second is not first
+    assert [str(c.model) for c in second] == [_BRIDGE_SPEC]
+
+
+def test_frontier_seed_empty_queue_is_not_rebuilt_every_select(
+    tmp_path, monkeypatch,
+):
+    """A sub-space with no live bridge edges must not pay for the
+    sweep on every select -- only the frontier moving can give it
+    new ones."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    _seed_runs(path, _make_conf(steps=256, spec=_BRIDGE_SPEC),
+               system='a', n=1)
+    search, templates = _seeded_search(path)
+    rnn = templates.by_name('rnn')
+    calls = _count_calls(monkeypatch, search)
+
+    for _ in range(3):
+        assert search._select_frontier_seed('b', rnn) is None
+    assert len(calls) == 1
+
+
+def test_frontier_seed_queue_rebuilds_once_after_draining(
+    tmp_path, monkeypatch,
+):
+    """Draining is the other invalidation: one rebuild to see whether
+    the sweep still has anything, then quiet again."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    search, templates = _seeded_search(path)
+    rnn = templates.by_name('rnn')
+
+    conf = search._select_frontier_seed('b', rnn)
+    assert conf is not None and str(conf.model) == _BRIDGE_SPEC
+    assert search.seed_queue_size('rnn') == 0
+
+    # The run lands, so the rebuild finds the edge already crossed.
+    _seed_runs(path, conf, system='b', n=1)
+    calls = _count_calls(monkeypatch, search)
+    assert search._select_frontier_seed('b', rnn) is None
+    assert len(calls) == 1
+    assert search._select_frontier_seed('b', rnn) is None
+    assert len(calls) == 1
+
+
+def test_frontier_seed_rechecks_runs_at_pop_time(tmp_path):
+    """The queue can be minutes old by the time a candidate reaches
+    the front, and another worker may have run it since."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    search, templates = _seeded_search(path)
+    rnn = templates.by_name('rnn')
+    assert len(search._seed_queue(rnn)) == 1
+
+    _seed_runs(path, _make_conf(steps=256, spec=_BRIDGE_SPEC),
+               system='b', n=1)
+    assert search._select_frontier_seed('b', rnn) is None
+    # Dropped rather than handed out a second time.
+    assert search.seed_queue_size('rnn') == 0
+
+
+def test_frontier_seed_off_builds_nothing(tmp_path):
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    search, templates = _seeded_search(path, seed=False)
+    assert search._select_frontier_seed(
+        'b', templates.by_name('rnn')) is None
+    assert search.seed_queue_size('rnn') is None
+
+
+def test_set_templates_drops_seed_queues(tmp_path):
+    """An /update rebuilds every entry and may move the shared bounds
+    under it, so no cached candidate list survives."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    search, templates = _seeded_search(path)
+    search._seed_queue(templates.by_name('rnn'))
+    assert search.seed_queue_size('rnn') == 1
+    search.set_templates(_two_entry_set(seed=True))
+    assert search.seed_queue_size('rnn') is None
+
+
+def test_cap_seed_steps_passes_a_fitting_conf_through(
+    tmp_path, monkeypatch,
+):
+    search = _make_search(tmp_path)   # train_time max is 16 s
+    monkeypatch.setattr(
+        search.timing_model, 'predict', lambda system, conf: 4.0)
+    assert search._cap_seed_steps(_make_conf(steps=1024), 'x').steps == 1024
+
+
+def test_cap_seed_steps_without_a_fit_keeps_the_source_steps(
+    tmp_path, monkeypatch,
+):
+    """No model for this (system, precision): the first run is what
+    seeds the predictor, and the source ran this conf somewhere."""
+    search = _make_search(tmp_path)
+    monkeypatch.setattr(
+        search.timing_model, 'predict', lambda system, conf: None)
+    assert search._cap_seed_steps(_make_conf(steps=1024), 'x').steps == 1024
+
+
+def test_cap_seed_steps_reduces_to_the_largest_fitting_power_of_2(
+    tmp_path, monkeypatch,
+):
+    search = _make_search(tmp_path)
+    monkeypatch.setattr(
+        search.timing_model, 'predict', lambda system, conf: 64.0)
+    monkeypatch.setattr(
+        search.timing_model, 'predict_max_steps',
+        lambda system, conf, t: 256)
+    assert search._cap_seed_steps(_make_conf(steps=1024), 'x').steps == 256
+
+
+def test_cap_seed_steps_floors_instead_of_dropping(tmp_path, monkeypatch):
+    """Not even the shortest run fits: hand it out at the template
+    floor (bounded overrun), the same call `_cap_steps` makes."""
+    search = _make_search(tmp_path)
+    monkeypatch.setattr(
+        search.timing_model, 'predict', lambda system, conf: 1000.0)
+    monkeypatch.setattr(
+        search.timing_model, 'predict_max_steps',
+        lambda system, conf, t: 0)
+    capped = search._cap_seed_steps(_make_conf(steps=1024), 'x')
+    assert capped.steps == 4   # template.steps.min
+
+
+def test_select_conf_frontier_seed_pre_empts_the_lottery(
+    tmp_path, monkeypatch,
+):
+    """With a queue to drain, seeding outranks everything inside the
+    entry -- the coverage walk included -- and yields to the ordinary
+    strategies once it is empty."""
+    from .predict.timing import Weights
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    search, templates = _seeded_search(path)
+    rnn = templates.by_name('rnn')
+    monkeypatch.setattr(search.templates, 'draw', lambda: rnn)
+    # A fitted timing model plus a sticky flag would fire the coverage
+    # walk unconditionally if seeding didn't come first.
+    search.timing_model._weights[('b', Precision.FP32)] = Weights(
+        {}, {}, {}, {})
+    search._coverage_flag[('b', 'rnn')] = True
+    walked: list[str] = []
+    monkeypatch.setattr(
+        search, '_select_uncovered_top',
+        lambda system, entry: walked.append(entry.name))
+
+    result = search.select_conf('b')
+    assert result is not None and result.strategy == 'frontier_seed'
+    assert str(result.conf.model) == _BRIDGE_SPEC
+    assert walked == []
+    # Booked against the entry like any other select.
+    assert search.entry_selects['rnn'] == 1
+
+    # Drained (and the run landed): back to the normal path.
+    _seed_runs(path, result.conf, system='b', n=1)
+    result = search.select_conf('b')
+    assert result is None or result.strategy != 'frontier_seed'

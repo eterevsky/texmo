@@ -40,7 +40,7 @@ from .configuration import (
     format_lr,
 )
 from . import named_regexes
-from .db import ConfScore, DbReader, DbWriter
+from .db import ConfScore, DbReader, DbWriter, FrontierVersion
 from .db.writer import DbWriterProxy, Stop as WriterStop, WriterThread
 from .latency import get_report, report, timer
 from .predict.loss_rnn import LossModelHolder
@@ -246,6 +246,14 @@ _ENTRY_FORM_FIELDS = (
     ('share', 'entry_share'),
 )
 
+# The Seed checkbox. It cannot join `_ENTRY_FORM_FIELDS`: a browser
+# posts nothing at all for an unchecked box, so an unticked row would
+# not occupy a slot and every later row's flag would shift up one.
+# Each box instead carries its own row index as its value (the page's
+# `updateShares` keeps those current across Add/Remove), so the posted
+# list simply names the ticked rows.
+_ENTRY_SEED_FIELD = 'entry_seed'
+
 
 def _entry_rows_from_form(params) -> list[dict]:
     """Zip the form's parallel `entry_*` fields into row dicts.
@@ -256,11 +264,15 @@ def _entry_rows_from_form(params) -> list[dict]:
     silently shifting every later row up a slot.
     """
     columns = [params.getlist(field) for _, field in _ENTRY_FORM_FIELDS]
-    return [
+    seeded = set(params.getlist(_ENTRY_SEED_FIELD))
+    rows = [
         {key: (value or '').strip()
          for (key, _), value in zip(_ENTRY_FORM_FIELDS, values)}
         for values in zip_longest(*columns, fillvalue='')
     ]
+    for i, row in enumerate(rows):
+        row['seed'] = str(i) in seeded
+    return rows
 
 
 def _is_unrestricted(preset: str) -> bool:
@@ -333,6 +345,7 @@ def _resolve_entry_rows(rows: list[dict], presets: list[dict]) -> list[dict]:
         out.append({
             'name': name, 'regex': regex,
             'default_spec': default_spec, 'share': share,
+            'seed': bool(row.get('seed')),
         })
     return out
 
@@ -513,6 +526,12 @@ class SearchServer(object):
         self.timing_model = TrainTimingModel()
         self.loss_model = LossModelHolder()
 
+        # Writer -> search signal: bumped whenever an incoming run
+        # flips the winning conf at some (system, W, T), which is the
+        # server's cheapest "the frontier moved" notification. The
+        # search thread's frontier-seed queues invalidate on it.
+        self.frontier_version = FrontierVersion()
+
         # Apply the schema if this is a fresh DB so the read below
         # doesn't trip on a not-yet-created file — `open_connection`
         # only runs the schema bootstrap on a read-write open. The
@@ -588,7 +607,8 @@ class SearchServer(object):
                 server._on_writer_fatal()
 
         self.writer_thread = WriterThread(
-            self.path, self.write_queue, on_fatal=_writer_fatal)
+            self.path, self.write_queue, on_fatal=_writer_fatal,
+            frontier_version=self.frontier_version)
         self.writer_thread.start()
 
         # Server-side handle the request handlers and `add_run` use to
@@ -627,6 +647,7 @@ class SearchServer(object):
             timing_model=self.timing_model,
             loss_model=self.loss_model,
             templates=self.templates,
+            frontier_version=self.frontier_version,
         )
         self.search_thread.start()
 
@@ -652,9 +673,10 @@ class SearchServer(object):
     def _entry_rows(
         self, templates: TemplateSet, presets: list[dict],
     ) -> list[dict]:
-        """One row per live entry: the editable bits (preset, share)
-        and the read-only ones (its snapshotted regex/default, plus
-        nominal vs realized share) in a single table.
+        """One row per live entry: the editable bits (preset, share,
+        seed) and the read-only ones (its snapshotted regex/default,
+        plus nominal vs realized share and any seed queue) in a single
+        table.
 
         Realized share is `selects / total selects` from the search
         thread's in-memory counters (see `Search.entry_selects`), and
@@ -711,6 +733,13 @@ class SearchServer(object):
                 'preset': preset,
                 'options': options,
                 'share': f'{entry.share:g}',
+                'seed': entry.seed,
+                # None until the search thread has built this entry's
+                # queue, which first happens on its first seeded
+                # select -- so a just-ticked row shows nothing yet.
+                'seed_left': (
+                    None if search is None
+                    else search.seed_queue_size(entry.name)),
                 'regex': entry.spec or '',
                 'default_spec': entry.default_spec or '',
                 'stale': stale,
@@ -748,6 +777,8 @@ class SearchServer(object):
                 'preset': preset,
                 'options': options,
                 'share': row['share'],
+                'seed': bool(row.get('seed')),
+                'seed_left': None,
                 'regex': stored['regex'] if stored else '',
                 'default_spec': stored['default_spec'] if stored else '',
                 'stale': stale,

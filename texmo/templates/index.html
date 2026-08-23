@@ -80,6 +80,13 @@
             // (entry_preset / entry_share); the server zips them back
             // by position and resolves each preset name against
             // named_regexes.json at Update time.
+            //
+            // The Seed checkbox can't be one of those: an unchecked
+            // box posts nothing, so it would not hold a slot. Each
+            // box carries its own row index as its value instead, and
+            // updateShares() -- which already walks every row, and
+            // already runs on load, on Add and on Remove -- keeps
+            // those indices current.
             function entryRows() {
                 return document.querySelectorAll('#entry-rows tr');
             }
@@ -102,12 +109,20 @@
             function updateShares() {
                 let total = 0;
                 entryRows().forEach(row => {
-                    const v = parseFloat(row.querySelector('.c-share').value);
+                    const share = row.querySelector('.c-share');
+                    if (!share) return;
+                    const v = parseFloat(share.value);
                     if (!isNaN(v) && v > 0) total += v;
                 });
-                entryRows().forEach(row => {
-                    const v = parseFloat(row.querySelector('.c-share').value);
+                entryRows().forEach((row, i) => {
+                    // Row index -> the Seed box's posted value, so the
+                    // server can tell which rows are ticked.
+                    const seed = row.querySelector('.c-seed');
+                    if (seed) seed.value = i;
+                    const share = row.querySelector('.c-share');
                     const out = row.querySelector('.norm');
+                    if (!share || !out) return;
+                    const v = parseFloat(share.value);
                     out.textContent = (total > 0 && !isNaN(v))
                         ? ' = ' + (100 * v / total).toFixed(0) + '%' : '';
                 });
@@ -210,6 +225,7 @@
                             <tr>
                                 <th>Preset</th>
                                 <th>Share</th>
+                                <th title="Seed this sub-search from the frontier: run every never-tried neighbour of a top conf that this sub-search admits, once each, before its normal strategies.">Seed</th>
                                 <th>Model specs</th>
                                 <th>Live</th>
                                 <th></th>
@@ -228,6 +244,7 @@
                                     {% if e.stale %}<span class="stale" title="{{ e.stale }}">&#9888;</span>{% endif %}
                                 </td>
                                 <td><input type="text" name="entry_share" value="{{ e.share }}" class="c-share" oninput="updateShares()"><span class="norm"></span></td>
+                                <td><input type="checkbox" name="entry_seed" class="c-seed" value="{{ loop.index0 }}" {% if e.seed %}checked{% endif %}></td>
                                 <td class="c-specs">
                                     {% if e.regex %}
                                     <label>regex<code class="c-regex">{{ e.regex }}</code></label>
@@ -241,6 +258,9 @@
                                     <a href="/?entry={{ e.name }}">{{ e.name }}</a>
                                     &middot; {{ e.share_pct }} nominal &middot;
                                     {{ e.realized }} realized ({{ e.selects }} selects)
+                                    {% if e.seed and e.seed_left is not none %}
+                                    &middot; {{ e.seed_left }} seeds queued
+                                    {% endif %}
                                     <br><code class="muted">{{ e.default }}</code>
                                     {% else %}
                                     <span class="muted">&mdash;</span>
@@ -262,6 +282,7 @@
                                     </select>
                                 </td>
                                 <td><input type="text" name="entry_share" value="" class="c-share" oninput="updateShares()"><span class="norm"></span></td>
+                                <td><input type="checkbox" name="entry_seed" class="c-seed" value=""></td>
                                 <td class="c-specs"><span class="muted">picked on Update</span></td>
                                 <td class="c-stats"><span class="muted">&mdash;</span></td>
                                 <td><button type="button" onclick="removeEntryRow(this)">Remove</button></td>
@@ -280,7 +301,14 @@
                         rows left on it with a blank share are ignored, and with none left the
                         search runs unrestricted as a single <code>main</code> entry. The regex
                         and default shown are the ones the search is <strong>running</strong>;
-                        a &#9888; marks a row whose preset file has moved on since.</small>
+                        a &#9888; marks a row whose preset file has moved on since.
+                        <strong>Seed</strong> makes a sub-search start from the frontier: while
+                        it is ticked, its selects go to never-run confs one mutation off a top
+                        conf that this sub-search admits &mdash; each exactly once, ahead of its
+                        normal strategies &mdash; which is how a newly landed family gets
+                        measured on tuned metaparams instead of waiting for the random walk to
+                        find its few bridge edges. The queue refills whenever the frontier
+                        moves, so leave it on only while a sub-search is still new.</small>
                     </td>
                 </tr>
                 <tr>

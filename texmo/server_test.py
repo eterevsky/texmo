@@ -217,7 +217,7 @@ def test_search_server_add_run_writes_median_estimate(
     assert time_s == pytest.approx(12.5)
 
 
-def _form_params(entries=(), **overrides):
+def _form_params(entries=(), seed_rows=(), **overrides):
     """Build a minimal /update form.
 
     A `MultiDict`, like the real `request.form`: the sub-search table
@@ -225,6 +225,10 @@ def _form_params(entries=(), **overrides):
     `(preset, share)` tuples -- is spread across them one value per
     row, in row order. The regex and default spec are no longer
     posted at all; the server resolves them from the preset file.
+
+    `seed_rows` is what a browser posts for the Seed column: the row
+    indices whose checkbox is ticked, and nothing at all for the rest
+    (which is exactly why it can't be a positional field).
     """
     params = {
         'default_spec': '',
@@ -243,6 +247,8 @@ def _form_params(entries=(), **overrides):
     for preset, share in entries:
         form.add('entry_preset', preset)
         form.add('entry_share', share)
+    for i in seed_rows:
+        form.add('entry_seed', str(i))
     return form
 
 
@@ -709,6 +715,8 @@ def _entry_display_row(**overrides):
         preset=named_regexes.RESERVED_NAME,
         options=[],
         share='100',
+        seed=False,
+        seed_left=None,
         regex='',
         default_spec='',
         stale='',
@@ -720,6 +728,12 @@ def _entry_display_row(**overrides):
     )
     row.update(overrides)
     return row
+
+
+def _seed_box(html: str, i: int) -> str:
+    """The i-th row's Seed checkbox tag."""
+    return _entry_row_html(html, i).split(
+        'class="c-seed"', 1)[1].split('>', 1)[0]
 
 
 def test_index_preset_dropdown_lists_unrestricted_first(tmp_path):
@@ -1139,7 +1153,7 @@ def test_search_server_cli_spec_seeds_the_first_row(tmp_path):
         assert server.template.spec_pattern is None
         assert server.templates.rows() == [{
             'name': 'main', 'regex': 'bytes|dense.32.gelu',
-            'default_spec': '', 'share': '100'}]
+            'default_spec': '', 'share': '100', 'seed': False}]
     finally:
         server.join()
 
@@ -1291,6 +1305,127 @@ def test_search_server_update_rejects_a_bad_template_set(
                 if share.strip():
                     assert f'value="{escape(share)}"' in result, share
                 assert f'<option selected>{escape(preset)}' in result
+    finally:
+        server.join()
+
+
+# --- frontier seeding -------------------------------------------------
+
+
+def test_server_shares_one_frontier_version_across_threads(tmp_path):
+    """The writer thread publishes frontier moves and the search
+    thread's seed queues invalidate on them. Two objects and neither
+    half does anything -- with no error to show for it."""
+    path = str(tmp_path / "db.sqlite")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        assert (server.writer_thread._frontier_version
+                is server.frontier_version)
+        for _ in range(200):
+            if server.search_thread.search is not None:
+                break
+            time.sleep(0.01)
+        assert (server.search_thread.search.frontier_version
+                is server.frontier_version)
+    finally:
+        server.join()
+
+
+def test_index_renders_the_seed_checkbox_column():
+    """One checkbox per row, plus one in the Add-row template so a new
+    row can be ticked before it is ever applied."""
+    html = _render(entries=[
+        _entry_display_row(share='60'),
+        _entry_display_row(
+            preset='rnn', options=['rnn'], share='40', seed=True,
+            seed_left=7, regex=r'.*\|rnn\..*', name='rnn'),
+    ])
+    assert '>Seed</th>' in html
+    assert 'name="entry_seed"' in html
+    assert 'checked' not in _seed_box(html, 0)
+    assert 'checked' in _seed_box(html, 1)
+    # Each box carries its own row index -- see `_ENTRY_SEED_FIELD`.
+    assert 'value="0"' in _seed_box(html, 0)
+    assert 'value="1"' in _seed_box(html, 1)
+    # Remaining queue is shown next to the entry's other live stats.
+    assert '7 seeds queued' in html
+    # The clone source has one too (rows + template = 3 in total).
+    assert html.count('name="entry_seed"') == 3
+
+
+def test_index_seed_queue_hidden_until_there_is_one():
+    """An entry that has never had a seeded select shows no count --
+    0 and 'not built yet' are different things."""
+    html = _render(entries=[_entry_display_row(seed=True, seed_left=None)])
+    assert 'seeds queued' not in html
+    html = _render(entries=[_entry_display_row(seed=True, seed_left=0)])
+    assert '0 seeds queued' in html
+
+
+def test_entry_rows_from_form_reads_seed_by_row_index():
+    """An unchecked checkbox posts nothing, so the flag can't be
+    zipped by position like preset/share -- a single ticked row three
+    down must not land on row 0."""
+    rows = server_mod._entry_rows_from_form(_form_params(
+        entries=[('a', '1'), ('b', '2'), ('c', '3')], seed_rows=[2]))
+    assert [r['seed'] for r in rows] == [False, False, True]
+    # Nothing ticked at all is the common case.
+    rows = server_mod._entry_rows_from_form(_form_params(
+        entries=[('a', '1'), ('b', '2')]))
+    assert [r['seed'] for r in rows] == [False, False]
+
+
+def test_update_round_trips_the_seed_checkbox(tmp_path, monkeypatch):
+    """Seed is per-entry state like share: applied by Update, kept in
+    the live set, rendered back onto the row."""
+    _write_presets(tmp_path, monkeypatch, _PRESETS)
+    path = str(tmp_path / "test.db")
+    server = SearchServer(
+        path, _make_template(spec=None),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        with _make_app().test_request_context():
+            result = server.update(_form_params(
+                entries=_ROWS, seed_rows=[1]))
+        assert not isinstance(result, str)
+        assert server.templates.by_name(MAIN_ENTRY).seed is False
+        assert server.templates.by_name('rnn').seed is True
+
+        with _make_app().test_request_context():
+            html = server.index()
+        assert 'checked' not in _seed_box(html, 0)
+        assert 'checked' in _seed_box(html, 1)
+
+        # Unticking it is an ordinary Update too.
+        with _make_app().test_request_context():
+            assert not isinstance(
+                server.update(_form_params(entries=_ROWS)), str)
+        assert server.templates.by_name('rnn').seed is False
+    finally:
+        server.join()
+
+
+def test_update_keeps_the_seed_tick_on_a_rejected_form(
+        tmp_path, monkeypatch):
+    """The rejection re-render exists so the user fixes what they
+    submitted instead of retyping it -- the tick is part of that."""
+    _write_presets(tmp_path, monkeypatch, _PRESETS)
+    path = str(tmp_path / "test.db")
+    server = SearchServer(
+        path, _make_template(spec=None),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        with _make_app().test_request_context():
+            result = server.update(_form_params(
+                entries=[('rnn', 'lots')], seed_rows=[0]))
+        assert isinstance(result, str)
+        assert "Couldn't apply template" in result
+        assert 'checked' in _seed_box(result, 0)
     finally:
         server.join()
 

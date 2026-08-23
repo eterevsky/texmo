@@ -21,7 +21,7 @@ from .configuration import (
     TemplateSet,
     conf_neighbors,
 )
-from .db import ConfScore, ConfWithRuns, DbReader
+from .db import ConfScore, ConfWithRuns, DbReader, FrontierVersion
 from .predict.loss_rnn import LossModelHolder
 from .predict.timing import TrainTimingModel
 from .report import format_top_conf_row
@@ -295,6 +295,22 @@ _BFS_FRONTIER_CAP = 256
 _BFS_VISITED_CAP = 10_000
 _BFS_TIME_BUDGET_S = 5.0
 
+# Frontier seeding (`Search._select_frontier_seed`).
+#
+# Largest candidate list one build keeps. The sweep behind it is
+# ~200 frontier confs x one `conf_neighbors` call each (~1 ms), so the
+# BUILD is bounded by the frontier, not by this; the cap bounds the
+# list we hold and random-samples (like `_BFS_FRONTIER_CAP`) so a
+# broad entry doesn't pin thousands of confs in memory and hand them
+# out in enumeration order. It is not a budget: the queue replenishes
+# whenever the frontier moves, and unticking Seed is how you stop it.
+_SEED_QUEUE_CAP = 200
+
+# `get_run_counts` builds one SQL placeholder per id, and a seed sweep
+# can produce thousands of candidates -- past SQLite's host-parameter
+# limit (999 on older builds). Ask in chunks.
+_SEED_RUN_COUNT_CHUNK = 500
+
 
 def top_confs_report(
     confs: list[ConfScore], max_weights: int, max_time: Optional[float], system: Optional[str]
@@ -424,6 +440,23 @@ def _run_limit_sequences():
         seq = [x + 1 for x in seq] + [1] * (2 * len(seq))
 
 
+@dataclass
+class _SeedQueue:
+    """One entry's cached frontier-seed candidates.
+
+    `version` is the `FrontierVersion` reading the list was built at;
+    a different one means the Pareto frontier has moved and the
+    sources this was derived from are no longer the current ones.
+    `born_empty` records that the build itself found nothing, which is
+    what keeps a dead-end entry from re-running the (~1 s) sweep on
+    every select: an empty queue is only suspicious when it got that
+    way by being drained.
+    """
+    confs: list[Configuration]
+    version: int
+    born_empty: bool
+
+
 class Search(object):
     """Keep track of the configurations and selects what to try next."""
 
@@ -437,6 +470,7 @@ class Search(object):
         loss_model: LossModelHolder,
         warmup_systems: Optional[Iterable[str]] = None,
         templates: Optional[TemplateSet] = None,
+        frontier_version: Optional[FrontierVersion] = None,
     ):
         assert isinstance(reader, DbReader)
         # `_db` is the read handle used by every strategy below. Search
@@ -464,6 +498,17 @@ class Search(object):
         # one. The raw count is the sample size behind that percentage:
         # it takes a few hundred selects before the two are comparable.
         self.entry_selects: dict[str, int] = {}
+
+        # Per-entry frontier-seed candidate queues, keyed by entry
+        # name. Built lazily, invalidated by `frontier_version` (and
+        # dropped wholesale by `set_templates`); see `_seed_queue`.
+        self._seed_queues: dict[str, _SeedQueue] = {}
+
+        # Bumped by the writer thread whenever a run flips the winning
+        # conf at some (system, W, T). Read-only here. A standalone
+        # Search (tests, one-off analysis) gets its own, which never
+        # moves -- so its seed queue is built once and then drains.
+        self.frontier_version = frontier_version or FrontierVersion()
 
         # Weighted sub-searches. Absent one, the whole template is a
         # single entry and every select behaves exactly as it did
@@ -521,6 +566,13 @@ class Search(object):
         self.templates = templates
         for entry in templates:
             self.entry_selects.setdefault(entry.name, 0)
+        # Every entry is rebuilt from scratch by an /update, and any
+        # of the shared bounds may have moved with it -- a cached
+        # candidate list is derived from BOTH the entry's regex and
+        # those bounds, so none of it survives. Rebuilding costs one
+        # neighbor sweep on the next seeded select; keeping a stale
+        # queue would hand out confs the new template rejects.
+        self._seed_queues.clear()
 
     def _select_time(self) -> float:
         tmin, tmax = self.train_time
@@ -931,6 +983,171 @@ class Search(object):
             self._coverage_stats[key] = (covered, len(top))
             return selected
 
+    # --- frontier seeding -------------------------------------------
+
+    def _zero_run_confs(
+        self, confs: list[Configuration],
+    ) -> list[Configuration]:
+        """`confs` filtered to those with no recorded run anywhere.
+
+        A conf absent from the DB trivially qualifies; one that is
+        present may still have zero runs (an estimate row or a
+        `find_or_add_conf` put it there), so the ids get counted.
+        """
+        ids: dict[Configuration, int] = {}
+        out: list[Configuration] = []
+        for c in confs:
+            cid = self._db.get_conf_id(c)
+            if cid is None:
+                out.append(c)
+            else:
+                ids[c] = cid
+        counts: dict[int, tuple[int, int]] = {}
+        id_list = list(ids.values())
+        for i in range(0, len(id_list), _SEED_RUN_COUNT_CHUNK):
+            counts.update(self._db.get_run_counts(
+                id_list[i:i + _SEED_RUN_COUNT_CHUNK]))
+        out.extend(
+            c for c, cid in ids.items()
+            if counts.get(cid, (0, 0))[0] == 0
+        )
+        return out
+
+    def _frontier_seed_confs(
+        self, entry: TemplateEntry,
+    ) -> list[Configuration]:
+        """Never-run confs `entry` admits, one neighbor hop off the
+        UNRESTRICTED frontier.
+
+        The sources are the base template's Pareto front -- the same
+        frontier the top-confs page shows -- not the entry's own. That
+        is the whole point: a freshly landed family is reached only by
+        random hops across a handful of bridge edges, and this walks
+        those edges deliberately instead of waiting for the lottery to
+        find them. The source's metaparams ride along, since a spec
+        mutation keeps `(lr, batch, length, steps)`, so a candidate
+        arrives pre-tuned rather than at the sub-space's cold default.
+
+        Zero recorded runs is what makes seeding run-once: anything
+        the fleet has already measured is somebody else's job.
+        """
+        with latency.timer('Search._frontier_seed_confs'):
+            # `--spec` can leave a filter on the base template at
+            # startup (entries carry the spec after the first
+            # /update); strip it so "unrestricted" means it.
+            base = self.template.with_spec(None)
+            sources = [c.conf for c in self._db.top_confs_global(base)]
+            seen: set[Configuration] = set()
+            candidates: list[Configuration] = []
+            for source in sources:
+                for n in conf_neighbors(source, entry.template):
+                    if n in seen:
+                        continue
+                    seen.add(n)
+                    # `conf_neighbors` re-checks the spec filter on
+                    # MODEL mutations only, so a steps/lr neighbor of
+                    # an off-regex source is still off-regex; the full
+                    # `match` is what keeps the queue inside the entry.
+                    if not entry.template.match(n):
+                        continue
+                    if not n.is_valid() or _is_retired_conf(n):
+                        continue
+                    candidates.append(n)
+            confs = self._zero_run_confs(candidates)
+            if len(confs) > _SEED_QUEUE_CAP:
+                # `random.sample` returns its picks shuffled, so the
+                # capped and uncapped paths both hand out in random
+                # order rather than in enumeration order (which is
+                # biased toward the smallest frontier sources).
+                confs = random.sample(confs, _SEED_QUEUE_CAP)
+            else:
+                random.shuffle(confs)
+            logging.info(
+                f'Frontier seed sweep for {entry.name}: '
+                f'{len(sources)} frontier confs -> {len(seen)} neighbors '
+                f'-> {len(confs)} never-run candidates')
+            return confs
+
+    def _seed_queue(self, entry: TemplateEntry) -> list[Configuration]:
+        """`entry`'s candidate queue, rebuilt when it has gone stale.
+
+        Three things invalidate it: the frontier moved (a run flipped
+        the winner somewhere -- `FrontierVersion`), the queue drained,
+        or the entry was replaced (`set_templates` drops the cache
+        outright). A queue that was built EMPTY is not stale: an entry
+        with no live bridge edges must not pay for the sweep on every
+        select, and only the frontier moving can give it new ones.
+        """
+        version = self.frontier_version.value
+        cached = self._seed_queues.get(entry.name)
+        if cached is not None and cached.version == version and (
+            cached.confs or cached.born_empty
+        ):
+            return cached.confs
+        confs = self._frontier_seed_confs(entry)
+        self._seed_queues[entry.name] = _SeedQueue(
+            confs, version, born_empty=not confs)
+        return confs
+
+    def _cap_seed_steps(
+        self, conf: Configuration, system: str,
+    ) -> Configuration:
+        """`conf` with `steps` reduced to the largest power of 2 whose
+        predicted time fits the global budget on `system`.
+
+        A seeded candidate inherits its source's step count, and the
+        source was tuned on whatever machine found it -- so the same
+        conf can be minutes here and hours there. When the timing
+        model has nothing to say for this (system, precision) the conf
+        goes out unchanged: the first run on a new pair is what seeds
+        the predictor, and a new family's head is cheaper than the
+        source it came from anyway. Even an unfittable candidate is
+        floored rather than dropped (bounded overrun), matching
+        `_cap_steps`.
+        """
+        max_t = self.train_time[1]
+        predicted = self.timing_model.predict(system, conf)
+        if predicted is None or predicted <= max_t:
+            return conf
+        steps = self.timing_model.predict_max_steps(system, conf, max_t)
+        if steps is None:
+            return conf
+        floor = max(self.template.steps.min, 2)
+        return conf.replace(steps=max(min(steps, conf.steps), floor))
+
+    def _select_frontier_seed(
+        self, system: str, entry: TemplateEntry,
+    ) -> Optional[Configuration]:
+        """Pop the next never-run candidate off `entry`'s seed queue,
+        or None when seeding is off for it or the queue is empty.
+
+        The zero-run check is repeated here because the queue can be
+        many minutes old by the time a candidate reaches the front:
+        another worker may have run it in between, and run-once means
+        once.
+        """
+        if not entry.seed:
+            return None
+        with latency.timer('Search._select_frontier_seed'):
+            queue = self._seed_queue(entry)
+            while queue:
+                conf = queue.pop()
+                if not self._zero_run_confs([conf]):
+                    continue
+                logging.info(
+                    f'Frontier seed for {system}/{entry.name}: '
+                    f'{len(queue)} left in queue')
+                return self._cap_seed_steps(conf, system)
+            return None
+
+    def seed_queue_size(self, name: str) -> Optional[int]:
+        """Candidates left in `name`'s seed queue, or None if it has
+        never been built. Read by the web UI from another thread; the
+        list is only ever popped by the search thread, so a stale
+        length is the worst that can happen."""
+        cached = self._seed_queues.get(name)
+        return None if cached is None else len(cached.confs)
+
     def _select_predicted_best(
         self, t: float, max_weights: int, system: str, bfs_depth: int,
         template: Template,
@@ -1194,7 +1411,11 @@ class Search(object):
         that entry. With a single entry this is exactly the
         pre-template-set path.
 
-        The coverage walk runs first (independent of t / max_weights)
+        Frontier seeding comes first inside the entry: with its Seed
+        switch on and candidates left in its queue, one of those is
+        returned and nothing below runs.
+
+        The coverage walk runs next (independent of t / max_weights)
         and fires either with probability `_COVERAGE_PROB` or
         unconditionally when its sticky flag is set for this
         (system, entry).
@@ -1237,6 +1458,19 @@ class Search(object):
                 logging.info(
                     f'Sub-template for {system}: {entry.name} '
                     f'(spec={entry.spec})')
+
+            # Frontier seeding: while this entry's Seed switch is on
+            # and its queue has anything left, it pre-empts everything
+            # below -- the coverage walk included. That is deliberate.
+            # The queue is the set of bridge edges from the general
+            # frontier into this sub-space, and the reason it exists
+            # is that the lottery crosses them a handful of times a
+            # day. It empties itself (run-once, and no budget knob):
+            # the entry's share is what governs the drain rate.
+            conf = self._select_frontier_seed(system, entry)
+            if conf is not None:
+                return self._result(
+                    conf, 'frontier_seed', system, entry=entry)
 
             # Coverage walk runs *before* t / max_weights selection so
             # the bulk cross-system push isn't confined to the current
@@ -1323,6 +1557,7 @@ class SearchThread(threading.Thread):
         loss_model: LossModelHolder,
         warmup_systems: Optional[Iterable[str]] = None,
         templates: Optional[TemplateSet] = None,
+        frontier_version: Optional[FrontierVersion] = None,
     ):
         # Daemon like every other server thread: this one is
         # read-only, and durability belongs to the graceful path
@@ -1340,6 +1575,9 @@ class SearchThread(threading.Thread):
         self._default = default
         self._timing_model = timing_model
         self._loss_model = loss_model
+        # Shared with the writer thread, which is the only writer; see
+        # `FrontierVersion`.
+        self._frontier_version = frontier_version
         self.template = template
         self.requests_queue = requests_queue
         self.confs_by_system = confs_by_system
@@ -1358,6 +1596,7 @@ class SearchThread(threading.Thread):
             loss_model=self._loss_model,
             warmup_systems=self._warmup_systems,
             templates=self._templates,
+            frontier_version=self._frontier_version,
         )
         logging.info("Started search thread")
         if self.search.templates.is_single:
@@ -1367,7 +1606,8 @@ class SearchThread(threading.Thread):
                 logging.info(
                     f'Sub-search {entry.name}: '
                     f'{self.search.templates.nominal_share(entry):.0f}% '
-                    f'spec={entry.spec} default={entry.default.model}')
+                    f'spec={entry.spec} default={entry.default.model}'
+                    f'{" seed=on" if entry.seed else ""}')
         if self._warmup_systems:
             logging.info(
                 f"Warmup mode for {sorted(self._warmup_systems)}: "

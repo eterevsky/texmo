@@ -510,6 +510,42 @@ class DbWriter(object):
 # --- WriterThread + queued writes -------------------------------------------
 
 
+class FrontierVersion:
+    """Monotonic count of Pareto-winner flips, shared writer -> search.
+
+    `_add_run` already samples the winning conf at (system,
+    train_time, num_weights) before and after every insert -- the
+    `changed_winner` column. That flip is the cheapest signal the
+    server has that the frontier moved, and the frontier-seeding
+    strategy (`Search._select_frontier_seed`) needs exactly that to
+    know when its cached candidate queue went stale.
+
+    Deliberately NOT a queue message, even though the house rule
+    prefers those: the value coalesces, so a burst of flips costs one
+    cache rebuild rather than one message each, and a reader that
+    wasn't looking misses nothing. Lives here rather than in
+    `search.py` because `search` imports `db`, not the other way
+    around.
+
+    Writer: the writer thread only (see `WriterThread.run`), which is
+    the single thread that can observe a flip. Readers: the search
+    thread, which compares `value` against the one its cache was built
+    at. One writer plus a plain int attribute assignment (atomic in
+    CPython) is the whole synchronization story -- the same shape as
+    `LossModelHolder`'s pointer swap.
+    """
+
+    def __init__(self):
+        self._n = 0
+
+    @property
+    def value(self) -> int:
+        return self._n
+
+    def bump(self) -> None:
+        self._n += 1
+
+
 @dataclass
 class AddRun:
     conf: Configuration
@@ -611,6 +647,11 @@ class WriterThread(threading.Thread):
     bring the server down and make producers fail loudly. Without a
     callback (bare constructions in tests, admin tools) the CRITICAL
     log is the whole signal and the thread still exits.
+
+    With a `frontier_version`, this thread is also the publisher of
+    "the Pareto frontier moved": `add_run` computes that flip inside
+    its own transaction and no other thread can see it. See
+    `FrontierVersion`.
     """
 
     def __init__(
@@ -618,11 +659,13 @@ class WriterThread(threading.Thread):
         db_path: Optional[str],
         queue: Queue,
         on_fatal: Optional[Callable[[], None]] = None,
+        frontier_version: Optional[FrontierVersion] = None,
     ):
         super().__init__(daemon=True)
         self._db_path = db_path
         self._queue = queue
         self._on_fatal = on_fatal
+        self._frontier_version = frontier_version
 
     def run(self):
         writer = DbWriter(self._db_path)
@@ -636,11 +679,16 @@ class WriterThread(threading.Thread):
                             conf=conf, run=run, strategy=strategy,
                             track_winner_change=track,
                         ):
-                            writer.add_run(
+                            changed = writer.add_run(
                                 conf, run,
                                 strategy=strategy,
                                 track_winner_change=track,
                             )
+                            # The only place the flip is observable:
+                            # the proxy is fire-and-forget, so the
+                            # bool dies here unless we publish it.
+                            if changed and self._frontier_version is not None:
+                                self._frontier_version.bump()
                         case UpsertPredictedTimeEstimates(rows=rows):
                             writer.upsert_predicted_time_estimates(
                                 (r.conf_id, r.system, r.time_s)

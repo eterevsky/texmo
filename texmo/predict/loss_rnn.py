@@ -25,6 +25,7 @@ import optax
 from .. import latency
 from ..configuration import Configuration
 from ..db import DbReader
+from ..layers.pair_codec import PairCodecDef
 from ..layers.split import SplitDef
 from ..layers.suffix import SuffixDef
 from ..tokens import get_tokenizer
@@ -167,7 +168,8 @@ def _tokenset_features(conf: Configuration) -> tuple[float, float]:
 
 
 # init_globals: output_size + 5 log training knobs + cosine flag +
-# 2 codec features + the total weight budget + 2 tokenset features.
+# 2 codec features + the total weight budget + 2 tokenset features +
+# 3 hex-pair features.
 # `is_tied` is duck-typed off the head: a tied-embedding head has no
 # parameters of its own (its matrix is the input table), while the
 # one-hot dense head always does. The IO budget is
@@ -178,9 +180,34 @@ def _tokenset_features(conf: Configuration) -> tuple[float, float]:
 # reconstruct it from the per-layer log-weights (sum of logs != log
 # of sum), so it goes in directly (2026-07 sweep: -0.0008 val L1;
 # nbits and log-num-mults were nulls).
+#
+# The three hex-pair slots (2026-08-22) name the family explicitly
+# rather than letting it hide inside the numeric profile. Every other
+# global the pair arms move -- output size 256, the IO budget, b/B
+# granularity -- is shared with `bytes`, so without these the
+# predictor would model a pair conf as a byte conf with an oddly
+# cheap head. The arms are a genuinely different output
+# factorization, so they get their own indicators, plus a smooth
+# log2(1+k) that is NOT recoverable from the weight count (k and X
+# trade off inside `(16+k)X + 33k + 32`).
+def _pair_features(model) -> tuple[float, float, float]:
+    """(is .add, is .K, log2(1+k)) for the hex-pair codec family.
+
+    Detected by type, not by spec string: `codec.k is None` is the
+    additive arm, an integer k the multiplicative one.
+    """
+    codec = model.codec
+    if not isinstance(codec, PairCodecDef):
+        return 0.0, 0.0, 0.0
+    if codec.k is None:
+        return 1.0, 0.0, 0.0
+    return 0.0, 1.0, float(np.log2(1 + codec.k))
+
+
 def _init_global_features(conf: Configuration) -> np.ndarray:
     model = conf.model
     residual, log_bpt = _tokenset_features(conf)
+    pair_add, pair_mult, pair_log_k = _pair_features(model)
     return np.array([
         np.log2(model.output.size),
         np.log2(conf.batch),
@@ -194,10 +221,13 @@ def _init_global_features(conf: Configuration) -> np.ndarray:
         np.log2(max(model.num_weights, 1)),
         residual,
         log_bpt,
+        pair_add,
+        pair_mult,
+        pair_log_k,
     ], dtype=np.float32)
 
 
-N_INIT_GLOBAL = 12
+N_INIT_GLOBAL = 15
 
 
 def discover_simple_types(

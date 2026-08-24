@@ -125,9 +125,10 @@ def _decode(tokenizer, ids: list[int]) -> str:
 def _decode_partial(decode, ids: list[int], previous: str) -> str:
     """Decode a reply that may stop mid token group.
 
-    Some tokensets decode in fixed-size groups (bits.N's nibble
-    pairs) and raise on a partial one; until the group closes, the
-    text of the previous token stands.
+    The bits.N tokenizers withhold a trailing partial group, so their
+    partial decodes are always clean prefixes. The guard stays for
+    any tokenizer that raises mid group instead; until the group
+    closes, the text of the previous token stands.
     """
     try:
         return decode(ids)

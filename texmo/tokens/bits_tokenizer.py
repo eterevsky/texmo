@@ -31,6 +31,11 @@ class BitsTokenizer1:
         return self.tokenize(chunk)
 
     def untokenize(self, tokens: list[int]) -> bytes:
+        # Whole bytes only: a trailing partial group is withheld, not
+        # padded -- packbits would zero-fill the missing bits into a
+        # wrong byte, and callers stream partial decodes (chat).
+        tokens = np.asarray(tokens, dtype=np.uint8)
+        tokens = tokens[:len(tokens) - len(tokens) % 8]
         return bytes(np.packbits(tokens, bitorder='little'))
 
 
@@ -52,7 +57,10 @@ class BitsTokenizer2:
         return self.tokenize(chunk)
 
     def untokenize(self, tokens: list[int]) -> bytes:
-        tokens = np.array(tokens)
+        # Whole bytes only: a trailing partial group is withheld --
+        # uneven strides would broadcast or raise on it.
+        tokens = np.asarray(tokens, dtype=np.int64)
+        tokens = tokens[:len(tokens) - len(tokens) % 4]
         chunk0 = tokens[0::4]
         chunk1 = tokens[1::4]
         chunk2 = tokens[2::4]
@@ -79,7 +87,11 @@ class BitsTokenizer4:
         return self.tokenize(chunk)
 
     def untokenize(self, tokens: list[int]) -> bytes:
-        tokens = np.array(tokens)
+        # Whole bytes only: an odd-length list would broadcast the
+        # lone low nibble across both high nibbles and fabricate a
+        # byte (streamed " I" once rendered as " )").
+        tokens = np.asarray(tokens, dtype=np.int64)
+        tokens = tokens[:len(tokens) - len(tokens) % 2]
         chunk0 = tokens[0::2]
         chunk1 = tokens[1::2]
         chunk = chunk0 + (chunk1 << 4)

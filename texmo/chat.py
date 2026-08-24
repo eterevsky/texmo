@@ -41,7 +41,7 @@ def build_prompt(
     where the corpus has the model produce a reply.
     """
     return (f'{dialog}{user_name}: {utterance}{TURN_SEPARATOR}'
-            f'{bot_name}:')
+            f'{bot_name}: ')
 
 
 def append_reply(prompt: str, reply: str) -> str:
@@ -49,9 +49,11 @@ def append_reply(prompt: str, reply: str) -> str:
 
     Normalized back to the `build_prompt` invariant: exactly one turn
     separator at the end, whether the reply stopped at a boundary or
-    ran into the token cap.
+    ran into the token cap. Leading whitespace goes too -- the prompt
+    already ends with the format's colon-space, so a model that emits
+    its own space would double it in the history.
     """
-    return prompt + reply.rstrip() + TURN_SEPARATOR
+    return prompt + reply.strip() + TURN_SEPARATOR
 
 
 def collect_reply(

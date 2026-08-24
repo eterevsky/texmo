@@ -35,28 +35,28 @@ def _join(ids: list[str]) -> str:
 
 
 def test_build_prompt_opens_the_bot_turn():
-    assert build_prompt('', 'hi', 'User', 'Bot') == 'User: hi\n\nBot:'
+    assert build_prompt('', 'hi', 'User', 'Bot') == 'User: hi\n\nBot: '
 
 
 def test_build_prompt_extends_history():
     dialog = 'User: hi\n\nBot: hello.\n\n'
     assert build_prompt(dialog, 'bye', 'User', 'Bot') == (
-        'User: hi\n\nBot: hello.\n\nUser: bye\n\nBot:')
+        'User: hi\n\nBot: hello.\n\nUser: bye\n\nBot: ')
 
 
 def test_build_prompt_uses_custom_names():
-    assert build_prompt('', 'hi', 'Ann', 'Bob') == 'Ann: hi\n\nBob:'
+    assert build_prompt('', 'hi', 'Ann', 'Bob') == 'Ann: hi\n\nBob: '
 
 
 def test_append_reply_normalizes_the_boundary():
-    prompt = 'User: hi\n\nBot:'
+    prompt = 'User: hi\n\nBot: '
     assert append_reply(prompt, ' hello.\n\n') == (
         'User: hi\n\nBot: hello.\n\n')
 
 
 def test_append_reply_adds_a_missing_boundary():
     """A reply cut off by the token cap still closes its turn."""
-    prompt = 'User: hi\n\nBot:'
+    prompt = 'User: hi\n\nBot: '
     assert append_reply(prompt, ' hello and') == (
         'User: hi\n\nBot: hello and\n\n')
 

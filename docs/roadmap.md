@@ -172,9 +172,11 @@ budget. Dream target: 32-64K weights.
    seeds; the 100-subset ±5% ranks models, the 10-subset is smoke),
    plus per-turn-position curves (prediction on record: current
    models forget beyond ~30 characters, so little depth structure
-   is expected yet). This metric gates the data experiments in
-   milestone 3 — "does dumbed-down data help" is unanswerable
-   without it.
+   is expected yet). Working targets (2026-08-26, to be reevaluated):
+   a ≥ 90%, b ≥ 90%, c ≥ 50% — the "smallest coherent model" is the
+   smallest one clearing all three. This metric gates the data
+   experiments in milestone 3 — "does dumbed-down data help" is
+   unanswerable without it.
 3. **Tranches** of synthetic data under different instructions and
    vocabulary limits. (Skepticism on record 2026-08-21: training may
    already extract the simplest patterns from natural SODA, and the

@@ -18,6 +18,7 @@ if not getattr(config, 'JAX_PREALLOCATE', True):
 from texmo import latency
 from texmo.cli import bench, client, db, loss, report, sample, server, train
 from texmo.cli import chat as chat_cli
+from texmo.cli import chat_server as chat_server_cli
 from texmo.cli import eval as eval_cli
 from texmo.cli import generate as generate_cli
 from texmo.cli import time as predict_time
@@ -80,6 +81,13 @@ def parse_args():
         help="chat with a stored model in a REPL",
     )
     chat_cli.init_args(parser_chat, config)
+
+    parser_chat_server = subparsers.add_parser(
+        "chat-server",
+        help="serve a stored model over an OpenAI-compatible "
+             "chat-completions endpoint",
+    )
+    chat_server_cli.init_args(parser_chat_server, config)
 
     parser_updatedb = subparsers.add_parser(
         "db-update",

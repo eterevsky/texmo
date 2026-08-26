@@ -6,6 +6,7 @@ doesn't blow up, not the quality of training.
 """
 
 import json
+import logging
 import math
 
 import jax
@@ -198,6 +199,132 @@ def test_jax_num_weights_matches_def(spec):
     )
     actual = sum(w.size for w in jax.tree.leaves(manager.weights))
     assert actual == conf.model.num_weights
+
+
+def test_chunk_times_no_outlier_unchanged():
+    """Steady chunks: the total is the plain sum."""
+    times = [3.0] + [1.0] * 12
+    total, n = manager_jax._correct_chunk_times(times)
+    assert n == 0
+    assert total == pytest.approx(sum(times))
+
+
+def test_chunk_times_single_outlier_corrected():
+    """One suspend-sized gap is replaced by the median of the rest."""
+    times = [1.0] * 6 + [31900.0] + [1.0] * 6
+    total, n = manager_jax._correct_chunk_times(times)
+    assert n == 1
+    # 13 chunks of 1 s each: the 31900 s gap becomes the 1 s median.
+    assert total == pytest.approx(13.0)
+
+
+def test_chunk_times_correction_arithmetic_exact():
+    """corrected = measured - outlier + median, on uneven chunks."""
+    times = [5.0, 2.0, 2.5, 3.0, 2.0, 400.0, 3.5, 2.0, 3.0, 2.5]
+    # Eligible sorted: 2, 2, 2, 2.5, [2.5], 3, 3, 3.5, 400 -> median 2.5.
+    median = 2.5
+    total, n = manager_jax._correct_chunk_times(times)
+    assert n == 1
+    assert total == pytest.approx(sum(times) - 400.0 + median)
+    assert total == pytest.approx(28.0)
+
+
+def test_chunk_times_two_outliers_raise():
+    """A suspend straddling a chunk boundary smears into two chunks;
+    that case is deliberately fatal rather than guessed at."""
+    times = [1.0] * 5 + [20000.0, 12000.0] + [1.0] * 6
+    with pytest.raises(RuntimeError, match='anomalous chunk times'):
+        manager_jax._correct_chunk_times(times)
+
+
+def test_chunk_times_too_few_chunks_unchanged():
+    """Under the minimum, nothing is corrected and nothing raises --
+    not even with one or several would-be outliers."""
+    # 8 chunks -> 7 eligible, one short of _SUSPEND_MIN_CHUNKS.
+    one = [1.0] * 4 + [5000.0] + [1.0] * 3
+    total, n = manager_jax._correct_chunk_times(one)
+    assert (total, n) == (pytest.approx(sum(one)), 0)
+
+    several = [1.0] * 3 + [5000.0, 7000.0] + [1.0] * 3
+    total, n = manager_jax._correct_chunk_times(several)
+    assert (total, n) == (pytest.approx(sum(several)), 0)
+
+    # A 512-step run is 2 chunks; a 0-step one is none at all.
+    assert manager_jax._correct_chunk_times([9.0, 1.0]) == (10.0, 0)
+    assert manager_jax._correct_chunk_times([]) == (0.0, 0)
+
+
+def test_chunk_times_min_chunks_boundary():
+    """Exactly _SUSPEND_MIN_CHUNKS eligible chunks do get corrected."""
+    n_eligible = manager_jax._SUSPEND_MIN_CHUNKS
+    assert n_eligible == 8
+    times = [1.0] + [1.0] * 4 + [900.0] + [1.0] * 3
+    assert len(times) - 1 == n_eligible
+    total, n = manager_jax._correct_chunk_times(times)
+    assert n == 1
+    assert total == pytest.approx(9.0)
+
+
+def test_chunk_times_first_chunk_excluded_but_counted():
+    """Chunk 0 carries the JIT compile: it never triggers the outlier
+    test and never enters the median, but its time stays in the total."""
+    times = [500.0] + [1.0] * 12
+    total, n = manager_jax._correct_chunk_times(times)
+    assert n == 0
+    assert total == pytest.approx(512.0)
+
+    # It also must not drag the median up and thereby mask a real gap
+    # among the eligible chunks.
+    times = [500.0] + [1.0] * 6 + [900.0] + [1.0] * 5
+    total, n = manager_jax._correct_chunk_times(times)
+    assert n == 1
+    assert total == pytest.approx(512.0)
+
+
+def test_chunk_times_outlier_threshold_is_strict():
+    """Exactly _SUSPEND_OUTLIER_FACTOR x median is not an outlier."""
+    times = [1.0] * 6 + [manager_jax._SUSPEND_OUTLIER_FACTOR] + [1.0] * 6
+    total, n = manager_jax._correct_chunk_times(times)
+    assert n == 0
+    assert total == pytest.approx(sum(times))
+
+
+def test_chunk_times_warning_logged(caplog):
+    """The reported incident: 13 chunks of ~1 s, one of which swallowed
+    an 8h52m suspend."""
+    times = [1.0] * 6 + [31900.0] + [1.0] * 6
+    with caplog.at_level(logging.WARNING):
+        manager_jax._correct_chunk_times(times)
+    assert 'suspend detected' in caplog.text
+    assert '8 h 52 m' in caplog.text  # the outlier (and the old total)
+    assert '1.00 s' in caplog.text    # the median
+    assert '13.0 s' in caplog.text    # the corrected total
+
+
+def test_train_time_comes_from_chunk_correction(monkeypatch):
+    """Wiring: the chunked loop times every chunk and returns whatever
+    the correction says, which is what lands in run.train_time."""
+    seen = []
+
+    def fake_correct(chunk_times):
+        seen.append(list(chunk_times))
+        return 42.0, 1
+
+    monkeypatch.setattr(manager_jax, '_CHUNK_SIZE', 1)
+    monkeypatch.setattr(manager_jax, '_correct_chunk_times', fake_correct)
+    manager = create_manager(
+        'jax', conf=_make_conf(), system='test',
+        dataset=_make_dataset(),
+        test_sample_len=64, test_batch=2,
+        verbose=False,
+    )
+    run, _ = manager.train_and_eval(steps=3, time_limit=None)
+    assert len(seen) == 1
+    assert len(seen[0]) == 3  # one entry per chunk, chunk size 1
+    assert all(t >= 0 for t in seen[0])
+    # The corrected total is what gets reported -- and eval, which runs
+    # after train(), is not folded into it.
+    assert run.train_time == 42.0
 
 
 def test_continue_prefix():

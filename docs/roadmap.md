@@ -205,6 +205,24 @@ budget. Dream target: 32-64K weights.
   finer rungs, and clean per-family scaling exponents to hold
   against the global frontier fit.
 
+* **Per-corpus metaparameter optima — length vs entropy**
+  (2026-08-26 idea, not for right now). The transferability study
+  froze each conf's books3-tuned metaparams, so it showed that fixed
+  bundles keep their order across corpora — it was structurally
+  blind to the per-corpus *optima* moving. Hypothesis (Oleg): lower
+  entropy per byte makes long-range context relatively more
+  valuable, so on low-entropy corpora (SODA; even more so a
+  deliberately dumbed-down dialog set) configurations with longer
+  training samples should win — the optimal `-l` shifts even where
+  rankings transfer. The affine stretch the study found
+  (soda ≈ 1.44·books3 − 2.07) is consistent with a systematic
+  entropy gap. No full per-corpus search; the test is a limited
+  study: the 1-D sweep above applied to `length` — a few confs,
+  length → loss curves per corpus, compare where the curves bend.
+  Design detail to respect: length trades against batch/steps in
+  the step-time budget, so hold the right thing constant (probably
+  batch × length) or the curve confounds capacity with compute.
+
 * **Re-check logit capping under bf16** (2026-08-21, waits on run
   mass). The cap was removed after the fp32 3-way study found it
   convergence-neutral (io.md records the decision), but bf16 — just

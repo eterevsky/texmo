@@ -126,18 +126,55 @@ budget. Dream target: 32-64K weights.
      `logit_bias` or llama.cpp's `grammar` goes — and it is recorded
      with every dialog, so a tranche always says which constraint
      produced it.
-2. **Nonsense-rate eval** (2026-08-21): a big model (Gemma-class via
-   the dialog harness) makes smalltalk with a texmo model; a judge
-   pass marks each small-model response nonsense / not. Working goal:
-   the smallest model with nonsense < 90% on simple smalltalk. Needs
-   a texmo-side OpenAI-compatible endpoint so the harness can seat a
-   texmo model unchanged. This metric gates the data experiments in
+2. **Scripted-examiner eval** (design settled 2026-08-26; supersedes
+   the earlier nonsense-rate sketch, same rung of the coherency
+   ladder: CE proxy → this → probe scripts if the judge proves too
+   coarse). The eval measures each student answer, not whole dialogs:
+
+   *Generation*: 1000 seed dialogs from SODA validation (first-10 and
+   first-100 prefixes as quick subsets). Per seed: an examiner model
+   (3-9B, local) is shown the whole seed dialog and told to follow
+   its topic while adapting to the student; its first utterance is
+   forced to the seed's verbatim opener; the student (texmo model,
+   seated via a texmo-side OpenAI-compatible endpoint so the dialog
+   harness needs no changes) replies; 10 turns total (5 each). The
+   examiner is instructed to SODA-length utterances (1-2 short
+   sentences) — verbosity would push the student's conditioning out
+   of its training distribution, measuring OOD robustness instead of
+   coherence. Showing the full seed script is deliberate: without
+   it the seeds contribute only openers and the examiner's own
+   favorite topics take over; with it the whole seed distribution
+   shapes coverage.
+
+   *Format*: student models are trained on a User/Bot-renamed SODA
+   variant (speakers mapped to "User"/"Bot"; >2-speaker dialogs
+   dropped), so eval dialogs are exactly in the training format.
+
+   *Grading*: a judge model DIFFERENT from the examiner scores each
+   student answer on three criteria — (a) internally consistent and
+   grammatically correct; (b) consistent with the preceding turn;
+   (c) also substantive, not a generic deflection ("I don't know"
+   passes a and b but not c). Only c⊆b holds by construction (c is
+   b plus substance); a and b are independent axes — "How are you?"
+   → "Great" followed by nonsense is b without a. Deflection maxes
+   a+b, so a/b then c is roughly the optimization progression, and
+   b−c reads as the deflection rate. The judge also flags defects
+   on the examiner's side (QA on the instrument). Judge hardening:
+   c⊆b enforced mechanically (violations are judge errors,
+   flagged); calibration anchors in every run (a
+   known-good student = the examiner model itself, a known-garbage
+   one = an untrained model, plus hand-labeled chats from
+   data/chat_logs); one example pair for "substantive" in the judge
+   prompt. A mechanical n-gram repetition rate per answer rides
+   along as a fourth, LLM-free column.
+
+   *Reporting*: rates for a/b/c over 5000 answers (±1.4% at n=1000
+   seeds; the 100-subset ±5% ranks models, the 10-subset is smoke),
+   plus per-turn-position curves (prediction on record: current
+   models forget beyond ~30 characters, so little depth structure
+   is expected yet). This metric gates the data experiments in
    milestone 3 — "does dumbed-down data help" is unanswerable
-   without it. This is the middle rung of the coherency-measurement
-   ladder (absorbed the former standalone "Coherency eval" entry):
-   cross-entropy on the dialog distribution as the cheap proxy →
-   judge-scored nonsense rate → a fixed script of probe dialogs with
-   exact/fuzzy answer matching if the judge proves too coarse.
+   without it.
 3. **Tranches** of synthetic data under different instructions and
    vocabulary limits. (Skepticism on record 2026-08-21: training may
    already extract the simplest patterns from natural SODA, and the

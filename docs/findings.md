@@ -6,7 +6,21 @@ entries here are the results worth re-reading a year later). Dated,
 newest first. Full data locations are noted per entry; scratch/ paths
 are machine-local and untracked.
 
-## Books3 rankings transfer to SODA (2026-08-21)
+## Chatbot eval baseline: 8k is far below the bar (2026-08-27)
+
+First full scripted-examiner eval (1000 seeds x T 0.3/0.5/0.7,
+15,000 graded answers, anchors clean, zero judge errors).
+`hb32-8k-1ub` (hexbpe-32, 8k weights, User/Bot SODA): a ~ 1.2-1.8%,
+b ~ 0.6-1.2%, c ~ 0.1-0.2% against targets 90/90/50. T=0.5 best on
+b (1.2%, a 2-3 s.e. lead) — matches the earlier hand impression;
+repetition ~ 0 (the model rambles, it does not loop). The sharpest
+structure: position 1 outscores positions 2-5 by 3-10x (b 4.5% ->
+0.1% at T=0.5) — the context compounds the model's own degenerate
+output and it never recovers, pointing at longer-context training
+(the length/entropy hypothesis) and a teacher-forced-history eval
+variant to separate "can't use context" from "poisons its own
+context". Reference artifacts (machine-local, untracked):
+data/eval/baseline-hb32-8k-1ub*.jsonl / -report.md.
 
 **Architecture selection on books3 is trustworthy for SODA training.**
 Measured over 35 confs (frontier + random, mixed families) x 3 fresh

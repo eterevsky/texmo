@@ -1,11 +1,12 @@
 import argparse
 import logging
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from ..configuration import Configuration
-from ..dataset import DataSet, DataSetWrapper
+from ..dataset import DataSet, DataSetWrapper, MixDataSet
 from ..manager import Manager, create_manager
 from ..model_store import save_model
 from ..precision import Precision
@@ -62,15 +63,110 @@ def parse_lr(x: str) -> float:
     return float(x)
 
 
-def train(args: argparse.Namespace):
-    set_tokens_dir(args.tokens_dir)
+@dataclass(frozen=True)
+class DataSpec:
+    """Resolved --data / --data-weights / --data-switch.
 
+    `files` are sampled together with `weights` (a static mix). When
+    `switch_step` is set, the mix covers only `files[:-1]` and the run
+    switches to `files[-1]` alone at that step -- same LR schedule
+    throughout, so the cosine tail is the fine-tuning phase.
+    """
+
+    files: list[str]
+    weights: list[float]
+    switch_step: int | None
+
+
+def parse_data_spec(
+    data: str,
+    weights: str | None,
+    switch: float | None,
+    steps: int | None,
+) -> DataSpec:
+    files = [f.strip() for f in data.split(",") if f.strip()]
+    if not files:
+        raise SystemExit("--data needs at least one file")
+
+    if weights is None:
+        parsed = [1.0] * len(files)
+    else:
+        try:
+            parsed = [float(w) for w in weights.split(",") if w.strip()]
+        except ValueError:
+            raise SystemExit(
+                f"--data-weights must be comma-separated numbers, got "
+                f"'{weights}'")
+        if len(parsed) != len(files):
+            raise SystemExit(
+                f"--data-weights has {len(parsed)} values but --data has "
+                f"{len(files)} files")
+        if any(w <= 0 for w in parsed):
+            raise SystemExit(f"--data-weights must be positive, got '{weights}'")
+
+    switch_step = None
+    if switch is not None:
+        if not 0 < switch < 1:
+            raise SystemExit(
+                f"--data-switch must be a fraction in (0, 1), got {switch}")
+        if len(files) < 2:
+            raise SystemExit(
+                "--data-switch needs at least 2 --data files (the last one "
+                "is the post-switch corpus)")
+        if steps is None:
+            raise SystemExit("--data-switch requires --steps")
+        switch_step = max(1, round(switch * steps))
+
+    return DataSpec(files=files, weights=parsed, switch_step=switch_step)
+
+
+def make_data_wrapper(
+    files: list[str], weights: list[float], num_workers: int
+) -> DataSetWrapper:
     # pread sampling (no mmap readahead amplification) parallelized
     # across worker threads, so input throughput keeps up with the GPU
     # even for tiny models.
-    train_set = DataSet(path=args.data, read_mode="pread")
-    train_set_wrapper = DataSetWrapper(
-        train_set, num_workers=args.sample_threads)
+    sources = [DataSet(path=f, read_mode="pread") for f in files]
+    # One file is the plain DataSet, exactly as before the mix existed.
+    dataset = sources[0] if len(sources) == 1 else MixDataSet(sources, weights)
+    return DataSetWrapper(dataset, num_workers=num_workers)
+
+
+def build_data(
+    spec: DataSpec, num_workers: int, steps: int | None
+) -> tuple[DataSetWrapper, DataSetWrapper | None, list[DataSetWrapper]]:
+    """Build the training sampler(s) and log the data configuration.
+
+    Returns (initial wrapper, post-switch wrapper or None, all wrappers
+    to tear down at the end).
+    """
+    if spec.switch_step is None:
+        wrapper = make_data_wrapper(spec.files, spec.weights, num_workers)
+        logging.info(f"data config: {wrapper}")
+        return wrapper, None, [wrapper]
+
+    # Both wrappers are built up front: the second's files are opened
+    # (and a bad path reported) at startup rather than mid-run. Its
+    # prefetch can't be warmed anyway -- DataSetWrapper only queues
+    # jobs once a batch of a given (ntokens, batch, tokenset) shape is
+    # first requested -- so the switch pays one batch of latency.
+    wrapper = make_data_wrapper(
+        spec.files[:-1], spec.weights[:-1], num_workers)
+    post = make_data_wrapper(
+        spec.files[-1:], spec.weights[-1:], num_workers)
+    logging.info(
+        f"data config: {wrapper} -> {post} at step {spec.switch_step}"
+        f"/{steps}")
+    return wrapper, post, [wrapper, post]
+
+
+def train(args: argparse.Namespace):
+    set_tokens_dir(args.tokens_dir)
+
+    data_spec = parse_data_spec(
+        args.data, args.data_weights, args.data_switch, args.steps)
+    train_set_wrapper, post_switch_wrapper, all_wrappers = build_data(
+        data_spec, args.sample_threads, args.steps)
     lr = parse_lr(args.lr)
     decay = parse_lr(args.decay)
 
@@ -105,6 +201,10 @@ def train(args: argparse.Namespace):
             if args.no_scan and hasattr(manager, 'scan_train'):
                 manager.scan_train = False
 
+        if post_switch_wrapper is not None:
+            manager.set_data_switch(
+                data_spec.switch_step, post_switch_wrapper)
+
         run, final_conf = manager.train_and_eval(
             args.steps,
             args.time,
@@ -128,7 +228,10 @@ def train(args: argparse.Namespace):
                 print,
             )
     finally:
-        train_set_wrapper.join()
+        # join() is idempotent, so the wrapper the switch already
+        # retired is skipped here.
+        for wrapper in all_wrappers:
+            wrapper.join()
 
     if not args.no_graph:
         show_loss_graph(manager)
@@ -141,7 +244,28 @@ def init_args(parser: argparse.ArgumentParser, config):
         "--data",
         type=str,
         default=config.DATA,
-        help=f"a file with (default: '{config.DATA}')",
+        help=f"training corpus; a comma-separated list mixes several "
+             f"files (see --data-weights, --data-switch) "
+             f"(default: '{config.DATA}')",
+    )
+    parser.add_argument(
+        "--data-weights",
+        type=str,
+        metavar="W1,W2,...",
+        default=None,
+        help="sampling weights for the --data files, one per file "
+             "(normalized; default: equal). Each training window is "
+             "drawn from file i with probability w_i",
+    )
+    parser.add_argument(
+        "--data-switch",
+        type=float,
+        metavar="F",
+        default=None,
+        help="curriculum: train on all but the last --data file (with "
+             "--data-weights) for the first F of the steps, then on the "
+             "last file alone, under the same LR schedule. Requires "
+             "--steps and >= 2 files",
     )
     parser.add_argument(
         "--sample-threads",

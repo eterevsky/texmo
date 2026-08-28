@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 import texmo.dataset
-from texmo.dataset import DataSet, DataSetWrapper
+from texmo.dataset import DataSet, DataSetWrapper, MixDataSet
 from texmo.tokens import set_tokens_dir
 
 set_tokens_dir(os.path.join(os.path.dirname(__file__), "../tokens"))
@@ -204,3 +204,133 @@ def test_wrapper_bytes(dataset):
     batch, lengths = wrapper.sample_bytes(1, 4, "bytes")
     assert batch.shape[0] == 4
     wrapper.join()
+
+
+def _ab_sources(n: int = 4096) -> tuple[DataSet, DataSet]:
+    """Two corpora with no byte in common, so every sampled row can be
+    attributed to the source it came from."""
+    return DataSet(data=b"a" * n), DataSet(data=b"b" * n)
+
+
+def _row_sources(batch: np.ndarray) -> list[int]:
+    """0 for a row of 'a's, 1 for a row of 'b's ('bytes' tokenset, so
+    tokens are the bytes themselves)."""
+    sources = []
+    for row in batch:
+        values = set(row.tolist())
+        assert values <= {ord("a"), ord("b")}, values
+        assert len(values) == 1, "a window spans two corpora"
+        sources.append(0 if values == {ord("a")} else 1)
+    return sources
+
+
+def test_mix_weights_proportions():
+    mix = MixDataSet(list(_ab_sources()), [0.75, 0.25])
+    random.seed(4)
+    sources = _row_sources(mix.sample_tokens(8, 2000, "bytes"))
+    share_a = sources.count(0) / len(sources)
+    # 2000 draws: the sampling error is ~1%; 5% is comfortable slack.
+    assert abs(share_a - 0.75) < 0.05
+
+
+def test_mix_default_weights_are_equal():
+    mix = MixDataSet(list(_ab_sources()))
+    assert mix.weights == [0.5, 0.5]
+    random.seed(5)
+    sources = _row_sources(mix.sample_tokens(8, 1000, "bytes"))
+    assert abs(sources.count(0) / len(sources) - 0.5) < 0.05
+
+
+def test_mix_shuffles_rows():
+    """Rows must be interleaved: ManagerJax slices one big sample into
+    consecutive per-step batches, so grouped rows would mean whole
+    steps trained on a single source."""
+    mix = MixDataSet(list(_ab_sources()))
+    random.seed(6)
+    sources = _row_sources(mix.sample_tokens(8, 200, "bytes"))
+    runs = 1 + sum(a != b for a, b in zip(sources, sources[1:]))
+    # Grouped output has 2 runs; a shuffle of ~100+100 has ~100.
+    assert runs > 20
+
+
+def test_mix_sample_bytes_mixes():
+    mix = MixDataSet(list(_ab_sources()))
+    random.seed(7)
+    batch, lengths = mix.sample_bytes(16, 200, "bytes")
+    assert batch.shape[0] == 200
+    assert lengths.shape == (200,)
+    sources = _row_sources(batch)
+    assert abs(sources.count(0) / len(sources) - 0.5) < 0.15
+
+
+def test_mix_sample_bytes_ragged_sources():
+    """Sources tokenize to different lengths; the mix pads to the
+    longest across sources and keeps each row's own length."""
+    sources = [DataSet(data=_DATA * 20), DataSet(data=b"aaaa bbbb " * 100)]
+    mix = MixDataSet(sources)
+    random.seed(8)
+    batch, lengths = mix.sample_bytes(16, 32, "tokens.32.hexbpe")
+    assert batch.shape[0] == 32
+    assert lengths.shape == (32,)
+    assert batch.shape[1] == max(lengths)
+
+
+def test_mix_single_source_matches_plain_dataset():
+    """A one-file 'mix' is a pass-through: no multinomial, no shuffle,
+    so it draws the same random numbers as the bare DataSet."""
+    random.seed(11)
+    plain = DataSet(data=_DATA * 20).sample_tokens(8, 16, "bytes")
+    random.seed(11)
+    mixed = MixDataSet([DataSet(data=_DATA * 20)]).sample_tokens(8, 16, "bytes")
+    assert (plain == mixed).all()
+
+    random.seed(12)
+    pb, pl = DataSet(data=_DATA * 20).sample_bytes(16, 8, "bytes")
+    random.seed(12)
+    mb, ml = MixDataSet([DataSet(data=_DATA * 20)]).sample_bytes(16, 8, "bytes")
+    assert (pb == mb).all() and (pl == ml).all()
+
+
+def test_mix_rejects_bad_weights():
+    sources = list(_ab_sources())
+    with pytest.raises(ValueError):
+        MixDataSet(sources, [1.0])
+    with pytest.raises(ValueError):
+        MixDataSet(sources, [1.0, 1.0, 1.0])
+    with pytest.raises(ValueError):
+        MixDataSet(sources, [1.0, 0.0])
+    with pytest.raises(ValueError):
+        MixDataSet(sources, [1.0, -1.0])
+
+
+def test_mix_str_lists_sources_and_weights(tmp_path):
+    path_a = tmp_path / "a.txt"
+    path_b = tmp_path / "b.txt"
+    path_a.write_bytes(b"a" * 4096)
+    path_b.write_bytes(b"b" * 4096)
+    mix = MixDataSet(
+        [DataSet(path=str(path_a)), DataSet(path=str(path_b))], [3.0, 1.0])
+    assert str(mix) == f"{path_a}:0.75,{path_b}:0.25"
+
+
+def test_wrapper_over_mix():
+    """DataSetWrapper needs nothing but the sampling surface, so the
+    mix prefetches on worker threads like a plain DataSet."""
+    wrapper = DataSetWrapper(MixDataSet(list(_ab_sources())), num_workers=2)
+    try:
+        batch = wrapper.sample_tokens(8, 64, "bytes")
+        assert batch.shape == (64, 8)
+        assert set(_row_sources(batch)) == {0, 1}
+        bytes_batch, lengths = wrapper.sample_bytes(16, 16, "bytes")
+        assert bytes_batch.shape[0] == 16
+    finally:
+        wrapper.join()
+    assert str(wrapper) == str(wrapper.dataset)
+
+
+def test_wrapper_join_is_idempotent(dataset):
+    wrapper = DataSetWrapper(dataset)
+    wrapper.join()
+    assert wrapper.joined
+    wrapper.join()
+    assert wrapper.jobs_queue.qsize() <= wrapper.num_workers

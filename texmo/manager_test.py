@@ -14,7 +14,7 @@ import pytest
 
 from texmo import manager_jax
 from texmo.configuration import Configuration
-from texmo.dataset import DataSet
+from texmo.dataset import DataSet, DataSetWrapper
 from texmo.manager import create_manager
 from texmo.precision import Precision
 from texmo.spec_parser import parse_model2
@@ -463,3 +463,122 @@ def test_continue_prefix():
     out = manager.continue_prefix('hi', length=8, temperature=1.0)
     assert isinstance(out, bytes)
     assert len(out) > 0
+
+
+class _TaggedDataSet(DataSet):
+    """A single-byte corpus that records each sampling call, so a test
+    can tell which corpus a chunk was drawn from."""
+
+    def __init__(self, byte: bytes, log: list):
+        super().__init__(data=byte * 4096)
+        self.byte = byte
+        self.log = log
+
+    def sample_tokens(self, ntokens: int, batch: int, tokenset_name: str):
+        data = super().sample_tokens(ntokens, batch, tokenset_name)
+        self.log.append((self.byte, int(data[0, 0])))
+        return data
+
+
+def _make_bytes_conf(steps: int):
+    """A tiny model over the 'bytes' tokenset, so sampled tokens are
+    the corpus bytes themselves."""
+    return Configuration(
+        parse_model2('bytes.emb.2|dense.2.tanh', precision=Precision.FP32),
+        lr=0.01, length=8, batch=2, steps=steps, decay=1.0,
+    )
+
+
+def _make_switch_manager(steps: int, dataset):
+    return create_manager(
+        'jax', conf=_make_bytes_conf(steps), system='test',
+        dataset=dataset, test_sample_len=32, test_batch=2, verbose=False,
+    )
+
+
+def _corpora() -> tuple[list, _TaggedDataSet, _TaggedDataSet]:
+    log = []
+    return log, _TaggedDataSet(b'a', log), _TaggedDataSet(b'b', log)
+
+
+def test_data_switch_at_chunk_boundary(monkeypatch):
+    """Everything up to the switch step comes from the first corpus,
+    everything after from the second."""
+    monkeypatch.setattr(manager_jax, '_CHUNK_SIZE', 4)
+    log, corpus_a, corpus_b = _corpora()
+    manager = _make_switch_manager(16, corpus_a)
+    manager.set_data_switch(8, corpus_b)
+    manager.train(steps=16, time_limit=None)
+
+    # One sample call per chunk of 4 steps: 2 chunks each side.
+    assert [byte for byte, _ in log] == [b'a', b'a', b'b', b'b']
+    # ...and the tokens really are that corpus's bytes.
+    assert all(token == ord(byte) for byte, token in log)
+    assert manager.dataset is corpus_b
+    assert manager.run.steps == 16
+
+
+def test_data_switch_rounds_to_nearest_chunk(monkeypatch):
+    """A switch step inside a chunk snaps to the nearest boundary --
+    a chunk is one uninterruptible scan."""
+    monkeypatch.setattr(manager_jax, '_CHUNK_SIZE', 4)
+    log, corpus_a, corpus_b = _corpora()
+    manager = _make_switch_manager(16, corpus_a)
+    manager.set_data_switch(9, corpus_b)  # -> 8
+    manager.train(steps=16, time_limit=None)
+    assert [byte for byte, _ in log] == [b'a', b'a', b'b', b'b']
+
+    log, corpus_a, corpus_b = _corpora()
+    manager = _make_switch_manager(16, corpus_a)
+    manager.set_data_switch(11, corpus_b)  # -> 12
+    manager.train(steps=16, time_limit=None)
+    assert [byte for byte, _ in log] == [b'a', b'a', b'a', b'b']
+
+
+def test_data_switch_alignment_clamped_to_one_chunk():
+    """Rounding must never produce step 0 (which would put the whole
+    run on the post-switch corpus)."""
+    log, corpus_a, corpus_b = _corpora()
+    manager = _make_switch_manager(16, corpus_a)
+    manager.set_data_switch(1, corpus_b)
+    manager._align_data_switch(256)
+    assert manager._data_switch == (256, corpus_b)
+
+
+def test_data_switch_per_step_loop(monkeypatch):
+    """--no-scan takes the per-step loop, which switches on the exact
+    step (no chunk to align to)."""
+    log, corpus_a, corpus_b = _corpora()
+    manager = _make_switch_manager(4, corpus_a)
+    manager.scan_train = False
+    manager.set_data_switch(2, corpus_b)
+    manager.train(steps=4, time_limit=None)
+    assert [byte for byte, _ in log] == [b'a', b'a', b'b', b'b']
+
+
+def test_data_switch_retires_old_wrapper(monkeypatch):
+    """The pre-switch sampler's worker threads are torn down once
+    nothing will ask it for another batch."""
+    monkeypatch.setattr(manager_jax, '_CHUNK_SIZE', 4)
+    log, corpus_a, corpus_b = _corpora()
+    wrapper_a = DataSetWrapper(corpus_a, num_workers=1)
+    wrapper_b = DataSetWrapper(corpus_b, num_workers=1)
+    try:
+        manager = _make_switch_manager(8, wrapper_a)
+        manager.set_data_switch(4, wrapper_b)
+        manager.train(steps=8, time_limit=None)
+        assert wrapper_a.joined
+        assert not wrapper_b.joined
+        assert manager.dataset is wrapper_b
+    finally:
+        wrapper_a.join()
+        wrapper_b.join()
+
+
+def test_no_data_switch_keeps_dataset(monkeypatch):
+    monkeypatch.setattr(manager_jax, '_CHUNK_SIZE', 4)
+    log, corpus_a, _ = _corpora()
+    manager = _make_switch_manager(8, corpus_a)
+    manager.train(steps=8, time_limit=None)
+    assert [byte for byte, _ in log] == [b'a', b'a']
+    assert manager.dataset is corpus_a

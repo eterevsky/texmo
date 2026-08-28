@@ -229,6 +229,106 @@ class DataSet(object):
         lengths = np.array(lengths)
         return samples, lengths
 
+    def __str__(self) -> str:
+        if self.path is not None:
+            return self.path
+        return f"<{itoa3(self.data_size)} in memory>"
+
+
+class MixDataSet(object):
+    """Several corpora sampled as one, in fixed proportions.
+
+    Every row of a batch comes from source `i` with probability
+    `weights[i]` (normalized): the per-source row counts are one
+    multinomial draw, each source is asked for its own count in a
+    single call, and the rows are shuffled together so no consumer
+    sees the sources grouped. `ManagerJax.train` samples a whole
+    chunk of steps at once and reshapes it into per-step batches, so
+    without the shuffle the first steps of a chunk would see only
+    source 0.
+
+    Randomness comes from the `random` module, like `DataSet`'s own
+    offset sampling, so one seed governs the whole sampler.
+    """
+
+    def __init__(self, sources: list[DataSet], weights: list[float] | None = None):
+        assert sources, "MixDataSet needs at least one source"
+        if weights is None:
+            weights = [1.0] * len(sources)
+        if len(weights) != len(sources):
+            raise ValueError(
+                f"{len(weights)} weights for {len(sources)} data sources")
+        if any(w <= 0 for w in weights):
+            raise ValueError(f"data weights must be positive, got {weights}")
+        total = sum(weights)
+        self.sources = sources
+        self.weights = [w / total for w in weights]
+        logging.info(f"Creating MixDataSet over {len(sources)} sources: {self}")
+
+    @property
+    def single(self) -> bool:
+        """A one-source mix is a pass-through: no draw, no shuffle, so
+        it consumes the same random numbers as the bare DataSet."""
+        return len(self.sources) == 1
+
+    def _counts(self, batch: int) -> list[int]:
+        """Per-source row counts: one multinomial draw over the weights."""
+        if self.single:
+            return [batch]
+        counts = [0] * len(self.sources)
+        for i in random.choices(
+            range(len(self.sources)), weights=self.weights, k=batch
+        ):
+            counts[i] += 1
+        return counts
+
+    def _permutation(self, batch: int) -> list[int]:
+        return random.sample(range(batch), batch)
+
+    def sample_tokens(self, ntokens: int, batch: int, tokenset_name: str) -> np.ndarray:
+        if self.single:
+            return self.sources[0].sample_tokens(ntokens, batch, tokenset_name)
+        parts = [
+            source.sample_tokens(ntokens, count, tokenset_name)
+            for source, count in zip(self.sources, self._counts(batch))
+            if count > 0
+        ]
+        rows = np.concatenate(parts, axis=0)
+        return rows[self._permutation(batch)]
+
+    def sample_bytes(
+        self, nbytes: int, batch: int, tokenset_name: str
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Eval samples are mixed the same way as training ones, so the
+        eval metric measures the mixture the model was trained on."""
+        if self.single:
+            return self.sources[0].sample_bytes(nbytes, batch, tokenset_name)
+        parts = [
+            source.sample_bytes(nbytes, count, tokenset_name)
+            for source, count in zip(self.sources, self._counts(batch))
+            if count > 0
+        ]
+        # Each source pads to its own longest tokenization; pad again to
+        # the longest across sources before stacking.
+        max_len = max(samples.shape[1] for samples, _ in parts)
+        samples = np.concatenate(
+            [
+                np.pad(s, ((0, 0), (0, max_len - s.shape[1])))
+                for s, _ in parts
+            ],
+            axis=0,
+        )
+        lengths = np.concatenate([lengths for _, lengths in parts])
+        perm = self._permutation(batch)
+        return samples[perm], lengths[perm]
+
+    def __str__(self) -> str:
+        return ",".join(
+            f"{source}:{weight:.2f}"
+            for source, weight in zip(self.sources, self.weights)
+        )
+
+
 class DataSetWrapper(object):
     """Runs sampling on background worker threads feeding off a shared
     jobs queue, decoupling it from the training loop.
@@ -240,12 +340,16 @@ class DataSetWrapper(object):
     request order without consequence.
     """
 
-    def __init__(self, dataset: DataSet, num_workers: int = 1):
+    def __init__(self, dataset: DataSet | MixDataSet, num_workers: int = 1):
         self.dataset = dataset
         self.num_workers = num_workers
         self.jobs_queue = Queue()
         self.results_queues: dict[tuple[int, int, str], Queue] = {}
         self.results_queues_lock = Lock()
+        # A mid-run dataset switch retires its wrapper while the CLI
+        # still tears every wrapper down at the end; joining twice is
+        # harmless but pointless.
+        self.joined = False
         self.threads = [
             Thread(target=self._thread) for _ in range(num_workers)
         ]
@@ -253,6 +357,9 @@ class DataSetWrapper(object):
             t.start()
 
     def join(self):
+        if self.joined:
+            return
+        self.joined = True
         # One sentinel per worker so each loop exits.
         for _ in range(self.num_workers):
             self.jobs_queue.put(None)
@@ -291,3 +398,6 @@ class DataSetWrapper(object):
             with self.results_queues_lock:
                 results_queue = self.results_queues[key]
             results_queue.put(sample)
+
+    def __str__(self) -> str:
+        return str(self.dataset)

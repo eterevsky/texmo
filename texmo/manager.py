@@ -5,7 +5,7 @@ from typing import Optional
 
 from .common import INF, ttoa3
 from .configuration import Configuration
-from .dataset import DataSet, DataSetWrapper
+from .dataset import DataSet, DataSetWrapper, MixDataSet
 from .run import Run
 from .tokens import get_tokenizer
 
@@ -27,14 +27,14 @@ class Manager:
         self,
         conf: Configuration,
         system: str,
-        dataset: DataSet,
+        dataset: DataSet | MixDataSet | DataSetWrapper,
         test_sample_len: int = 1024,
         test_batch: int = 1024,
         verbose: bool = True,
     ):
         assert isinstance(system, str)
         assert isinstance(conf, Configuration)
-        assert isinstance(dataset, (DataSet, DataSetWrapper))
+        assert isinstance(dataset, (DataSet, MixDataSet, DataSetWrapper))
 
         self.conf = conf
         self.system = system
@@ -49,6 +49,58 @@ class Manager:
         # (fold) tokensets add their residual charge uniformly.
         self.tokenset = tokenizer.tokenset
         self.run: Optional[Run] = None
+        # Pending mid-run corpus switch: (step, dataset). See
+        # set_data_switch.
+        self._data_switch: Optional[
+            tuple[int, DataSet | MixDataSet | DataSetWrapper]
+        ] = None
+
+    def set_data_switch(
+        self, step: int, dataset: DataSet | MixDataSet | DataSetWrapper
+    ) -> None:
+        """Train on `dataset` from `step` on (curriculum fine-tuning).
+
+        The LR schedule is untouched: the run keeps decaying along the
+        same cosine, and the tail after the switch is the fine-tuning
+        phase. The swap happens at a training-loop boundary at or
+        after `step` -- the chunked JAX trainer aligns it to a chunk
+        (see ManagerJax.train).
+        """
+        assert step > 0
+        self._data_switch = (step, dataset)
+
+    def _align_data_switch(self, chunk: int) -> None:
+        """Round a pending switch to the nearest multiple of `chunk`.
+
+        A chunked trainer can only swap between chunks, so the request
+        is snapped once, up front, and logged -- rather than silently
+        landing on the next boundary.
+        """
+        if self._data_switch is None:
+            return
+        step, dataset = self._data_switch
+        aligned = max(chunk, round(step / chunk) * chunk)
+        if aligned != step:
+            logging.info(
+                f'data switch step {step} -> {aligned} (chunk boundary)')
+            self._data_switch = (aligned, dataset)
+
+    def _maybe_switch_data(self) -> bool:
+        """Perform a pending switch if this step has reached it."""
+        if self._data_switch is None:
+            return False
+        step, dataset = self._data_switch
+        if self.step < step:
+            return False
+        old = self.dataset
+        self.dataset = dataset
+        self._data_switch = None
+        logging.info(f'data switch at step {self.step}: {old} -> {dataset}')
+        if isinstance(old, DataSetWrapper):
+            # Retire the old sampler's worker threads; nothing will ask
+            # it for another batch.
+            old.join()
+        return True
 
     @property
     def step(self):
@@ -101,6 +153,8 @@ class Manager:
                 logging.info(
                     f'Stopped at step {self.step} due to time limit {ttoa3(time_limit)}')
                 break
+
+            self._maybe_switch_data()
 
             batch = self._get_batch()
             loss = self.train_step(batch)
@@ -176,7 +230,7 @@ def create_manager(
     backend: str,
     conf: Configuration,
     system: str,
-    dataset: DataSet,
+    dataset: DataSet | MixDataSet | DataSetWrapper,
     test_sample_len: int = 1024,
     test_batch: int = 1024,
     verbose: bool = True,

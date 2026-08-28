@@ -289,6 +289,9 @@ class ManagerJax(Manager):
                 'trainer; ignoring. Pass --no-scan to use the per-step '
                 'loop instead.')
         logging.info(f'Training for {steps} steps')
+        # A chunk is one uninterruptible scan, so a corpus switch can
+        # only land between chunks.
+        self._align_data_switch(_CHUNK_SIZE)
 
         batch = self.conf.batch
         length = self.conf.length
@@ -306,6 +309,7 @@ class ManagerJax(Manager):
         sample_time = 0.0
         compute_time = 0.0
         while self.step < steps:
+            self._maybe_switch_data()
             n = min(_CHUNK_SIZE, steps - self.step)
             # One big sample of (n*batch, length), reshaped to
             # (n, batch, length). Avoids n round-trips through the

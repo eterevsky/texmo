@@ -6,6 +6,37 @@ entries here are the results worth re-reading a year later). Dated,
 newest first. Full data locations are noted per entry; scratch/ paths
 are machine-local and untracked.
 
+## Simplified data moves an 8k model from ~1% to ~80% grammatical (2026-08-28)
+
+Same spec and hyperparameters as the baseline, retrained on 30k
+SODA dialogs in four renderings of ONE simplification pass (scripts/
+simplify_corpus.py): s0 natural, s1 Bot A2-simplified, s2 Bot reduced
+to a trivial phrase, s3 both sides reduced (User A2, Bot trivial).
+100-seed scripted-examiner eval at T=0.5 (500 graded answers; the
+examiner speaks natural English throughout):
+
+| model | a | b | c |
+|---|---|---|---|
+| baseline / s0 / s1 | ~1-2% | ~0-1% | ~0% |
+| s2 | 59% | 34% | 11% |
+| s3 | **79%** | **44%** | 15% |
+
+Reading: (1) steering the answer distribution toward trivial phrases
+buys grammar and responsiveness wholesale at 8k -- the model can
+learn "which short phrase fits" where it cannot learn sentences.
+(2) s3 >> s2: simplifying the User side -- what the model must READ
+-- matters as much as what it produces, and the gain survives a
+natural-English examiner. (3) c stays low (deflection rate b-c ~ 29%):
+the substance target is the real fight, as designed. (4) The
+per-position curve is flat for s2/s3 (no context poisoning: replies
+are too short to poison), unlike the baseline's 3-10x decay.
+(5) Corpus size is not the constraint: s0 (30k dialogs, ~25x
+repeated) shows no overfitting (train 1.717 vs valid 1.688 b/B,
+parallel-forward numbers) and matches the full 814 MB baseline.
+Training-corpus loss (parallel forward): s0 1.717, s1 1.646, s2
+1.589, s3 1.280 b/B. Artifacts: data/eval/eval100-hb32-8k-*.jsonl,
+models/hb32-8k-s{0,1,2,3}.json (machine-local).
+
 ## Chatbot eval baseline: 8k is far below the bar (2026-08-27)
 
 First full scripted-examiner eval (1000 seeds x T 0.3/0.5/0.7,

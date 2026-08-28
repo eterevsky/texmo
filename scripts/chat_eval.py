@@ -127,34 +127,50 @@ launched and no sampling temperature applies: the sweep collapses to a
 single pass and `student_temperature` is recorded as null rather than
 as a number nothing used.
 
-## Judging
+## Judging: three context-scoped passes
 
-One request per student answer, carrying the dialog up to and
-including that answer with `User:` / `Bot:` labels, the three criteria
-as separate yes/no questions, and an example pair for "substantive".
+Each criterion is asked in its own request, seeing exactly the context
+that criterion is defined on and nothing more:
+
+    A  the student utterance ALONE, framed as a short reply in a
+       casual chat          -> {"comment", "a"}
+    B  the preceding User turn and the reply, that pair alone
+                            -> {"comment", "b"}
+    C  the whole dialog through the reply
+                            -> {"comment", "c", "user_problem"}
+
+The split is a fix, not a refactor. With one prompt carrying the whole
+dialog, context leaked into (a), which is defined on the reply alone:
+the null phrase bot -- whose every utterance is a well-formed sentence
+some real model produced -- scored a = 91.2%, failing 44 of 500 with
+comments like "inconsistent with the conversation". A judge that
+cannot see the conversation cannot make that mistake, so the phrase
+bot's pass-A rate becomes a *calibration* number: it should read
+~100%, and anything below is judge noise rather than student
+behaviour.
+
 Output must be strict JSON; a parse failure gets one retry with an
 error-correcting suffix and is then recorded as `judge_error`.
 Markdown fences and `<think>` blocks are stripped first (Qwen3 habits).
 
-Four things in `_JUDGE_PROMPT` are load-bearing, each of them a fix
-for a failure the anchors caught with Qwen3-8B (2026-08-26) -- do not
-tidy them away without re-running the anchors:
+Load-bearing details in the prompts, each of them a fix for a failure
+the anchors caught with Qwen3-8B (2026-08-26) -- do not tidy them away
+without re-running the anchors:
 
-- **`comment` comes first in the requested JSON.** Keys are generated
-  in order, so describing the reply before voting makes the comment a
-  one-line chain of thought. Without it the judge went straight to
-  `"a": true`.
-- **Criterion (a) names word salad explicitly.** With only "is it
+- **`comment` comes first in every requested JSON.** Keys are
+  generated in order, so describing the reply before voting makes the
+  comment a one-line chain of thought. Without it the judge went
+  straight to `"a": true`.
+- **Pass A names word salad explicitly.** With only "is it
   grammatically correct?", the garbage anchor -- literal random bytes
   -- passed (a) on 14 of 15 answers. Spelling out that unreadable
   text, invented words and fluent-looking word salad are all `false`
   took it to 0 of 15, while the good anchor stayed at 100%.
-- **(a) also says a dull-but-clean sentence passes.** The clause
-  above overshot: after five incoherent turns the judge failed a plain
-  `"I really like it."` on (a) too, letting the conversation drag down
-  a criterion that is defined on the reply alone. The counter-example
-  restored it (that answer now grades a/b/c all true) without moving
-  either anchor.
+- **Pass A also says a dull-but-clean sentence passes**, and that a
+  bare fragment ("Why?", "Me too.") is normal in chat. The clause
+  above overshot once and the counter-example restored it. The old
+  "do not let a bad conversation drag a down" plea is gone: pass A
+  cannot see the conversation at all.
 - **The defect key is called `user_problem` in the prompt** (the
   record still calls it `examiner_defect`, and the parser takes either
   name). Named after the model under test, the field collected remarks
@@ -163,16 +179,60 @@ tidy them away without re-running the anchors:
   goes quiet on clean dialogs and still fires on a User that repeats
   itself.
 
-Two checks ride along without an LLM:
+The record keeps `c_raw` -- what pass C voted -- and reports
+`c = c_raw and b`: an answer cannot be substantive if it does not fit
+the turn, and pass C is no longer asked about fit. `c_raw` without `b`
+is now a disagreement between two independent passes rather than a
+self-contradiction inside one answer, so it is counted as
+`c_without_b`: a judge-noise diagnostic in the report, not a repaired
+grade.
 
-- `c` without `b` is impossible by construction (c is b plus
-  substance). Violations are counted as `judge_inconsistency`; the
-  grade is kept as returned and marked.
-- an n-gram repetition rate per answer: `rep3` is the fraction of
-  repeated word 3-grams (`1 - unique/total`), and `lrs_ratio` the
-  length of the longest substring occurring twice divided by the
-  answer length. Both are 0 for a clean short answer and approach 1
-  for a stuck one.
+## Judging: caching and parallelism
+
+Every request carries `"cache_prompt": true`, and each pass's system
+prompt is byte-identical across requests -- the utterance, the pair or
+the dialog goes in the *user* message -- so llama-server reuses the
+shared prefix KV per slot. Measured (b10472, Qwen3-8B Q6_K): prompt
+eval ~15 ms for the ~30 new tokens of a ~700-token prompt, i.e. the
+prefix is not recomputed.
+
+The passes run one after another over a chunk of answers -- all A,
+then all B, then all C -- so a slot's cached prefix stays put for a
+whole pass, and the server can be *sized per pass*. Two shapes, since
+the prompt sizes are an order of magnitude apart:
+
+    A, B  one server, `--parallel-ab` slots of `--ctx-ab` each
+          (default 16 x 1024): a ~250-token cached prefix plus a line
+          or two, and a reply capped at 192 tokens
+    C     `--parallel-c` slots of `--ctx-size` each (default 4 x 4096):
+          the whole dialog, `--judge-max-tokens` for the reply
+
+Both budgets are 16k tokens of KV. Note that an explicit `-np N`
+*divides* `-c` among the slots on this build, so the script multiplies
+it back up: `--ctx-ab` and `--ctx-size` are per request. The judge
+reloads in seconds, so relaunching between the two phases is cheaper
+than running the short passes at pass C's context.
+
+Measured on this box (RTX 5090 shared with the search server, Qwen3-8B
+Q6_K, 500 phrase-bot answers), pass A: 17.5 answers/s at 4 slots,
+20.6 at 8, 24.2 at 16 -- about +18% per doubling, no knee yet at 16.
+Decode is the bottleneck, not the queue, so more slots keep paying a
+little; 16 is where the KV budget stops being free.
+
+The chunk (`--chunk`, default 2000 answers) bounds the loss from a
+Ctrl-C: only a complete three-pass grade is ever written, so an
+interrupt costs the chunk in flight and nothing else. Each chunk pays
+the two server starts.
+
+`--n-seeds` grades only the first N distinct seeds of the dialogs file
+(the anchors are always kept), which is how a 15k-answer file is
+sampled without regenerating anything.
+
+An n-gram repetition metric rides along without an LLM: `rep3` is the
+fraction of repeated word 3-grams (`1 - unique/total`), and
+`lrs_ratio` the length of the longest substring occurring twice
+divided by the answer length. Both are 0 for a clean short answer and
+approach 1 for a stuck one.
 
 ## Server lifecycle
 
@@ -193,6 +253,7 @@ models reason by default and return empty `content` otherwise.
 """
 import argparse
 import collections
+import concurrent.futures
 import datetime
 import json
 import logging
@@ -200,6 +261,7 @@ import os
 import random
 import re
 import sys
+import threading
 import time
 
 import dialog_harness as dh
@@ -223,6 +285,9 @@ _STUDENT = "student"
 # House rule for llama.cpp seats: without it 2026 instruct models burn
 # the budget in <think> and return empty content.
 _NO_THINKING = {"chat_template_kwargs": {"enable_thinking": False}}
+# The judge seat adds prompt caching: every request of a pass shares a
+# byte-identical system prefix, so the slot keeps its KV.
+_JUDGE_EXTRA = dict(_NO_THINKING, cache_prompt=True)
 
 # Prepended to the examiner's messages so the roles alternate from a
 # user turn -- see the module docstring.
@@ -233,6 +298,8 @@ _EMPTY_PLACEHOLDER = "..."
 # Working targets (docs/roadmap.md, 2026-08-26), in percent.
 _TARGETS = {"a": 90.0, "b": 90.0, "c": 50.0}
 _CRITERIA = ("a", "b", "c")
+# One judge request per criterion, in the order they are asked.
+_PASSES = ("a", "b", "c")
 
 _USER_LABEL = "User"
 _BOT_LABEL = "Bot"
@@ -251,6 +318,22 @@ _DEFAULT_STUDENT_MAX_TOKENS = 256
 # subcommand keeps, and the RNG seed the bot draws with.
 _DEFAULT_TOP_N = 20
 _DEFAULT_PHRASE_SEED = 0
+
+# Judge concurrency, per phase: server slots == in-flight requests.
+# Passes A and B are short prompts and share a server with many small
+# slots; pass C carries a whole dialog and gets few big ones. Both
+# budgets are slots x per-slot context = 16k tokens of KV.
+_DEFAULT_PARALLEL_AB = 16
+_DEFAULT_CTX_AB = 1024
+_DEFAULT_PARALLEL_C = 4
+# A pass-A/B reply is one short sentence plus a one-key JSON object.
+# The cap is not just politeness: llama-server checks prompt +
+# n_predict against the slot's context, so a fat cap shrinks the
+# prompt that fits in a small slot.
+_JUDGE_SHORT_MAX_TOKENS = 192
+# How many answers go through all three passes before anything is
+# written. A Ctrl-C costs the chunk in flight.
+_DEFAULT_CHUNK = 2000
 
 _EXAMINER_PROMPT = """\
 You are playing the "{user}" side of a short, casual conversation with \
@@ -280,34 +363,68 @@ marks, no stage directions, no commentary.
 - Keep it short: 1-2 short sentences.
 - Never mention that you are a model or that this is a test."""
 
-_JUDGE_PROMPT = """\
+_PASS_A_PROMPT = """\
+You are grading ONE short reply written by a very small, weak chatbot \
+in a casual chat. You will not see the conversation it came from, and \
+you do not need it: this question is about the reply itself.
+
+a) Is the reply internally consistent and grammatically correct? Is \
+it readable English, and does it avoid contradicting itself? Answer \
+false whenever it is not readable English at all -- random \
+characters, word fragments, invented words, a garbled loop -- or when \
+it breaks off mid-thought, repeats itself, or states two incompatible \
+things. A weak model often produces fluent-looking word salad: that \
+is false, not true.
+
+This is casual chat, so replies are short. A bare fragment such as \
+"Why?", "Me too." or "At the park." is normal speech and is TRUE. A \
+short, plain, dull sentence such as "I really like it." is readable \
+and self-consistent, so it is TRUE as well. You cannot see what was \
+said before, so never answer false because the reply is vague, dull, \
+generic or an odd thing to say -- other questions cover that.
+
+Reply with STRICT JSON and nothing else -- no markdown fences, no \
+explanation before or after. Write `comment` FIRST and let it decide \
+the verdict, not the other way round:
+
+{{"comment": <one short sentence describing the reply>, \
+"a": <true or false>}}"""
+
+_PASS_B_PROMPT = """\
+You are grading one reply from a very small, weak chatbot called \
+"{bot}" in a casual conversation with a person called "{user}". You \
+will see exactly two lines: what {user} said, and the {bot} reply to \
+it. The rest of the conversation is deliberately withheld and is not \
+needed.
+
+b) Is the {bot} reply consistent with the preceding {user} turn? Does \
+it make sense as a response to what {user} just said? Answer true \
+when an ordinary person could plausibly have said it at that point in \
+a chat -- a short, vague or dull response can still fit the turn. \
+Answer false when it answers some other question, ignores what {user} \
+said, or does not fit the turn at all.
+
+Grammar is not your question here: a clumsy reply that fits the turn \
+is still true.
+
+Reply with STRICT JSON and nothing else -- no markdown fences, no \
+explanation before or after. Write `comment` FIRST and let it decide \
+the verdict, not the other way round:
+
+{{"comment": <one short sentence on how the reply relates to what \
+{user} said>, "b": <true or false>}}"""
+
+_PASS_C_PROMPT = """\
 You are grading one reply from a very small, weak chatbot called \
 "{bot}" that is having a casual conversation with a person called \
 "{user}". You will see the conversation so far; the LAST line is the \
 {bot} reply you must grade. Grade only that line.
 
-Answer three yes/no questions about it:
-
-a) Is the reply internally consistent and grammatically correct? \
-Judge the reply on its own, ignoring the rest of the conversation: is \
-it readable English, and does it avoid contradicting itself? Answer \
-false whenever it is not readable English at all -- random characters, \
-word fragments, invented words, a garbled loop -- or when it breaks \
-off mid-thought, repeats itself, or states two incompatible things. A \
-weak model often produces fluent-looking word salad: that is false, \
-not true. But a short, plain, well-formed sentence such as "I really \
-like it." is readable and self-consistent, so a is TRUE even when the \
-reply is vague, dull or a poor answer to {user} -- that is what b and \
-c are for. Do not let a bad conversation drag a down.
-
-b) Is the reply consistent with the preceding turn? Does it make \
-sense as a response to what {user} just said?
-
-c) Is the reply also substantive -- a contentful, on-topic answer \
-rather than a generic deflection? For example, to "What do you like \
-to do on weekends?": "I don't know." is NOT substantive (it can still \
-pass a and b), while "I usually go hiking with my brother." IS \
-substantive.
+c) Is the reply substantive -- a contentful, on-topic answer rather \
+than a generic deflection? For example, to "What do you like to do on \
+weekends?": "I don't know." is NOT substantive, while "I usually go \
+hiking with my brother." IS substantive. Grammar and fit with the \
+preceding turn are graded elsewhere and are not your question here.
 
 Separately, `user_problem` is quality control on the {user} side and \
 has nothing to do with grading {bot}. {user} is played by another \
@@ -322,17 +439,14 @@ problem, and neither is {user} simply being clear and on-topic.
 
 Reply with STRICT JSON and nothing else -- no markdown fences, no \
 explanation before or after. Write `comment` FIRST and let it decide \
-the three verdicts, not the other way round:
+the verdict, not the other way round:
 
 {{"comment": <one short sentence describing the {bot} reply>, \
-"a": <true or false>, "b": <true or false>, "c": <true or false>, \
-"user_problem": <a short phrase, or null>}}"""
+"c": <true or false>, "user_problem": <a short phrase, or null>}}"""
 
 _RETRY_SUFFIX = """\
 Your previous answer could not be parsed as JSON ({error}). Reply \
-again with the JSON object only: keys "comment" (string), "a", "b", \
-"c" (true/false), "user_problem" (string or null). No fences, no \
-prose."""
+again with the JSON object only: {keys}. No fences, no prose."""
 
 
 # ---------------------------------------------------------------- seeds
@@ -427,20 +541,88 @@ def render_dialog(turns: list[dict], upto: int) -> str:
     return "\n".join(lines)
 
 
-def judge_messages(turns: list[dict], upto: int,
+def preceding_user_text(turns: list[dict], upto: int) -> str:
+    """What the examiner said last before the answer at `upto`.
+
+    Searched backwards rather than taken as `turns[upto - 1]`: turns
+    alternate today, but a student that answers twice in a row must
+    still be graded against the question it was actually answering.
+    """
+    for turn in reversed(turns[:upto]):
+        if turn["side"] == _EXAMINER:
+            return turn["text"]
+    return ""
+
+
+def pass_a_user(turns: list[dict], upto: int) -> str:
+    """Pass A sees the utterance and nothing else."""
+    return f"Reply to grade:\n\n{turns[upto]['text']}"
+
+
+def pass_b_user(turns: list[dict], upto: int) -> str:
+    """Pass B sees the preceding turn and the reply, that pair alone."""
+    return (f"The two lines (grade the {_BOT_LABEL} line):\n\n"
+            f"{_USER_LABEL}: {preceding_user_text(turns, upto)}\n"
+            f"{_BOT_LABEL}: {turns[upto]['text']}")
+
+
+def pass_c_user(turns: list[dict], upto: int) -> str:
+    """Pass C sees the whole dialog through the reply."""
+    return (f"Conversation so far (grade the last {_BOT_LABEL} line):\n\n"
+            f"{render_dialog(turns, upto)}")
+
+
+# The three context-scoped judge requests. `system` is formatted once,
+# at import: every request of a pass must send the *same bytes* or the
+# server's prompt cache has nothing to reuse.
+_PASS_SPECS = {
+    "a": {
+        "system": _PASS_A_PROMPT.format(user=_USER_LABEL, bot=_BOT_LABEL),
+        "user": pass_a_user,
+        "keys": ("a",),
+        "key_spec": '"comment" (string), "a" (true/false)',
+        "max_tokens": _JUDGE_SHORT_MAX_TOKENS,
+    },
+    "b": {
+        "system": _PASS_B_PROMPT.format(user=_USER_LABEL, bot=_BOT_LABEL),
+        "user": pass_b_user,
+        "keys": ("b",),
+        "key_spec": '"comment" (string), "b" (true/false)',
+        "max_tokens": _JUDGE_SHORT_MAX_TOKENS,
+    },
+    "c": {
+        "system": _PASS_C_PROMPT.format(user=_USER_LABEL, bot=_BOT_LABEL),
+        "user": pass_c_user,
+        "keys": ("c",),
+        "key_spec": '"comment" (string), "c" (true/false), "user_problem" '
+                    "(string or null)",
+        # None: pass C keeps whatever --judge-max-tokens says.
+        "max_tokens": None,
+    },
+}
+
+# The two server shapes a judging run needs. Passes A and B are both
+# "system prefix + a couple of lines", so they share one server; only
+# pass C needs room for a whole dialog.
+_PHASES = (("ab", ("a", "b")), ("c", ("c",)))
+
+
+def judge_messages(pass_name: str, turns: list[dict], upto: int,
                    retry_error: str | None = None) -> list[dict]:
-    """One grading request: the criteria, then the dialog.
+    """One grading request for one pass: its prompt, then its context.
 
     `retry_error` appends the error-correcting suffix used for the
-    single retry after a parse failure.
+    single retry after a parse failure. It goes in the *user* message,
+    like the context: the system prompt stays byte-identical across
+    every request of the pass, which is what the prompt cache keys on.
     """
-    system = _JUDGE_PROMPT.format(user=_USER_LABEL, bot=_BOT_LABEL)
-    user = (f"Conversation so far (grade the last {_BOT_LABEL} line):\n\n"
-            f"{render_dialog(turns, upto)}")
+    spec = _PASS_SPECS[pass_name]
+    user = spec["user"](turns, upto)
     if retry_error is not None:
-        user += "\n\n" + _RETRY_SUFFIX.format(error=retry_error)
+        user += "\n\n" + _RETRY_SUFFIX.format(
+            error=retry_error, keys=spec["key_spec"])
     return [
-        {"role": "system", "content": system},
+        {"role": "system", "content": spec["system"]},
         {"role": "user", "content": user},
     ]
 
@@ -552,13 +734,14 @@ def _defect(value) -> str | None:
     return text
 
 
-def parse_judge_output(text: str) -> dict:
-    """Strict-JSON grade out of the judge's raw reply.
+def parse_judge_output(text: str, keys: tuple = _CRITERIA) -> dict:
+    """Strict-JSON grade out of one pass's raw reply.
 
-    Raises ValueError on anything that is not an object with boolean
-    a/b/c. Tolerates fences, a leaked thinking block, and prose around
-    the object -- all failure modes seen from local judges, none of
-    them a reason to throw away a good grade.
+    `keys` are the boolean verdicts that pass must return -- ("a",)
+    for pass A and so on. Raises ValueError on anything that is not an
+    object carrying them. Tolerates fences, a leaked thinking block,
+    and prose around the object -- all failure modes seen from local
+    judges, none of them a reason to throw away a good grade.
     """
     body = strip_fences(text)
     obj = None
@@ -577,7 +760,7 @@ def parse_judge_output(text: str) -> dict:
         raise ValueError(f"expected a JSON object, got {type(obj).__name__}")
 
     grade = {}
-    for key in _CRITERIA:
+    for key in keys:
         if key not in obj:
             raise ValueError(f"missing key {key!r}")
         grade[key] = _as_bool(obj[key])
@@ -594,13 +777,15 @@ def parse_judge_output(text: str) -> dict:
     return grade
 
 
-def is_inconsistent(grade: dict) -> bool:
-    """`c` without `b` -- impossible by construction, so a judge error.
+def is_c_without_b(grade: dict) -> bool:
+    """Pass C said substantive where pass B said the reply does not fit.
 
-    Only c subset b holds; a and b are independent axes, so no other
-    combination is checkable.
+    The headline `c` is `c_raw and b`, so this combination never
+    survives into a grade; counting it is how the two passes'
+    disagreement rate stays visible. `b` unknown (a judge error) is
+    not a disagreement.
     """
-    return bool(grade.get("c")) and not bool(grade.get("b"))
+    return bool(grade.get("c_raw")) and grade.get("b") is False
 
 
 # --------------------------------------------------------- resumability
@@ -663,12 +848,42 @@ def _stamp() -> str:
 # ------------------------------------------------------------- servers
 
 
-def _server_conf(args) -> dict:
-    """The `server` block `dialog_harness` expects, from our flags."""
-    conf = {"ngl": args.ngl, "args": ["-c", str(args.ctx_size)]}
+def _server_conf(args, parallel: int | None = None,
+                 ctx: int | None = None) -> dict:
+    """The `server` block `dialog_harness` expects, from our flags.
+
+    `parallel` adds `-np N`: without it llama-server queues concurrent
+    requests instead of running them. An explicit `-np N` also *splits*
+    `-c` across the slots (measured on b10472: `-c 4096 -np 4` gives
+    1024 tokens per slot and rejects a 1119-token judge request), so
+    `-c` is scaled by the slot count and `ctx` keeps meaning what it
+    says: the context one request may use, prompt plus reply.
+    """
+    per_slot = args.ctx_size if ctx is None else ctx
+    total = per_slot * parallel if parallel else per_slot
+    conf = {"ngl": args.ngl, "args": ["-c", str(total)]}
+    if parallel:
+        conf["args"] += ["-np", str(parallel)]
     if args.llama_binary:
         conf["binary"] = args.llama_binary
     return conf
+
+
+def phase_server_conf(args, phase: str) -> tuple[dict, int]:
+    """The server shape and slot count for one judging phase.
+
+    Two shapes, because the two prompt sizes are an order of magnitude
+    apart: A and B are a cached system prefix plus a line or two, so
+    they want many small slots, while C carries the whole dialog and
+    wants a few big ones. The 8B judge reloads in seconds, so a second
+    server start is cheaper than running the short passes at the wide
+    context they do not need.
+    """
+    if phase == "ab":
+        parallel, ctx = args.parallel_ab, args.ctx_ab
+    else:
+        parallel, ctx = args.parallel_c, args.ctx_size
+    return _server_conf(args, parallel, ctx), parallel
 
 
 def launch_llama_server(model_path: str, out_path: str,
@@ -883,7 +1098,7 @@ def default_dialogs_path(student: str) -> str:
 
 def llama_participant(name: str, model_path: str | None, base_url: str | None,
                       system_prompt: str, temperature: float,
-                      max_tokens: int) -> dict:
+                      max_tokens: int, extra: dict = _NO_THINKING) -> dict:
     """A llama.cpp seat, recorded harness-style (provenance verbatim)."""
     participant = {
         "name": name,
@@ -891,7 +1106,7 @@ def llama_participant(name: str, model_path: str | None, base_url: str | None,
         "system_prompt": system_prompt,
         "temperature": temperature,
         "max_tokens": max_tokens,
-        "extra": _NO_THINKING,
+        "extra": extra,
     }
     if model_path:
         participant["model_path"] = model_path
@@ -1176,29 +1391,118 @@ def student_positions(turns: list[dict]) -> list[tuple[int, int]]:
     return out
 
 
-def grade_answer(session, base_url: str, judge: dict, turns: list[dict],
-                 upto: int, timeout) -> dict:
-    """One judged answer; one retry, then `judge_error`."""
+def grade_pass(session, base_url: str, judge: dict, pass_name: str,
+               turns: list[dict], upto: int, timeout) -> dict:
+    """One pass over one answer; one retry, then `judge_error`.
+
+    The returned dict carries the pass's verdict key(s), its `comment`,
+    the raw reply and the seconds spent (both attempts, if there were
+    two).
+    """
+    spec = _PASS_SPECS[pass_name]
     error = None
     raw = ""
+    spent = 0.0
     for attempt in range(2):
-        messages = judge_messages(turns, upto, error if attempt else None)
-        raw, _, _ = ask(session, base_url, judge, messages, timeout)
+        messages = judge_messages(
+            pass_name, turns, upto, error if attempt else None)
+        raw, _, elapsed = ask(session, base_url, judge, messages, timeout)
+        spent += elapsed
         try:
-            grade = parse_judge_output(raw)
+            grade = parse_judge_output(raw, spec["keys"])
         except ValueError as e:
             error = str(e)
-            logging.warning(f"judge parse failure ({error}); "
+            logging.warning(f"judge pass {pass_name} parse failure "
+                            f"({error}); "
                             f"{'retrying' if not attempt else 'giving up'}")
             continue
         grade["judge_error"] = None
         grade["raw"] = raw
+        grade["elapsed_s"] = round(spent, 3)
         return grade
-    return {
-        "a": None, "b": None, "c": None,
-        "examiner_defect": None, "comment": "",
-        "judge_error": error, "raw": raw,
+    grade = {key: None for key in spec["keys"]}
+    grade.update({"examiner_defect": None, "comment": "",
+                  "judge_error": error, "raw": raw,
+                  "elapsed_s": round(spent, 3)})
+    return grade
+
+
+def merge_grades(results: dict) -> dict:
+    """The three passes' results as one grade record.
+
+    `c` is the headline substantive rate and is `c_raw and b`: pass C
+    is no longer asked whether the reply fits the turn, so a reply that
+    pass B rejected cannot be substantive whatever pass C thought.
+    Either verdict missing (a judge error) leaves `c` unknown.
+    """
+    a, b, c = (results[p] for p in _PASSES)
+    c_raw = c.get("c")
+    grade = {
+        "a": a.get("a"),
+        "b": b.get("b"),
+        "c_raw": c_raw,
+        "c": None if c_raw is None or b.get("b") is None
+             else bool(c_raw and b["b"]),
+        "examiner_defect": c.get("examiner_defect"),
+        "comment_a": a.get("comment", ""),
+        "comment_b": b.get("comment", ""),
+        "comment_c": c.get("comment", ""),
+        "raw": {p: results[p].get("raw", "") for p in _PASSES},
+        "elapsed_s": {p: results[p].get("elapsed_s", 0.0) for p in _PASSES},
     }
+    errors = {p: results[p].get("judge_error") for p in _PASSES
+              if results[p].get("judge_error")}
+    grade["judge_error"] = (
+        None if not errors
+        else "; ".join(f"{p}: {e}" for p, e in sorted(errors.items())))
+    grade["c_without_b"] = is_c_without_b(grade)
+    return grade
+
+
+def run_pass(pass_name: str, tasks: list[tuple], base_url: str, judge: dict,
+             timeout, parallel: int, session_factory=requests.Session,
+             progress=None) -> dict:
+    """One pass over many answers, `parallel` requests in flight.
+
+    `tasks` are `(key, turns, upto)`; the result is `{key: grade}`, so
+    the aggregation does not depend on completion order. Each worker
+    thread keeps its own session (`requests.Session` is not designed
+    to be shared), and `session_factory` is what the tests stub out.
+
+    A Ctrl-C cancels whatever has not started; the pool still waits out
+    the requests already in flight, which is one per slot.
+    """
+    local = threading.local()
+
+    def work(task):
+        key, turns, upto = task
+        session = getattr(local, "session", None)
+        if session is None:
+            session = local.session = session_factory()
+        return key, grade_pass(
+            session, base_url, judge, pass_name, turns, upto, timeout)
+
+    results = {}
+    if parallel <= 1:
+        for task in tasks:
+            key, grade = work(task)
+            results[key] = grade
+            if progress is not None:
+                progress(len(results), len(tasks))
+        return results
+    with concurrent.futures.ThreadPoolExecutor(max_workers=parallel) as pool:
+        futures = [pool.submit(work, task) for task in tasks]
+        try:
+            for future in concurrent.futures.as_completed(futures):
+                key, grade = future.result()
+                results[key] = grade
+                if progress is not None:
+                    progress(len(results), len(tasks))
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
+    return results
 
 
 def default_grades_path(dialogs: str) -> str:
@@ -1211,8 +1515,105 @@ def default_report_path(dialogs: str) -> str:
     return stem + "-report.md"
 
 
+def limit_seeds(dialogs: list[dict], n_seeds: int | None) -> list[dict]:
+    """The dialogs of the first `n_seeds` distinct seeds, anchors kept.
+
+    Sampling a big dialogs file down without regenerating it. Seed
+    identity comes from the file itself (`seed_idx` in order of first
+    appearance), not from an index range, so it works on any file; the
+    anchors are only a handful of dialogs and calibrate the judge, so
+    they always ride along.
+    """
+    if n_seeds is None:
+        return dialogs
+    keep = []
+    for record in dialogs:
+        if record.get("anchor") is None and record["seed_idx"] not in keep:
+            keep.append(record["seed_idx"])
+            if len(keep) >= n_seeds:
+                break
+    wanted = set(keep)
+    return [r for r in dialogs
+            if r.get("anchor") is not None or r["seed_idx"] in wanted]
+
+
+def plan_answers(dialogs: list[dict], done: set) -> list[tuple]:
+    """Every ungraded student answer as `(key, record, position, index)`."""
+    answers = []
+    for record in dialogs:
+        turns = record["turns"]
+        for position, index in student_positions(turns):
+            key = record_key(record) + (position,)
+            if key in done:
+                continue
+            answers.append((key, record, position, index))
+    return answers
+
+
+def _chunks(items: list, size: int) -> list[list]:
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def judge_seats(args) -> dict:
+    """One recorded seat per pass -- they differ only in the reply cap.
+
+    The system prompt is per-request and per-pass (`judge_messages`),
+    so the seat carries only the sampling params, the no-thinking rule
+    and `cache_prompt`.
+    """
+    seats = {}
+    for pass_name in _PASSES:
+        cap = _PASS_SPECS[pass_name]["max_tokens"] or args.judge_max_tokens
+        seat = llama_participant(
+            "judge", args.judge, args.judge_url, "",
+            args.judge_temperature, cap, _JUDGE_EXTRA)
+        seat.pop("system_prompt")
+        seats[pass_name] = seat
+    return seats
+
+
+def run_phase(args, phase: str, passes: tuple, tasks: list[tuple],
+              seats: dict, session, out_path: str, timeout,
+              label: str) -> tuple[dict, dict]:
+    """One phase's passes against a server sized for them.
+
+    Returns `({pass: {key: result}}, {pass: wall seconds})`. The server
+    is started here and stopped here -- including on a Ctrl-C, which is
+    the whole reason for the `finally`. With `--judge-url` nothing is
+    launched: someone else's endpoint serves every phase, its slot
+    count is unknown, so concurrency falls back to the narrower
+    `--parallel-c`.
+    """
+    conf, parallel = phase_server_conf(args, phase)
+    results, wall = {}, {}
+    server = None
+    try:
+        if args.judge:
+            server = launch_llama_server(args.judge, out_path, conf)
+            dh.wait_until_ready(server, session, args.startup_timeout)
+            logging.info(f"server on port {server.port} is ready "
+                         f"({' '.join(conf['args'])})")
+            url = server.base_url
+        else:
+            url = args.judge_url
+            parallel = min(parallel, args.parallel_c)
+        for pass_name in passes:
+            t0 = time.perf_counter()
+            results[pass_name] = run_pass(
+                pass_name, tasks, url, seats[pass_name], timeout, parallel)
+            wall[pass_name] = time.perf_counter() - t0
+            rate = len(tasks) / wall[pass_name] if wall[pass_name] else 0.0
+            print(f"{label} pass {pass_name}: {len(tasks)} answers in "
+                  f"{wall[pass_name]:.1f}s ({rate:.1f} answers/s, "
+                  f"{parallel} slots)")
+    finally:
+        if server is not None:
+            _stop_all([server])
+    return results, wall
+
+
 def run_judge(args) -> int:
-    dialogs = read_records(args.dialogs)
+    dialogs = limit_seeds(read_records(args.dialogs), args.n_seeds)
     if not dialogs:
         raise ValueError(f"no dialogs in {args.dialogs}")
     out_path = args.out or default_grades_path(args.dialogs)
@@ -1221,43 +1622,31 @@ def run_judge(args) -> int:
     done = existing_keys(out_path, grade_key)
     timeout = (dh._CONNECT_TIMEOUT, args.request_timeout)
     session = requests.Session()
+    seats = judge_seats(args)
+    todo = plan_answers(dialogs, done)
+    skipped = sum(len(student_positions(r["turns"])) for r in dialogs) \
+        - len(todo)
+    wall = {p: 0.0 for p in _PASSES}
+    written = 0
 
-    servers: list[dh.Server] = []
     try:
-        if args.judge:
-            judge_server = launch_llama_server(
-                args.judge, out_path, _server_conf(args))
-            servers.append(judge_server)
-            judge_url = judge_server.base_url
-        else:
-            judge_url = args.judge_url
-        for server in servers:
-            dh.wait_until_ready(server, session, args.startup_timeout)
-            logging.info(f"server on port {server.port} is ready")
-
-        judge = llama_participant(
-            "judge", args.judge, args.judge_url, "",
-            args.judge_temperature, args.judge_max_tokens)
-        # The system prompt is per-request (`judge_messages`); the seat
-        # only carries the sampling params and the no-thinking rule.
-        judge.pop("system_prompt")
-
-        written = skipped = 0
+        chunks = _chunks(todo, args.chunk)
         with open(out_path, "a", encoding="utf-8", newline="\n") as f:
-            for record in dialogs:
-                turns = record["turns"]
-                for position, index in student_positions(turns):
-                    if record_key(record) + (position,) in done:
-                        skipped += 1
-                        continue
-                    try:
-                        grade = grade_answer(
-                            session, judge_url, judge, turns, index, timeout)
-                    except KeyboardInterrupt:
-                        print(f"\ninterrupted; {written} grade(s) in "
-                              f"{out_path}")
-                        raise
-                    answer = turns[index]["text"]
+            for chunk_no, chunk in enumerate(chunks, 1):
+                tasks = [(key, record["turns"], index)
+                         for key, record, _, index in chunk]
+                results = {}
+                for phase, passes in _PHASES:
+                    part, spent = run_phase(
+                        args, phase, passes, tasks, seats, session, out_path,
+                        timeout, f"[chunk {chunk_no}/{len(chunks)}]")
+                    results.update(part)
+                    for pass_name, seconds in spent.items():
+                        wall[pass_name] += seconds
+                for key, record, position, index in chunk:
+                    answer = record["turns"][index]["text"]
+                    grade = merge_grades(
+                        {p: results[p][key] for p in _PASSES})
                     grade.update({
                         "seed_idx": record["seed_idx"],
                         "anchor": record.get("anchor"),
@@ -1266,24 +1655,16 @@ def run_judge(args) -> int:
                         "position": position,
                         "answer": answer,
                         "repetition": repetition_stats(answer),
-                        "judge_inconsistency": is_inconsistent(grade),
-                        "judge_model": judge["model"],
+                        "judge_model": seats["c"]["model"],
                     })
                     dh.write_record(f, grade)
                     written += 1
-                    print(f"[{written}] "
-                          f"{record.get('anchor') or 'main'} "
-                          f"seed={record['seed_idx']} "
-                          f"T={record.get('student_temperature')} "
-                          f"pos={position} "
-                          f"a={grade['a']} b={grade['b']} c={grade['c']}")
     except KeyboardInterrupt:
-        pass
-    finally:
-        _stop_all(servers)
+        print(f"\ninterrupted; {written} grade(s) in {out_path}")
 
     grades = read_records(out_path)
-    report = build_report(args.dialogs, out_path, grades)
+    report = build_report(args.dialogs, out_path, grades,
+                          student_kind(dialogs), wall)
     with open(report_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(report)
     print(f"wrote {written} grade(s) ({skipped} already present) to "
@@ -1309,10 +1690,23 @@ def _mean(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
+def _pass_latency(grades: list[dict], pass_name: str) -> float | None:
+    """Mean seconds one pass spent per answer, as the client saw it."""
+    values = [g["elapsed_s"][pass_name] for g in grades
+              if isinstance(g.get("elapsed_s"), dict)
+              and pass_name in g["elapsed_s"]]
+    return _mean(values)
+
+
 def summarize(grades: list[dict]) -> dict:
-    """Rates and counts for one group of grades."""
+    """Rates and counts for one group of grades.
+
+    Rates skip a missing verdict per criterion rather than dropping the
+    whole answer: the three passes fail independently, so a pass-A
+    parse failure must not cost the b and c that did come back.
+    """
     valid = [g for g in grades if g.get("judge_error") is None]
-    rates = {k: _rate(valid, k) for k in _CRITERIA}
+    rates = {k: _rate(grades, k) for k in _CRITERIA}
     deflection = None
     if rates["b"] is not None and rates["c"] is not None:
         deflection = rates["b"] - rates["c"]
@@ -1320,10 +1714,11 @@ def summarize(grades: list[dict]) -> dict:
         "n": len(grades),
         "n_valid": len(valid),
         "rates": rates,
+        "c_raw": _rate(grades, "c_raw"),
         "deflection": deflection,
         "errors": sum(1 for g in grades if g.get("judge_error") is not None),
-        "inconsistent": sum(1 for g in grades
-                            if g.get("judge_inconsistency")),
+        "c_without_b": sum(1 for g in grades if g.get("c_without_b")),
+        "latency": {p: _pass_latency(grades, p) for p in _PASSES},
         "rep3": _mean([g["repetition"]["rep3"] for g in grades
                        if "repetition" in g]),
         "lrs_ratio": _mean([g["repetition"]["lrs_ratio"] for g in grades
@@ -1363,8 +1758,64 @@ _SUMMARY_HEADER = [
 ]
 
 
-def build_report(dialogs_path: str, grades_path: str,
-                 grades: list[dict]) -> str:
+def student_kind(dialogs: list[dict]) -> str | None:
+    """The student seat's `kind`, from the first non-anchor dialog.
+
+    Only the null model sets one (`phrases`), and that is exactly what
+    the report needs to know: for that student, pass A is a judge
+    calibration number rather than a measurement of the student.
+    """
+    for record in dialogs:
+        if record.get("anchor") is None:
+            seat = (record.get("participants") or {}).get(_STUDENT) or {}
+            return seat.get("kind")
+    return None
+
+
+def _calibration_lines(summary: dict) -> list[str]:
+    """The phrase bot's pass-A rate, called what it is."""
+    return [
+        "## Judge calibration (pass A on the null phrase bot)",
+        "",
+        "Every answer here is a sentence a real model produced and this "
+        "judge already passed, drawn at random. Pass A sees the reply "
+        "alone, so its rate measures the *judge*, not the student: it "
+        "should read ~100%, and the gap below 100% is judge noise that "
+        "lands on every other file's `a` as well.",
+        "",
+        f"**pass A: {_fmt(summary['rates']['a'])}** over {summary['n']} "
+        f"answers.",
+        "",
+    ]
+
+
+def _timing_lines(summary: dict, wall: dict | None) -> list[str]:
+    """Per-pass cost: request latency from the grades, wall from the run."""
+    lines = [
+        "## Judge cost, per pass",
+        "",
+        "`latency` is the mean seconds one request took (retries "
+        "included); `wall` is this run's elapsed time for the pass, "
+        "which is what `--parallel-ab` (a, b) and `--parallel-c` (c) "
+        "shrink. Every request sends `cache_prompt: true` and a "
+        "byte-identical system prompt, so the server keeps the shared "
+        "prefix in the slot's KV and only the utterance, the pair or "
+        "the dialog is evaluated.",
+        "",
+        "| pass | mean latency | wall this run |",
+        "| --- | --- | --- |",
+    ]
+    for pass_name in _PASSES:
+        elapsed = (wall or {}).get(pass_name)
+        lines.append(
+            f"| {pass_name} | {_fmt(summary['latency'][pass_name], 's')} | "
+            f"{'n/a' if not elapsed else f'{elapsed:.1f}s'} |")
+    lines.append("")
+    return lines
+
+
+def build_report(dialogs_path: str, grades_path: str, grades: list[dict],
+                 kind: str | None = None, wall: dict | None = None) -> str:
     """The markdown report: rates per temperature, positions, anchors."""
     main = [g for g in grades if g.get("anchor") is None]
     overall = summarize(main)
@@ -1376,12 +1827,19 @@ def build_report(dialogs_path: str, grades_path: str,
         f"- judge: `{main[0]['judge_model'] if main else 'n/a'}`",
         f"- generated: {_now()}",
         "",
+    ]
+    if kind == "phrases" and main:
+        lines += _calibration_lines(overall)
+    lines += [
         "## Main set, by student temperature",
         "",
         f"{overall['n']} student answers "
         f"({overall['n_valid']} with a valid grade). Targets: "
         + ", ".join(f"{k} >= {_TARGETS[k]:.0f}%" for k in _CRITERIA)
-        + "; `verdict` is PASS only when all three clear.",
+        + "; `verdict` is PASS only when all three clear. Each criterion "
+        "is judged in its own request, on its own context: a sees the "
+        "reply alone, b the reply and the turn before it, c the whole "
+        "dialog. The reported `c` is c_raw AND b.",
         "",
     ] + list(_SUMMARY_HEADER)
     for temperature in _temperatures(main):
@@ -1391,8 +1849,10 @@ def build_report(dialogs_path: str, grades_path: str,
     lines += [
         "",
         f"- judge errors: {overall['errors']}",
-        f"- judge inconsistencies (c without b): {overall['inconsistent']}",
+        f"- pass disagreements (c_raw without b): "
+        f"{overall['c_without_b']}",
         "",
+    ] + _timing_lines(overall, wall) + [
         "## Repetition (LLM-free)",
         "",
         "`rep3` is the fraction of repeated word 3-grams "
@@ -1585,6 +2045,30 @@ def build_parser() -> argparse.ArgumentParser:
     jud.add_argument(
         "--judge-max-tokens", type=int, default=_DEFAULT_JUDGE_MAX_TOKENS,
         help=f"cap on a judge reply (default: {_DEFAULT_JUDGE_MAX_TOKENS})")
+    jud.add_argument(
+        "--parallel-ab", type=int, default=_DEFAULT_PARALLEL_AB,
+        help=f"slots (-np) and in-flight requests for passes a and b, "
+             f"whose prompts are a cached prefix plus a line or two "
+             f"(default: {_DEFAULT_PARALLEL_AB})")
+    jud.add_argument(
+        "--ctx-ab", type=int, default=_DEFAULT_CTX_AB,
+        help=f"per-slot context for passes a and b (default: "
+             f"{_DEFAULT_CTX_AB}); the server is started with "
+             "--ctx-ab * --parallel-ab")
+    jud.add_argument(
+        "--parallel-c", type=int, default=_DEFAULT_PARALLEL_C,
+        help=f"slots and in-flight requests for pass c, which carries "
+             f"a whole dialog at --ctx-size per slot (default: "
+             f"{_DEFAULT_PARALLEL_C})")
+    jud.add_argument(
+        "--chunk", type=int, default=_DEFAULT_CHUNK,
+        help=f"answers taken through all three passes before anything is "
+             f"written (default: {_DEFAULT_CHUNK}); a Ctrl-C costs at most "
+             "one chunk")
+    jud.add_argument(
+        "--n-seeds", type=int, default=None,
+        help="grade only the first N distinct seeds of the dialogs file "
+             "(default: all); the anchors are always included")
     jud.add_argument(
         "--out", default=None,
         help="grades JSONL (default: <dialogs stem>-grades.jsonl)")

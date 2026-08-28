@@ -55,6 +55,21 @@ standard control column; (2) the judge leaks context into criterion
 is bad, so a's ceiling under this judge is ~91% -- the a >= 90
 target sits on the ceiling; grade (a) with the context hidden.
 
+**Three-pass judge (same day):** (a) judged on the utterance alone,
+(b) on the pair, (c) on the whole dialog; llama-server prefix
+caching makes the extra passes cheap (pass A evaluates ~69 of ~368
+prompt tokens; 25 answers/s at 16 slots, no knee yet). Re-judged
+numbers (a/b/c): phrase bot **100**/26.8/1.6, s3 92.0/25.8/1.6, s2
+76.6/23.8/1.2, baseline (T=0.5, 100 seeds) 8.0/2.2/0.0. So under a
+clean instrument: s3 CLEARS the a >= 90 target, its responsiveness
+sits exactly on the null-model floor (b premium -1 point), and
+substance is ~0 for every 8k model while the good anchor scores
+86.7 on c -- the strictness is signal. The old single-prompt judge
+had been inflating b (context lent stock phrases plausibility) and
+crushing a (context leaked into a reply-only criterion), for the
+baseline too (a 1.6 -> 8-14%). Definition going forward: coherent =
+beats its own phrase-bot on b and c.
+
 ## Chatbot eval baseline: 8k is far below the bar (2026-08-27)
 
 First full scripted-examiner eval (1000 seeds x T 0.3/0.5/0.7,

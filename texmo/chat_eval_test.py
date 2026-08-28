@@ -15,6 +15,7 @@ session, and the phrase bot needs no endpoint at all.
 import json
 import os
 import sys
+import threading
 
 import pytest
 
@@ -126,20 +127,83 @@ def test_render_dialog_labels_sides_and_stops_at_upto():
     assert chat_eval.render_dialog(turns, 1) == "User: opener\nBot: reply"
 
 
-def test_judge_messages_carry_criteria_and_the_dialog():
-    messages = chat_eval.judge_messages(_turns("opener", "reply"), 1)
+def test_pass_a_sees_the_utterance_and_nothing_else():
+    # The whole point of the split: context cannot leak into (a).
+    turns = _turns("what is your favourite colour", "reply", "e2", "reply2")
+    messages = chat_eval.judge_messages("a", turns, 3)
     assert [m["role"] for m in messages] == ["system", "user"]
+    assert "reply2" in messages[1]["content"]
+    for other in ("what is your favourite colour", "e2", "User:", "Bot:"):
+        assert other not in messages[1]["content"]
+    # Nor does the system prompt smuggle the conversation back in.
+    assert "conversation so far" not in messages[0]["content"].lower()
+    assert "word salad" in messages[0]["content"]
+
+
+def test_pass_b_sees_only_the_pair():
+    turns = _turns("opener", "reply", "the question", "the answer")
+    content = chat_eval.judge_messages("b", turns, 3)[1]["content"]
+    assert "User: the question" in content
+    assert "Bot: the answer" in content
+    assert "opener" not in content and "reply" not in content
+
+
+def test_pass_b_pairs_with_the_last_user_turn_not_the_previous_index():
+    # Two student turns in a row: the question answered is the last
+    # User line, not turns[upto - 1].
+    turns = [
+        {"side": chat_eval._EXAMINER, "text": "the question"},
+        {"side": chat_eval._STUDENT, "text": "first"},
+        {"side": chat_eval._STUDENT, "text": "second"},
+    ]
+    content = chat_eval.judge_messages("b", turns, 2)[1]["content"]
+    assert "User: the question" in content
+    assert "Bot: second" in content
+
+
+def test_pass_c_carries_the_whole_dialog_and_the_substantive_example():
+    turns = _turns("opener", "reply", "e2", "reply2")
+    messages = chat_eval.judge_messages("c", turns, 3)
     assert "substantive" in messages[0]["content"]
     assert "I don't know." in messages[0]["content"]
-    assert "Bot: reply" in messages[1]["content"]
-    assert chat_eval._RETRY_SUFFIX[:20] not in messages[1]["content"]
+    assert "user_problem" in messages[0]["content"]
+    assert "User: opener\nBot: reply\nUser: e2\nBot: reply2" in (
+        messages[1]["content"])
 
 
-def test_judge_messages_append_the_retry_suffix():
+def test_pass_prompts_ask_for_their_own_key_only():
+    systems = {p: chat_eval.judge_messages(p, _turns("o", "r"), 1)[0][
+        "content"] for p in chat_eval._PASSES}
+    assert '"a": <true or false>' in systems["a"]
+    assert '"b"' not in systems["a"] and '"c"' not in systems["a"]
+    assert '"b": <true or false>' in systems["b"]
+    assert '"c": <true or false>' in systems["c"]
+    # `comment` first in all three: the keys are generated in order, so
+    # it is the judge's one-line chain of thought.
+    for system in systems.values():
+        assert system.index('"comment"') < system.index("true or false")
+
+
+def test_pass_system_prompts_are_stable_across_answers():
+    # The prompt cache keys on the shared prefix: two different answers
+    # must produce the same system bytes, or every request re-evaluates
+    # the whole prompt.
+    first = chat_eval.judge_messages("a", _turns("o", "one"), 1)[0]
+    second = chat_eval.judge_messages("a", _turns("o", "two"), 1)[0]
+    assert first["content"] == second["content"]
+
+
+@pytest.mark.parametrize("pass_name", chat_eval._PASSES)
+def test_judge_messages_append_the_retry_suffix(pass_name):
     messages = chat_eval.judge_messages(
-        _turns("opener", "reply"), 1, "no JSON object in the reply")
+        pass_name, _turns("opener", "reply"), 1,
+        "no JSON object in the reply")
     assert "could not be parsed as JSON" in messages[1]["content"]
     assert "no JSON object in the reply" in messages[1]["content"]
+    # The suffix names the keys of *this* pass, and rides in the user
+    # message so the cached system prefix is untouched.
+    assert f'"{pass_name}" (true/false)' in messages[1]["content"]
+    assert "could not be parsed" not in messages[0]["content"]
 
 
 def test_student_positions_are_one_based():
@@ -263,42 +327,53 @@ def test_repetition_stats_shape():
 # -------------------------------------------------- judge output parsing
 
 
-def test_parse_plain_json():
+def test_parse_plain_json_per_pass():
+    a = chat_eval.parse_judge_output('{"comment": "fine", "a": true}', ("a",))
+    assert a["a"] is True and a["comment"] == "fine"
+    b = chat_eval.parse_judge_output('{"comment": "x", "b": false}', ("b",))
+    assert b["b"] is False
+    c = chat_eval.parse_judge_output(
+        '{"comment": "y", "c": false, "user_problem": null}', ("c",))
+    assert c["c"] is False
+    assert c["examiner_defect"] is None
+
+
+def test_parse_ignores_keys_another_pass_owns():
+    # A judge that volunteers all three still gets graded on the one
+    # key this pass asked for.
     grade = chat_eval.parse_judge_output(
-        '{"a": true, "b": false, "c": false, "examiner_defect": null, '
-        '"comment": "fine"}')
-    assert (grade["a"], grade["b"], grade["c"]) == (True, False, False)
-    assert grade["examiner_defect"] is None
-    assert grade["comment"] == "fine"
+        '{"comment": "x", "a": true, "b": false, "c": false}', ("a",))
+    assert grade["a"] is True
+    assert "b" not in grade and "c" not in grade
 
 
 def test_parse_strips_markdown_fences():
     grade = chat_eval.parse_judge_output(
-        '```json\n{"a": true, "b": true, "c": true, '
-        '"examiner_defect": null, "comment": ""}\n```')
+        '```json\n{"c": true, "user_problem": null, "comment": ""}\n```',
+        ("c",))
     assert grade["c"] is True
 
 
 def test_parse_strips_a_leaked_thinking_block():
     grade = chat_eval.parse_judge_output(
         '<think>hmm, the reply is fine</think>\n'
-        '{"a": true, "b": true, "c": false, "examiner_defect": null, '
-        '"comment": "ok"}')
+        '{"b": true, "comment": "ok"}', ("b",))
     assert grade["b"] is True
 
 
 def test_parse_tolerates_prose_around_the_object():
     grade = chat_eval.parse_judge_output(
-        'Here is my grade:\n{"a": false, "b": false, "c": false, '
-        '"comment": "nonsense"}\nHope that helps!')
+        'Here is my grade:\n{"a": false, "comment": "nonsense"}\n'
+        'Hope that helps!', ("a",))
     assert grade["a"] is False
     assert grade["examiner_defect"] is None
 
 
 def test_parse_accepts_yes_no_strings():
-    grade = chat_eval.parse_judge_output(
-        '{"a": "yes", "b": "no", "c": "no", "comment": "x"}')
-    assert (grade["a"], grade["b"], grade["c"]) == (True, False, False)
+    assert chat_eval.parse_judge_output(
+        '{"a": "yes", "comment": "x"}', ("a",))["a"] is True
+    assert chat_eval.parse_judge_output(
+        '{"b": "no", "comment": "x"}', ("b",))["b"] is False
 
 
 @pytest.mark.parametrize("value", ['"  "', '"null"', '"None."', '"n/a"',
@@ -307,8 +382,7 @@ def test_parse_normalizes_a_non_defect_to_none(value):
     # Judges write the string "null" about as often as JSON null, and
     # an untouched one would report a defect on every single answer.
     grade = chat_eval.parse_judge_output(
-        '{"a": true, "b": true, "c": true, "examiner_defect": '
-        + value + "}")
+        '{"c": true, "examiner_defect": ' + value + "}", ("c",))
     assert grade["examiner_defect"] is None
 
 
@@ -317,28 +391,27 @@ def test_parse_keeps_a_real_defect_under_either_key():
     # field name) stays accepted as an alias.
     for key in ("user_problem", "examiner_defect"):
         grade = chat_eval.parse_judge_output(
-            '{"a": true, "b": true, "c": true, '
-            f'"{key}": "User repeated its question."}}')
+            f'{{"c": true, "{key}": "User repeated its question."}}', ("c",))
         assert grade["examiner_defect"] == "User repeated its question."
 
 
 def test_parse_rejects_missing_and_unparseable():
     with pytest.raises(ValueError):
-        chat_eval.parse_judge_output('{"a": true, "b": true}')
+        chat_eval.parse_judge_output('{"comment": "no verdict"}', ("a",))
     with pytest.raises(ValueError):
-        chat_eval.parse_judge_output("I would say the reply is fine.")
+        chat_eval.parse_judge_output("I would say the reply is fine.", ("a",))
     with pytest.raises(ValueError):
-        chat_eval.parse_judge_output('{"a": "maybe", "b": true, "c": true}')
+        chat_eval.parse_judge_output('{"a": "maybe"}', ("a",))
     with pytest.raises(ValueError):
-        chat_eval.parse_judge_output('["a", "b"]')
+        chat_eval.parse_judge_output('["a", "b"]', ("a",))
 
 
-def test_c_without_b_is_flagged():
-    assert chat_eval.is_inconsistent({"a": True, "b": False, "c": True})
-    assert not chat_eval.is_inconsistent({"a": True, "b": True, "c": True})
-    assert not chat_eval.is_inconsistent({"a": True, "b": False, "c": False})
-    # A judge error carries None everywhere and is not an inconsistency.
-    assert not chat_eval.is_inconsistent({"a": None, "b": None, "c": None})
+def test_c_without_b_counts_a_pass_disagreement():
+    assert chat_eval.is_c_without_b({"b": False, "c_raw": True})
+    assert not chat_eval.is_c_without_b({"b": True, "c_raw": True})
+    assert not chat_eval.is_c_without_b({"b": False, "c_raw": False})
+    # A judge error on b is unknown, not a disagreement.
+    assert not chat_eval.is_c_without_b({"b": None, "c_raw": True})
 
 
 # ------------------------------------------------- null model (phrase bot)
@@ -511,58 +584,184 @@ class _FakeSession:
         })
 
 
+class _ScriptedSession:
+    """Answers by looking the reply up, not by call order.
+
+    What the concurrency tests need: with N threads in flight the
+    request order is not defined, so the canned answer has to be keyed
+    on the request itself.
+    """
+
+    def __init__(self, replies):
+        self.replies = replies
+        self.bodies = []
+        self.lock = threading.Lock()
+
+    def post(self, url, json=None, timeout=None):
+        with self.lock:
+            self.bodies.append(json)
+        text = json["messages"][-1]["content"]
+        content = ""
+        for needle, reply in self.replies.items():
+            if needle in text:
+                content = reply
+                break
+        return _FakeResponse({
+            "choices": [{"message": {"content": content}}],
+            "usage": {"completion_tokens": 7},
+        })
+
+
 def _judge_seat():
     return {"model": "judge.gguf", "temperature": 0.0, "max_tokens": 400,
-            "extra": chat_eval._NO_THINKING}
+            "extra": chat_eval._JUDGE_EXTRA}
 
 
-def test_grade_answer_retries_once_then_succeeds():
+def test_grade_pass_retries_once_then_succeeds():
     session = _FakeSession([
         "I think it is fine, honestly.",
-        '{"a": true, "b": true, "c": false, "examiner_defect": null, '
-        '"comment": "deflection"}',
+        '{"comment": "deflection", "a": true}',
     ])
-    grade = chat_eval.grade_answer(
-        session, "http://x", _judge_seat(), _turns("opener", "reply"), 1,
-        (1, 1))
+    grade = chat_eval.grade_pass(
+        session, "http://x", _judge_seat(), "a", _turns("opener", "reply"),
+        1, (1, 1))
     assert grade["judge_error"] is None
-    assert (grade["a"], grade["b"], grade["c"]) == (True, True, False)
+    assert grade["a"] is True
     assert len(session.bodies) == 2
-    # The retry carries the correcting suffix, and the house rule rides
+    # The retry carries the correcting suffix, and the house rules ride
     # on every request.
     assert "could not be parsed" in session.bodies[1]["messages"][1][
         "content"]
-    assert session.bodies[0]["chat_template_kwargs"] == {
-        "enable_thinking": False}
+    for body in session.bodies:
+        assert body["chat_template_kwargs"] == {"enable_thinking": False}
+        assert body["cache_prompt"] is True
 
 
-def test_grade_answer_gives_up_after_the_retry():
+def test_grade_pass_gives_up_after_the_retry():
     session = _FakeSession(["nope", "still nope"])
-    grade = chat_eval.grade_answer(
-        session, "http://x", _judge_seat(), _turns("opener", "reply"), 1,
-        (1, 1))
-    assert grade["a"] is None
+    grade = chat_eval.grade_pass(
+        session, "http://x", _judge_seat(), "b", _turns("opener", "reply"),
+        1, (1, 1))
+    assert grade["b"] is None
     assert grade["judge_error"]
     assert grade["raw"] == "still nope"
     assert len(session.bodies) == 2
+
+
+# ------------------------------------------------- the three-pass grade
+
+
+def _pass_results(a=True, b=True, c=True, defect=None, errors=()):
+    def one(key, value, comment):
+        result = {key: value, "comment": comment, "raw": f"raw-{key}",
+                  "judge_error": f"{key} broke" if key in errors else None,
+                  "elapsed_s": 0.2}
+        if key == "c":
+            result["examiner_defect"] = defect
+        return result
+    return {"a": one("a", a, "grammar"), "b": one("b", b, "fit"),
+            "c": one("c", c, "substance")}
+
+
+def test_merge_gates_c_on_b():
+    # c is the headline substantive rate: pass C is not asked about
+    # fit, so a reply pass B rejected cannot be substantive.
+    grade = chat_eval.merge_grades(_pass_results(b=False, c=True))
+    assert grade["c_raw"] is True
+    assert grade["c"] is False
+    assert grade["c_without_b"] is True
+    kept = chat_eval.merge_grades(_pass_results(b=True, c=True))
+    assert (kept["c_raw"], kept["c"], kept["c_without_b"]) == (
+        True, True, False)
+
+
+def test_merge_keeps_every_passs_comment_and_the_defect():
+    grade = chat_eval.merge_grades(_pass_results(defect="User repeated"))
+    assert grade["comment_a"] == "grammar"
+    assert grade["comment_b"] == "fit"
+    assert grade["comment_c"] == "substance"
+    assert grade["examiner_defect"] == "User repeated"
+    assert set(grade["raw"]) == set(chat_eval._PASSES)
+    assert grade["elapsed_s"]["a"] == 0.2
+
+
+def test_merge_leaves_c_unknown_when_a_pass_failed():
+    grade = chat_eval.merge_grades(
+        _pass_results(a=None, b=None, errors=("b",)))
+    assert grade["b"] is None
+    assert grade["c"] is None
+    assert grade["c_without_b"] is False
+    assert "b: b broke" in grade["judge_error"]
+    # An independent pass that did come back is still usable.
+    partial = chat_eval.merge_grades(
+        _pass_results(a=None, errors=("a",)))
+    assert partial["a"] is None and partial["b"] is True
+
+
+# ------------------------------------------------------- pass concurrency
+
+
+def _pass_tasks(n):
+    return [((None, i, 0.5, 1), _turns("q%d" % i, "answer%d" % i), 1)
+            for i in range(n)]
+
+
+@pytest.mark.parametrize("parallel", [1, 4])
+def test_run_pass_aggregates_by_key_not_by_order(parallel):
+    tasks = _pass_tasks(9)
+    session = _ScriptedSession({
+        f"answer{i}": '{"comment": "c", "a": %s}'
+                      % ("true" if i % 2 else "false")
+        for i in range(9)
+    })
+    results = chat_eval.run_pass(
+        "a", tasks, "http://x", _judge_seat(), (1, 1), parallel,
+        session_factory=lambda: session)
+    assert set(results) == {t[0] for t in tasks}
+    assert [results[(None, i, 0.5, 1)]["a"] for i in range(9)] == [
+        bool(i % 2) for i in range(9)]
+    assert len(session.bodies) == 9
+    # Every request of a pass shares the same system prefix -- that is
+    # what the server's prompt cache reuses.
+    systems = {body["messages"][0]["content"] for body in session.bodies}
+    assert len(systems) == 1
+
+
+def test_run_pass_gives_each_thread_its_own_session():
+    sessions = []
+
+    def factory():
+        session = _ScriptedSession({"answer": '{"comment": "c", "b": true}'})
+        sessions.append(session)
+        return session
+
+    chat_eval.run_pass("b", _pass_tasks(8), "http://x", _judge_seat(),
+                       (1, 1), 4, session_factory=factory)
+    assert 1 <= len(sessions) <= 4
+    assert sum(len(s.bodies) for s in sessions) == 8
 
 
 # ------------------------------------------------------------- reporting
 
 
 def _grade(a, b, c, temperature=0.5, position=1, anchor=None, seed_idx=0,
-           answer="something", defect=None, error=None):
-    return {
-        "a": a, "b": b, "c": c,
-        "examiner_defect": defect, "comment": "",
-        "judge_error": error, "raw": "",
+           answer="something", defect=None, error=None, c_raw=None):
+    c_raw = c if c_raw is None else c_raw
+    grade = chat_eval.merge_grades({
+        "a": {"a": a, "comment": "", "raw": "", "judge_error": error,
+              "elapsed_s": 0.2},
+        "b": {"b": b, "comment": "", "raw": "", "judge_error": None,
+              "elapsed_s": 0.1},
+        "c": {"c": c_raw, "comment": "", "raw": "", "judge_error": None,
+              "examiner_defect": defect, "elapsed_s": 0.3},
+    })
+    grade.update({
         "seed_idx": seed_idx, "anchor": anchor,
         "student_temperature": temperature, "position": position,
         "answer": answer, "repetition": chat_eval.repetition_stats(answer),
-        "judge_inconsistency": chat_eval.is_inconsistent(
-            {"b": b, "c": c}),
         "judge_model": "judge.gguf",
-    }
+    })
+    return grade
 
 
 def test_summarize_ignores_judge_errors_in_the_rates():
@@ -591,6 +790,17 @@ def test_verdict_needs_every_target():
     assert chat_eval.verdict(failing) == "FAIL"
 
 
+def test_summarize_counts_pass_disagreements_and_latency():
+    grades = ([_grade(True, False, False, c_raw=True)] * 3
+              + [_grade(True, True, True)] * 7)
+    summary = chat_eval.summarize(grades)
+    assert summary["c_without_b"] == 3
+    # c_raw is what pass C said; c is c_raw AND b.
+    assert summary["c_raw"] == 100.0
+    assert summary["rates"]["c"] == 70.0
+    assert summary["latency"]["c"] == pytest.approx(0.3)
+
+
 def test_report_has_one_row_per_temperature_and_the_anchors():
     grades = (
         [_grade(True, True, True, temperature=0.3)] * 4
@@ -612,3 +822,105 @@ def test_report_survives_an_empty_main_set():
         "d.jsonl", "g.jsonl", [_grade(True, True, True, anchor="good")])
     assert "0 student answers" in report
     assert "n/a" in report
+
+
+def test_report_lines_for_disagreements_and_pass_cost():
+    grades = [_grade(True, False, False, c_raw=True)] * 2 + [
+        _grade(True, True, True)] * 2
+    report = chat_eval.build_report(
+        "d.jsonl", "g.jsonl", grades, None, {"a": 12.0, "b": 8.5, "c": 30.0})
+    assert "pass disagreements (c_raw without b): 2" in report
+    assert "| a | 0.2s | 12.0s |" in report
+    assert "| c | 0.3s | 30.0s |" in report
+
+
+def test_report_calls_out_the_phrase_bots_pass_a_as_calibration():
+    grades = [_grade(True, False, False, temperature=None)] * 9 + [
+        _grade(False, False, False, temperature=None)]
+    report = chat_eval.build_report("d.jsonl", "g.jsonl", grades, "phrases")
+    assert "Judge calibration" in report
+    assert "**pass A: 90.0%**" in report
+    # A texmo student gets no such section: pass A measures the student
+    # there.
+    assert "Judge calibration" not in chat_eval.build_report(
+        "d.jsonl", "g.jsonl", grades, None)
+
+
+def test_student_kind_comes_from_the_first_non_anchor_dialog():
+    dialogs = [
+        {"seed_idx": 0, "anchor": "good", "turns": [],
+         "participants": {"student": {"kind": "llama"}}},
+        {"seed_idx": 0, "anchor": None, "turns": [],
+         "participants": {"student": chat_eval.phrase_participant(
+             "student", "p.json", 0, 3)}},
+    ]
+    assert chat_eval.student_kind(dialogs) == "phrases"
+    assert chat_eval.student_kind([{"seed_idx": 0, "anchor": None,
+                                    "turns": [], "participants": {}}]) is None
+
+
+# ------------------------------------------------- judge job planning
+
+
+def _judge_dialog(seed_idx, anchor=None, temperature=0.5):
+    return {"seed_idx": seed_idx, "anchor": anchor,
+            "student_temperature": temperature,
+            "turns": _turns("q1", "a1", "q2", "a2")}
+
+
+def test_limit_seeds_takes_the_first_n_distinct_seeds_and_all_anchors():
+    dialogs = ([_judge_dialog(i, temperature=t)
+                for t in (0.3, 0.5) for i in range(4)]
+               + [_judge_dialog(0, anchor="good")])
+    kept = chat_eval.limit_seeds(dialogs, 2)
+    assert {r["seed_idx"] for r in kept if r["anchor"] is None} == {0, 1}
+    # Both temperatures of a kept seed survive, and so does the anchor.
+    assert len([r for r in kept if r["anchor"] is None]) == 4
+    assert any(r["anchor"] == "good" for r in kept)
+    assert chat_eval.limit_seeds(dialogs, None) == dialogs
+
+
+def _judge_args(argv=()):
+    return chat_eval.build_parser().parse_args(
+        ["judge", "--dialogs", "d.jsonl", "--judge", "j.gguf", *argv])
+
+
+def test_phase_server_conf_sizes_the_two_phases_differently():
+    args = _judge_args(["--parallel-ab", "16", "--ctx-ab", "1024",
+                        "--parallel-c", "4", "--ctx-size", "4096"])
+    ab, ab_parallel = chat_eval.phase_server_conf(args, "ab")
+    c, c_parallel = chat_eval.phase_server_conf(args, "c")
+    # -np divides -c among the slots on this build, so the total is
+    # scaled back up and the flags stay per-request.
+    assert ab["args"] == ["-c", "16384", "-np", "16"]
+    assert c["args"] == ["-c", "16384", "-np", "4"]
+    assert (ab_parallel, c_parallel) == (16, 4)
+
+
+def test_generate_still_gets_a_single_slot_server():
+    args = chat_eval.build_parser().parse_args(
+        ["generate", "--student", "m.json", "--examiner", "e.gguf"])
+    assert chat_eval._server_conf(args)["args"] == ["-c", "4096"]
+
+
+def test_judge_seats_cap_the_short_passes():
+    args = _judge_args(["--judge-max-tokens", "400"])
+    seats = chat_eval.judge_seats(args)
+    assert seats["a"]["max_tokens"] == chat_eval._JUDGE_SHORT_MAX_TOKENS
+    assert seats["b"]["max_tokens"] == chat_eval._JUDGE_SHORT_MAX_TOKENS
+    assert seats["c"]["max_tokens"] == 400
+    for seat in seats.values():
+        # The per-request system prompt is not part of the seat.
+        assert "system_prompt" not in seat
+        assert seat["extra"]["cache_prompt"] is True
+
+
+def test_plan_answers_skips_what_is_already_graded():
+    dialogs = [_judge_dialog(0), _judge_dialog(1)]
+    done = {chat_eval.record_key(dialogs[0]) + (1,)}
+    todo = chat_eval.plan_answers(dialogs, done)
+    assert [(key[1], position) for key, _, position, _ in todo] == [
+        (0, 2), (1, 1), (1, 2)]
+    # The turn index is what the judge grades, the position what the
+    # report groups by.
+    assert [index for *_, index in todo] == [3, 1, 3]

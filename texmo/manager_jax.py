@@ -53,8 +53,30 @@ _QUIET_PROGRESS_INTERVAL = 30.0
 # 10x above it. The correction only fires on a gap that is anomalous
 # *relative to the same run*, which is why it is safe for a fleet
 # spanning a Pi and a GPU box.
+#
+# The factor alone is not enough: chunk medians across the fleet run
+# from ~90 ms (an SBC on a tiny conf) to tens of seconds, and at a
+# sub-second median 10x is a second or two -- the size of an ordinary
+# input-pipeline stall, not of a nap. Two workers crashed on exactly
+# that. A Mac mini with a 217 ms median saw 53 chunks at 2.2-2.7 s,
+# one in every 9 or 10: its prefetch workers deliver in lockstep
+# bursts, training drains a burst at 217 ms a chunk and then waits
+# ~2.2 s for the next one (that conf is input-bound there, ~32% of
+# wall time spent waiting for data). An SBC with a 91 ms median saw
+# its first 3 chunks at ~1.4 s while the tokenizer-heavy hexbpe-64
+# sampler filled the queue. So a suspend must also clear an absolute
+# floor: the incident this detector was built for was a single 8h52m
+# gap between ~30 s chunks, and any real suspend is minutes to hours.
+# Chunks over the factor but under the floor are simply not outliers
+# -- no correction, no crash, the time is reported as measured.
 _SUSPEND_MIN_CHUNKS = 8
 _SUSPEND_OUTLIER_FACTOR = 10.0
+_SUSPEND_MIN_GAP_S = 30.0
+
+# Below this share of training wall time spent waiting on the input
+# pipeline, the summary line is phrased as a neutral statistic rather
+# than as a diagnosis.
+_INPUT_BOUND_FRACTION = 0.10
 
 # Local log of the learned tied-embedding input scale, appended after
 # every completed run of an EmbeddingCodec model. One JSON object per
@@ -69,8 +91,11 @@ def _correct_chunk_times(chunk_times: list[float]) -> tuple[float, int]:
 
     `chunk_times` are the measured durations of the training chunks,
     in order. Returns `(total_seconds, n_outliers)`, where the total
-    has any single outlying chunk replaced by the median of the others
-    (see `_SUSPEND_MIN_CHUNKS` above for what counts and why).
+    has any single outlying chunk replaced by the median of the
+    others. A chunk is an outlier only if it is both over
+    `_SUSPEND_OUTLIER_FACTOR` times the median of the eligible chunks
+    and over `_SUSPEND_MIN_GAP_S` in absolute terms (see the
+    constants above for what counts and why).
 
     Raises:
         RuntimeError: more than one outlying chunk. A suspend that
@@ -91,18 +116,23 @@ def _correct_chunk_times(chunk_times: list[float]) -> tuple[float, int]:
         return total, 0
 
     median = statistics.median(eligible)
-    outliers = [t for t in eligible if t > _SUSPEND_OUTLIER_FACTOR * median]
+    # Both conditions at once: relative to this run *and* long enough
+    # to be a nap rather than a data-pipeline hiccup.
+    threshold = max(_SUSPEND_OUTLIER_FACTOR * median, _SUSPEND_MIN_GAP_S)
+    outliers = [t for t in eligible if t > threshold]
     if not outliers:
         return total, 0
 
     if len(outliers) > 1:
         durations = ', '.join(ttoa3(t) for t in outliers)
         raise RuntimeError(
-            f'anomalous chunk times: {len(outliers)} chunks over '
-            f'{_SUSPEND_OUTLIER_FACTOR:g}x the median {ttoa3(median)} '
-            f'({durations}) out of a measured total of {ttoa3(total)}. '
-            f'Repeated suspends or a broken clock -- the timing of this '
-            f'run is garbage and it must not be submitted.')
+            f'anomalous chunk times: {len(outliers)} chunks over the '
+            f'suspend threshold {ttoa3(threshold)} '
+            f'({_SUSPEND_OUTLIER_FACTOR:g}x the median {ttoa3(median)}, '
+            f'floor {ttoa3(_SUSPEND_MIN_GAP_S)}): {durations} -- out of a '
+            f'measured total of {ttoa3(total)}. Repeated suspends or a '
+            f'broken clock -- the timing of this run is garbage and it '
+            f'must not be submitted.')
 
     corrected = total - outliers[0] + median
     logging.warning(
@@ -110,6 +140,29 @@ def _correct_chunk_times(chunk_times: list[float]) -> tuple[float, int]:
         f'median of {ttoa3(median)}; correcting train time '
         f'{ttoa3(total)} -> {ttoa3(corrected)}')
     return corrected, 1
+
+
+def _log_input_bound(sample_time: float, compute_time: float) -> None:
+    """Log how much of the training wall time went to waiting on the
+    input pipeline rather than to the model.
+
+    Cheap and always logged: a conf whose chunks are mostly queue wait
+    trains no faster on a better accelerator, and the same waits are
+    what the suspend detector's absolute floor exists to ignore. The
+    two arguments are the measured phase totals and sum to the
+    measured training wall time -- after a suspend correction the gap
+    is still inside whichever phase swallowed it.
+    """
+    wall = sample_time + compute_time
+    if wall <= 0:
+        return
+    frac = sample_time / wall
+    detail = f'(sample {ttoa3(sample_time)}, compute {ttoa3(compute_time)})'
+    if frac >= _INPUT_BOUND_FRACTION:
+        logging.info(
+            f'input-bound: {frac:.0%} of wall time waiting for data {detail}')
+    else:
+        logging.info(f'data wait: {frac:.0%} of wall time {detail}')
 
 
 class ManagerJax(Manager):
@@ -218,7 +271,9 @@ class ManagerJax(Manager):
         the first occurrence of each unique tensor shape); the DB's
         median across runs filters the resulting outliers. A single
         suspend-sized gap in the remaining chunks is repaired by
-        `_correct_chunk_times`; several of them raise.
+        `_correct_chunk_times`; several of them raise. Each chunk's
+        time is also split into input-pipeline wait and compute, and
+        the ratio is logged once at the end.
 
         NaN losses propagate -- once the model diverges, subsequent
         steps run with NaN updates and the final eval will catch it.
@@ -243,6 +298,13 @@ class ManagerJax(Manager):
         last_progress_log = start_time
         chunk_start = start_time
         chunk_times: list[float] = []
+        # Phase split of the same intervals: how much of each chunk
+        # went to waiting for the sampler and how much to the model.
+        # Kept apart from `chunk_times`, which stays the per-iteration
+        # total the suspend detector needs -- a nap can land in either
+        # phase, and only the total is guaranteed to contain it.
+        sample_time = 0.0
+        compute_time = 0.0
         while self.step < steps:
             n = min(_CHUNK_SIZE, steps - self.step)
             # One big sample of (n*batch, length), reshaped to
@@ -253,13 +315,19 @@ class ManagerJax(Manager):
                 batch=n * batch,
                 tokenset_name=tokens_name,
             )
+            sampled = perf_counter()
             batches = jnp.asarray(data).reshape(n, batch, length)
             self.weights, self._opt_state, losses = self._train_chunk(
                 self.weights, self._opt_state, batches)
+            # JAX dispatch is async, so the chunk's compute is only
+            # actually paid for at this host sync -- which keeps it on
+            # the compute side of the split, where it belongs.
             losses_host = np.asarray(losses)
             for loss_val in losses_host:
                 self.run.add_step(self.tokenset.byte_loss(float(loss_val)))
             now = perf_counter()
+            sample_time += sampled - chunk_start
+            compute_time += now - sampled
             chunk_times.append(now - chunk_start)
             chunk_start = now
             if (
@@ -272,6 +340,7 @@ class ManagerJax(Manager):
 
         total_time, _ = _correct_chunk_times(chunk_times)
         logging.info(f'Trained for {self.step} steps in {ttoa3(total_time)}')
+        _log_input_bound(sample_time, compute_time)
         return total_time, self.conf.replace(steps=self.step)
 
     def train_and_eval(

@@ -330,6 +330,24 @@ budget. Dream target: 32-64K weights.
 
 ## Training procedures
 
+* **Training continuations as a search problem** (2026-08-28 idea,
+  for spare search capacity -- unlikely soon). Given a pre-trained
+  model M at loss L (plus, possibly, a few descriptors of how it got
+  there), what are the optimal metaparameters to train it FURTHER
+  on X tokens? Same machinery as the search, different conf shape:
+  the starting point is a checkpoint rather than an init, and the
+  target is the loss after the continuation budget. Probably run
+  WITHOUT an LR schedule -- constant LR -- so the search discovers
+  the appropriate reduced LR itself instead of inheriting a
+  schedule tuned for from-scratch runs. Immediate motivation is the
+  chatbot curriculum (natural SODA -> simplified corpus), which for
+  now uses the schedule-free workaround of switching the corpus
+  mid-run under one cosine; the general question is what the
+  post-training regime looks like across weights and continuation
+  budgets. Sits naturally next to progressive layer-wise training:
+  both are "start from a trained state" procedures the search does
+  not model today.
+
 * **Progressive layer-wise training.** For an N-hidden-layer model,
   the schedule is `2N − 1` phases: N "growth" phases (add l_i with
   prior layers frozen, fresh output projection) interleaved with

@@ -37,6 +37,24 @@ Training-corpus loss (parallel forward): s0 1.717, s1 1.646, s2
 1.589, s3 1.280 b/B. Artifacts: data/eval/eval100-hb32-8k-*.jsonl,
 models/hb32-8k-s{0,1,2,3}.json (machine-local).
 
+**Null-model correction (same day, Oleg's check):** a phrase bot
+drawing s3's own 20 most frequent answers at random with s3's
+frequencies (63% of its output; `chat_eval.py phrases` +
+`--student-phrases`) scores a 91.2 / b 46.8 / c 10.4 on the same 100
+seeds. s3's b (43.6) is *below* the bot's (z = -1.0): on
+responsiveness s3 is indistinguishable from random phrase emission
+-- everything it scores comes from the marginal fit of casual stock
+phrases to casual turns (~47% is the floor for ANY phrase emitter on
+this eval). The only crack is c (+4.2, z = +2.0, one of three
+comparisons). s3 does learn turn *type* (it asks back after 45% of
+statements vs 22% of questions, ~5 sigma) but not turn *content*.
+Two methodological consequences: (1) "coherent" must mean beating
+the model's own phrase-bot on b/c, so the null model becomes a
+standard control column; (2) the judge leaks context into criterion
+(a): ~9% of perfectly-formed phrases fail it when the conversation
+is bad, so a's ceiling under this judge is ~91% -- the a >= 90
+target sits on the ceiling; grade (a) with the context hidden.
+
 ## Chatbot eval baseline: 8k is far below the bar (2026-08-27)
 
 First full scripted-examiner eval (1000 seeds x T 0.3/0.5/0.7,

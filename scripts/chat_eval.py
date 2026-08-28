@@ -13,6 +13,9 @@ measures *each student answer*, not whole dialogs:
               substantive, not a generic deflection -- and writes a
               report against the working targets a>=90%, b>=90%,
               c>=50%.
+    phrases   distil a dialogs file into the student's N most common
+              answers with their counts, which is the input for the
+              null model below.
 
     uv run python scripts/chat_eval.py generate --n-seeds 100 \\
         --student models/hb32-8k-1ub.json \\
@@ -24,6 +27,13 @@ measures *each student answer*, not whole dialogs:
     uv run python scripts/chat_eval.py judge \\
         --dialogs data/eval/dialogs-hb32-8k-1ub-20260826-120000.jsonl \\
         --judge C:/Users/oleg/models/Qwen3-8B-Q6_K.gguf
+
+    uv run python scripts/chat_eval.py phrases \\
+        --dialogs data/eval/eval100-hb32-8k-s3.jsonl \\
+        --top 20 --out data/eval/phrases-s3-top20.json
+    uv run python scripts/chat_eval.py generate --n-seeds 100 \\
+        --student-phrases data/eval/phrases-s3-top20.json \\
+        --examiner C:/Users/oleg/models/gemma-4-12b-it-Q6_K.gguf
 
 ## Temperature sweep
 
@@ -90,6 +100,33 @@ The report scores them separately. A judge that does not put good far
 above garbage on all three criteria is broken, and the run's numbers
 mean nothing.
 
+## The null model (phrase bot)
+
+The anchors bracket the judge; the phrase bot brackets the *student*
+from below. A model with a handful of stock answers scores on (b) and
+(c) by luck alone -- sprayed at random, "I am good." lands on a fair
+share of turns -- so a raw b/c says nothing until the luck floor is
+known.
+
+`--student-phrases <json>` seats exactly that floor:
+
+    {"phrases": [{"text": ..., "weight": ...}, ...]}
+
+One independent weighted draw per turn (`random.choices`), the dialog
+so far never read. Build the file from a real run with the `phrases`
+subcommand and the bot emits that model's own phrases at that model's
+own relative frequencies, differing from it in one respect only: it
+does not condition on the question. Whatever b/c the model has *above*
+the bot is the part conditioning bought; (a) should come out ~100% by
+construction, since every phrase is a sentence the judge already
+passed.
+
+The draws come from one `random.Random(--phrase-seed)` stream for the
+whole run, so the same seed reproduces the dialogs. No server is
+launched and no sampling temperature applies: the sweep collapses to a
+single pass and `student_temperature` is recorded as null rather than
+as a number nothing used.
+
 ## Judging
 
 One request per student answer, carrying the dialog up to and
@@ -155,16 +192,22 @@ Every llama.cpp request carries
 models reason by default and return empty `content` otherwise.
 """
 import argparse
+import collections
 import datetime
 import json
 import logging
 import os
+import random
 import re
 import sys
 import time
 
 import dialog_harness as dh
 import requests
+
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from texmo.pjson import save_json
 
 _DEFAULT_SEEDS = os.path.join("data", "eval", "seeds.jsonl")
 _DEFAULT_OUT_DIR = os.path.join("data", "eval")
@@ -203,6 +246,11 @@ _DEFAULT_JUDGE_MAX_TOKENS = 400
 # reaches the cap is a run-on the model never closed -- a real defect,
 # which the judge should see as a run-on rather than as a cut-off word.
 _DEFAULT_STUDENT_MAX_TOKENS = 256
+
+# Null model: how many of the student's own answers the `phrases`
+# subcommand keeps, and the RNG seed the bot draws with.
+_DEFAULT_TOP_N = 20
+_DEFAULT_PHRASE_SEED = 0
 
 _EXAMINER_PROMPT = """\
 You are playing the "{user}" side of a short, casual conversation with \
@@ -703,13 +751,103 @@ def ask(session, base_url: str, participant: dict, messages: list[dict],
     return dh.extract_text(response), _usage_tokens(response), elapsed
 
 
+# ------------------------------------------------------------- students
+
+
+class UrlStudent:
+    """A student behind a chat-completions endpoint -- the usual seat.
+
+    Holds the URL, the participant record and the optional system
+    prompt, so `run_dialog` has to know only "given the turns so far,
+    what does the student say next". That is what lets the null model
+    below take the same chair without a server behind it.
+    """
+
+    def __init__(self, base_url: str, participant: dict,
+                 system_prompt: str | None = None):
+        self.base_url = base_url
+        self.participant = participant
+        self.system_prompt = system_prompt
+
+    def reply(self, session, turns: list[dict],
+              timeout) -> tuple[str, int, float]:
+        return ask(session, self.base_url, self.participant,
+                   student_messages(turns, self.system_prompt), timeout)
+
+
+class PhraseStudent:
+    """The null model: one weighted random draw, the context ignored.
+
+    `turns` is accepted and deliberately unused -- not conditioning on
+    it is the whole point of the seat. One `random.Random` serves the
+    entire run, so `--phrase-seed` reproduces it end to end.
+    """
+
+    def __init__(self, phrases: list[str], weights: list[float],
+                 participant: dict, seed: int = _DEFAULT_PHRASE_SEED):
+        if not phrases:
+            raise ValueError("the phrase bot needs at least one phrase")
+        self.phrases = phrases
+        self.weights = weights
+        self.participant = participant
+        self._rng = random.Random(seed)
+
+    def reply(self, session, turns: list[dict],
+              timeout) -> tuple[str, int, float]:
+        text = self._rng.choices(self.phrases, self.weights)[0]
+        return text, 0, 0.0
+
+
+def load_phrase_file(path: str) -> tuple[list[str], list[float]]:
+    """`{"phrases": [{"text", "weight"}, ...]}` -> texts and weights.
+
+    The weights are the raw counts `phrases` writes; normalization
+    happens at draw time (`random.choices` does it), so a hand-edited
+    file may use any positive scale it likes.
+    """
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    entries = data.get("phrases") if isinstance(data, dict) else None
+    if not entries:
+        raise ValueError(f"no phrases in {path}")
+    phrases, weights = [], []
+    for entry in entries:
+        weight = float(entry.get("weight", 1))
+        if weight <= 0:
+            raise ValueError(f"phrase weight must be > 0: {entry!r}")
+        phrases.append(str(entry["text"]))
+        weights.append(weight)
+    return phrases, weights
+
+
+def phrase_participant(name: str, path: str, seed: int,
+                       n_phrases: int) -> dict:
+    """The null-model seat, recorded like every other participant.
+
+    No model file and no sampling params, because neither exists: what
+    reproduces this seat is the phrase file plus the seed, so that is
+    what the record carries.
+    """
+    return {
+        "name": name,
+        "kind": "phrases",
+        "model": os.path.basename(path),
+        "phrases_path": path,
+        "phrase_seed": seed,
+        "n_phrases": n_phrases,
+    }
+
+
 # ---------------------------------------------------------- generation
 
 
 def run_dialog(session, seed: dict, examiner: dict, examiner_url: str,
-               student: dict, student_url: str, student_system: str | None,
-               n_turns: int, timeout) -> list[dict]:
-    """One eval dialog: forced opener, then alternating turns."""
+               student, n_turns: int, timeout) -> list[dict]:
+    """One eval dialog: forced opener, then alternating turns.
+
+    `student` is any object with `.reply(session, turns, timeout)` --
+    `UrlStudent` or `PhraseStudent`.
+    """
     system_prompt = examiner["system_prompt"]
     turns = [{
         "side": _EXAMINER,
@@ -720,9 +858,7 @@ def run_dialog(session, seed: dict, examiner: dict, examiner_url: str,
     }]
     while len(turns) < n_turns:
         if turns[-1]["side"] == _EXAMINER:
-            text, tokens, elapsed = ask(
-                session, student_url, student,
-                student_messages(turns, student_system), timeout)
+            text, tokens, elapsed = student.reply(session, turns, timeout)
             side = _STUDENT
         else:
             text, tokens, elapsed = ask(
@@ -829,7 +965,15 @@ def run_generate(args) -> int:
     anchor_temperature = (args.anchor_temperature
                           if args.anchor_temperature is not None
                           else temperatures[0])
-    out_path = args.out or default_dialogs_path(args.student or "student")
+    phrases = weights = None
+    if args.student_phrases:
+        phrases, weights = load_phrase_file(args.student_phrases)
+        # The phrase bot has no sampling temperature, so the sweep is
+        # one pass and the field is recorded as null rather than as a
+        # number nothing used. The anchors keep their own temperature.
+        temperatures = [None]
+    out_path = args.out or default_dialogs_path(
+        args.student or args.student_phrases or "student")
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     jobs = plan_jobs(seeds, temperatures, args.anchor_good,
                      args.anchor_garbage, anchor_temperature)
@@ -854,15 +998,15 @@ def run_generate(args) -> int:
         else:
             examiner_url = args.examiner_url
         # One server per model for the whole sweep: temperature is a
-        # per-request field, so the expensive loads are paid once.
+        # per-request field, so the expensive loads are paid once. The
+        # phrase bot needs no server at all.
+        student_url = args.student_url
         if args.student:
             student_server = launch_chat_server(
                 args.student, out_path, temperatures[0],
                 args.max_reply_tokens)
             servers.append(student_server)
             student_url = student_server.base_url
-        else:
-            student_url = args.student_url
         garbage_url = None
         if args.anchor_garbage:
             garbage_server = launch_chat_server(
@@ -874,6 +1018,16 @@ def run_generate(args) -> int:
         for server in servers:
             dh.wait_until_ready(server, session, args.startup_timeout)
             logging.info(f"server on port {server.port} is ready")
+
+        # Built once, outside the loop: the bot draws from a single
+        # seeded stream for the whole run.
+        phrase_student = None
+        if phrases is not None:
+            phrase_student = PhraseStudent(
+                phrases, weights,
+                phrase_participant(_STUDENT, args.student_phrases,
+                                   args.phrase_seed, len(phrases)),
+                args.phrase_seed)
 
         written = skipped = 0
         with open(out_path, "a", encoding="utf-8", newline="\n") as f:
@@ -890,24 +1044,27 @@ def run_generate(args) -> int:
                         "good-student", args.examiner, args.examiner_url,
                         _GOOD_ANCHOR_PROMPT.format(bot=_BOT_LABEL),
                         temperature, args.examiner_max_tokens)
-                    seat_url, seat_system = (
-                        examiner_url, seat["system_prompt"])
+                    student = UrlStudent(
+                        examiner_url, seat, seat["system_prompt"])
                 elif anchor == "garbage":
                     seat = texmo_participant(
                         "garbage-student", args.garbage_student, None,
                         temperature, args.max_reply_tokens)
-                    seat_url, seat_system = garbage_url, None
+                    student = UrlStudent(garbage_url, seat)
+                elif phrase_student is not None:
+                    student = phrase_student
+                    seat = phrase_student.participant
                 else:
                     seat = texmo_participant(
                         _STUDENT, args.student, args.student_url,
                         temperature, args.max_reply_tokens)
-                    seat_url, seat_system = student_url, None
+                    student = UrlStudent(student_url, seat)
                 started_at = _now()
                 t0 = time.time()
                 try:
                     turns = run_dialog(
-                        session, seed, examiner, examiner_url, seat, seat_url,
-                        seat_system, args.n_turns, timeout)
+                        session, seed, examiner, examiner_url, student,
+                        args.n_turns, timeout)
                 except KeyboardInterrupt:
                     print(f"\ninterrupted during job {i + 1}; "
                           f"{written} dialog(s) written to {out_path}")
@@ -931,6 +1088,79 @@ def run_generate(args) -> int:
               f"to {out_path}")
     finally:
         _stop_all(servers)
+    return 0
+
+
+# -------------------------------------------------------- phrase table
+
+
+def count_answers(dialogs: list[dict]) -> collections.Counter:
+    """Exact (stripped) student answers over the non-anchor dialogs.
+
+    The anchors are a different student -- the examiner model, or an
+    untrained one -- so their answers would poison a distillation of
+    the model under test.
+    """
+    counts = collections.Counter()
+    for record in dialogs:
+        if record.get("anchor") is not None:
+            continue
+        for turn in record["turns"]:
+            if turn["side"] == _STUDENT:
+                counts[turn["text"].strip()] += 1
+    return counts
+
+
+def phrase_table(counts: collections.Counter, top_n: int,
+                 dialogs_path: str) -> dict:
+    """The top-N phrases plus the provenance of the distillation.
+
+    `weight` is the raw count: the bot normalizes at draw time, so the
+    file doubles as a readable frequency table. `coverage` is the share
+    of all answers the kept phrases account for -- the part of the
+    student's behaviour the null model actually reproduces.
+    """
+    total = sum(counts.values())
+    top = counts.most_common(top_n)
+    return {
+        "source_dialogs": dialogs_path,
+        "generated": _now(),
+        "n_answers": total,
+        "n_distinct": len(counts),
+        "top_n": top_n,
+        "coverage": round(sum(c for _, c in top) / total, 4) if total else 0.0,
+        "phrases": [{"text": text, "weight": count} for text, count in top],
+    }
+
+
+def format_phrase_table(table: dict) -> str:
+    """The same table for the terminal, one line per phrase."""
+    total = table["n_answers"] or 1
+    lines = [f"{'#':>3}  {'count':>5}  {'share':>6}  text"]
+    for i, entry in enumerate(table["phrases"], 1):
+        lines.append(
+            f"{i:>3}  {entry['weight']:>5}  "
+            f"{100.0 * entry['weight'] / total:>5.1f}%  {entry['text']!r}")
+    lines.append(
+        f"\n{table['n_distinct']} distinct answers over "
+        f"{table['n_answers']}; the top {len(table['phrases'])} cover "
+        f"{100.0 * table['coverage']:.1f}%.")
+    return "\n".join(lines)
+
+
+def run_phrases(args) -> int:
+    dialogs = read_records(args.dialogs)
+    if not dialogs:
+        raise ValueError(f"no dialogs in {args.dialogs}")
+    counts = count_answers(dialogs)
+    if not counts:
+        raise ValueError(f"no student answers in {args.dialogs}")
+    table = phrase_table(counts, args.top, args.dialogs)
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    with open(args.out, "w", encoding="utf-8", newline="\n") as f:
+        save_json(table, f)
+    print(format_phrase_table(table))
+    print(f"\nwrote {len(table['phrases'])} phrase(s) to {args.out}")
     return 0
 
 
@@ -1281,6 +1511,14 @@ def build_parser() -> argparse.ArgumentParser:
     student.add_argument(
         "--student-url", default=None,
         help="an already-running chat-completions endpoint for the student")
+    student.add_argument(
+        "--student-phrases", default=None,
+        help="null model: a `phrases` JSON file whose entries are drawn at "
+             "random, one per turn, ignoring the conversation entirely")
+    gen.add_argument(
+        "--phrase-seed", type=int, default=_DEFAULT_PHRASE_SEED,
+        help=f"RNG seed for --student-phrases (default: "
+             f"{_DEFAULT_PHRASE_SEED})")
     examiner = gen.add_mutually_exclusive_group(required=True)
     examiner.add_argument(
         "--examiner", default=None,
@@ -1355,6 +1593,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="markdown report (default: <dialogs stem>-report.md)")
     _add_server_args(jud)
     jud.set_defaults(func=run_judge)
+
+    phr = subparsers.add_parser(
+        "phrases",
+        help="distil a dialogs file into the student's most common answers")
+    phr.add_argument(
+        "--dialogs", required=True, help="a `generate` output JSONL")
+    phr.add_argument(
+        "--top", type=int, default=_DEFAULT_TOP_N,
+        help=f"how many answers to keep (default: {_DEFAULT_TOP_N})")
+    phr.add_argument(
+        "--out", required=True,
+        help="phrase JSON, the input for `generate --student-phrases`")
+    phr.set_defaults(func=run_phrases)
 
     return parser
 

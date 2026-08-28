@@ -7,8 +7,10 @@ shim.
 
 Only the pure pieces are covered -- message assembly for both seats,
 the resumability keys and the job plan, the repetition metrics, judge
-output parsing, the c-without-b check, and report building. No model,
-no server, no network: `grade_answer` is driven by a fake session.
+output parsing, the c-without-b check, report building, and the
+null-model phrase bot (draws, seeding, distillation, seat record). No
+model, no server, no network: `grade_answer` is driven by a fake
+session, and the phrase bot needs no endpoint at all.
 """
 import json
 import os
@@ -337,6 +339,144 @@ def test_c_without_b_is_flagged():
     assert not chat_eval.is_inconsistent({"a": True, "b": False, "c": False})
     # A judge error carries None everywhere and is not an inconsistency.
     assert not chat_eval.is_inconsistent({"a": None, "b": None, "c": None})
+
+
+# ------------------------------------------------- null model (phrase bot)
+
+
+def _phrase_student(pairs, seed=0):
+    texts = [t for t, _ in pairs]
+    weights = [w for _, w in pairs]
+    return chat_eval.PhraseStudent(
+        texts, weights,
+        chat_eval.phrase_participant("student", "p.json", seed, len(texts)),
+        seed)
+
+
+def test_phrase_student_draws_follow_the_weights():
+    student = _phrase_student([("often", 80), ("rarely", 20)])
+    draws = [student.reply(None, [], None)[0] for _ in range(4000)]
+    # 4000 draws at p=0.8 has sd ~0.6%, so 3 points is many sigma;
+    # the seed makes it deterministic anyway.
+    assert abs(draws.count("often") / len(draws) - 0.8) < 0.03
+
+
+def test_phrase_student_ignores_the_context_and_costs_nothing():
+    student = _phrase_student([("only", 1)])
+    # No session, no URL, no timeout -- and the turns are not read.
+    text, tokens, elapsed = student.reply(
+        None, _turns("opener", "reply", "second"), None)
+    assert (text, tokens, elapsed) == ("only", 0, 0.0)
+
+
+def _draws(student, n=50):
+    return [student.reply(None, [], None)[0] for _ in range(n)]
+
+
+def test_phrase_student_is_reproducible_per_seed():
+    pairs = [("a", 3), ("b", 2), ("c", 1)]
+    first = _draws(_phrase_student(pairs))
+    assert len(set(first)) > 1
+    # One stream per run, so the same seed replays the whole run.
+    assert _draws(_phrase_student(pairs)) == first
+    assert _draws(_phrase_student(pairs, seed=7)) != first
+
+
+def test_phrase_student_needs_a_phrase():
+    with pytest.raises(ValueError):
+        chat_eval.PhraseStudent([], [], {}, 0)
+
+
+def test_phrase_participant_records_the_provenance():
+    seat = chat_eval.phrase_participant(
+        "student", "data/eval/phrases-s3-top20.json", 0, 20)
+    assert seat["kind"] == "phrases"
+    assert seat["phrases_path"] == "data/eval/phrases-s3-top20.json"
+    assert seat["phrase_seed"] == 0
+    assert seat["n_phrases"] == 20
+    # No sampling params: neither exists for this seat.
+    assert "temperature" not in seat and "manifest" not in seat
+
+
+def _write_phrase_file(tmp_path, pairs):
+    path = tmp_path / "phrases.json"
+    path.write_text(
+        json.dumps({"phrases": [{"text": t, "weight": w} for t, w in pairs]}),
+        encoding="utf-8")
+    return str(path)
+
+
+def test_load_phrase_file_round_trip(tmp_path):
+    path = _write_phrase_file(tmp_path, [("hi", 10), ("bye", 3)])
+    phrases, weights = chat_eval.load_phrase_file(path)
+    # Raw counts, not normalized: `random.choices` normalizes.
+    assert phrases == ["hi", "bye"]
+    assert weights == [10.0, 3.0]
+
+
+def test_load_phrase_file_rejects_empty_and_non_positive(tmp_path):
+    empty = tmp_path / "empty.json"
+    empty.write_text('{"phrases": []}', encoding="utf-8")
+    with pytest.raises(ValueError):
+        chat_eval.load_phrase_file(str(empty))
+    with pytest.raises(ValueError):
+        chat_eval.load_phrase_file(_write_phrase_file(tmp_path, [("x", 0)]))
+
+
+# ------------------------------------------------------- phrase distillation
+
+
+def _dialog(seed_idx, *texts, anchor=None):
+    return {"seed_idx": seed_idx, "anchor": anchor,
+            "student_temperature": None, "turns": _turns(*texts)}
+
+
+def test_count_answers_strips_and_skips_anchors():
+    dialogs = [
+        _dialog(0, "q1", "  Hi.  ", "q2", "Hi."),
+        _dialog(1, "q1", "Bye.", "q2", "Hi."),
+        _dialog(2, "q1", "ANCHOR", "q2", "ANCHOR", anchor="good"),
+    ]
+    counts = chat_eval.count_answers(dialogs)
+    assert counts == {"Hi.": 3, "Bye.": 1}
+
+
+def test_phrase_table_carries_coverage_and_provenance():
+    counts = chat_eval.count_answers([
+        _dialog(0, "q", "a", "q", "a"),
+        _dialog(1, "q", "a", "q", "b"),
+        _dialog(2, "q", "c", "q", "d"),
+    ])
+    table = chat_eval.phrase_table(counts, 2, "d.jsonl")
+    assert table["source_dialogs"] == "d.jsonl"
+    assert table["n_answers"] == 6
+    assert table["n_distinct"] == 4
+    assert table["top_n"] == 2
+    # "a" three times plus one of the singletons: 4 of 6.
+    assert table["coverage"] == pytest.approx(4 / 6, abs=1e-4)
+    assert table["phrases"][0] == {"text": "a", "weight": 3}
+    assert len(table["phrases"]) == 2
+
+
+def test_phrases_subcommand_writes_a_file_the_bot_can_load(tmp_path):
+    dialogs_path = tmp_path / "dialogs.jsonl"
+    dialogs_path.write_text(
+        "\n".join(json.dumps(r) for r in [
+            _dialog(0, "q", "Hi.", "q", "Hi."),
+            _dialog(1, "q", "Hi.", "q", "Bye."),
+            _dialog(2, "q", "NOPE", "q", "NOPE", anchor="garbage"),
+        ]),
+        encoding="utf-8")
+    out_path = tmp_path / "phrases.json"
+    args = chat_eval.build_parser().parse_args([
+        "phrases", "--dialogs", str(dialogs_path), "--top", "5",
+        "--out", str(out_path)])
+    assert args.func(args) == 0
+    phrases, weights = chat_eval.load_phrase_file(str(out_path))
+    assert phrases == ["Hi.", "Bye."]
+    assert weights == [3.0, 1.0]
+    # The anchor dialog contributes nothing.
+    assert "NOPE" not in phrases
 
 
 # ------------------------------------------------- grading with a fake seat

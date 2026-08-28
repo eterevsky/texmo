@@ -53,6 +53,8 @@ variant to separate "can't use context" from "poisons its own
 context". Reference artifacts (machine-local, untracked):
 data/eval/baseline-hb32-8k-1ub*.jsonl / -report.md.
 
+## Books3 rankings transfer to SODA (2026-08-21)
+
 **Architecture selection on books3 is trustworthy for SODA training.**
 Measured over 35 confs (frontier + random, mixed families) x 3 fresh
 SODA runs against the DB's existing books3 run distributions, as the

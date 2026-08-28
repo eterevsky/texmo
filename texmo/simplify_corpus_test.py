@@ -287,6 +287,7 @@ def test_existing_indices_of_a_missing_file_is_empty(tmp_path):
 
 
 @pytest.mark.parametrize("variant,expected", [
+    ("s0", [("User", "original"), ("Bot", "original")]),
     ("s1", [("User", "original"), ("Bot", "simple")]),
     ("s2", [("User", "original"), ("Bot", "trivial")]),
     ("s3", [("User", "simple"), ("Bot", "trivial")]),

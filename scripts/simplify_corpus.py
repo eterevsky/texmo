@@ -801,6 +801,9 @@ def format_summary_block(records: list[dict]) -> str:
 
 # Which field each side's utterance comes from, per corpus variant.
 VARIANTS = {
+    # s0: the natural text of the same dialogs -- the equal-indices
+    # control for every simplified variant.
+    "s0": {_USER: "original", _BOT: "original"},
     "s1": {_USER: "original", _BOT: "simple"},
     "s2": {_USER: "original", _BOT: "trivial"},
     "s3": {_USER: "simple", _BOT: "trivial"},

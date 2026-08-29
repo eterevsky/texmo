@@ -127,6 +127,26 @@ launched and no sampling temperature applies: the sweep collapses to a
 single pass and `student_temperature` is recorded as null rather than
 as a number nothing used.
 
+## The other reference student: ELIZA
+
+`--student-eliza` seats Weizenbaum's DOCTOR (1966) -- the vendored
+pattern matcher in `scripts/eliza/`, zero weights, no training data.
+It brackets the eval from a third side. The phrase bot ignores the
+question entirely and is the *luck* floor on (b); ELIZA reads the
+question, reflects the user's own words back with the pronouns
+flipped, and asks about them, which is the maximum (b) a system with
+no world model can buy. It cannot say anything of its own, so it is
+also a floor on (c). "Responsive but empty" is a shape the eval should
+be able to name, and a student that beats the phrase bot on (b)
+without beating ELIZA has learned reflection rather than content.
+
+Like the phrase bot it takes no server and no sampling temperature
+(`student_temperature` is null). One session per dialog: the matcher
+is stateful -- each decomposition rule cycles through its reassembly
+rules in order, and unmatched turns push onto a memory stack that a
+later turn pops -- so `run_dialog` resets the student per dialog and
+`--eliza-seed` plus the seed index reproduce any single transcript.
+
 ## Judging: three context-scoped passes
 
 Each criterion is asked in its own request, seeing exactly the context
@@ -265,6 +285,7 @@ import threading
 import time
 
 import dialog_harness as dh
+import eliza
 import requests
 
 sys.path.insert(
@@ -318,6 +339,8 @@ _DEFAULT_STUDENT_MAX_TOKENS = 256
 # subcommand keeps, and the RNG seed the bot draws with.
 _DEFAULT_TOP_N = 20
 _DEFAULT_PHRASE_SEED = 0
+# ELIZA: the base seed a dialog's session stream is derived from.
+_DEFAULT_ELIZA_SEED = 0
 
 # Judge concurrency, per phase: server slots == in-flight requests.
 # Passes A and B are short prompts and share a server with many small
@@ -969,13 +992,19 @@ def ask(session, base_url: str, participant: dict, messages: list[dict],
 # ------------------------------------------------------------- students
 
 
+# A student seat is `.reply(session, turns, timeout) -> (text, tokens,
+# seconds)` plus `.reset(seed_idx)`, called once per dialog. Only a
+# stateful seat (ELIZA) does anything in `reset`; the others declare
+# it so `run_dialog` can call it unconditionally.
+
+
 class UrlStudent:
     """A student behind a chat-completions endpoint -- the usual seat.
 
     Holds the URL, the participant record and the optional system
     prompt, so `run_dialog` has to know only "given the turns so far,
-    what does the student say next". That is what lets the null model
-    below take the same chair without a server behind it.
+    what does the student say next". That is what lets the reference
+    students below take the same chair without a server behind them.
     """
 
     def __init__(self, base_url: str, participant: dict,
@@ -983,6 +1012,9 @@ class UrlStudent:
         self.base_url = base_url
         self.participant = participant
         self.system_prompt = system_prompt
+
+    def reset(self, seed_idx: int | None = None):
+        """Nothing to reset: the whole dialog goes in every request."""
 
     def reply(self, session, turns: list[dict],
               timeout) -> tuple[str, int, float]:
@@ -1007,10 +1039,89 @@ class PhraseStudent:
         self.participant = participant
         self._rng = random.Random(seed)
 
+    def reset(self, seed_idx: int | None = None):
+        """Deliberately not reseeded per dialog: one stream serves the
+        whole run, which is what `--phrase-seed` reproduces."""
+
     def reply(self, session, turns: list[dict],
               timeout) -> tuple[str, int, float]:
         text = self._rng.choices(self.phrases, self.weights)[0]
         return text, 0, 0.0
+
+
+# " ?" and " ." come out of the port joining its output words with
+# spaces; "??" out of a reassembly rule appending its own mark to an
+# inserted phrase that already ended in one. Both are artifacts of the
+# port's plumbing, not of the 1966 script.
+_SPACES_RE = re.compile(r"\s+")
+_DETOKEN_RE = re.compile(r"\s+([,.;:!?])")
+_PUNCT_RUN_RE = re.compile(r"[,.;:!?]{2,}")
+
+
+def tidy_eliza(text: str) -> str:
+    """ELIZA's word list as a typed sentence.
+
+    Collapses runs of spaces, pulls punctuation back onto the
+    preceding word, and keeps only the last mark of a punctuation run.
+    Presentation only -- no word is added, removed or reordered -- so
+    that pass A grades the sentence rather than the port's spacing.
+    """
+    text = _DETOKEN_RE.sub(r"\1", _SPACES_RE.sub(" ", text))
+    return _PUNCT_RUN_RE.sub(lambda m: m.group(0)[-1], text).strip()
+
+
+class ElizaStudent:
+    """Weizenbaum's DOCTOR in the student seat: responsive but empty.
+
+    Reads only the last thing the examiner said -- which is all the
+    1966 program ever read -- and answers from the vendored script. It
+    is stateful in two ways that make the session, not the utterance,
+    the unit: a decomposition rule cycles through its reassembly rules
+    in order, and a turn that matches a `$` rule is pushed onto a
+    memory stack for a later turn with no keyword to pop. So `reset`
+    builds a *new* session, keyed on the dialog's seed index rather
+    than on a call counter, and a resumed run reproduces the transcript
+    of every dialog it did not already have.
+
+    An utterance that is exactly a quit word ("bye") makes `respond`
+    return None; the sign-off is the faithful answer there, and the
+    dialog continues, because the eval always runs its 10 turns.
+    """
+
+    def __init__(self, participant: dict, seed: int = _DEFAULT_ELIZA_SEED):
+        self.participant = participant
+        self.seed = seed
+        self._bot = None
+        self.reset()
+
+    def reset(self, seed_idx: int | None = None):
+        self._bot = eliza.load_doctor(
+            random.Random(self.seed + (seed_idx or 0)))
+
+    def reply(self, session, turns: list[dict],
+              timeout) -> tuple[str, int, float]:
+        t0 = time.perf_counter()
+        said = preceding_user_text(turns, len(turns))
+        text = self._bot.respond(said)
+        if text is None:
+            text = self._bot.final()
+        return tidy_eliza(text), 0, time.perf_counter() - t0
+
+
+def eliza_participant(name: str, seed: int) -> dict:
+    """The DOCTOR seat, recorded like every other participant.
+
+    No model file and no sampling params: what reproduces this seat is
+    the vendored script plus the seed, so that is what is written down.
+    """
+    return {
+        "name": name,
+        "kind": "eliza",
+        "model": "eliza",
+        "script": os.path.basename(eliza.DOCTOR_SCRIPT),
+        "source": "github.com/wadetb/eliza@6055a7d (MIT)",
+        "eliza_seed": seed,
+    }
 
 
 def load_phrase_file(path: str) -> tuple[list[str], list[float]]:
@@ -1060,9 +1171,13 @@ def run_dialog(session, seed: dict, examiner: dict, examiner_url: str,
                student, n_turns: int, timeout) -> list[dict]:
     """One eval dialog: forced opener, then alternating turns.
 
-    `student` is any object with `.reply(session, turns, timeout)` --
-    `UrlStudent` or `PhraseStudent`.
+    `student` is any object with `.reply(session, turns, timeout)` and
+    `.reset(seed_idx)` -- `UrlStudent`, `PhraseStudent` or
+    `ElizaStudent`. The reset opens the dialog: a stateful seat must
+    not carry a rule cursor or a memory stack over from the previous
+    seed.
     """
+    student.reset(seed["idx"])
     system_prompt = examiner["system_prompt"]
     turns = [{
         "side": _EXAMINER,
@@ -1183,12 +1298,14 @@ def run_generate(args) -> int:
     phrases = weights = None
     if args.student_phrases:
         phrases, weights = load_phrase_file(args.student_phrases)
-        # The phrase bot has no sampling temperature, so the sweep is
-        # one pass and the field is recorded as null rather than as a
-        # number nothing used. The anchors keep their own temperature.
+    if args.student_phrases or args.student_eliza:
+        # Neither reference student has a sampling temperature, so the
+        # sweep is one pass and the field is recorded as null rather
+        # than as a number nothing used. The anchors keep their own.
         temperatures = [None]
     out_path = args.out or default_dialogs_path(
-        args.student or args.student_phrases or "student")
+        args.student or args.student_phrases
+        or ("eliza" if args.student_eliza else "student"))
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     jobs = plan_jobs(seeds, temperatures, args.anchor_good,
                      args.anchor_garbage, anchor_temperature)
@@ -1243,6 +1360,12 @@ def run_generate(args) -> int:
                 phrase_participant(_STUDENT, args.student_phrases,
                                    args.phrase_seed, len(phrases)),
                 args.phrase_seed)
+        # Also built once, but re-seeded per dialog by `run_dialog`.
+        eliza_student = None
+        if args.student_eliza:
+            eliza_student = ElizaStudent(
+                eliza_participant(_STUDENT, args.eliza_seed),
+                args.eliza_seed)
 
         written = skipped = 0
         with open(out_path, "a", encoding="utf-8", newline="\n") as f:
@@ -1269,6 +1392,9 @@ def run_generate(args) -> int:
                 elif phrase_student is not None:
                     student = phrase_student
                     seat = phrase_student.participant
+                elif eliza_student is not None:
+                    student = eliza_student
+                    seat = eliza_student.participant
                 else:
                     seat = texmo_participant(
                         _STUDENT, args.student, args.student_url,
@@ -1975,10 +2101,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--student-phrases", default=None,
         help="null model: a `phrases` JSON file whose entries are drawn at "
              "random, one per turn, ignoring the conversation entirely")
+    student.add_argument(
+        "--student-eliza", action="store_true",
+        help="reference model: ELIZA (Weizenbaum's DOCTOR script, vendored "
+             "in scripts/eliza/), one session per dialog -- zero weights, "
+             "reflects the examiner's own words back")
     gen.add_argument(
         "--phrase-seed", type=int, default=_DEFAULT_PHRASE_SEED,
         help=f"RNG seed for --student-phrases (default: "
              f"{_DEFAULT_PHRASE_SEED})")
+    gen.add_argument(
+        "--eliza-seed", type=int, default=_DEFAULT_ELIZA_SEED,
+        help=f"base RNG seed for --student-eliza; a dialog's session "
+             f"draws from seed + its seed index (default: "
+             f"{_DEFAULT_ELIZA_SEED})")
     examiner = gen.add_mutually_exclusive_group(required=True)
     examiner.add_argument(
         "--examiner", default=None,

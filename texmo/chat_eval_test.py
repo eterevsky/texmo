@@ -8,9 +8,10 @@ shim.
 Only the pure pieces are covered -- message assembly for both seats,
 the resumability keys and the job plan, the repetition metrics, judge
 output parsing, the c-without-b check, report building, and the
-null-model phrase bot (draws, seeding, distillation, seat record). No
-model, no server, no network: `grade_answer` is driven by a fake
-session, and the phrase bot needs no endpoint at all.
+null-model phrase bot (draws, seeding, distillation, seat record) and
+the ELIZA reference student. No model, no server, no network:
+`grade_answer` is driven by a fake session, and neither reference
+student needs an endpoint at all.
 """
 import json
 import os
@@ -494,6 +495,102 @@ def test_load_phrase_file_rejects_empty_and_non_positive(tmp_path):
         chat_eval.load_phrase_file(str(empty))
     with pytest.raises(ValueError):
         chat_eval.load_phrase_file(_write_phrase_file(tmp_path, [("x", 0)]))
+
+
+# ------------------------------------------- reference student (ELIZA)
+
+
+def _eliza_student(seed=0):
+    return chat_eval.ElizaStudent(
+        chat_eval.eliza_participant("student", seed), seed)
+
+
+def _said(*texts):
+    """Turns ending on an examiner utterance, which is what a student
+    is asked to answer."""
+    return _turns(*texts)
+
+
+def test_tidy_eliza_is_spacing_only():
+    # The port joins its output words with spaces; " ?" and " ." are
+    # the joiner's, not the script's.
+    assert chat_eval.tidy_eliza("Your  job ?") == "Your job?"
+    assert chat_eval.tidy_eliza(
+        "Earlier you said your job .") == "Earlier you said your job."
+    # A rule appending "?" to a phrase that already ended in one.
+    assert chat_eval.tidy_eliza("Oh, I like computers??") == \
+        "Oh, I like computers?"
+    # No word is touched.
+    assert chat_eval.tidy_eliza("I don't know, really!") == \
+        "I don't know, really!"
+
+
+def test_eliza_student_reflects_the_users_own_words():
+    student = _eliza_student()
+    text, tokens, elapsed = student.reply(
+        None, _said("I am sad about my job."), None)
+    # Deterministic: the matcher has no randomness, and the reply is
+    # built out of the user's own words with the pronouns flipped.
+    assert text == "Your job?"
+    # No server behind this seat.
+    assert tokens == 0 and elapsed >= 0.0
+
+
+def test_eliza_student_reads_the_last_examiner_turn_not_the_last_turn():
+    student = _eliza_student()
+    text, _, _ = student.reply(
+        None, _said("Hello.", "irrelevant", "My mother is worried."), None)
+    assert text == "Tell me more about your family."
+
+
+def test_eliza_student_cycles_its_reassembly_rules_within_a_session():
+    student = _eliza_student()
+    turns = _said("I am sad about my job.")
+    replies = [student.reply(None, turns, None)[0] for _ in range(3)]
+    # Same input, three different answers: each decomposition rule
+    # walks its reassembly list in order. That state is per session.
+    assert len(set(replies)) == 3
+    assert replies[0] == "Your job?"
+
+
+def test_eliza_student_reset_starts_a_new_session():
+    student = _eliza_student()
+    turns = _said("I am sad about my job.")
+    first = student.reply(None, turns, None)[0]
+    student.reply(None, turns, None)
+    student.reset(0)
+    # The rule cursor and the memory stack are gone with the session.
+    assert student.reply(None, turns, None)[0] == first
+    # The seed index only picks the stream; the matching is the same.
+    student.reset(5)
+    assert student.reply(None, turns, None)[0] == first
+
+
+def test_eliza_student_answers_a_quit_word_with_the_signoff():
+    # `respond` returns None on a bare quit word, but the eval always
+    # runs its 10 turns, so the seat must still say something.
+    student = _eliza_student()
+    assert student.reply(None, _said("Bye"), None)[0] == \
+        "Goodbye. Thank you for talking to me."
+
+
+def test_eliza_participant_records_the_provenance():
+    seat = chat_eval.eliza_participant("student", 3)
+    assert seat["kind"] == "eliza"
+    assert seat["model"] == "eliza"
+    assert seat["script"] == "doctor.txt"
+    assert seat["eliza_seed"] == 3
+    assert "wadetb/eliza" in seat["source"]
+    # No sampling params: neither exists for this seat.
+    assert "temperature" not in seat and "manifest" not in seat
+
+
+def test_every_student_seat_takes_a_reset():
+    # `run_dialog` calls it unconditionally, once per dialog.
+    for student in (chat_eval.UrlStudent("http://x", {}),
+                    _phrase_student([("a", 1)]),
+                    _eliza_student()):
+        student.reset(0)
 
 
 # ------------------------------------------------------- phrase distillation

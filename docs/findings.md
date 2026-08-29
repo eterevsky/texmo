@@ -6,6 +6,40 @@ entries here are the results worth re-reading a year later). Dated,
 newest first. Full data locations are noted per entry; scratch/ paths
 are machine-local and untracked.
 
+## XLA:GPU adds a fused bias on the wrong axis (2026-08-29)
+
+**A `dot` whose output layout is `{0,1}` plus a bias add is fused by
+XLA:GPU into a cuBLASLt `epilogue:"BIAS"` that computes
+`out[m,n] += b[m]` instead of `out[m,n] += b[n]`.** Silent whenever
+M == N (the wrong broadcast is shape-compatible; XLA declines the
+fusion when M != N, so only square dots corrupt). Second miscompile of
+a cuBLASLt bias epilogue on this stack after the soft-cap one below —
+same class, different mechanism, and again found only because two
+formulations of the same quantity disagreed.
+
+Reached in texmo from `Model2Jax.forward_recurrent` (vmap of `step`
+over the batch inside `lax.scan`): each layer's `[batch, width]`
+dot+bias goes feature-major downstream of a `split.cat` merge, so
+`batch == width` hits it. `models/hb32-8k-s3.json` on
+`data/soda/soda_train_ub_s3.txt` read **10.84 b/B at batch 32 and
+2.09 at batch 16 against a true 1.36**; every other batch size, the
+parallel forward, and CPU were correct, at every sample length. It
+does not need trained weights, only a nonzero bias — at init the
+error is just small.
+
+Only the recurrent eval path (`ManagerJax.eval`, `texmo.py eval`) is
+structurally exposed; the parallel forward, the training step, and
+unbatched generation never produce a square `{0,1}` dot. Search
+results are safe because the eval batch is 1024 and no searched layer
+is 1024 wide — the exposure is `texmo.py eval --chunk W` and any
+hand-run eval whose batch equals a layer width. Fixed by
+`--xla_gpu_cublas_fallback=false`, injected at `import texmo`
+(`texmo/xla_flags.py`); perf-neutral to favorable on this repo's
+shapes. `--xla_gpu_enable_cublaslt=false` does NOT help (inert in this
+build). Seen on jax/jaxlib 0.11.0 + winjax CUDA 13, sm_120; other
+CUDA machines are unverified. 20-line standalone repro:
+`scratch/recurrent_bug/repro.py`.
+
 ## Simplified data moves an 8k model from ~1% to ~80% grammatical (2026-08-28)
 
 Same spec and hyperparameters as the baseline, retrained on 30k

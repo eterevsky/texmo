@@ -17,20 +17,65 @@ Three target corpora, all in the same `Name: utterance` format as
         "That sounds fun.").
     s3  User turns SIMPLIFIED (the s1 Bot rule, applied to the User
         side), Bot turns TRIVIAL.
+    s4  s3, except that a Bot turn answering a yes/no question says
+        "Yes." or "No." -- see "Polar answers" below.
 
-The three differ only in *selection*, so generation runs once and
-renders three times:
+The first three differ only in *selection*, so generation runs once
+and renders three times:
 
     uv run --with pyarrow python scripts/simplify_corpus.py generate \\
         --n-dialogs 1000 [--start 0] [--parallel 4]
     uv run --with pyarrow python scripts/simplify_corpus.py render \\
-        --variant s1
+        --variant s1 [--n-dialogs 30000]
 
 `generate` asks the LLM for BOTH rewrites of every turn in one
 request and appends one JSONL record per dialog to
 `data/simplified/simplify-log.jsonl`; `render` selects fields out of
 that log per the table above. One generation pass, three corpora, and
 a new variant is a render away rather than a regeneration.
+
+`--n-dialogs` on `render` truncates the log to its first N records --
+its *file* order, which is the order they were rendered in. A log that
+has grown since an earlier corpus was written can still reproduce it,
+and a new variant can cover exactly the same dialogs.
+
+## Polar answers (s4)
+
+Measured on the milestone-2 eval, an 8k model trained on s3 is 92%
+grammatical but only 26% responsive -- exactly the floor of a null
+model drawing its own top-20 phrases at random. The simplification
+prompt steered *away* from bare "Yes."/"No." (it asked for varied
+phrases), so the one place where a purely structural cue determines a
+content-appropriate short answer is underused.
+
+s4 puts it back. A User turn that ends in an auxiliary-initial
+question ("Do you...", "Are you...", optionally after a short lead-in:
+`is_yes_no_question`) is a cue a tiny model can plausibly detect, and
+the right answer to it is one of two words. The `classify` subcommand
+asks a second, smaller LLM what the ORIGINAL Bot reply meant as an
+answer to that question --
+
+    uv run python scripts/simplify_corpus.py classify \\
+        [--n-dialogs 30000] [--parallel 16]
+
+-- where "as an answer" is read broadly: a request or an offer
+("Can you help me?", "Do you want some?") is a yes/no question for
+this purpose, granted or refused, because a tiny model cannot tell it
+from a true polar question either and "Yes." answers all of them.
+Narrowing the classifier to true polar questions was tried first and
+labelled only 20% of the detected turns, which is too thin a signal to
+learn from; the broad reading labels ~80%.
+
+The subcommand logs `{dialog_idx, turn, label}` (yes / no / other) to
+`data/simplified/polar-log.jsonl`, resumably, keyed by that pair.
+`render --variant s4` then writes "Yes." / "No." for the labelled
+turns and the s3 trivial phrase everywhere else, so s4 minus s3 is
+exactly the polar answers. A classification that failed is recorded as
+`other`, which is the s3 behaviour: no hole, no retry.
+
+The substitutes are bare and unvaried on purpose. "Yes, I do." would
+be more natural and would blunt the point, which is a single cue with
+a single answer to learn.
 
 ## Source and dialog identity
 
@@ -129,8 +174,10 @@ except ImportError:  # pragma: no cover - exercised by the CLI, not tests
 
 _DEFAULT_SOURCE = os.path.join("data", "soda", "train.parquet")
 _DEFAULT_LOG = os.path.join("data", "simplified", "simplify-log.jsonl")
+_DEFAULT_POLAR_LOG = os.path.join("data", "simplified", "polar-log.jsonl")
 _CORPUS_DIR = os.path.join("data", "soda")
 _DEFAULT_MODEL = "C:/Users/oleg/models/gemma-4-12b-it-Q6_K.gguf"
+_DEFAULT_POLAR_MODEL = "C:/Users/oleg/models/Qwen3-8B-Q6_K.gguf"
 
 _COLUMNS = ["dialogue", "speakers"]
 _BATCH_SIZE = 4096
@@ -154,6 +201,15 @@ _DEFAULT_MAX_TOKENS = 2048
 _DEFAULT_CTX = 16384
 _DEFAULT_STARTUP_TIMEOUT = 600
 _DEFAULT_REQUEST_TIMEOUT = 600.0
+
+# The classification pass is the opposite shape: a cached ~350-token
+# system prefix, two short lines and a one-word answer. Many small
+# slots, then; `-c` is the total llama-server splits across them, so
+# 16 slots get 1024 tokens each -- far more than a pair ever needs.
+_DEFAULT_POLAR_PARALLEL = 16
+_DEFAULT_POLAR_CTX = 16384
+# One word, with room for an empty <think> block a template may leak.
+_DEFAULT_POLAR_MAX_TOKENS = 32
 
 # Loud warning threshold for the most common trivial phrase.
 _TRIVIAL_TOP_WARN = 0.40
@@ -796,6 +852,339 @@ def format_summary_block(records: list[dict]) -> str:
         + format_summary(summarize(records)))
 
 
+# --------------------------------------------- yes/no question detection
+
+
+# Auxiliaries that can open an English polar question. "May", "shall"
+# and "must" are deliberately absent -- rare in this corpus and almost
+# always stilted requests, so they would cost precision on the cue and
+# buy almost no coverage.
+_AUX_VERBS = frozenset("""
+do does did don't doesn't didn't
+is are am was were isn't aren't wasn't weren't
+have has had haven't hasn't hadn't
+can could cannot can't couldn't
+will would won't wouldn't
+should shouldn't
+""".split())
+
+# Discourse markers that may sit in front of the auxiliary with no
+# comma at all ("So did she say yes?"). One of these is skipped, and
+# then the comma rule below still applies, so "Hey Marcus, are you..."
+# works too.
+_LEAD_IN_WORDS = frozenset(
+    "so and but well oh ok okay hey hi hmm then now yeah um".split())
+
+# At most this many words may precede the auxiliary as a lead-in
+# closed by a comma ("So, do you...", "Hey Marcus, are you...").
+_LEAD_IN_MAX_WORDS = 2
+
+# Sentence end: a terminator, any closing quotes/brackets, whitespace.
+_SENTENCE_END = re.compile(r"[.!?]['\"’”)\]]*\s+")
+# A word, apostrophes included so "don't" survives as one token.
+_WORD = re.compile(r"[A-Za-z'’]+")
+# Trailing characters tolerated after the final "?".
+_QUESTION_TAIL = " \t\"'’”)]}"
+
+
+def final_question(text: str) -> str | None:
+    """The last sentence of `text`, if the turn ends in a question.
+
+    A simplified User turn runs to two sentences and puts the question
+    last ("That is sad. Can you come later?"), so the cue has to be
+    looked for there rather than at the start of the turn.
+    """
+    stripped = text.strip().rstrip(_QUESTION_TAIL)
+    if not stripped.endswith("?"):
+        return None
+    matches = list(_SENTENCE_END.finditer(stripped))
+    start = matches[-1].end() if matches else 0
+    return stripped[start:]
+
+
+def is_yes_no_question(text: str) -> bool:
+    """Does `text` end in an auxiliary-initial (polar) question?
+
+    Purely structural, and deliberately so: this is the cue a
+    ~8k-weight model could plausibly learn to detect. It accepts
+    requests and offers dressed as questions ("Can you help me?", "Do
+    you want some?") along with true polar questions, which is on
+    purpose -- a model cannot tell them apart structurally either, and
+    "Yes." answers all three. What the reply *meant* is the
+    classifier's business, not this function's.
+    """
+    question = final_question(text)
+    if question is None:
+        return False
+    head = question
+    first = _WORD.search(head)
+    if first is not None and first.group(0).lower() in _LEAD_IN_WORDS:
+        head = head[first.end():]
+    comma = head.find(",")
+    if comma != -1:
+        lead_words = _WORD.findall(head[:comma])
+        if 0 < len(lead_words) <= _LEAD_IN_MAX_WORDS:
+            head = head[comma + 1:]
+    match = _WORD.search(head)
+    if match is None:
+        return False
+    return match.group(0).lower().replace("’", "'") in _AUX_VERBS
+
+
+# ------------------------------------------------- polar classification
+
+
+YES, NO, OTHER = "yes", "no", "other"
+POLAR_LABELS = (YES, NO, OTHER)
+
+_POLAR_ALIASES = {
+    "yes": YES, "yeah": YES, "yep": YES, "affirmative": YES, "true": YES,
+    "no": NO, "nope": NO, "negative": NO, "false": NO,
+    "other": OTHER, "neither": OTHER, "unclear": OTHER, "none": OTHER,
+    "null": OTHER, "na": OTHER, "unknown": OTHER,
+}
+
+_POLAR_SYSTEM = """\
+You label short conversation replies. You are given the last thing a \
+"User" said -- a yes/no question, a request, or an offer -- and the \
+reply "Bot" gave. Decide what the reply MEANS as an answer, and \
+answer with exactly one word:
+
+yes -- affirmative in effect: it confirms, agrees, admits, accepts \
+the offer, or grants the request. A reply that says yes and then adds \
+detail, or that simply gets on with what was asked, is still yes.
+no -- negative in effect: it denies, refuses, declines, disagrees, or \
+says it cannot or will not.
+other -- neither: the reply dodges, answers some other question, says \
+it does not know, or has nothing to do with what the User said.
+
+Judge the meaning, not the words: "Of course, what's up?" is yes, \
+"Sure, let me take a look." is yes, "I wish I could, but I'm busy." \
+is no, "Why do you ask?" is other.
+
+Reply with one word -- yes, no, or other -- and nothing else."""
+
+_LABEL_WORD = re.compile(r"[a-z]+")
+
+
+def polar_messages(question: str, reply: str) -> list[dict]:
+    """The classification request for one (question, reply) pair.
+
+    The system message is a constant, so every request shares a
+    byte-identical prefix and `cache_prompt` has something to reuse.
+    """
+    return [
+        {"role": "system", "content": _POLAR_SYSTEM},
+        {"role": "user", "content": f"User: {question}\nBot: {reply}"},
+    ]
+
+
+def parse_polar(text: str) -> tuple[str, bool]:
+    """`(label, loose)` from a classifier reply; raise ValueError.
+
+    `loose` marks a reply that needed more than its first word to
+    read, so the tally can keep those apart from clean one-word
+    answers.
+    """
+    body = ce.strip_fences(text).strip().lower()
+    words = _LABEL_WORD.findall(body)
+    if not words:
+        raise ValueError(f"no word in the reply: {text!r}")
+    if words[0] in _POLAR_ALIASES:
+        return _POLAR_ALIASES[words[0]], False
+    for word in words[1:]:
+        if word in _POLAR_ALIASES:
+            return _POLAR_ALIASES[word], True
+    raise ValueError(f"no label in the reply: {text!r}")
+
+
+def polar_jobs(records: list[dict], variant: str = "s3") -> list[tuple]:
+    """Every Bot turn that answers a detected yes/no question.
+
+    `(dialog_idx, turn_idx, question, reply)`, where the question is
+    the text the corpus actually shows the model (the `variant`
+    selection for the User side) and the reply is the ORIGINAL Bot
+    utterance -- the only field still carrying enough meaning to be
+    affirmative or negative.
+    """
+    jobs = []
+    for record in records:
+        if "error" in record or not record.get("turns"):
+            continue
+        turns = record["turns"]
+        for i, turn in enumerate(turns):
+            if turn["side"] != _BOT or i == 0:
+                continue
+            previous = turns[i - 1]
+            if previous["side"] != _USER:
+                continue
+            question, _ = select_text(previous, variant)
+            if not is_yes_no_question(question):
+                continue
+            reply = turn.get("original") or turn.get("simple") or ""
+            jobs.append((record["dialog_idx"], i, question, reply))
+    return jobs
+
+
+def classify_polar(session, url: str, participant: dict, dialog_idx: int,
+                   turn_idx: int, question: str, reply: str,
+                   timeout) -> dict:
+    """One (question, reply) pair to one polar-log record.
+
+    A failure is logged as `other` rather than dropped: the renderer
+    then leaves that Bot turn its trivial phrase, which is exactly the
+    s3 behaviour, and a re-run does not have to redo the turn.
+    """
+    try:
+        raw, _, _ = ce.ask(
+            session, url, participant, polar_messages(question, reply),
+            timeout)
+    except Exception as e:  # after dialog_harness's own HTTP retries
+        logging.warning(f"dialog {dialog_idx} turn {turn_idx}: {e}")
+        return {"dialog_idx": dialog_idx, "turn": turn_idx,
+                "label": OTHER, "error": str(e)}
+    try:
+        label, loose = parse_polar(raw)
+    except ValueError as e:
+        logging.warning(f"dialog {dialog_idx} turn {turn_idx}: {e}")
+        return {"dialog_idx": dialog_idx, "turn": turn_idx,
+                "label": OTHER, "error": str(e), "raw": raw[:200]}
+    record = {"dialog_idx": dialog_idx, "turn": turn_idx, "label": label}
+    if loose:
+        record["loose"] = True
+        record["raw"] = raw[:200]
+    return record
+
+
+def read_polar_records(path: str) -> list[dict]:
+    """Every polar-log record carrying the keys the renderer needs."""
+    return [r for r in read_log(path) if "dialog_idx" in r and "turn" in r]
+
+
+def polar_map(records: list[dict]) -> dict:
+    """`{dialog_idx: {turn_idx: label}}` from polar-log records."""
+    out: dict = {}
+    for record in records:
+        out.setdefault(record["dialog_idx"], {})[record["turn"]] = (
+            record.get("label", OTHER))
+    return out
+
+
+def polar_keys(path: str) -> set:
+    """`(dialog_idx, turn)` pairs already classified."""
+    return {(r["dialog_idx"], r["turn"]) for r in read_polar_records(path)}
+
+
+def summarize_polar(records: list[dict]) -> dict:
+    counts = collections.Counter(r.get("label", OTHER) for r in records)
+    return {
+        "classified": len(records),
+        YES: counts[YES],
+        NO: counts[NO],
+        OTHER: counts[OTHER],
+        "errors": sum(1 for r in records if r.get("error")),
+        "loose": sum(1 for r in records if r.get("loose")),
+    }
+
+
+def format_polar_block(records: list[dict]) -> str:
+    """The `classify` summary, headed so it stands out in the console."""
+    summary = summarize_polar(records)
+    total = max(summary["classified"], 1)
+    lines = [f"\n--- polar classification over {summary['classified']} "
+             f"turn(s) ---"]
+    for label in POLAR_LABELS:
+        lines.append(f"  {label:<6}{summary[label]:>8} "
+                     f"({100 * summary[label] / total:.1f}%)")
+    lines.append(f"  request/parse failures: {summary['errors']}, "
+                 f"loose parses: {summary['loose']}")
+    return "\n".join(lines)
+
+
+def polar_participant(model: str, temperature: float,
+                      max_tokens: int) -> dict:
+    """The classifier seat: no thinking, and a cacheable prefix."""
+    return {
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "extra": dict(_NO_THINKING, cache_prompt=True),
+    }
+
+
+def run_classify(args) -> int:
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    records = read_log(args.log)
+    if args.n_dialogs is not None:
+        records = records[:args.n_dialogs]
+    jobs = polar_jobs(records, args.variant)
+    done = polar_keys(args.out)
+    todo = [job for job in jobs if (job[0], job[1]) not in done]
+    print(f"{len(records)} log record(s): {len(jobs)} Bot turn(s) answer a "
+          f"yes/no question, {len(jobs) - len(todo)} already in "
+          f"{args.out}, {len(todo)} to do")
+    if not todo:
+        print(format_polar_block(read_polar_records(args.out)))
+        return 0
+
+    # `--model` keeps its default only when no `--url` was given: an
+    # argparse default survives the mutually-exclusive group.
+    model_path = None if args.url else (args.model or _DEFAULT_POLAR_MODEL)
+    model = (os.path.basename(model_path) if model_path
+             else args.model_name)
+    participant = polar_participant(
+        model, args.temperature, args.max_tokens)
+    timeout = (dh._CONNECT_TIMEOUT, args.request_timeout)
+    session = requests.Session()
+    server = None
+    written = 0
+    t_start = time.time()
+    t_ready = t_done = None
+    try:
+        if model_path:
+            server = ce.launch_llama_server(
+                model_path, args.out, _server_conf(args))
+            dh.wait_until_ready(server, session, args.startup_timeout)
+            url = server.base_url
+            logging.info(f"llama-server on port {server.port} is ready "
+                         f"({args.parallel} slots)")
+        else:
+            url = args.url
+        t_ready = time.time()
+
+        def work(job) -> dict:
+            # `thread_session()` must run *in* the worker: called at
+            # submit time it would hand every worker the main thread's
+            # session.
+            return classify_polar(
+                thread_session(), url, participant, *job, timeout)
+
+        executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=args.parallel_requests or args.parallel)
+        try:
+            futures = [executor.submit(work, job) for job in todo]
+            with open(args.out, "a", encoding="utf-8", newline="\n") as f:
+                for future in concurrent.futures.as_completed(futures):
+                    dh.write_record(f, future.result())
+                    written += 1
+                    if written % 500 == 0 or written == len(todo):
+                        rate = written / max(time.time() - t_ready, 1e-6)
+                        print(f"[{written}/{len(todo)}] {rate:.1f} turns/s")
+            t_done = time.time()
+        except KeyboardInterrupt:
+            print(f"\ninterrupted; {written} record(s) in {args.out}")
+        finally:
+            t_done = t_done or time.time()
+            executor.shutdown(wait=False, cancel_futures=True)
+    finally:
+        if server is not None:
+            server.stop()
+    print(f"\nwrote {written} record(s) to {args.out} in "
+          f"{t_done - t_start:.1f}s")
+    print(format_polar_block(read_polar_records(args.out)))
+    return 0
+
+
 # ------------------------------------------------------------ rendering
 
 
@@ -807,7 +1196,20 @@ VARIANTS = {
     "s1": {_USER: "original", _BOT: "simple"},
     "s2": {_USER: "original", _BOT: "trivial"},
     "s3": {_USER: "simple", _BOT: "trivial"},
+    # s4: s3, except that a Bot turn whose original reply *meant* yes
+    # or no to an auxiliary-initial User question becomes the bare
+    # word. Everything else is the s3 trivial phrase, so s4 - s3 is
+    # exactly the polar answers.
+    "s4": {_USER: "simple", _BOT: "trivial"},
 }
+
+# Variants that additionally consult the polar log.
+POLAR_VARIANTS = frozenset({"s4"})
+
+# The two answers s4 substitutes in. Bare and punctuated like the
+# trivial phrases around them, and deliberately not varied ("Yes, I
+# do."): the point is a single, maximally learnable cue -> answer map.
+POLAR_TEXT = {YES: "Yes.", NO: "No."}
 
 # What to fall back on when the chosen field is missing or empty. A
 # validated log never needs this; an older or hand-edited one might,
@@ -829,11 +1231,23 @@ def select_text(turn: dict, variant: str) -> tuple[str, str]:
     raise ValueError(f"no usable text for a {turn['side']} turn: {turn!r}")
 
 
-def render_dialog(turns: list[dict], variant: str, stats: dict) -> str:
-    """One dialog as `Name: utterance` lines separated by blank lines."""
+def render_dialog(turns: list[dict], variant: str, stats: dict,
+                  polar: dict | None = None) -> str:
+    """One dialog as `Name: utterance` lines separated by blank lines.
+
+    `polar` is `{turn index: "yes"/"no"/"other"}` for this dialog; only
+    the polar variants pass it, and only `yes`/`no` override the text.
+    """
     lines = []
-    for turn in turns:
-        text, field = select_text(turn, variant)
+    for i, turn in enumerate(turns):
+        label = (polar or {}).get(i)
+        override = POLAR_TEXT.get(label) if turn["side"] == _BOT else None
+        if override is not None:
+            text, field = override, VARIANTS[variant][turn["side"]]
+            stats["polar"] += 1
+            stats[f"polar_{label}"] += 1
+        else:
+            text, field = select_text(turn, variant)
         text, collapsed = collapse(text)
         stats["collapsed"] += collapsed
         stats["fallbacks"] += field != VARIANTS[variant][turn["side"]]
@@ -842,16 +1256,21 @@ def render_dialog(turns: list[dict], variant: str, stats: dict) -> str:
     return "\n\n".join(lines)
 
 
-def render_corpus(records: list[dict], variant: str) -> tuple[str, dict]:
+def render_corpus(records: list[dict], variant: str,
+                  polar: dict | None = None) -> tuple[str, dict]:
     """The whole corpus text for one variant, plus its tallies.
 
     Failed dialogs are skipped; the rest are emitted in `dialog_idx`
     order (the log is in completion order, which the thread pool
     shuffles), two blank lines between dialogs, one trailing newline
     -- the format `make_soda_txt.py` writes.
+
+    `polar` is the `{dialog_idx: {turn index: label}}` map of
+    `polar_map`, consulted only by the variants in `POLAR_VARIANTS`.
     """
     stats = {"dialogs": 0, "turns": 0, "failed": 0, "collapsed": 0,
-             "fallbacks": 0}
+             "fallbacks": 0, "polar": 0, f"polar_{YES}": 0,
+             f"polar_{NO}": 0}
     usable = []
     for record in records:
         if "error" in record or not record.get("turns"):
@@ -861,7 +1280,10 @@ def render_corpus(records: list[dict], variant: str) -> tuple[str, dict]:
     usable.sort(key=lambda r: r["dialog_idx"])
     chunks = []
     for record in usable:
-        chunks.append(render_dialog(record["turns"], variant, stats))
+        by_turn = (polar or {}).get(record["dialog_idx"]) \
+            if variant in POLAR_VARIANTS else None
+        chunks.append(
+            render_dialog(record["turns"], variant, stats, by_turn))
         stats["dialogs"] += 1
     text = "\n\n\n".join(chunks)
     if text:
@@ -877,9 +1299,20 @@ def run_render(args) -> int:
     records = read_log(args.log)
     if not records:
         raise ValueError(f"no records in {args.log}")
+    if args.n_dialogs is not None:
+        records = records[:args.n_dialogs]
+    polar = None
+    if args.variant in POLAR_VARIANTS:
+        polar_records = read_polar_records(args.polar_log)
+        if not polar_records:
+            raise ValueError(
+                f"variant {args.variant} needs a polar log; "
+                f"{args.polar_log} has no usable records (run "
+                f"`simplify_corpus.py classify` first)")
+        polar = polar_map(polar_records)
     out_path = args.out or default_corpus_path(args.variant)
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    text, stats = render_corpus(records, args.variant)
+    text, stats = render_corpus(records, args.variant, polar)
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
     print(f"{args.log} -> {out_path} ({args.variant}: "
@@ -890,6 +1323,12 @@ def run_render(args) -> int:
     print(f"  skipped (failed in the log): {stats['failed']}")
     print(f"  newline collapses: {stats['collapsed']}, "
           f"field fallbacks: {stats['fallbacks']}")
+    if args.variant in POLAR_VARIANTS:
+        turns = max(stats["turns"], 1)
+        print(f"  polar answers: {stats['polar']} "
+              f"({100 * stats['polar'] / turns:.1f}% of all turns) -- "
+              f"{stats[f'polar_{YES}']} \"{POLAR_TEXT[YES]}\", "
+              f"{stats[f'polar_{NO}']} \"{POLAR_TEXT[NO]}\"")
     return 0
 
 
@@ -963,6 +1402,71 @@ def build_parser() -> argparse.ArgumentParser:
              f"{_DEFAULT_REQUEST_TIMEOUT})")
     gen.set_defaults(func=run_generate)
 
+    cls = subparsers.add_parser(
+        "classify",
+        help="label the Bot answers to yes/no questions yes/no/other")
+    cls.add_argument(
+        "--log", default=_DEFAULT_LOG,
+        help=f"a `generate` output JSONL (default: {_DEFAULT_LOG})")
+    cls.add_argument(
+        "--n-dialogs", type=int, default=None,
+        help="classify only the first N records of the log, so a corpus "
+             "variant covers exactly the dialogs an earlier render did "
+             "(default: all)")
+    cls.add_argument(
+        "--variant", default="s3", choices=sorted(VARIANTS),
+        help="which variant's User text the question is read from "
+             "(default: s3)")
+    endpoint = cls.add_mutually_exclusive_group()
+    endpoint.add_argument(
+        "--model", default=None,
+        help=f"GGUF to serve with llama-server (default, unless --url is "
+             f"given: {_DEFAULT_POLAR_MODEL})")
+    endpoint.add_argument(
+        "--url", default=None,
+        help="an already-running chat-completions endpoint instead")
+    cls.add_argument(
+        "--model-name", default="external",
+        help="model label recorded with each turn when --url is used")
+    cls.add_argument(
+        "--parallel", type=int, default=_DEFAULT_POLAR_PARALLEL,
+        help=f"llama-server decode slots (-np) and, unless "
+             f"--parallel-requests says otherwise, in-flight requests "
+             f"(default: {_DEFAULT_POLAR_PARALLEL})")
+    cls.add_argument(
+        "--parallel-requests", type=int, default=None,
+        help="in-flight requests, if different from --parallel")
+    cls.add_argument(
+        "--temperature", type=float, default=0.0,
+        help="sampling temperature (default: 0, near-deterministic)")
+    cls.add_argument(
+        "--max-tokens", type=int, default=_DEFAULT_POLAR_MAX_TOKENS,
+        help=f"cap on one reply (default: {_DEFAULT_POLAR_MAX_TOKENS}; the "
+             "prompt asks for one word)")
+    cls.add_argument(
+        "--out", default=_DEFAULT_POLAR_LOG,
+        help=f"output JSONL (default: {_DEFAULT_POLAR_LOG})")
+    cls.add_argument(
+        "--llama-binary", default=None,
+        help="llama-server executable (default: $LLAMA_SERVER, then PATH, "
+             "then the known local install)")
+    cls.add_argument(
+        "--ngl", type=int, default=99,
+        help="GPU layers for the launched llama-server (default: 99)")
+    cls.add_argument(
+        "--ctx-size", type=int, default=_DEFAULT_POLAR_CTX,
+        help=f"llama-server context, split across the slots "
+             f"(default: {_DEFAULT_POLAR_CTX})")
+    cls.add_argument(
+        "--startup-timeout", type=float, default=_DEFAULT_STARTUP_TIMEOUT,
+        help=f"seconds to wait for /health (default: "
+             f"{_DEFAULT_STARTUP_TIMEOUT})")
+    cls.add_argument(
+        "--request-timeout", type=float, default=_DEFAULT_REQUEST_TIMEOUT,
+        help=f"read timeout per request in seconds (default: "
+             f"{_DEFAULT_REQUEST_TIMEOUT})")
+    cls.set_defaults(func=run_classify)
+
     ren = subparsers.add_parser(
         "render", help="write one corpus variant out of a generate log")
     ren.add_argument(
@@ -971,7 +1475,18 @@ def build_parser() -> argparse.ArgumentParser:
     ren.add_argument(
         "--variant", required=True, choices=sorted(VARIANTS),
         help="s1: User original + Bot simple; s2: User original + Bot "
-             "trivial; s3: User simple + Bot trivial")
+             "trivial; s3: User simple + Bot trivial; s4: s3 with polar "
+             "answers")
+    ren.add_argument(
+        "--n-dialogs", type=int, default=None,
+        help="render only the first N records of the log (default: all); "
+             "how a later variant covers exactly the dialogs an earlier "
+             "one did, the log having grown in between")
+    ren.add_argument(
+        "--polar-log", default=_DEFAULT_POLAR_LOG,
+        help=f"a `classify` output JSONL, required by the polar variants "
+             f"({', '.join(sorted(POLAR_VARIANTS))}); default: "
+             f"{_DEFAULT_POLAR_LOG}")
     ren.add_argument(
         "--out", default=None,
         help="output text file (default: "

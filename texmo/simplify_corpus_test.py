@@ -291,6 +291,9 @@ def test_existing_indices_of_a_missing_file_is_empty(tmp_path):
     ("s1", [("User", "original"), ("Bot", "simple")]),
     ("s2", [("User", "original"), ("Bot", "trivial")]),
     ("s3", [("User", "simple"), ("Bot", "trivial")]),
+    # s4 selects exactly like s3; the polar answers are an override
+    # applied on top, in `render_dialog`.
+    ("s4", [("User", "simple"), ("Bot", "trivial")]),
 ])
 def test_select_text_follows_the_variant_table(variant, expected):
     turns = [
@@ -320,7 +323,8 @@ def test_render_corpus_sorts_skips_failures_and_formats():
     text, stats = sc.render_corpus(records, "s1")
     assert text == ("User: u0\n\nBot: s0\n\n\nUser: u2\n\nBot: s2\n")
     assert stats == {"dialogs": 2, "turns": 4, "failed": 1,
-                     "collapsed": 0, "fallbacks": 0}
+                     "collapsed": 0, "fallbacks": 0, "polar": 0,
+                     "polar_yes": 0, "polar_no": 0}
 
 
 def test_render_corpus_collapses_newlines_and_counts_them():
@@ -337,6 +341,196 @@ def test_render_corpus_of_nothing_is_empty():
     text, stats = sc.render_corpus([{"dialog_idx": 0, "error": "x"}], "s2")
     assert text == ""
     assert stats["dialogs"] == 0 and stats["failed"] == 1
+
+
+# -------------------------------------------- yes/no question detection
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Do you like tea?", "Do you like tea?"),
+    ("That is sad. Can you come later?", "Can you come later?"),
+    ("Really! Are you sure?", "Are you sure?"),
+    ('He said "no". Is that true?', "Is that true?"),
+    # Trailing punctuation after the question mark is tolerated.
+    ('Is that true?"', "Is that true?"),
+    ("I am fine.", None),
+    ("Tell me about it", None),
+])
+def test_final_question_is_the_last_sentence_of_a_question_turn(
+        text, expected):
+    assert sc.final_question(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "Do you like tea?",
+    "Does she know?",
+    "Did you steal a candy bar today?",
+    "Are you coming to the party on Saturday?",
+    "Is this the main water valve?",
+    "Am I late?",
+    "Was it good?",
+    "Were they there?",
+    "Can I try on your shirt?",
+    "Could you help me?",
+    "Will you come?",
+    "Would you like some?",
+    "Have you ever been there?",
+    "Has he called?",
+    "Had you eaten?",
+    "Should I go?",
+    "Don't you want to come?",
+    "Isn’t that nice?",          # a curly apostrophe
+    "That is sad. Can you come later?",   # the question is the 2nd sentence
+    "So, do you like it?",                # comma lead-in
+    "So did she say yes?",                # bare discourse marker
+    "Hey Marcus, are you coming to the party?",   # name lead-in
+    "Is it raining, do you know?",        # the comma is not a lead-in
+])
+def test_is_yes_no_question_accepts_auxiliary_initial_questions(text):
+    assert sc.is_yes_no_question(text)
+
+
+@pytest.mark.parametrize("text", [
+    "What do you think?",
+    "Well, what do you think?",
+    "How much did it cost?",
+    "Where do you live?",
+    "Why did they do that?",
+    "You like tea, right?",               # a tag question, not aux-initial
+    "I am fine.",                         # not a question at all
+    "Tell me about it.",
+    "Do you like tea? What is your name?",   # the last sentence rules
+    "May I have some?",                   # a bare request, not a question
+    "Shall we go?",
+    "If you have the time and you are free, can you help?",  # long lead-in
+    "",
+    "?",
+])
+def test_is_yes_no_question_rejects_everything_else(text):
+    assert not sc.is_yes_no_question(text)
+
+
+# ------------------------------------------------- polar classification
+
+
+@pytest.mark.parametrize("reply,label", [
+    ("yes", sc.YES),
+    ("Yes", sc.YES),
+    ("no", sc.NO),
+    ("No.", sc.NO),
+    ("other", sc.OTHER),
+    ("Neither", sc.OTHER),
+    ("<think>\n\n</think>\n\nyes", sc.YES),
+    ("```\nno\n```", sc.NO),
+])
+def test_parse_polar_reads_a_one_word_answer(reply, label):
+    assert sc.parse_polar(reply) == (label, False)
+
+
+def test_parse_polar_digs_a_label_out_of_a_sentence():
+    assert sc.parse_polar("The answer is yes.") == (sc.YES, True)
+
+
+@pytest.mark.parametrize("reply", ["", "hmm", "42"])
+def test_parse_polar_rejects_a_reply_without_a_label(reply):
+    with pytest.raises(ValueError):
+        sc.parse_polar(reply)
+
+
+def test_polar_messages_share_a_constant_system_prefix():
+    a = sc.polar_messages("Do you like tea?", "Yeah, I love it.")
+    b = sc.polar_messages("Are you ready?", "Not yet.")
+    assert a[0] == b[0]
+    assert a[1]["content"] == "User: Do you like tea?\nBot: Yeah, I love it."
+
+
+def test_polar_jobs_pairs_the_simple_question_with_the_original_reply():
+    record = _record(4, [
+        _log_turn(sc._USER, "Anyway, do you happen to like tea at all?",
+                  "Do you like tea?"),
+        _log_turn(sc._BOT, "Absolutely, I drink it daily.", "I like tea.",
+                  "Yes, I do."),
+        _log_turn(sc._USER, "What else do you drink?", "What else?"),
+        _log_turn(sc._BOT, "Coffee.", "Coffee.", "Coffee."),
+    ])
+    assert sc.polar_jobs([record]) == [
+        (4, 1, "Do you like tea?", "Absolutely, I drink it daily.")]
+
+
+def test_polar_jobs_skips_failures_and_bot_turns_that_open_a_dialog():
+    opener = _record(1, [_log_turn(sc._BOT, "Do you like tea?",
+                                   "Do you like tea?", "Yes.")])
+    assert sc.polar_jobs([opener, {"dialog_idx": 2, "error": "x"}]) == []
+
+
+def test_polar_map_keeps_the_last_label_per_turn():
+    records = [{"dialog_idx": 3, "turn": 1, "label": "yes"},
+               {"dialog_idx": 3, "turn": 5, "label": "no"}]
+    assert sc.polar_map(records) == {3: {1: "yes", 5: "no"}}
+
+
+def test_polar_records_round_trip_through_a_log(tmp_path):
+    path = tmp_path / "polar.jsonl"
+    path.write_text(
+        '{"dialog_idx": 3, "turn": 1, "label": "yes"}\n'
+        '{"dialog_idx": 3, "turn": 3, "label": "other", "error": "boom"}\n'
+        '{"no_keys": true}\n', encoding="utf-8")
+    assert sc.polar_keys(str(path)) == {(3, 1), (3, 3)}
+    summary = sc.summarize_polar(sc.read_polar_records(str(path)))
+    assert summary["classified"] == 2
+    assert summary[sc.YES] == 1 and summary[sc.OTHER] == 1
+    assert summary["errors"] == 1
+
+
+# ------------------------------------------------------------- render s4
+
+
+def _s4_record():
+    """One dialog: a polar question, a plain question, two Bot turns."""
+    return _record(0, [
+        _log_turn(sc._USER, "u0-orig", "Do you like tea?"),
+        _log_turn(sc._BOT, "b1-orig", "b1-simp", "I like it."),
+        _log_turn(sc._USER, "u2-orig", "What else?"),
+        _log_turn(sc._BOT, "b3-orig", "b3-simp", "Coffee."),
+    ])
+
+
+@pytest.mark.parametrize("label,expected", [
+    ("yes", "Yes."),
+    ("no", "No."),
+    # An unclassifiable turn keeps its trivial phrase -- s3 behaviour.
+    ("other", "I like it."),
+])
+def test_render_s4_substitutes_only_the_labelled_turns(label, expected):
+    text, stats = sc.render_corpus(
+        [_s4_record()], "s4", {0: {1: label}})
+    assert text == (f"User: Do you like tea?\n\nBot: {expected}\n\n"
+                    f"User: What else?\n\nBot: Coffee.\n")
+    if label == sc.OTHER:
+        assert stats["polar"] == 0
+    else:
+        assert stats["polar"] == 1
+        assert stats[f"polar_{label}"] == 1
+
+
+def test_render_s4_without_a_polar_map_is_exactly_s3():
+    record = _s4_record()
+    s3, _ = sc.render_corpus([record], "s3")
+    s4, stats = sc.render_corpus([record], "s4", {})
+    assert s4 == s3
+    assert stats["polar"] == 0
+
+
+def test_render_s3_ignores_the_polar_map():
+    text, stats = sc.render_corpus([_s4_record()], "s3", {0: {1: "yes"}})
+    assert "Yes." not in text
+    assert stats["polar"] == 0
+
+
+def test_render_s4_ignores_a_label_on_a_user_turn():
+    # A stale or mis-keyed label must never rewrite the User side.
+    text, _ = sc.render_corpus([_s4_record()], "s4", {0: {0: "yes"}})
+    assert text.startswith("User: Do you like tea?")
 
 
 # ------------------------------------------------------------ summary

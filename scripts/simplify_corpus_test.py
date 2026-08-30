@@ -13,6 +13,7 @@ so this module imports in an environment without it.
 """
 import json
 import os
+import random
 import sys
 
 import pytest
@@ -294,6 +295,8 @@ def test_existing_indices_of_a_missing_file_is_empty(tmp_path):
     # s4 selects exactly like s3; the polar answers are an override
     # applied on top, in `render_dialog`.
     ("s4", [("User", "simple"), ("Bot", "trivial")]),
+    # s5 too; its speech acts are added turns, not a selection.
+    ("s5", [("User", "simple"), ("Bot", "trivial")]),
 ])
 def test_select_text_follows_the_variant_table(variant, expected):
     turns = [
@@ -322,9 +325,10 @@ def test_render_corpus_sorts_skips_failures_and_formats():
     ]
     text, stats = sc.render_corpus(records, "s1")
     assert text == ("User: u0\n\nBot: s0\n\n\nUser: u2\n\nBot: s2\n")
-    assert stats == {"dialogs": 2, "turns": 4, "failed": 1,
+    assert stats == {"dialogs": 2, "turns": 4, "bot_turns": 2, "failed": 1,
                      "collapsed": 0, "fallbacks": 0, "polar": 0,
-                     "polar_yes": 0, "polar_no": 0}
+                     "polar_yes": 0, "polar_no": 0, "lowercased": 0,
+                     "greeting": 0, "thanks": 0, "farewell": 0}
 
 
 def test_render_corpus_collapses_newlines_and_counts_them():
@@ -531,6 +535,274 @@ def test_render_s4_ignores_a_label_on_a_user_turn():
     # A stale or mis-keyed label must never rewrite the User side.
     text, _ = sc.render_corpus([_s4_record()], "s4", {0: {0: "yes"}})
     assert text.startswith("User: Do you like tea?")
+
+
+# ------------------------------------------------------------ render s5
+
+
+class _NoActsRng:
+    """A generator that selects no exchange at all."""
+
+    def random(self) -> float:
+        return 1.0
+
+    def choices(self, population, weights=None):
+        raise AssertionError("no phrase should be drawn")
+
+
+class _AllActsRng:
+    """Selects every exchange, and always the first phrase offered."""
+
+    def random(self) -> float:
+        return 0.0
+
+    def choices(self, population, weights=None):
+        return [population[0]]
+
+
+def _rendered(*pairs):
+    """Rendered turns -- what `add_speech_acts` operates on."""
+    return [{"side": side, "text": text} for side, text in pairs]
+
+
+def _pairs(turns):
+    return [(turn["side"], turn["text"]) for turn in turns]
+
+
+def _same_side_pairs(turns) -> int:
+    return sum(turns[i]["side"] == turns[i + 1]["side"]
+               for i in range(len(turns) - 1))
+
+
+def _alternating_record(dialog_idx, n_turns, first=sc._USER):
+    """A strictly alternating dialog, written like the corpus is.
+
+    Capitals and closing full stops, so the case post-step has
+    something to change.
+    """
+    sides = [first, sc._other_side(first)]
+    return _record(dialog_idx, [
+        _log_turn(sides[i % 2], f"Original {i}.", f"Simple {i}.",
+                  f"Trivial {i}.")
+        for i in range(n_turns)])
+
+
+def test_add_speech_acts_selecting_nothing_changes_nothing():
+    turns = _rendered(("User", "u0"), ("Bot", "b1"))
+    out, added = sc.add_speech_acts(turns, _NoActsRng())
+    assert out == turns
+    # Pure: the caller's list is not the one that comes back.
+    assert out is not turns
+    assert added == {act: 0 for act in sc.SPEECH_ACTS}
+
+
+def test_render_s5_with_nothing_selected_is_exactly_s4(monkeypatch):
+    monkeypatch.setattr(sc, "speech_rng", lambda seed, idx: _NoActsRng())
+    monkeypatch.setattr(sc, "case_rng", lambda seed, idx: _NoActsRng())
+    record = _s4_record()
+    polar = {0: {1: "yes"}}
+    s4, stats4 = sc.render_corpus([record], "s4", polar)
+    s5, stats5 = sc.render_corpus([record], "s5", polar)
+    assert s5 == s4
+    # The polar override is still s5's, and no exchange went in.
+    assert stats5["polar"] == stats4["polar"] == 1
+    assert all(stats5[act] == 0 for act in sc.SPEECH_ACTS)
+    assert stats5["lowercased"] == 0
+
+
+def test_speech_acts_wrap_a_user_first_dialog():
+    turns = _rendered(("User", "u0"), ("Bot", "b1"))
+    out, added = sc.add_speech_acts(turns, _AllActsRng())
+    assert _pairs(out) == [
+        ("User", "Hi!"), ("Bot", "Hi!"),
+        ("User", "u0"), ("Bot", "b1"),
+        # Thanks first, then the farewell that closes the dialog.
+        ("User", "Thanks!"), ("Bot", "You're welcome!"),
+        ("User", "Bye!"), ("Bot", "Bye!")]
+    assert added == {act: 1 for act in sc.SPEECH_ACTS}
+
+
+def test_speech_acts_mirror_a_bot_first_dialog():
+    # The greeting must leave the original Bot turn still answering a
+    # User turn, so a Bot-opened dialog is greeted by the Bot.
+    turns = _rendered(("Bot", "b0"), ("User", "u1"))
+    out, _ = sc.add_speech_acts(turns, _AllActsRng())
+    assert _pairs(out) == [
+        ("Bot", "Hi!"), ("User", "Hi!"),
+        ("Bot", "b0"), ("User", "u1"),
+        ("Bot", "Thanks!"), ("User", "You're welcome!"),
+        ("Bot", "Bye!"), ("User", "Bye!")]
+
+
+def test_the_closing_exchanges_answer_whoever_closed_the_dialog():
+    turns = _rendered(("User", "u0"), ("Bot", "b1"), ("User", "u2"))
+    out, _ = sc.add_speech_acts(turns, _AllActsRng())
+    assert _pairs(out)[-4:] == [
+        ("Bot", "Thanks!"), ("User", "You're welcome!"),
+        ("Bot", "Bye!"), ("User", "Bye!")]
+
+
+def test_add_speech_acts_is_seeded_and_reproducible():
+    turns = _rendered(("User", "u0"), ("Bot", "b1"))
+    first = sc.add_speech_acts(turns, sc.speech_rng(3, 11))
+    assert sc.add_speech_acts(turns, sc.speech_rng(3, 11)) == first
+    variants = {
+        tuple(_pairs(sc.add_speech_acts(turns, sc.speech_rng(3, i))[0]))
+        for i in range(50)}
+    # Different dialogs get different exchanges out of the same seed.
+    assert len(variants) > 5
+
+
+def test_rendered_s5_dialogs_alternate_sides():
+    records = [_alternating_record(i, 2 + i % 5, sc._SIDES[i % 2])
+               for i in range(80)]
+    text, stats = sc.render_corpus(records, "s5")
+    dialogs = text.rstrip("\n").split("\n\n\n")
+    assert len(dialogs) == len(records)
+    for dialog in dialogs:
+        sides = [line.split(":", 1)[0] for line in dialog.split("\n\n")]
+        assert all(a != b for a, b in zip(sides, sides[1:])), dialog
+    # The sample has to actually exercise all three exchanges.
+    assert all(stats[act] > 0 for act in sc.SPEECH_ACTS)
+    assert stats["bot_turns"] > 0
+
+
+def test_add_speech_acts_adds_no_same_side_pair_to_a_ragged_dialog():
+    # Some source dialogs have two turns from one side in a row; the
+    # exchanges must not add any more of them.
+    turns = _rendered(("User", "a"), ("Bot", "b"), ("Bot", "c"),
+                      ("User", "d"))
+    for seed in range(40):
+        out, _ = sc.add_speech_acts(turns, random.Random(seed))
+        assert _same_side_pairs(out) == _same_side_pairs(turns)
+
+
+def test_add_speech_acts_of_an_empty_dialog_is_empty():
+    out, added = sc.add_speech_acts([], random.Random(0))
+    assert out == []
+    assert added == {act: 0 for act in sc.SPEECH_ACTS}
+
+
+def test_speech_act_shares_follow_the_constants():
+    records = [_alternating_record(i, 4) for i in range(2000)]
+    _, stats = sc.render_corpus(records, "s5")
+    for act, fraction in ((sc.GREETING, sc._GREETING_FRACTION),
+                          (sc.THANKS, sc._THANKS_FRACTION),
+                          (sc.FAREWELL, sc._FAREWELL_FRACTION)):
+        assert stats[act] / len(records) == pytest.approx(fraction, abs=0.04)
+
+
+def test_every_greeting_and_farewell_has_a_reply_table():
+    assert set(sc._GREETING_REPLIES) == {p for p, _ in sc._GREETINGS}
+    assert set(sc._FAREWELL_REPLIES) == {p for p, _ in sc._FAREWELLS}
+
+
+def test_format_speech_acts_reports_every_act():
+    _, stats = sc.render_corpus(
+        [_alternating_record(i, 4) for i in range(50)], "s5")
+    lines = sc.format_speech_acts(stats, 1)
+    assert all(any(act in line for line in lines) for act in sc.SPEECH_ACTS)
+    assert "Bot turns" in lines[0]
+
+
+# ------------------------------------------------- case mirroring (s5)
+
+
+# `apply_case_style` draws one `random()` and nothing else, so the
+# speech-act generators above serve as "never" and "always" here too.
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("I am good.", "i am good"),
+    ("Yes.", "yes"),
+    # A full stop inside the utterance is not a closing one.
+    ("It is late. Bye!", "it is late. bye!"),
+    ("I like it. Do you?", "i like it. do you?"),
+    # "!" and "?" carry a tone a full stop does not; they stay.
+    ("Hi there!", "hi there!"),
+    ("Really?", "really?"),
+    # An ellipsis is not a full stop either.
+    ("Wait...", "wait..."),
+    ('He said "no".', 'he said "no"'),
+])
+def test_lowercase_drops_only_the_closing_full_stop(text, expected):
+    assert sc.drop_final_period(text.lower()) == expected
+
+
+def test_lowercase_dialog_leaves_the_speaker_labels_alone():
+    turns = _rendered(("User", "Do you like tea?"), ("Bot", "Yes."))
+    assert _pairs(sc.lowercase_dialog(turns)) == [
+        ("User", "do you like tea?"), ("Bot", "yes")]
+
+
+def test_apply_case_style_is_all_or_nothing():
+    turns = _rendered(("User", "Hi!"), ("Bot", "I am good."))
+    kept, lowered = sc.apply_case_style(turns, _NoActsRng())
+    assert kept == turns and kept is not turns and lowered is False
+    changed, lowered = sc.apply_case_style(turns, _AllActsRng())
+    assert _pairs(changed) == [("User", "hi!"), ("Bot", "i am good")]
+    assert lowered is True
+
+
+def _lowered_line(line: str) -> str:
+    """One rendered `Name: text` line as the case post-step leaves it."""
+    name, _, text = line.partition(": ")
+    return f"{name}: {sc.drop_final_period(text.lower())}"
+
+
+def test_render_s5_leaves_the_untransformed_dialogs_byte_identical(
+        monkeypatch):
+    records = [_alternating_record(i, 2 + i % 4, sc._SIDES[i % 2])
+               for i in range(120)]
+    mixed, stats = sc.render_corpus(records, "s5")
+    monkeypatch.setattr(sc, "case_rng", lambda seed, idx: _NoActsRng())
+    plain, plain_stats = sc.render_corpus(records, "s5")
+
+    assert plain_stats["lowercased"] == 0
+    # The same speech acts either way: the two post-steps draw from
+    # separate generators, so one does not shift the other.
+    assert all(stats[act] == plain_stats[act] for act in sc.SPEECH_ACTS)
+    left = mixed.rstrip("\n").split("\n\n\n")
+    right = plain.rstrip("\n").split("\n\n\n")
+    assert len(left) == len(right) == len(records)
+    changed = 0
+    for a, b in zip(left, right):
+        if a == b:
+            continue
+        changed += 1
+        assert a == "\n\n".join(
+            _lowered_line(line) for line in b.split("\n\n"))
+    assert changed == stats["lowercased"] > 0
+
+
+def test_render_s5_lowercases_the_synthesized_turns_too(monkeypatch):
+    monkeypatch.setattr(sc, "speech_rng", lambda seed, idx: _AllActsRng())
+    monkeypatch.setattr(sc, "case_rng", lambda seed, idx: _AllActsRng())
+    text, stats = sc.render_corpus([_s4_record()], "s5", {0: {1: "yes"}})
+    # The greeting, the polar answer and the closing pair, all in the
+    # style of the dialog they were added to.
+    assert text == (
+        "User: hi!\n\nBot: hi!\n\n"
+        "User: do you like tea?\n\nBot: yes\n\n"
+        "User: what else?\n\nBot: coffee\n\n"
+        "User: thanks!\n\nBot: you're welcome!\n\n"
+        "User: bye!\n\nBot: bye!\n")
+    assert stats["lowercased"] == 1
+    assert stats["polar"] == 1
+
+
+def test_lowercase_share_follows_the_constant():
+    records = [_alternating_record(i, 4) for i in range(2000)]
+    _, stats = sc.render_corpus(records, "s5")
+    assert stats["lowercased"] / len(records) == pytest.approx(
+        sc._LOWERCASE_FRACTION, abs=0.04)
+
+
+def test_s4_is_never_lowercased():
+    records = [_alternating_record(i, 4) for i in range(50)]
+    text, stats = sc.render_corpus(records, "s4")
+    assert stats["lowercased"] == 0
+    assert "User: Simple 0." in text
 
 
 # ------------------------------------------------------------ summary

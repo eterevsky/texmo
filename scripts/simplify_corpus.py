@@ -19,6 +19,9 @@ Three target corpora, all in the same `Name: utterance` format as
         side), Bot turns TRIVIAL.
     s4  s3, except that a Bot turn answering a yes/no question says
         "Yes." or "No." -- see "Polar answers" below.
+    s5  s4, plus synthesized greeting / thanks / farewell exchanges
+        and half the dialogs in lower case -- see "Speech acts" and
+        "Case mirroring" below.
 
 The first three differ only in *selection*, so generation runs once
 and renders three times:
@@ -76,6 +79,66 @@ exactly the polar answers. A classification that failed is recorded as
 The substitutes are bare and unvaried on purpose. "Yes, I do." would
 be more natural and would blunt the point, which is a single cue with
 a single answer to learn.
+
+## Speech acts (s5)
+
+SODA dialogs start and end in the middle of a conversation: there are
+essentially no greetings, no farewells and no thanks anywhere in the
+corpus. A chat therefore opens on the one turn the model has never
+seen -- "Hi!" -- and answers it out of whatever the trivial phrases
+happen to put there.
+
+s4 showed what a tiny model *can* learn: a cue that fixes an answer.
+"Hi!" -> "Hi!" is the same shape as "Do you...?" -> "Yes.", and unlike
+the polar cue it needs no classifier, only phrases we already know.
+s5 is s4 with those exchanges synthesized in, by `add_speech_acts`, as
+a post-step on the rendered turns of each dialog:
+
+    greeting   prefixed to `_GREETING_FRACTION` of dialogs
+    thanks     appended to `_THANKS_FRACTION` of them
+    farewell   appended to `_FAREWELL_FRACTION`, after the thanks
+
+Every exchange is a *pair* of turns, which is what keeps the sides
+alternating: prefixing `<first speaker>: Hi!` / `<the other>: Hello!`
+leaves the original opening turn still preceded by the other side, and
+appending in the mirror image leaves the closing turn followed by it.
+Whoever ends up saying "Thanks!" is decided by the dialog, not by the
+phrase: after a Bot turn the User thanks and the Bot answers "You're
+welcome!", after a User turn it is the other way round. That the Bot
+says both halves of every exchange over the corpus is the point --
+the model has to answer a greeting with a greeting, not merely emit
+one.
+
+The phrases (`_GREETINGS`, `_FAREWELLS`, `_THANKS`, and the reply
+table for each) are weighted so the common form is common, and the
+replies are pure speech acts: a greeting answers a greeting and
+nothing more. "Hi! How are you?" would be a better opening and a
+worse lesson -- the next turn is the original dialog's, which does not
+answer it.
+
+Seeded: `render --seed` (default `_DEFAULT_SPEECH_SEED`) plus the
+`dialog_idx`, so a dialog gets the same exchanges whatever else is
+rendered with it, and `--n-dialogs` does not reshuffle the corpus.
+
+## Case mirroring (s5)
+
+People type "hi" as often as "Hi!", and a corpus written entirely in
+edited prose has nothing to say about the first. So s5 rewrites
+`_LOWERCASE_FRACTION` of its dialogs -- chosen per dialog, seeded --
+into lower case with the closing full stop dropped: "I am good." ->
+"i am good", "Yes." -> "yes".
+
+Whole dialogs, both sides. That is the whole point: the transform is
+applied after the speech acts, so a lower-case dialog is lower case
+throughout, and what the model can learn from it is to *mirror* the
+style it is given rather than to prefer one. A dialog lower-cased on
+the User side alone would teach exactly the opposite.
+
+Only the closing full stop goes, and only a real one: "!" and "?"
+stay, a full stop inside the utterance stays ("It is late. Bye!" ->
+"it is late. bye!"), and an ellipsis is not a full stop. The speaker
+labels are format rather than content and are never touched -- the
+corpus parses on "User: " / "Bot: ".
 
 ## Source and dialog identity
 
@@ -155,6 +218,7 @@ import concurrent.futures
 import json
 import logging
 import os
+import random
 import re
 import sys
 import threading
@@ -1201,10 +1265,20 @@ VARIANTS = {
     # word. Everything else is the s3 trivial phrase, so s4 - s3 is
     # exactly the polar answers.
     "s4": {_USER: "simple", _BOT: "trivial"},
+    # s5: s4 plus synthesized greeting / thanks / farewell exchanges
+    # and the lower-case rewrite, both applied after selection, so s5
+    # minus s4 is exactly those two post-steps.
+    "s5": {_USER: "simple", _BOT: "trivial"},
 }
 
 # Variants that additionally consult the polar log.
-POLAR_VARIANTS = frozenset({"s4"})
+POLAR_VARIANTS = frozenset({"s4", "s5"})
+
+# Variants that get synthesized speech-act exchanges.
+SPEECH_ACT_VARIANTS = frozenset({"s5"})
+
+# Variants that rewrite some dialogs in lower case.
+CASE_VARIANTS = frozenset({"s5"})
 
 # The two answers s4 substitutes in. Bare and punctuated like the
 # trivial phrases around them, and deliberately not varied ("Yes, I
@@ -1221,6 +1295,207 @@ _FALLBACK = {
 }
 
 
+# -------------------------------------------------------- speech acts
+
+
+GREETING, THANKS, FAREWELL = "greeting", "thanks", "farewell"
+SPEECH_ACTS = (GREETING, THANKS, FAREWELL)
+
+# Share of dialogs that get each exchange, drawn independently. Half
+# the dialogs open with a greeting so the cue is common without being
+# the corpus; the closing pair is rarer because it also has to compete
+# with the model simply learning to stop.
+_GREETING_FRACTION = 0.50
+_THANKS_FRACTION = 0.20
+_FAREWELL_FRACTION = 0.40
+
+# `(phrase, weight)`, weighted so the short common forms dominate and
+# the rest keep the model from memorizing one string. Replies are
+# *pure* speech acts on purpose (see the module docstring): "Hi! How
+# are you?" would be answered by the original dialog's next turn,
+# which is about something else entirely.
+_GREETINGS = (
+    ("Hi!", 4),
+    ("Hello!", 3),
+    ("Hey!", 2),
+    ("Hi there!", 1),
+    ("Good morning!", 1),
+    ("Good evening!", 1),
+)
+_GREETING_REPLIES = {
+    "Hi!": (("Hi!", 3), ("Hello!", 2), ("Hey!", 1)),
+    "Hello!": (("Hello!", 3), ("Hi!", 2), ("Hey!", 1)),
+    "Hey!": (("Hey!", 3), ("Hi!", 2), ("Hello!", 1)),
+    "Hi there!": (("Hi!", 3), ("Hi there!", 2), ("Hello!", 1)),
+    "Good morning!": (("Good morning!", 3), ("Hi!", 1), ("Hello!", 1)),
+    "Good evening!": (("Good evening!", 3), ("Hi!", 1), ("Hello!", 1)),
+}
+
+_FAREWELLS = (
+    ("Bye!", 4),
+    ("Goodbye!", 2),
+    ("See you later!", 2),
+    ("See you!", 2),
+    ("Good night!", 1),
+    ("Take care!", 1),
+)
+_FAREWELL_REPLIES = {
+    "Bye!": (("Bye!", 3), ("Goodbye!", 1), ("See you!", 1)),
+    "Goodbye!": (("Goodbye!", 3), ("Bye!", 2), ("See you!", 1)),
+    "See you later!": (("See you!", 3), ("Bye!", 2), ("See you later!", 1)),
+    "See you!": (("See you!", 3), ("Bye!", 2), ("Goodbye!", 1)),
+    "Good night!": (("Good night!", 3), ("Bye!", 1)),
+    "Take care!": (("You too!", 3), ("Take care!", 1), ("Bye!", 1)),
+}
+
+_THANKS = (
+    ("Thanks!", 3),
+    ("Thank you!", 2),
+    ("Thanks a lot!", 1),
+)
+# One reply table for all three: "You're welcome!" answers every way
+# of saying thank you.
+_THANKS_REPLIES = (
+    ("You're welcome!", 3),
+    ("No problem!", 2),
+    ("Sure!", 1),
+)
+
+# Fixed unless `render --seed` says otherwise; combined with the
+# `dialog_idx` so a dialog's exchanges do not depend on what else is
+# in the render.
+_DEFAULT_SPEECH_SEED = 20260829
+
+
+def _weighted_choice(rng: random.Random, table: tuple) -> str:
+    """One phrase from a `(phrase, weight)` table."""
+    return rng.choices([phrase for phrase, _ in table],
+                       weights=[weight for _, weight in table])[0]
+
+
+def speech_rng(seed: int, dialog_idx: int) -> random.Random:
+    """The generator for one dialog's speech acts."""
+    return random.Random(f"{seed}:{dialog_idx}")
+
+
+def _other_side(side: str) -> str:
+    return _BOT if side == _USER else _USER
+
+
+def add_speech_acts(turns: list[dict],
+                    rng: random.Random) -> tuple[list[dict], dict]:
+    """`(turns, added)`: the dialog with speech-act exchanges around it.
+
+    `turns` are rendered turns -- `{"side", "text"}` -- and the result
+    is a new list; nothing is mutated. `added` counts the exchanges by
+    kind (0 or 1 each), which is also the number of *Bot* turns each
+    kind contributed, every exchange being one turn per side.
+
+    Every exchange is a pair, added so that the side that has to speak
+    next is the side that was going to: a prefix opens on whoever
+    opened the dialog and a suffix answers whoever closed it. An
+    alternating dialog therefore stays alternating, and one that was
+    not gains no new same-side pair.
+    """
+    added = {act: 0 for act in SPEECH_ACTS}
+    if not turns:
+        return list(turns), added
+
+    greet = rng.random() < _GREETING_FRACTION
+    thank = rng.random() < _THANKS_FRACTION
+    farewell = rng.random() < _FAREWELL_FRACTION
+
+    out = list(turns)
+    if greet:
+        opening = _weighted_choice(rng, _GREETINGS)
+        reply = _weighted_choice(rng, _GREETING_REPLIES[opening])
+        first = out[0]["side"]
+        out = [{"side": first, "text": opening},
+               {"side": _other_side(first), "text": reply}] + out
+        added[GREETING] = 1
+    # Thanks first: it belongs to the conversation that just ended,
+    # and the farewell closes everything.
+    if thank:
+        _append_exchange(out, _weighted_choice(rng, _THANKS),
+                         _weighted_choice(rng, _THANKS_REPLIES))
+        added[THANKS] = 1
+    if farewell:
+        opening = _weighted_choice(rng, _FAREWELLS)
+        _append_exchange(
+            out, opening, _weighted_choice(rng, _FAREWELL_REPLIES[opening]))
+        added[FAREWELL] = 1
+    return out, added
+
+
+def _append_exchange(turns: list[dict], opening: str, reply: str) -> None:
+    """Append `opening` from the side that speaks next, then `reply`.
+
+    The last speaker answers, so the pair leaves the dialog on the
+    same side it was already on -- which is what lets a second
+    exchange follow the first.
+    """
+    last = turns[-1]["side"]
+    turns.append({"side": _other_side(last), "text": opening})
+    turns.append({"side": last, "text": reply})
+
+
+# ------------------------------------------------------ case mirroring
+
+
+# Share of dialogs rewritten in lower case without their closing full
+# stops. Half: the lesson is mirroring, so the model has to see both
+# styles about equally often.
+_LOWERCASE_FRACTION = 0.50
+
+# A closing full stop -- one that ends the utterance and is not the
+# tail of an ellipsis. Anchored at the end, so a full stop *inside*
+# the utterance ("It is late. Bye!") is not matched at all.
+_FINAL_PERIOD = re.compile(r"(?<!\.)\.$")
+
+
+def case_rng(seed: int, dialog_idx: int) -> random.Random:
+    """The generator for one dialog's case style.
+
+    Separate from `speech_rng` on purpose: the speech acts draw a
+    variable number of values, so sharing a stream would make the
+    case of every dialog depend on the phrase tables.
+    """
+    return random.Random(f"{seed}:case:{dialog_idx}")
+
+
+def drop_final_period(text: str) -> str:
+    """`text` without its closing full stop.
+
+    "!" and "?" stay -- they carry the tone a full stop does not --
+    and so does an ellipsis, which is not a full stop.
+    """
+    return _FINAL_PERIOD.sub("", text)
+
+
+def lowercase_dialog(turns: list[dict]) -> list[dict]:
+    """Every utterance lower-cased and stripped of its closing stop.
+
+    `turns` are rendered turns -- `{"side", "text"}` -- and the result
+    is a new list. The side is untouched: "User"/"Bot" are the corpus
+    format, not something the model should mirror.
+    """
+    return [{"side": turn["side"],
+             "text": drop_final_period(turn["text"].lower())}
+            for turn in turns]
+
+
+def apply_case_style(turns: list[dict],
+                     rng: random.Random) -> tuple[list[dict], bool]:
+    """`(turns, lowered)`: the dialog, in lower case or as it was.
+
+    All of a dialog or none of it, which is what makes the style
+    something a model can mirror within a conversation.
+    """
+    if rng.random() < _LOWERCASE_FRACTION:
+        return lowercase_dialog(turns), True
+    return list(turns), False
+
+
 def select_text(turn: dict, variant: str) -> tuple[str, str]:
     """`(text, field used)` for one turn under one variant."""
     wanted = VARIANTS[variant][turn["side"]]
@@ -1232,13 +1507,20 @@ def select_text(turn: dict, variant: str) -> tuple[str, str]:
 
 
 def render_dialog(turns: list[dict], variant: str, stats: dict,
-                  polar: dict | None = None) -> str:
+                  polar: dict | None = None,
+                  rng: random.Random | None = None,
+                  case: random.Random | None = None) -> str:
     """One dialog as `Name: utterance` lines separated by blank lines.
 
     `polar` is `{turn index: "yes"/"no"/"other"}` for this dialog; only
     the polar variants pass it, and only `yes`/`no` override the text.
+    `rng` is the speech-act generator, passed only by the variants in
+    `SPEECH_ACT_VARIANTS`; the exchanges go on after selection, so the
+    polar indices still address the source turns. `case` is the
+    case-style generator of `CASE_VARIANTS`, applied last of all, so
+    that the synthesized turns are rewritten with the rest.
     """
-    lines = []
+    rendered = []
     for i, turn in enumerate(turns):
         label = (polar or {}).get(i)
         override = POLAR_TEXT.get(label) if turn["side"] == _BOT else None
@@ -1251,13 +1533,22 @@ def render_dialog(turns: list[dict], variant: str, stats: dict,
         text, collapsed = collapse(text)
         stats["collapsed"] += collapsed
         stats["fallbacks"] += field != VARIANTS[variant][turn["side"]]
-        stats["turns"] += 1
-        lines.append(f"{turn['side']}: {text}")
-    return "\n\n".join(lines)
+        rendered.append({"side": turn["side"], "text": text})
+    if rng is not None:
+        rendered, added = add_speech_acts(rendered, rng)
+        for act in SPEECH_ACTS:
+            stats[act] += added[act]
+    if case is not None:
+        rendered, lowered = apply_case_style(rendered, case)
+        stats["lowercased"] += lowered
+    stats["turns"] += len(rendered)
+    stats["bot_turns"] += sum(t["side"] == _BOT for t in rendered)
+    return "\n\n".join(f"{t['side']}: {t['text']}" for t in rendered)
 
 
 def render_corpus(records: list[dict], variant: str,
-                  polar: dict | None = None) -> tuple[str, dict]:
+                  polar: dict | None = None,
+                  seed: int = _DEFAULT_SPEECH_SEED) -> tuple[str, dict]:
     """The whole corpus text for one variant, plus its tallies.
 
     Failed dialogs are skipped; the rest are emitted in `dialog_idx`
@@ -1267,10 +1558,13 @@ def render_corpus(records: list[dict], variant: str,
 
     `polar` is the `{dialog_idx: {turn index: label}}` map of
     `polar_map`, consulted only by the variants in `POLAR_VARIANTS`.
+    `seed` drives the speech acts and the case style of the variants
+    in `SPEECH_ACT_VARIANTS` / `CASE_VARIANTS`, per `dialog_idx`.
     """
-    stats = {"dialogs": 0, "turns": 0, "failed": 0, "collapsed": 0,
-             "fallbacks": 0, "polar": 0, f"polar_{YES}": 0,
-             f"polar_{NO}": 0}
+    stats = {"dialogs": 0, "turns": 0, "bot_turns": 0, "failed": 0,
+             "collapsed": 0, "fallbacks": 0, "polar": 0, f"polar_{YES}": 0,
+             f"polar_{NO}": 0, "lowercased": 0}
+    stats.update({act: 0 for act in SPEECH_ACTS})
     usable = []
     for record in records:
         if "error" in record or not record.get("turns"):
@@ -1282,8 +1576,13 @@ def render_corpus(records: list[dict], variant: str,
     for record in usable:
         by_turn = (polar or {}).get(record["dialog_idx"]) \
             if variant in POLAR_VARIANTS else None
+        rng = (speech_rng(seed, record["dialog_idx"])
+               if variant in SPEECH_ACT_VARIANTS else None)
+        case = (case_rng(seed, record["dialog_idx"])
+                if variant in CASE_VARIANTS else None)
         chunks.append(
-            render_dialog(record["turns"], variant, stats, by_turn))
+            render_dialog(
+                record["turns"], variant, stats, by_turn, rng, case))
         stats["dialogs"] += 1
     text = "\n\n\n".join(chunks)
     if text:
@@ -1312,7 +1611,7 @@ def run_render(args) -> int:
         polar = polar_map(polar_records)
     out_path = args.out or default_corpus_path(args.variant)
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    text, stats = render_corpus(records, args.variant, polar)
+    text, stats = render_corpus(records, args.variant, polar, args.seed)
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
     print(f"{args.log} -> {out_path} ({args.variant}: "
@@ -1329,7 +1628,38 @@ def run_render(args) -> int:
               f"({100 * stats['polar'] / turns:.1f}% of all turns) -- "
               f"{stats[f'polar_{YES}']} \"{POLAR_TEXT[YES]}\", "
               f"{stats[f'polar_{NO}']} \"{POLAR_TEXT[NO]}\"")
+    if args.variant in SPEECH_ACT_VARIANTS:
+        for line in format_speech_acts(stats, args.seed):
+            print(line)
+    if args.variant in CASE_VARIANTS:
+        dialogs = max(stats["dialogs"], 1)
+        print(f"  lower case, no closing stop: {stats['lowercased']} "
+              f"dialog(s) ({100 * stats['lowercased'] / dialogs:.1f}%)")
     return 0
+
+
+def format_speech_acts(stats: dict, seed: int) -> list[str]:
+    """How many exchanges went in, and what share of Bot turns they are.
+
+    Every exchange is one turn per side, so its count is also the
+    number of Bot turns it contributed -- the share the model actually
+    sees when it is the Bot.
+    """
+    dialogs = max(stats["dialogs"], 1)
+    bot_turns = max(stats["bot_turns"], 1)
+    lines = [f"  speech acts (seed {seed}), Bot turns {stats['bot_turns']}:",
+             f"    {'act':<10}{'added':>8}{'of dialogs':>13}"
+             f"{'of Bot turns':>15}"]
+    for act in SPEECH_ACTS:
+        lines.append(
+            f"    {act:<10}{stats[act]:>8}"
+            f"{100 * stats[act] / dialogs:>12.1f}%"
+            f"{100 * stats[act] / bot_turns:>14.1f}%")
+    total = sum(stats[act] for act in SPEECH_ACTS)
+    lines.append(
+        f"    {'any':<10}{total:>8}{'':>13}"
+        f"{100 * total / bot_turns:>14.1f}%")
+    return lines
 
 
 # ------------------------------------------------------------------ cli
@@ -1476,7 +1806,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--variant", required=True, choices=sorted(VARIANTS),
         help="s1: User original + Bot simple; s2: User original + Bot "
              "trivial; s3: User simple + Bot trivial; s4: s3 with polar "
-             "answers")
+             "answers; s5: s4 with greeting/thanks/farewell exchanges and "
+             "half the dialogs in lower case")
     ren.add_argument(
         "--n-dialogs", type=int, default=None,
         help="render only the first N records of the log (default: all); "
@@ -1487,6 +1818,12 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"a `classify` output JSONL, required by the polar variants "
              f"({', '.join(sorted(POLAR_VARIANTS))}); default: "
              f"{_DEFAULT_POLAR_LOG}")
+    ren.add_argument(
+        "--seed", type=int, default=_DEFAULT_SPEECH_SEED,
+        help=f"RNG seed for the speech-act and lower-case post-steps "
+             f"({', '.join(sorted(SPEECH_ACT_VARIANTS | CASE_VARIANTS))}); "
+             f"combined with each dialog_idx (default: "
+             f"{_DEFAULT_SPEECH_SEED})")
     ren.add_argument(
         "--out", default=None,
         help="output text file (default: "

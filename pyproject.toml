@@ -34,7 +34,7 @@ dependencies = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["texmo"]
+testpaths = ["texmo", "scripts"]
 
 [tool.ruff.lint]
 # Only sort imports and flag unused imports. Other warnings were

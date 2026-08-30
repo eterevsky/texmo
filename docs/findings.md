@@ -6,6 +6,121 @@ entries here are the results worth re-reading a year later). Dated,
 newest first. Full data locations are noted per entry; scratch/ paths
 are machine-local and untracked.
 
+## Synthesized speech acts and case style are learned outright: s5 (2026-08-30)
+
+SODA starts and ends mid-conversation, so the simplified corpora had
+no greetings, farewells or thanks, and a chat opening with "Hi!" got a
+random trivial phrase. **s5** = s4 + two seeded post-steps on the
+rendered turns: a greeting pair prefixed to 50% of dialogs, thanks
+(20%) and a farewell pair (40%) appended, alternation preserved
+(23.9% of Bot turns become speech acts); and 50% of dialogs rewritten
+whole -- both sides, after the insertion -- in lower case without the
+closing full stop. Same 30k dialogs and polar log as s4.
+
+Judge-free probe (20 samples per opener, T = 0.5): correct speech-act
+replies went from 0-1% (s4 models) to **60% (hb32) / 80% (rl32)**,
+rl32 answering every capitalized greeting/farewell/thanks probe 100%;
+case mirroring on lower-case probes from 0% to **94-97%**. Cost: the
+scripted-examiner eval is blind to all of it (its openers carry
+content in the same turn and none of its dialogs say goodbye), and b
+drifts down within noise (hb32 40.0 -> 35.6, rl32 33.6 -> 31.4,
+z <= 1.4) because the cues compete for the same weights: hb32's
+polar-cue margin over its null fell from z 4.0 to z 1.0. Corpus loss
+is not comparable across corpora (s5 1.183 vs s4 1.212 for hb32 --
+the corpus got easier, not the model better). Two notes for the next
+round: bare unpunctuated lower-case openers ("hi") are still out of
+distribution because the synthesized lower-case greetings keep their
+"!"; and each new corpus regularity needs its own probe, since the
+examiner eval measures only what SODA-style openers exercise.
+Artifacts: `models/{hb32,rl32}-8k-s5.json`, `data/eval/eval100-*s5*`,
+`scratch/s5/` (machine-local).
+
+## Longer context and 4x steps move the loss, not the chat metrics (2026-08-29)
+
+Two ~8k specs (the hb32 baseline and the rglru+lstm `rl32`) trained on
+s3 in five arms -- base 256x128 / 16k steps, l256 (128x256), l512
+(64x512), 4x steps, l512-4x -- and scored with one instrument (same
+sampled bytes for every model; recurrent and parallel losses agree to
+4 decimals at these batch sizes). Loss at 1024-byte samples, b/B:
+
+| arm | hb32 | rl32 |
+|---|---|---|
+| base | 1.274 | 1.289 |
+| l256 | 1.277 | 1.265 |
+| l512 | 1.274 | 1.266 |
+| 4x | 1.258 | 1.263 |
+| l512-4x | **1.242** | 1.261 |
+
+Steps move hb32 and length moves rl32, and only hb32 compounds the two
+(-0.032). All single runs; same-conf spread in the DB is 0.02-0.05
+b/B, so treat the pattern as suggestive and leave the question to the
+search, which mutates steps/batch/length and averages over runs. The
+loss predictor, asked the same question, ranks rl32 as the less
+saturated model at 16k steps (slope -0.016 vs -0.013 b/B per octave)
+but with a 1.2x ratio where the observation was 2.4x -- it is a prior
+on saturation, not a measurement (`steps` is one global log2 feature).
+
+The chatbot eval does not move at all: across the ten models b sits in
+24.4-29.8% and c in 0.8-2.8% (n = 500, SE +-2 points), rank
+correlation of loss with b -0.27, and **no model beats its own phrase
+bot** (b premium -8.6 to +1.0, difference SE +-2.8). The best-loss
+model is not the best chatbot; a bag of `rl32-l512-4x`'s own 20 most
+frequent answers drawn blind scores b 36.0, the highest of the sweep.
+Corpus-loss gains at this size land entirely below the resolution of
+the responsiveness metric; what moved it was the data (next entries).
+Artifacts: `models/{hb32,rl32}-8k-s3-*.json`, `data/eval/eval100-*`,
+`scratch/len_sweep/` (machine-local).
+
+## A tiny model can learn a structural cue: s4 (2026-08-29)
+
+The s3 8k baseline sat exactly on its null-model floor for
+responsiveness (b 25.8 vs 26.8) because its corpus had almost no polar
+answers -- 487 bare yes/no in 104k Bot turns; the simplification prompt
+had asked for *varied* phrases. **s4** restores them: an aux-verb-
+initial User question is detected structurally, a Qwen3-8B pass labels
+what the original Bot reply meant as an answer ("granted or refused",
+read broadly -- requests and offers count, since a tiny model cannot
+tell them from polar questions either; 81% of cued turns get a label
+vs 20% under the strict reading), and the corpus writes bare
+"Yes."/"No." there (6.1% of Bot turns). Same 30k dialogs as s3.
+
+Trained on s4, the same spec scores a 90.2 / b 40.0 / c 4.2 against
+its own phrase bot's 100 / 44.0 / 3.0 -- still below the floor
+overall, because a generically agreeable "Yes." raises the floor too
+(the null model is not a constant; re-derive it per corpus). But on
+the turns that follow an aux-verb-initial question it scores **b 62.2
+/ c 11.2** against the null's 34.7 / 6.1 (z = 4.0) and s3's 15.9 / 1.1
+(z = 7.4), and only there: it emits a polar answer 56% of the time on
+cued turns and 6.7% elsewhere (8.4x enrichment) while the null model
+is at chance. It generalizes past the detector ("So light is made up
+of colors?" -> "Yes."). First evidence that ~8k weights condition an
+answer on a structural property of the input; the route past the
+phrase-bot floor is more cue->answer regularities in the corpus, not
+more data. Hand impression (Oleg): noticeably more coherent than any
+earlier 8k model, with "I am good." as the attractor once it is in the
+context twice. Artifacts: `models/{hb32,rl32}-8k-s4.json`,
+`data/eval/eval100-hb32-8k-s4*`, `data/simplified/polar-log.jsonl`.
+
+## ELIZA is the (b) bar, and reflection is not what buys it (2026-08-29)
+
+Weizenbaum's DOCTOR (`scripts/eliza/`, 0 weights) through the same
+eval: **a 79.2 / b 37.0 / c 3.2** -- the highest b of any zero-weight
+student, +11 over the s3 model, c on the floor: the "responsive but
+empty" shape the eval should be able to name. But ELIZA's *own* phrase
+bot -- its 20 most frequent answers drawn blind -- scores b 34.2, so
+reading the question is worth +2.8 points and the rest is vocabulary:
+content-free questions fit almost any turn ("In what way?" b 77.5 when
+drawn at random, "Can you elaborate on that?" 91.7), where a
+SODA-trained model's declaratives ("I am good.") fit few. So (b) alone
+cannot separate comprehension from a well-chosen bag of
+interrogatives, and the bar a small model must clear on b before it
+has shown it conditions on anything is ELIZA's 37, not the phrase
+bot's 27 -- and clearing it without moving c means it learned
+reflection, not content. ELIZA's low a is 1966 meeting 2026 input:
+short canned replies a 94 / b 70, long reflected-clause reassemblies a
+57 / b 11. Artifacts: `data/eval/eval100-eliza*`,
+`eval100-phrasebot-eliza*`.
+
 ## XLA:GPU adds a fused bias on the wrong axis (2026-08-29)
 
 **A `dot` whose output layout is `{0,1}` plus a bias add is fused by

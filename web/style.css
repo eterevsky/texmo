@@ -1,0 +1,358 @@
+/* texmo chat -- a research demo page. System fonts, one accent,
+   light and dark from `prefers-color-scheme`. Every colour is a
+   custom property on :root so the dark block only has to redefine
+   values, and the SVG diagrams draw their strokes and text with
+   `currentColor` so they read in either theme. */
+
+:root {
+  --bg: #fbfbfa;
+  --panel: #ffffff;
+  --ink: #1d2025;
+  --ink-soft: #5c6472;
+  --ink-faint: #8a93a3;
+  --rule: #dfe3e9;
+  --rule-soft: #ecEFF3;
+  --accent: #2f6df0;
+  --accent-ink: #ffffff;
+  --accent-soft: #eaf0fe;
+  --box-bg: #ffffff;
+  --rec-bg: #eaf0fe;
+  --user-bg: #eef1f6;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+          "Liberation Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+          Arial, sans-serif;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171c;
+    --panel: #1b1f26;
+    --ink: #e6e9ef;
+    --ink-soft: #a3adbd;
+    --ink-faint: #6f7a8b;
+    --rule: #2c323c;
+    --rule-soft: #232830;
+    --accent: #6f9bff;
+    --accent-ink: #10131a;
+    --accent-soft: #1e2a44;
+    --box-bg: #1b1f26;
+    --rec-bg: #23304a;
+    --user-bg: #232830;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 2rem 1.25rem 3rem;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+
+/* ---------------------------------------------------------------- */
+/* header                                                            */
+/* ---------------------------------------------------------------- */
+
+.page-header,
+main,
+.page-footer {
+  max-width: 62rem;
+  margin: 0 auto;
+}
+
+h1 {
+  margin: 0 0 .25rem;
+  font-size: 1.5rem;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+.tagline {
+  margin: 0 0 1.25rem;
+  max-width: 46rem;
+  color: var(--ink-soft);
+  font-size: .95rem;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: .75rem 1.25rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.controls label {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  font-size: .78rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+select,
+input[type="number"],
+input[type="text"] {
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: .4rem .55rem;
+}
+
+input[type="number"] { width: 6rem; }
+
+select:focus-visible,
+input:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button {
+  font: inherit;
+  font-weight: 560;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: .4rem .9rem;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) { border-color: var(--ink-faint); }
+button:disabled { opacity: .5; cursor: default; }
+
+#send {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ---------------------------------------------------------------- */
+/* layout                                                            */
+/* ---------------------------------------------------------------- */
+
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22rem;
+  gap: 2rem;
+  align-items: stretch;
+  padding: 1.5rem 0;
+}
+
+@media (max-width: 56rem) {
+  main { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The chat column matches the diagram's height on wide screens; the
+   transcript takes the slack and scrolls inside itself. */
+.chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------- */
+/* chat                                                              */
+/* ---------------------------------------------------------------- */
+
+.transcript {
+  flex: 1 1 0;
+  min-height: 22rem;
+  max-height: 78vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+.turn { margin-bottom: 1rem; }
+.turn:last-child { margin-bottom: 0; }
+
+.turn .who {
+  display: block;
+  margin-bottom: .15rem;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.turn .said {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.turn.user .said {
+  display: inline-block;
+  padding: .35rem .6rem;
+  background: var(--user-bg);
+  border-radius: 8px;
+}
+
+.turn.bot .said { color: var(--ink); }
+.turn.bot.pending .said::after {
+  content: "\258f";
+  color: var(--accent);
+}
+
+.empty {
+  color: var(--ink-faint);
+  font-style: italic;
+}
+
+.composer {
+  display: flex;
+  gap: .6rem;
+  margin-top: .85rem;
+}
+
+.composer input { flex: 1 1 auto; min-width: 0; }
+
+.status {
+  margin: .6rem 0 0;
+  min-height: 1.2em;
+  font-family: var(--mono);
+  font-size: .78rem;
+  color: var(--ink-faint);
+}
+
+.status.error { color: #d2453c; }
+@media (prefers-color-scheme: dark) {
+  .status.error { color: #ff8a80; }
+}
+
+/* ---------------------------------------------------------------- */
+/* schematic                                                         */
+/* ---------------------------------------------------------------- */
+
+.schematic { min-width: 0; }
+
+.diagram {
+  margin: 0;
+  padding: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+.diagram[hidden] { display: none; }
+
+.diagram svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 78vh;
+  margin: 0 auto;
+  color: var(--ink);
+}
+
+.diagram figcaption {
+  margin-top: .85rem;
+  padding-top: .75rem;
+  border-top: 1px solid var(--rule-soft);
+  font-size: .8rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+/* Diagram internals: everything strokes with currentColor, so the
+   figure inverts with the theme; only the fills come from tokens. */
+.diagram .box {
+  fill: var(--box-bg);
+  stroke: currentColor;
+  stroke-width: 1.2;
+}
+
+.diagram .box.rec { fill: var(--rec-bg); }
+.diagram .box.io { fill: var(--rule-soft); }
+
+.diagram .merge {
+  fill: var(--box-bg);
+  stroke: currentColor;
+  stroke-width: 1.2;
+}
+
+.diagram .edge line,
+.diagram .edge path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+}
+
+.diagram .edge.skip line,
+.diagram .edge.skip path {
+  stroke: var(--ink-faint);
+  stroke-dasharray: 4 3;
+}
+
+.diagram .head { fill: currentColor; }
+
+.diagram text {
+  fill: currentColor;
+  font-family: var(--sans);
+}
+
+.diagram .name { font-size: 13px; }
+.diagram .wt {
+  font-size: 11px;
+  text-anchor: end;
+  fill: var(--ink-faint);
+  font-family: var(--mono);
+}
+
+.diagram .op {
+  font-size: 15px;
+  text-anchor: middle;
+}
+
+.diagram .op.plus { font-size: 19px; }
+
+.diagram .width text,
+.diagram .width {
+  font-size: 10px;
+  font-family: var(--mono);
+  fill: var(--ink-faint);
+}
+
+.diagram .width .lane { text-anchor: end; }
+.diagram .width .end { font-size: 11px; }
+
+/* ---------------------------------------------------------------- */
+/* footer                                                            */
+/* ---------------------------------------------------------------- */
+
+.page-footer {
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--rule);
+  font-size: .82rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+
+.page-footer p { margin: 0 0 .5rem; }
+.page-footer p:last-child { margin-bottom: 0; }
+
+code {
+  font-family: var(--mono);
+  font-size: .92em;
+  padding: .05em .3em;
+  background: var(--rule-soft);
+  border-radius: 4px;
+}

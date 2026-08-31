@@ -1,0 +1,6 @@
+{
+  "name": "texmo-web",
+  "private": true,
+  "type": "module",
+  "description": "Marker so Node treats web/*.js as ES modules; the page itself has no build step and no dependencies."
+}

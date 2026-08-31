@@ -1,0 +1,53 @@
+# Publishes the in-browser chat page to GitHub Pages.
+#
+# The page is deployed at the site ROOT (https://eterevsky.github.io/texmo/,
+# or the root of a custom domain later pointed at it), with the data it
+# fetches -- `models/` and `tokens/` -- as sibling directories. Only
+# committed files are checked out, so untracked local models stay local.
+name: Pages
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'web/**'
+      - 'models/**'
+      - 'tokens/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and never cancel one midway: a half-uploaded
+# artifact is worse than a slightly stale site.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site tree
+        run: |
+          mkdir -p _site
+          cp -r web/. _site/
+          rm -rf _site/test _site/export_vectors.py _site/texmo_test.mjs \
+                 _site/package.json _site/README.md
+          cp -r models tokens _site/
+          find _site -maxdepth 1
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

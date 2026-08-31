@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>texmo chat</title>
+<meta name="description" content="Chat with an 8,000-weight recurrent language model running entirely in your browser.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%234f7cff'/><rect x='3.5' y='5' width='9' height='2' rx='1' fill='white'/><rect x='3.5' y='9' width='6' height='2' rx='1' fill='white'/></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="page-header">
+  <h1>texmo chat</h1>
+  <p class="tagline">
+    A recurrent language model of about 8,000 weights, running in your
+    browser. Everything below &mdash; tokenizer, model, sampling &mdash;
+    is plain JavaScript; nothing is sent anywhere.
+  </p>
+  <div class="controls">
+    <label for="model">Model
+      <select id="model">
+        <option value="rl32" selected>rl32 &mdash; rnn + rglru + lstm (8,017 weights)</option>
+        <option value="hb32">hb32 &mdash; rnn + rglru + mgru (8,001 weights)</option>
+      </select>
+    </label>
+    <label for="temperature">Temperature
+      <input id="temperature" type="number" min="0.1" max="1.5" step="0.05" value="0.4">
+    </label>
+    <button type="button" id="new-chat">New chat</button>
+  </div>
+</header>
+
+<main>
+  <section class="chat" aria-label="Conversation">
+    <div id="transcript" class="transcript" aria-live="polite"></div>
+    <form id="composer" class="composer" autocomplete="off">
+      <input id="utterance" type="text" placeholder="Say something…"
+             aria-label="Your message" autocomplete="off" disabled>
+      <button type="submit" id="send" disabled>Send</button>
+    </form>
+    <p id="status" class="status" role="status">Loading model…</p>
+  </section>
+
+  <aside class="schematic" aria-label="Model architecture">
+
+    <!-- ============================ rl32 ============================ -->
+    <figure id="fig-rl32" class="diagram">
+      <svg viewBox="0 0 400 830" role="img"
+           aria-label="Layer diagram of the rl32 model: a one-hot input feeds an Elman RNN, whose output is both concatenated with an RG-LRU branch and added back after an LSTM branch, then projected and normalized before the output head.">
+        <defs>
+          <marker id="arrow-rl" viewBox="0 0 8 8" refX="7" refY="4"
+                  markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 1 L 7 4 L 0 7 z" class="head"/>
+          </marker>
+        </defs>
+
+        <!-- main spine -->
+        <g class="edge">
+          <line x1="150" y1="42"  x2="150" y2="72"  marker-end="url(#arrow-rl)"/>
+          <line x1="150" y1="104" x2="150" y2="134" marker-end="url(#arrow-rl)"/>
+          <line x1="150" y1="166" x2="150" y2="196" marker-end="url(#arrow-rl)"/>
+          <line x1="150" y1="228" x2="150" y2="258" marker-end="url(#arrow-rl)"/>
+          <line x1="150" y1="290" x2="150" y2="322" marker-end="url(#arrow-rl)"/>
+          <line x1="150" y1="350" x2="150" y2="380" marker-end="url(#arrow-rl)"/>
+          <line x1="150" y1="412" x2="150" y2="442" marker-end="url(#arrow-rl)"/>
+          <line x1="150" y1="474" x2="150" y2="506" marker-end="url(#arrow-rl)"/>
+          <line x1="150" y1="534" x2="150" y2="564" marker-end="url(#arrow-rl)"/>
+          <line x1="150" y1="592" x2="150" y2="622" marker-end="url(#arrow-rl)"/>
+          <line x1="150" y1="654" x2="150" y2="684" marker-end="url(#arrow-rl)"/>
+          <line x1="150" y1="716" x2="150" y2="746" marker-end="url(#arrow-rl)"/>
+          <line x1="150" y1="778" x2="150" y2="800" marker-end="url(#arrow-rl)"/>
+        </g>
+
+        <!-- skip routes -->
+        <g class="edge skip">
+          <line x1="250" y1="88" x2="365" y2="88"/>
+          <path d="M 330 88 L 330 336 L 166 336" marker-end="url(#arrow-rl)"/>
+          <path d="M 365 88 L 365 578 L 166 578" marker-end="url(#arrow-rl)"/>
+          <path d="M 250 396 L 295 396 L 295 520 L 166 520" marker-end="url(#arrow-rl)"/>
+        </g>
+
+        <!-- boxes -->
+        <g class="boxes">
+          <rect class="box io" x="50" y="10" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="31">one-hot input</text>
+          <text class="wt" x="238" y="31">32</text>
+
+          <rect class="box rec" x="50" y="72" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="93">rnn.32.gelu</text>
+          <text class="wt" x="238" y="93">2,080</text>
+
+          <rect class="box" x="50" y="134" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="155">dense.16.gelu</text>
+          <text class="wt" x="238" y="155">528</text>
+
+          <rect class="box rec" x="50" y="196" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="217">rglru.16</text>
+          <text class="wt" x="238" y="217">80</text>
+
+          <rect class="box" x="50" y="258" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="279">dense.16.gelu</text>
+          <text class="wt" x="238" y="279">272</text>
+
+          <rect class="box" x="50" y="380" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="401">dense.16.gelu</text>
+          <text class="wt" x="238" y="401">784</text>
+
+          <rect class="box rec" x="50" y="442" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="463">lstm.16</text>
+          <text class="wt" x="238" y="463">2,112</text>
+
+          <rect class="box" x="50" y="622" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="643">dense.32.gelu</text>
+          <text class="wt" x="238" y="643">1,056</text>
+
+          <rect class="box" x="50" y="684" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="705">rmsnorm</text>
+          <text class="wt" x="238" y="705">32</text>
+
+          <rect class="box io" x="50" y="746" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="767">dense.32</text>
+          <text class="wt" x="238" y="767">1,073</text>
+        </g>
+
+        <!-- merge operators -->
+        <g class="merges">
+          <circle class="merge" cx="150" cy="336" r="14"/>
+          <text class="op" x="150" y="342">&#8214;</text>
+          <circle class="merge" cx="150" cy="520" r="14"/>
+          <text class="op" x="150" y="526">&#8214;</text>
+          <circle class="merge" cx="150" cy="578" r="14"/>
+          <text class="op plus" x="150" y="584">+</text>
+        </g>
+
+        <!-- widths -->
+        <g class="width">
+          <text x="158" y="61">32</text>
+          <text x="158" y="123">32</text>
+          <text x="158" y="185">16</text>
+          <text x="158" y="247">16</text>
+          <text x="158" y="309">16</text>
+          <text x="158" y="369">48</text>
+          <text x="158" y="431">16</text>
+          <text x="158" y="494">16</text>
+          <text x="158" y="553">32</text>
+          <text x="158" y="611">32</text>
+          <text x="158" y="673">32</text>
+          <text x="158" y="735">32</text>
+          <text class="end" x="158" y="797">32 logits</text>
+          <text class="lane" x="326" y="150">32</text>
+          <text class="lane" x="361" y="186">32</text>
+          <text class="lane" x="291" y="470">16</text>
+        </g>
+      </svg>
+      <figcaption>
+        <strong>rl32</strong> &mdash; 8,017 weights.
+        &#8214; concatenates two branches; + adds them channel-wise.
+        Tinted boxes carry recurrent state.
+      </figcaption>
+    </figure>
+
+    <!-- ============================ hb32 ============================ -->
+    <figure id="fig-hb32" class="diagram" hidden>
+      <svg viewBox="0 0 400 775" role="img"
+           aria-label="Layer diagram of the hb32 model: a one-hot input feeds an Elman RNN, whose output is added back after an RG-LRU branch and concatenated after an mGRU, then projected and normalized before the output head.">
+        <defs>
+          <marker id="arrow-hb" viewBox="0 0 8 8" refX="7" refY="4"
+                  markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 1 L 7 4 L 0 7 z" class="head"/>
+          </marker>
+        </defs>
+
+        <g class="edge">
+          <line x1="150" y1="42"  x2="150" y2="72"  marker-end="url(#arrow-hb)"/>
+          <line x1="150" y1="104" x2="150" y2="134" marker-end="url(#arrow-hb)"/>
+          <line x1="150" y1="166" x2="150" y2="196" marker-end="url(#arrow-hb)"/>
+          <line x1="150" y1="228" x2="150" y2="258" marker-end="url(#arrow-hb)"/>
+          <line x1="150" y1="290" x2="150" y2="320" marker-end="url(#arrow-hb)"/>
+          <line x1="150" y1="352" x2="150" y2="384" marker-end="url(#arrow-hb)"/>
+          <line x1="150" y1="412" x2="150" y2="442" marker-end="url(#arrow-hb)"/>
+          <line x1="150" y1="474" x2="150" y2="506" marker-end="url(#arrow-hb)"/>
+          <line x1="150" y1="534" x2="150" y2="564" marker-end="url(#arrow-hb)"/>
+          <line x1="150" y1="596" x2="150" y2="626" marker-end="url(#arrow-hb)"/>
+          <line x1="150" y1="658" x2="150" y2="688" marker-end="url(#arrow-hb)"/>
+          <line x1="150" y1="720" x2="150" y2="742" marker-end="url(#arrow-hb)"/>
+        </g>
+
+        <g class="edge skip">
+          <line x1="250" y1="88" x2="365" y2="88"/>
+          <path d="M 330 88 L 330 398 L 166 398" marker-end="url(#arrow-hb)"/>
+          <path d="M 365 88 L 365 520 L 166 520" marker-end="url(#arrow-hb)"/>
+        </g>
+
+        <g class="boxes">
+          <rect class="box io" x="50" y="10" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="31">one-hot input</text>
+          <text class="wt" x="238" y="31">32</text>
+
+          <rect class="box rec" x="50" y="72" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="93">rnn.32.gelu</text>
+          <text class="wt" x="238" y="93">2,080</text>
+
+          <rect class="box" x="50" y="134" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="155">dense.16.gelu</text>
+          <text class="wt" x="238" y="155">528</text>
+
+          <rect class="box rec" x="50" y="196" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="217">rglru.16</text>
+          <text class="wt" x="238" y="217">80</text>
+
+          <rect class="box" x="50" y="258" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="279">dense.32.gelu</text>
+          <text class="wt" x="238" y="279">544</text>
+
+          <rect class="box" x="50" y="320" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="341">dense.16</text>
+          <text class="wt" x="238" y="341">528</text>
+
+          <rect class="box rec" x="50" y="442" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="463">mgru.16</text>
+          <text class="wt" x="238" y="463">1,568</text>
+
+          <rect class="box" x="50" y="564" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="585">dense.32.gelu</text>
+          <text class="wt" x="238" y="585">1,568</text>
+
+          <rect class="box" x="50" y="626" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="647">rmsnorm</text>
+          <text class="wt" x="238" y="647">32</text>
+
+          <rect class="box io" x="50" y="688" width="200" height="32" rx="5"/>
+          <text class="name" x="62" y="709">dense.32</text>
+          <text class="wt" x="238" y="709">1,073</text>
+        </g>
+
+        <g class="merges">
+          <circle class="merge" cx="150" cy="398" r="14"/>
+          <text class="op plus" x="150" y="404">+</text>
+          <circle class="merge" cx="150" cy="520" r="14"/>
+          <text class="op" x="150" y="526">&#8214;</text>
+        </g>
+
+        <g class="width">
+          <text x="158" y="61">32</text>
+          <text x="158" y="123">32</text>
+          <text x="158" y="185">16</text>
+          <text x="158" y="247">16</text>
+          <text x="158" y="309">32</text>
+          <text x="158" y="371">16</text>
+          <text x="158" y="431">32</text>
+          <text x="158" y="494">16</text>
+          <text x="158" y="553">48</text>
+          <text x="158" y="615">32</text>
+          <text x="158" y="677">32</text>
+          <text class="end" x="158" y="739">32 logits</text>
+          <text class="lane" x="326" y="150">32</text>
+          <text class="lane" x="361" y="186">32</text>
+        </g>
+      </svg>
+      <figcaption>
+        <strong>hb32</strong> &mdash; 8,001 weights.
+        The + here joins unequal widths: the 16 channels coming up the
+        branch are summed onto the first 16 of the skip, and the skip's
+        upper 16 are carried through unchanged.
+        &#8214; concatenates. Tinted boxes carry recurrent state.
+      </figcaption>
+    </figure>
+
+  </aside>
+</main>
+
+<footer class="page-footer">
+  <p>
+    <span id="footer-model">rl32</span>,
+    <span id="footer-weights">8,017</span> weights, fp32, trained on
+    simplified SODA dialogs (the <code>s5</code> corpus: LLM-simplified
+    conversations plus greetings, farewells and thanks). Tokenizer:
+    <code>tokens.32.hexbpe</code>, 32 tokens.
+  </p>
+  <p>
+    Inference runs entirely in this page &mdash; the model weights are
+    fetched as JSON and every token is computed locally. Nothing you
+    type is sent anywhere.
+  </p>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

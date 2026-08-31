@@ -11,6 +11,9 @@ architectures.
 
 Detailed docs live in [`docs/`](docs/):
 
+- [`structure.md`](docs/structure.md) — what lives where in the
+  repository: the two head scripts, code/models/data directories,
+  conventions, and the parts still in flux.
 - [`architecture.md`](docs/architecture.md) — model pipeline, layer
   abstractions, input encoding, and how a spec becomes a runnable
   model.

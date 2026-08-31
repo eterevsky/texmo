@@ -47,3 +47,9 @@ dev = [
     "ruff>=0.15.11",
     "transformers>=5.13.1",
 ]
+# rig.py -- operations with third-party models (examiner/judge LLMs,
+# corpus building). Not installed on worker machines: `uv sync` and
+# `uv run` skip it unless asked; use ./rig.sh (uv run --group rig).
+rig = [
+    "pyarrow>=21",
+]

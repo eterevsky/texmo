@@ -184,9 +184,9 @@ def init_args(parser: argparse.ArgumentParser, config):
         help='UTF-8 text file with dialog turns to start the '
              'conversation from')
     parser.add_argument(
-        '--log-dir', default='data/chat_logs',
+        '--log-dir', default='chat-logs',
         help="directory for JSONL transcripts "
-             "(default: 'data/chat_logs')")
+             "(default: 'chat-logs')")
     parser.add_argument(
         '--tokens-dir', default=config.TOKENS_DIR,
         help=f"directory with token sets (default: '{config.TOKENS_DIR}')")

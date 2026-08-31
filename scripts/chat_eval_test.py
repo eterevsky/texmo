@@ -463,9 +463,9 @@ def test_phrase_student_needs_a_phrase():
 
 def test_phrase_participant_records_the_provenance():
     seat = chat_eval.phrase_participant(
-        "student", "data/eval/phrases-s3-top20.json", 0, 20)
+        "student", "evals/phrases-s3-top20.json", 0, 20)
     assert seat["kind"] == "phrases"
-    assert seat["phrases_path"] == "data/eval/phrases-s3-top20.json"
+    assert seat["phrases_path"] == "evals/phrases-s3-top20.json"
     assert seat["phrase_seed"] == 0
     assert seat["n_phrases"] == 20
     # No sampling params: neither exists for this seat.

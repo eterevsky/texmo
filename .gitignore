@@ -4,7 +4,9 @@
 /config.py
 /data/*
 !/data/pride*
-/gemma
+/llms/**/*.safetensors
+/llms/**/*.gguf
+/llms/**/*.bin
 /log.txt
 /named_regexes.json
 /results
@@ -19,3 +21,6 @@ __pycache__
 CLAUDE.local.md
 Cargo.lock
 data.txt
+/freq*.txt
+/evals
+/chat-logs

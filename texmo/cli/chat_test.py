@@ -21,7 +21,7 @@ def _args(**kwargs) -> argparse.Namespace:
         'user_name': 'User',
         'bot_name': 'Bot',
         'preamble_file': None,
-        'log_dir': 'data/chat_logs',
+        'log_dir': 'chat-logs',
         'tokens_dir': 'tokens',
         'func': lambda a: None,
     }

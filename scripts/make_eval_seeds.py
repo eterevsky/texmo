@@ -1,6 +1,6 @@
 """Pick the scripted-examiner eval's seed dialogs out of SODA valid.
 
-Writes `data/eval/seeds.jsonl`: the first 1000 dialogs of
+Writes `data/eval_seeds.jsonl`: the first 1000 dialogs of
 `data/soda/valid.parquet`, in file order, that have exactly two
 distinct speakers and at least four utterances. One compact JSON
 object per line,
@@ -48,7 +48,7 @@ import sys
 import pyarrow.parquet as pq
 
 IN_PATH = "data/soda/valid.parquet"
-OUT_PATH = "data/eval/seeds.jsonl"
+OUT_PATH = "data/eval_seeds.jsonl"
 COLUMNS = ["dialogue", "speakers"]
 BATCH_SIZE = 4096
 USER_BOT = ("User", "Bot")

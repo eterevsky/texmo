@@ -4,7 +4,7 @@ Milestone 2 of the tiny chatbot program (`docs/roadmap.md`). The eval
 measures *each student answer*, not whole dialogs:
 
     generate  an examiner model (3-9B, local) plays the "User" side of
-              a seed dialog from `data/eval/seeds.jsonl` while the
+              a seed dialog from `data/eval_seeds.jsonl` while the
               student (a texmo model, seated through
               `texmo.py chat-server`) plays "Bot"; 10 turns, 5 each.
     judge     a DIFFERENT model grades every student answer on three
@@ -25,14 +25,14 @@ measures *each student answer*, not whole dialogs:
         --garbage-student scratch/untrained.json
 
     uv run python scripts/chat_eval.py judge \\
-        --dialogs data/eval/dialogs-hb32-8k-1ub-20260826-120000.jsonl \\
+        --dialogs evals/dialogs-hb32-8k-1ub-20260826-120000.jsonl \\
         --judge C:/Users/oleg/models/Qwen3-8B-Q6_K.gguf
 
     uv run python scripts/chat_eval.py phrases \\
-        --dialogs data/eval/eval100-hb32-8k-s3.jsonl \\
-        --top 20 --out data/eval/phrases-s3-top20.json
+        --dialogs evals/eval100-hb32-8k-s3.jsonl \\
+        --top 20 --out evals/phrases-s3-top20.json
     uv run python scripts/chat_eval.py generate --n-seeds 100 \\
-        --student-phrases data/eval/phrases-s3-top20.json \\
+        --student-phrases evals/phrases-s3-top20.json \\
         --examiner C:/Users/oleg/models/gemma-4-12b-it-Q6_K.gguf
 
 ## Temperature sweep
@@ -2160,7 +2160,7 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument(
         "--out", default=None,
         help="output JSONL (default: "
-             "data/eval/dialogs-<student stem>-<timestamp>.jsonl)")
+             "evals/dialogs-<student stem>-<timestamp>.jsonl)")
     _add_server_args(gen)
     gen.set_defaults(func=run_generate)
 

@@ -9,7 +9,7 @@
  *
  *   - token ids are byte-exact with the Python DP tokenizer;
  *   - untokenize() round-trips to the same text;
- *   - the per-position logits agree within 1e-4 (relative for
+ *   - the per-position logits agree within TOLERANCES (relative for
  *     magnitudes above 1, absolute below);
  *   - the 32-token greedy continuation is identical.
  *
@@ -23,7 +23,39 @@ import {
 } from './texmo.js';
 
 const ROOT = join(import.meta.dirname, '..');
-const TOLERANCE = 1e-4;
+
+const DEFAULT_TOLERANCE = 1e-4;
+
+/**
+ * Per-model logit tolerance, where the *reference* is too noisy for the
+ * default.
+ *
+ * The fixture is fp32, which is what the engine actually runs, but fp32
+ * rounding is amplified differently by different architectures, and the
+ * tolerance can never be tighter than the reference's own uncertainty.
+ * Re-exporting at fp64 and diffing measures that (see
+ * `scratch/web/cmp_fp64.mjs` for the recipe):
+ *
+ *              JS vs fp64   fp32 vs fp64
+ *   rl32-8k      4.2e-6       2.8e-5
+ *   hb32-8k      4.1e-6       3.1e-5
+ *   mg12k        5.8e-6       3.5e-4
+ *
+ * The JS agrees with the fp64 truth to ~5e-6 for all three -- it is
+ * uniformly accurate, and its matmuls accumulate in doubles, so it sits
+ * *nearer* fp64 than fp32 XLA does. mg12k's wider band is the fp32
+ * reference drifting, not the port: its long-memory chain (mingru.32
+ * into a full-block rglru.1 into gru.16) amplifies fp32 rounding about
+ * ten times harder than the 8k models' do. Greedy continuations are
+ * still asserted token-for-token, which is the behavioural pin.
+ *
+ * Reproduce the fp64 column with:
+ *   JAX_ENABLE_X64=1 uv run python web/export_vectors.py \
+ *     --precision fp64 --places 9 -o scratch/web/vectors_fp64.json
+ */
+const TOLERANCES = {
+  'models/mg-12k-s5.json': 5e-4,
+};
 
 function readJson(...parts) {
   return JSON.parse(readFileSync(join(ROOT, ...parts), 'utf-8'));
@@ -67,6 +99,7 @@ for (const modelRef of vectors.models) {
   const tokenizer = new Tokenizer(tokenset);
   const manifest = readJson(...modelRef.manifest.split('/'));
   const model = new Model(manifest, tokenset);
+  const tolerance = TOLERANCES[modelRef.manifest] ?? DEFAULT_TOLERANCE;
 
   console.log(`\n${modelRef.manifest}`);
   console.log(`  ${model.spec}`);
@@ -100,7 +133,7 @@ for (const modelRef of vectors.models) {
     let logits = model.reset();
     let dev = deviation(logits, testCase.logits0);
     check(
-      dev.maxRel < TOLERANCE,
+      dev.maxRel < tolerance,
       `${testCase.name}: logits0 deviation ${dev.maxRel.toExponential(2)}`);
     modelAbs = Math.max(modelAbs, dev.maxAbs);
     modelRel = Math.max(modelRel, dev.maxRel);
@@ -109,7 +142,7 @@ for (const modelRef of vectors.models) {
       logits = model.step(ids[i]);
       if (i >= testCase.logits.length) continue;
       dev = deviation(logits, testCase.logits[i]);
-      if (dev.maxRel >= TOLERANCE) {
+      if (dev.maxRel >= tolerance) {
         check(false,
           `${testCase.name}: position ${i} deviation `
           + `${dev.maxRel.toExponential(2)}`);
@@ -175,16 +208,16 @@ for (const modelRef of vectors.models) {
   console.log(
     `  ${modelRef.cases.length} prompts OK; max logit deviation: `
     + `${modelRel.toExponential(2)} relative, `
-    + `${modelAbs.toExponential(2)} absolute`);
+    + `${modelAbs.toExponential(2)} absolute `
+    + `(tolerance ${tolerance.toExponential(0)})`);
   worstAbs = Math.max(worstAbs, modelAbs);
   worstRel = Math.max(worstRel, modelRel);
 }
 
 console.log(
-  `\nworst deviation across both models: `
+  `\nworst deviation across ${vectors.models.length} models: `
   + `${worstRel.toExponential(2)} relative, `
-  + `${worstAbs.toExponential(2)} absolute `
-  + `(tolerance ${TOLERANCE.toExponential(0)})`);
+  + `${worstAbs.toExponential(2)} absolute`);
 
 if (failures) {
   console.error(`\n${failures} check(s) FAILED`);

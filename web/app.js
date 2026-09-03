@@ -16,17 +16,23 @@ import {
 // Data paths are relative to the page and carry no prefix; `fetchData`
 // works out where `models/` and `tokens/` actually sit (see below).
 const MODELS = {
-  rl32: {
-    label: 'rl32',
-    manifest: 'models/rl32-8k-s5.json',
+  mg12k: {
+    label: 'mg-12k-s5',
+    manifest: 'models/mg-12k-s5.json',
     temperature: 0.4,
-    figure: 'fig-rl32',
+    figure: 'fig-mg12k',
   },
   hb32: {
-    label: 'hb32',
+    label: 'hb32-8k-s5',
     manifest: 'models/hb32-8k-s5.json',
     temperature: 0.3,
     figure: 'fig-hb32',
+  },
+  rl32: {
+    label: 'rl32-8k-s5',
+    manifest: 'models/rl32-8k-s5.json',
+    temperature: 0.4,
+    figure: 'fig-rl32',
   },
 };
 
@@ -204,8 +210,13 @@ function newChat() {
   ui.transcript.replaceChildren();
   const hint = document.createElement('p');
   hint.className = 'empty';
+  // Called once before the first model finishes loading, then again on
+  // every activate() and New chat, when the count is known.
+  const size = state.model
+    ? `${state.model.numWeights.toLocaleString('en-US')} weights`
+    : 'a few thousand weights';
   hint.textContent =
-    'Say hello. This model has 8,000 weights and was trained on short, '
+    `Say hello. This model has ${size} and was trained on short, `
     + 'simplified dialogs, so it does best with greetings, small talk '
     + 'and very short questions.';
   ui.transcript.append(hint);

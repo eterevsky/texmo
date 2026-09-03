@@ -15,7 +15,12 @@ lowercase text with no sentence punctuation, dense punctuation,
 mixed-case and ALL-CAPS words, and non-ASCII characters (which the
 tokenset spells as nibble pairs).
 
-CPU only: the models are 8k weights, and a GPU would only add the
+Between them the three exported models cover every layer the JS port
+implements: `mg12k-s5` is the only one exercising `gru`, `mingru`,
+`split.mul` (both the gated and the `pass`-value self-gate form), a
+`tanh` dense and `rglru` with a single full-width block.
+
+CPU only: the models are 8k-12k weights, and a GPU would only add the
 XLA differences we are not trying to measure.
 """
 import argparse
@@ -32,9 +37,14 @@ from texmo import pjson
 from texmo.chat import collect_reply
 from texmo.generate import jit_step
 from texmo.model_store import load_model
+from texmo.precision import Precision
 from texmo.tokens import get_tokenizer, set_tokens_dir
 
-MODELS = ['models/rl32-8k-s5.json', 'models/hb32-8k-s5.json']
+MODELS = [
+    'models/rl32-8k-s5.json',
+    'models/hb32-8k-s5.json',
+    'models/mg-12k-s5.json',
+]
 
 PROMPTS = [
     ('dialog',
@@ -130,7 +140,7 @@ def export(args) -> dict:
     set_tokens_dir(args.tokens_dir)
     models = []
     for path in args.models:
-        md, weights = load_model(path)
+        md, weights = load_model(path, precision=args.precision)
         model = md.build_jax()
         tokenizer = get_tokenizer(md.codec.tokens_name)
         print(f'{path}: {md.num_weights:,} weights, {md.spec}')
@@ -163,10 +173,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         '-m', '--models', nargs='+', default=MODELS,
-        help='model manifests to export (default: both chat models)')
+        help='model manifests to export (default: all chat models)')
     parser.add_argument(
         '-o', '--out', default='web/test/vectors.json',
         help='output file (default: web/test/vectors.json)')
+    parser.add_argument(
+        '--precision', type=Precision, default=None,
+        choices=list(Precision),
+        help="override the manifest's precision. Only for diagnosis: "
+             "exporting at fp64 (with JAX_ENABLE_X64=1) and diffing "
+             "against the fp32 export measures how much of a JS/Python "
+             "gap is the reference's own rounding rather than a port "
+             "bug -- see per_model_tolerance in texmo_test.mjs")
     parser.add_argument(
         '--tokens-dir', default='tokens',
         help="directory with token sets (default: 'tokens')")

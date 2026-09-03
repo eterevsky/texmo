@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>texmo chat</title>
-<meta name="description" content="Chat with an 8,000-weight recurrent language model running entirely in your browser.">
+<meta name="description" content="Chat with a recurrent language model of a few thousand weights, running entirely in your browser.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%234f7cff'/><rect x='3.5' y='5' width='9' height='2' rx='1' fill='white'/><rect x='3.5' y='9' width='6' height='2' rx='1' fill='white'/></svg>">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -13,15 +13,16 @@
 <header class="page-header">
   <h1>texmo chat</h1>
   <p class="tagline">
-    A recurrent language model of about 8,000 weights, running in your
-    browser. Everything below &mdash; tokenizer, model, sampling &mdash;
-    is plain JavaScript; nothing is sent anywhere.
+    A recurrent language model of 8,000 to 12,000 weights, running in
+    your browser. Everything below &mdash; tokenizer, model, sampling
+    &mdash; is plain JavaScript; nothing is sent anywhere.
   </p>
   <div class="controls">
     <label for="model">Model
       <select id="model">
-        <option value="rl32" selected>rl32 &mdash; rnn + rglru + lstm (8,017 weights)</option>
-        <option value="hb32">hb32 &mdash; rnn + rglru + mgru (8,001 weights)</option>
+        <option value="mg12k" selected>mg-12k-s5 &mdash; gated rnn + mingru + rglru + gru (12,449 weights)</option>
+        <option value="hb32">hb32-8k-s5 &mdash; rnn + rglru + mgru (8,001 weights)</option>
+        <option value="rl32">rl32-8k-s5 &mdash; rnn + rglru + lstm (8,017 weights)</option>
       </select>
     </label>
     <label for="temperature">Temperature
@@ -45,7 +46,7 @@
   <aside class="schematic" aria-label="Model architecture">
 
     <!-- ============================ rl32 ============================ -->
-    <figure id="fig-rl32" class="diagram">
+    <figure id="fig-rl32" class="diagram" hidden>
       <svg viewBox="0 0 400 830" role="img"
            aria-label="Layer diagram of the rl32 model: a one-hot input feeds an Elman RNN, whose output is both concatenated with an RG-LRU branch and added back after an LSTM branch, then projected and normalized before the output head.">
         <defs>
@@ -154,7 +155,7 @@
         </g>
       </svg>
       <figcaption>
-        <strong>rl32</strong> &mdash; 8,017 weights.
+        <strong>rl32-8k-s5</strong> &mdash; 8,017 weights.
         &#8214; concatenates two branches; + adds them channel-wise.
         Tinted boxes carry recurrent state.
       </figcaption>
@@ -259,11 +260,150 @@
         </g>
       </svg>
       <figcaption>
-        <strong>hb32</strong> &mdash; 8,001 weights.
+        <strong>hb32-8k-s5</strong> &mdash; 8,001 weights.
         The + here joins unequal widths: the 16 channels coming up the
         branch are summed onto the first 16 of the skip, and the skip's
         upper 16 are carried through unchanged.
         &#8214; concatenates. Tinted boxes carry recurrent state.
+      </figcaption>
+    </figure>
+
+    <!-- =========================== mg12k ============================ -->
+    <figure id="fig-mg12k" class="diagram">
+      <svg viewBox="0 0 440 890" role="img"
+           aria-label="Layer diagram of the mg12k model: a one-hot input feeds an Elman RNN gated channel-wise by a dense branch; that output runs through a four-layer recurrent chain (a second RNN, a minGRU, a full-block RG-LRU and a GRU) closed by a self-gate, is concatenated with the unchanged 32 channels, projected back to 32 and added to those same channels, then normalized before the output head.">
+        <defs>
+          <marker id="arrow-mg" viewBox="0 0 8 8" refX="7" refY="4"
+                  markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 1 L 7 4 L 0 7 z" class="head"/>
+          </marker>
+        </defs>
+
+        <!-- main spine -->
+        <g class="edge">
+          <line x1="275" y1="42"  x2="275" y2="72"  marker-end="url(#arrow-mg)"/>
+          <line x1="275" y1="104" x2="275" y2="136" marker-end="url(#arrow-mg)"/>
+          <line x1="275" y1="164" x2="275" y2="194" marker-end="url(#arrow-mg)"/>
+          <line x1="275" y1="226" x2="275" y2="256" marker-end="url(#arrow-mg)"/>
+          <line x1="275" y1="288" x2="275" y2="318" marker-end="url(#arrow-mg)"/>
+          <line x1="275" y1="350" x2="275" y2="380" marker-end="url(#arrow-mg)"/>
+          <line x1="275" y1="412" x2="275" y2="506" marker-end="url(#arrow-mg)"/>
+          <line x1="275" y1="534" x2="275" y2="566" marker-end="url(#arrow-mg)"/>
+          <line x1="275" y1="594" x2="275" y2="624" marker-end="url(#arrow-mg)"/>
+          <line x1="275" y1="656" x2="275" y2="686" marker-end="url(#arrow-mg)"/>
+          <line x1="275" y1="714" x2="275" y2="744" marker-end="url(#arrow-mg)"/>
+          <line x1="275" y1="776" x2="275" y2="806" marker-end="url(#arrow-mg)"/>
+          <line x1="275" y1="838" x2="275" y2="860" marker-end="url(#arrow-mg)"/>
+        </g>
+
+        <!-- gate branches: same input as the spine, merged back by a
+             channel-wise multiply -->
+        <g class="edge">
+          <path d="M 180 26 L 81 26 L 81 72" marker-end="url(#arrow-mg)"/>
+          <path d="M 81 104 L 81 150 L 259 150" marker-end="url(#arrow-mg)"/>
+          <path d="M 180 396 L 81 396 L 81 444" marker-end="url(#arrow-mg)"/>
+          <path d="M 81 476 L 81 520 L 259 520" marker-end="url(#arrow-mg)"/>
+        </g>
+
+        <!-- identity routes: both tap the gated RNN's 32 channels -->
+        <g class="edge skip">
+          <line x1="289" y1="150" x2="418" y2="150"/>
+          <path d="M 392 150 L 392 580 L 291 580" marker-end="url(#arrow-mg)"/>
+          <path d="M 418 150 L 418 700 L 291 700" marker-end="url(#arrow-mg)"/>
+        </g>
+
+        <!-- boxes -->
+        <g class="boxes">
+          <rect class="box io" x="180" y="10" width="190" height="32" rx="5"/>
+          <text class="name" x="192" y="31">one-hot input</text>
+          <text class="wt" x="358" y="31">32</text>
+
+          <rect class="box rec" x="180" y="72" width="190" height="32" rx="5"/>
+          <text class="name" x="192" y="93">rnn.32.gelu</text>
+          <text class="wt" x="358" y="93">2,080</text>
+
+          <rect class="box" x="6" y="72" width="150" height="32" rx="5"/>
+          <text class="name" x="18" y="93">dense.32</text>
+          <text class="wt" x="144" y="93">1,056</text>
+
+          <rect class="box rec" x="180" y="194" width="190" height="32" rx="5"/>
+          <text class="name" x="192" y="215">rnn.16.gelu</text>
+          <text class="wt" x="358" y="215">784</text>
+
+          <rect class="box rec" x="180" y="256" width="190" height="32" rx="5"/>
+          <text class="name" x="192" y="277">mingru.32</text>
+          <text class="wt" x="358" y="277">1,088</text>
+
+          <rect class="box rec" x="180" y="318" width="190" height="32" rx="5"/>
+          <text class="name" x="192" y="339">rglru.1</text>
+          <text class="wt" x="358" y="339">2,144</text>
+
+          <rect class="box rec" x="180" y="380" width="190" height="32" rx="5"/>
+          <text class="name" x="192" y="401">gru.16</text>
+          <text class="wt" x="358" y="401">2,352</text>
+
+          <rect class="box" x="6" y="444" width="150" height="32" rx="5"/>
+          <text class="name" x="18" y="465">dense.16.tanh</text>
+          <text class="wt" x="144" y="465">272</text>
+
+          <rect class="box" x="180" y="624" width="190" height="32" rx="5"/>
+          <text class="name" x="192" y="645">dense.32.gelu</text>
+          <text class="wt" x="358" y="645">1,568</text>
+
+          <rect class="box" x="180" y="744" width="190" height="32" rx="5"/>
+          <text class="name" x="192" y="765">rmsnorm</text>
+          <text class="wt" x="358" y="765">32</text>
+
+          <rect class="box io" x="180" y="806" width="190" height="32" rx="5"/>
+          <text class="name" x="192" y="827">dense.32</text>
+          <text class="wt" x="358" y="827">1,073</text>
+        </g>
+
+        <!-- merge operators -->
+        <g class="merges">
+          <circle class="merge" cx="275" cy="150" r="14"/>
+          <text class="op times" x="275" y="156">&#215;</text>
+          <circle class="merge" cx="275" cy="520" r="14"/>
+          <text class="op times" x="275" y="526">&#215;</text>
+          <circle class="merge" cx="275" cy="580" r="14"/>
+          <text class="op" x="275" y="586">&#8214;</text>
+          <circle class="merge" cx="275" cy="700" r="14"/>
+          <text class="op plus" x="275" y="706">+</text>
+        </g>
+
+        <!-- widths -->
+        <g class="width">
+          <text x="283" y="61">32</text>
+          <text x="283" y="123">32</text>
+          <text x="283" y="183">32</text>
+          <text x="283" y="245">16</text>
+          <text x="283" y="307">32</text>
+          <text x="283" y="369">32</text>
+          <text x="283" y="462">16</text>
+          <text x="283" y="555">16</text>
+          <text x="283" y="613">48</text>
+          <text x="283" y="675">32</text>
+          <text x="283" y="733">32</text>
+          <text x="283" y="795">32</text>
+          <text class="end" x="283" y="857">32 logits</text>
+          <text x="88" y="20">32</text>
+          <text x="88" y="144">32</text>
+          <text x="88" y="390">16</text>
+          <text x="88" y="514">16</text>
+          <text class="lane" x="390" y="262">32</text>
+          <text class="lane" x="416" y="322">32</text>
+        </g>
+      </svg>
+      <figcaption>
+        <strong>mg-12k-s5</strong> &mdash; 12,449 weights.
+        &#215; multiplies channel-wise: the box on the left is a
+        <em>gate</em> that scales the spine beside it, once over the
+        input RNN and once as a self-gate closing the recurrent chain.
+        &#8214; concatenates the chain's 16 channels onto the untouched
+        32; + adds the result back. <code>rglru.1</code> is one full
+        32&#215;32 gate block &mdash; the <code>.1</code> counts blocks,
+        so unlike the other two models' <code>rglru.16</code> its gates
+        mix across all channels. Tinted boxes carry recurrent state.
       </figcaption>
     </figure>
 
@@ -272,8 +412,8 @@
 
 <footer class="page-footer">
   <p>
-    <span id="footer-model">rl32</span>,
-    <span id="footer-weights">8,017</span> weights, fp32, trained on
+    <span id="footer-model">mg-12k-s5</span>,
+    <span id="footer-weights">12,449</span> weights, fp32, trained on
     simplified SODA dialogs (the <code>s5</code> corpus: LLM-simplified
     conversations plus greetings, farewells and thanks). Tokenizer:
     <code>tokens.32.hexbpe</code>, 32 tokens.

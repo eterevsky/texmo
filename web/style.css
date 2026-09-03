@@ -323,6 +323,7 @@ main {
 }
 
 .diagram .op.plus { font-size: 19px; }
+.diagram .op.times { font-size: 17px; }
 
 .diagram .width text,
 .diagram .width {

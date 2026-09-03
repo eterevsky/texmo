@@ -41,20 +41,28 @@ tree.
 
 ## Models
 
-Two chat models, switchable from the page's dropdown. Both use the
+Three chat models, switchable from the page's dropdown. All use the
 `tokens.32.hexbpe` tokenset and the `User:` / `Bot:` turn format, and
-both were trained on the `s5` corpus (LLM-simplified SODA dialogs plus
+all were trained on the `s5` corpus (LLM-simplified SODA dialogs plus
 greetings, farewells and thanks).
 
 | model | weights | spec | recommended T |
 | --- | --- | --- | --- |
 | `models/rl32-8k-s5.json` | 8,017 | `rnn.32.gelu` + `rglru.16` + `lstm.16` | 0.4 |
 | `models/hb32-8k-s5.json` | 8,001 | `rnn.32.gelu` + `rglru.16` + `mgru.16` | 0.3 |
+| `models/mg-12k-s5.json` | 12,449 | gated `rnn.32.gelu` + `mingru.32` + `rglru.1` + `gru.16` | 0.4 |
 
-Selecting a model loads its JSON on first use, resets the chat and
-sets the temperature field to that model's recommendation.
+`mg-12k` (file name `mg12k-s5.json`) is the page default; the dropdown orders the models by quality: mg-12k, hb32, rl32. Selecting a model loads its JSON on
+first use, resets the chat and sets the temperature field to that
+model's recommendation.
 
-**Both manifests must be committed** for Pages to serve them —
+A note on the third spec, because the digit is easy to misread:
+`rglru.N` counts *block-diagonal gate blocks*, not channels, and the
+layer is dimension-preserving. `rglru.16` at width 32 is sixteen
+2-channel blocks; `rglru.1` is one full 32×32 block, so mg12k's gates
+mix across every channel — that is where its 2,144 weights go.
+
+**All three manifests must be committed** for Pages to serve them —
 `models/` is otherwise mostly untracked.
 
 ## Publishing
@@ -91,10 +99,46 @@ token ids, the position-0 logits, one logit row per prompt position
 
 `texmo_test.mjs` replays them through `texmo.js` and asserts token ids
 are byte-exact, `untokenize` round-trips identically, logits agree
-within `1e-4` (relative above magnitude 1, absolute below) and the
+within tolerance (relative above magnitude 1, absolute below) and the
 greedy continuations match token for token. Rerun both after touching
 anything in `texmo.js`, and rerun the export after touching a layer,
 the codec or the tokenizer on the Python side.
+
+Between them the three models exercise every layer the port
+implements except `norm`: `mg12k` is the only one with `gru`,
+`mingru`, `split.mul` (in both the gated and the `pass`-value
+self-gate form), a `tanh` dense, and an `rglru` whose gate block spans
+the full width.
+
+### About the tolerance
+
+The default is `1e-4`, but `mg12k` gets `5e-4`, and the reason is the
+*reference*, not the port. The fixture is fp32 — what the engine
+actually runs — and fp32 rounding is amplified differently by
+different architectures. Re-exporting at fp64 measures how much:
+
+|  | JS vs fp64 | fp32 vs fp64 |
+| --- | --- | --- |
+| `rl32-8k` | 4.2e-6 | 2.8e-5 |
+| `hb32-8k` | 4.1e-6 | 3.1e-5 |
+| `mg12k` | 5.8e-6 | 3.5e-4 |
+
+The JS agrees with the fp64 truth to ~5e-6 for all three — it is
+uniformly accurate, and since its matmuls accumulate in doubles it
+sits *nearer* fp64 than fp32 XLA does. `mg12k`'s wider band is the
+fp32 reference drifting: its long-memory chain (`mingru.32` into a
+full-block `rglru.1` into `gru.16`) amplifies fp32 rounding about ten
+times harder than the 8k models' do. A tolerance can never be tighter
+than the reference's own uncertainty. The greedy continuations are
+still asserted token for token, which is the behavioural pin.
+
+Reproduce the fp64 column with the `--precision` flag (diagnosis only;
+it needs x64 enabled) and diff the two exports:
+
+```sh
+JAX_ENABLE_X64=1 uv run python web/export_vectors.py \
+  --precision fp64 --places 9 -o scratch/web/vectors_fp64.json
+```
 
 ## What the JS port covers
 
@@ -125,8 +169,9 @@ Recorded here because they are the places the two could drift:
 - Weights and layer outputs are `Float32Array` (JAX's fp32), but the
   arithmetic inside a matmul accumulates in JS doubles and rounds once
   on store — slightly *more* accurate than XLA, not less. Measured
-  worst deviation across both models and all reference positions:
-  ~3e-5 relative.
+  worst deviation from the fp32 reference: ~3e-5 relative on the two
+  8k models, ~3.5e-4 on `mg12k` (see "About the tolerance" above —
+  against an fp64 reference all three sit at ~5e-6).
 - A `Model` owns its recurrent state instead of threading it
   functionally; one instance is one running sequence, and `reset()`
   starts a new one. Every turn re-tokenizes and re-prefills the whole

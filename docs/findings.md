@@ -6,6 +6,51 @@ entries here are the results worth re-reading a year later). Dated,
 newest first. Full data locations are noted per entry; scratch/ paths
 are machine-local and untracked.
 
+## The eval can see speech acts now: the style-mixed examiner (2026-09-03)
+
+The scripted-examiner eval was blind to everything s5 added (see
+2026-08-30 below). It now mixes the examiner's own side, per seed
+index and from seeded streams: 30% of dialogs entirely lower case
+without closing full stops, 40% opened by a forced bare greeting (the
+seed opener moves to the examiner's second turn; still 10 turns and 5
+answers), 15% closed by a forced farewell, with a few never-trained
+forms in both phrase tables. Re-baselining eight students at 100
+seeds: the three s5 models answer greetings 88-97% and farewells
+77-100% in kind and mirror lower case on 97-100% of their answers;
+the five s4/s3/ELIZA students score a flat **0% on all three**, and
+the phrase-bot nulls 0-9% ok / 10-22% mirror (the luck floor -- a bag
+drawn from an s5 model's own output contains lowercase phrases).
+Unseen greeting forms are answered 50-100% against 96-100% for
+trained ones: the act generalizes; the table is not merely memorized.
+
+Two judge rulings landed with it, calibrated old-vs-new on the same
+answers: pass A ignores capitalization and a missing final period (it
+had been costing lower-case answers ~2.5 points), and pass C counts a
+minimal direct answer that resolves the question as substantive (bare
+polar answers to polar questions 15% -> 40% credited; deflections and
+the good anchor unmoved; the pass-C *parser* was exonerated -- 26,030
+stored replies re-parsed with zero disagreements, so the old "Yes."
+inconsistency was the judge's own). Under the amended c, seven of
+eight students beat their own phrase bot on substance (+0.6 to +7.8)
+where none did before; **mg12k-s5 (12.4k weights, the search's best
+12k conf trained on s5) is the only model positive on both b (46.0
+vs null 41.0) and c (11.8 vs 4.0)** -- the first model above its own
+floor on responsiveness and substance at once. The s4/s5 ranking
+flipped with the instrument: mg12k-s4, the best model under the old
+examiner (and the first ever to beat its null overall, b 41.8 vs
+35.8 at T=0.4), answers 0% of greetings and goes 5.6 points of b
+negative once 40% of dialogs open with one.
+
+Side-effects to remember: b shifted -5.6 to +7.6 purely from the
+easier turn mix, so **pre- and post-2026-09-03 a/b/c are not
+comparable** (legacy numbers below stand as history); lower-case
+input *helps* case-trained models by 2-11 points of b while costing
+mg12k-s4 6.4 and ELIZA 5.4 (its rules key on capitalized words), and
+hb32-8k-s3 drops to c = 0.0% there. The judge itself carries ~2.5
+points of run-to-run noise at T=0 (llama.cpp batch nondeterminism).
+Thin spot: the unseen-farewell cell is n = 2 per run. Artifacts:
+`evals/style100-*`, `scratch/eval_style/` (machine-local).
+
 ## Synthesized speech acts and case style are learned outright: s5 (2026-08-30)
 
 SODA starts and ends mid-conversation, so the simplified corpora had

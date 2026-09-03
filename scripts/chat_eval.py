@@ -68,7 +68,8 @@ of its training distribution and measure OOD robustness instead of
 coherence.
 
 Turn 1 is the seed's opener **verbatim** -- not generated -- so every
-dialog starts from the seed distribution exactly.
+dialog starts from the seed distribution exactly (a greeting dialog,
+below, puts one more forced turn in front of it).
 
 Two message-assembly details that are not obvious:
 
@@ -83,6 +84,49 @@ Two message-assembly details that are not obvious:
   empty answer is a *failing* answer, not a crash -- but message
   assembly substitutes `_EMPTY_PLACEHOLDER` so endpoints that reject
   empty content still run.
+
+## Style mixing
+
+The s4/s5 corpora teach three things a plain SODA-style dialog never
+exercises: lower-case chat typing without closing full stops, an
+opening greeting, and a closing farewell. `generate` mixes all three
+into the *examiner's* side so that the eval measures them;
+`--no-style-mix` reproduces the old behaviour exactly.
+
+Per seed index, drawn from seeded RNG streams -- one per feature, the
+split `scripts/simplify_corpus.py` uses (`speech_rng` / `case_rng`),
+so one feature's phrase table cannot shift another's draws:
+
+    case      30% of dialogs: EVERY examiner utterance is lower-cased
+              and loses a single terminal "." (a full stop inside the
+              text, and "!" or "?", survive) before it is sent to the
+              student and before it is recorded. Exactly the corpus's
+              `apply_case_style` / `drop_final_period` semantics. The
+              examiner model writes normally; the transform is applied
+              to its output, and to the forced turns as well.
+    greeting  40%: a bare greeting is forced as the examiner's FIRST
+              turn and the seed's opener becomes its second, so the
+              student's first answer answers a greeting. The dialog
+              still runs 10 turns and 5 student answers -- one
+              generated examiner content turn pays for it.
+    farewell  15%: the examiner's LAST turn is a forced farewell, so
+              the student's final answer answers a goodbye.
+
+The three draws are independent, so the slices are orthogonal.
+
+Both phrase tables hold the forms the corpus trains on, weighted as it
+weights them (kept in step with `_GREETINGS` / `_FAREWELLS` in
+`simplify_corpus.py`), plus a few forms it never shows, at a lower
+weight. The record says which form was drawn and whether it is in the
+trained set, and the report scores seen and unseen apart: a model that
+only replays "Hi!" -> "Hi!" has memorized the table rather than learned
+the act.
+
+Every dialog record carries the draw as `style` and every grade copies
+it, so the report can slice a/b/c by case and score the greeting and
+farewell answers at their positions against the same accepted-reply
+sets `scratch/s5/speech_probe.py` uses. Dialogs generated before this
+existed carry no `style`; they judge and report unchanged.
 
 ## Anchors
 
@@ -292,8 +336,8 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from texmo.pjson import save_json
 
-_DEFAULT_SEEDS = os.path.join("data", "eval", "seeds.jsonl")
-_DEFAULT_OUT_DIR = os.path.join("data", "eval")
+_DEFAULT_SEEDS = os.path.join("data", "eval_seeds.jsonl")
+_DEFAULT_OUT_DIR = "evals"
 
 # 10 utterances, 5 per side, examiner first (the forced opener).
 _N_TURNS = 10
@@ -402,7 +446,10 @@ is false, not true.
 This is casual chat, so replies are short. A bare fragment such as \
 "Why?", "Me too." or "At the park." is normal speech and is TRUE. A \
 short, plain, dull sentence such as "I really like it." is readable \
-and self-consistent, so it is TRUE as well. You cannot see what was \
+and self-consistent, so it is TRUE as well. Capitalization and a \
+closing full stop are NOT part of this question: an all-lower-case \
+reply with no final period, such as "i am good", is ordinary chat \
+typing and is TRUE. You cannot see what was \
 said before, so never answer false because the reply is vague, dull, \
 generic or an odd thing to say -- other questions cover that.
 
@@ -446,7 +493,14 @@ You are grading one reply from a very small, weak chatbot called \
 c) Is the reply substantive -- a contentful, on-topic answer rather \
 than a generic deflection? For example, to "What do you like to do on \
 weekends?": "I don't know." is NOT substantive, while "I usually go \
-hiking with my brother." IS substantive. Grammar and fit with the \
+hiking with my brother." IS substantive. Length is not the test, and \
+a direct answer is never a deflection: a minimal reply that RESOLVES \
+the question IS substantive. "Yes." or "No." to a yes/no question \
+("Is everything okay?", "Do you like cats?") settles it and is TRUE, \
+and so is "{bot}." to "What is your name?". Answer false when the \
+reply leaves the question open: deflections ("I don't know."), \
+acknowledgements of nothing in particular ("I agree.", "Nice!"), \
+counter-questions, and stock filler. Grammar and fit with the \
 preceding turn are graded elsewhere and are not your question here.
 
 Separately, `user_problem` is quality control on the {user} side and \
@@ -510,6 +564,198 @@ def examiner_system_prompt(seed: dict) -> str:
     """The examiner's seat prompt for one seed."""
     return _EXAMINER_PROMPT.format(
         user=_USER_LABEL, bot=_BOT_LABEL, script=render_script(seed))
+
+
+# ---------------------------------------------------------- style mixing
+
+
+PLAIN, LOWER = "plain", "lower"
+GREETING, FAREWELL = "greeting", "farewell"
+_ACTS = (GREETING, FAREWELL)
+
+# Share of dialogs that get each feature. Drawn independently, so the
+# three slices are orthogonal: a lower-case dialog is exactly as likely
+# to open with a greeting as any other.
+_LOWERCASE_SHARE = 0.30
+_GREETING_SHARE = 0.40
+_FAREWELL_SHARE = 0.15
+
+# `(phrase, weight)`. The first block of each table is what the s5
+# corpus actually trains on, with its own weights -- keep it in step
+# with `_GREETINGS` / `_FAREWELLS` in `scripts/simplify_corpus.py`
+# ("Speech acts"). The block after it is forms the corpus never shows,
+# at a low weight: the record marks them unseen and the report scores
+# them apart, which is the generalization question.
+_TRAINED_GREETINGS = frozenset((
+    "Hi!", "Hello!", "Hey!", "Hi there!", "Good morning!", "Good evening!"))
+_GREETING_FORMS = (
+    ("Hi!", 4),
+    ("Hello!", 3),
+    ("Hey!", 2),
+    ("Hi there!", 1),
+    ("Good morning!", 1),
+    ("Good evening!", 1),
+    ("Hiya!", 1),
+    ("Morning!", 1),
+    ("Hey there!", 1),
+)
+_TRAINED_FAREWELLS = frozenset((
+    "Bye!", "Goodbye!", "See you later!", "See you!", "Good night!",
+    "Take care!"))
+_FAREWELL_FORMS = (
+    ("Bye!", 4),
+    ("Goodbye!", 2),
+    ("See you later!", 2),
+    ("See you!", 2),
+    ("Good night!", 1),
+    ("Take care!", 1),
+    ("Catch you later!", 1),
+)
+_TRAINED_FORMS = {GREETING: _TRAINED_GREETINGS, FAREWELL: _TRAINED_FAREWELLS}
+_ACT_FORMS = {GREETING: _GREETING_FORMS, FAREWELL: _FAREWELL_FORMS}
+
+# Fixed unless `--style-seed` says otherwise; combined with the seed
+# index so a dialog's style does not depend on how many seeds run, and
+# so every student meets the same examiner styles.
+_DEFAULT_STYLE_SEED = 20260902
+
+# A closing full stop -- one that ends the utterance and is not the
+# tail of an ellipsis. Anchored, so a full stop *inside* the utterance
+# ("It is late. Bye!") is not matched at all. Verbatim
+# `simplify_corpus._FINAL_PERIOD`.
+_FINAL_PERIOD = re.compile(r"(?<!\.)\.$")
+
+# The style of a dialog generated under `--no-style-mix`, and of every
+# dialog generated before style mixing existed.
+_NO_STYLE = {
+    "case": PLAIN,
+    GREETING: None, "greeting_seen": False,
+    FAREWELL: None, "farewell_seen": False,
+}
+
+# Accepted replies to a greeting and to a farewell, in `normalize_reply`
+# form. Verbatim the sets `scratch/s5/speech_probe.py` scores with
+# (`ACCEPTED[GREETING]` / `ACCEPTED[FAREWELL]`), so the judge-free probe
+# and this eval agree on what answering in kind means; the probe can
+# import these rather than keep its own copy. Deliberately wider than
+# the phrase tables above: the question is whether the model answers a
+# greeting with a greeting, not whether it reproduces the table.
+ACCEPTED_REPLIES = {
+    GREETING: {
+        "hi", "hello", "hey", "hi there", "hello there", "hey there",
+        "good morning", "good evening", "good afternoon", "good day",
+        "hiya", "howdy",
+    },
+    FAREWELL: {
+        "bye", "goodbye", "bye bye", "see you", "see you later",
+        "see you soon", "good night", "night", "take care", "you too",
+        "later", "farewell", "so long",
+    },
+}
+
+_ACT_PUNCT = " .!?,;:\"'()-"
+_APOSTROPHE = re.compile("['’]")
+
+
+def normalize_reply(text: str) -> str:
+    """The form `ACCEPTED_REPLIES` is written in (the probe's rule)."""
+    text = _APOSTROPHE.sub("", text.strip().lower())
+    return " ".join(text.split()).strip(_ACT_PUNCT)
+
+
+def answers_in_kind(act: str, reply: str) -> bool:
+    """Is `reply` an acceptable answer to a greeting / a farewell?"""
+    return normalize_reply(reply) in ACCEPTED_REPLIES[act]
+
+
+def mirrors_lower(reply: str) -> bool:
+    """Is `reply` written the way a lower-case dialog is written?
+
+    What the corpus rewrite means by lower case: no capitals anywhere
+    and no closing full stop. "!" and "?" are kept by the rewrite too,
+    so they say nothing about the style.
+    """
+    text = reply.strip()
+    if not text:
+        return False
+    return text == text.lower() and not text.endswith(".")
+
+
+def drop_final_period(text: str) -> str:
+    """`text` without its closing full stop ("!", "?", "..." stay)."""
+    return _FINAL_PERIOD.sub("", text)
+
+
+def apply_case_style(text: str, case: str) -> str:
+    """One utterance in the dialog's case style.
+
+    `PLAIN` is the identity; `LOWER` is the corpus rewrite, applied per
+    utterance because the examiner produces them one at a time.
+    """
+    if case != LOWER:
+        return text
+    return drop_final_period(text.lower())
+
+
+def case_rng(seed: int, seed_idx: int) -> random.Random:
+    """The generator for one dialog's case style."""
+    return random.Random(f"{seed}:case:{seed_idx}")
+
+
+def speech_rng(seed: int, seed_idx: int) -> random.Random:
+    """The generator for one dialog's greeting and farewell.
+
+    Separate from `case_rng` on purpose, exactly as in the corpus
+    renderer: the speech acts draw a variable number of values, so
+    sharing one stream would make the case of every dialog depend on
+    the phrase tables.
+    """
+    return random.Random(f"{seed}:speech:{seed_idx}")
+
+
+def _weighted_choice(rng: random.Random, table: tuple) -> str:
+    """One phrase from a `(phrase, weight)` table."""
+    return rng.choices([phrase for phrase, _ in table],
+                       weights=[weight for _, weight in table])[0]
+
+
+def assign_style(seed_idx: int, seed: int = _DEFAULT_STYLE_SEED) -> dict:
+    """The style draw for one seed: case, greeting, farewell.
+
+    Keyed on the seed index alone, so the same seed carries the same
+    style across temperatures, across students and across reruns --
+    which is what makes the slices paired comparisons.
+
+    Both booleans are drawn before either phrase, again as in the
+    corpus renderer, so whether a dialog gets a farewell does not
+    depend on how many values the greeting table consumed.
+    """
+    case = (LOWER if case_rng(seed, seed_idx).random() < _LOWERCASE_SHARE
+            else PLAIN)
+    rng = speech_rng(seed, seed_idx)
+    greet = rng.random() < _GREETING_SHARE
+    part = rng.random() < _FAREWELL_SHARE
+    greeting = _weighted_choice(rng, _GREETING_FORMS) if greet else None
+    farewell = _weighted_choice(rng, _FAREWELL_FORMS) if part else None
+    return {
+        "case": case,
+        GREETING: greeting,
+        "greeting_seen": greeting in _TRAINED_GREETINGS,
+        FAREWELL: farewell,
+        "farewell_seen": farewell in _TRAINED_FAREWELLS,
+    }
+
+
+def style_tag(style: dict | None) -> str:
+    """The draw as one short token for the progress line."""
+    if not style:
+        return "-"
+    parts = [style.get("case", PLAIN)]
+    if style.get(GREETING):
+        parts.append("greet")
+    if style.get(FAREWELL):
+        parts.append("bye")
+    return "+".join(parts)
 
 
 # ------------------------------------------------------ message assembly
@@ -1167,41 +1413,86 @@ def phrase_participant(name: str, path: str, seed: int,
 # ---------------------------------------------------------- generation
 
 
+def _turn(side: str, text: str, forced: bool = False, tokens: int = 0,
+          elapsed: float = 0.0) -> dict:
+    return {
+        "side": side,
+        "text": text,
+        "forced": forced,
+        "tokens": tokens,
+        "elapsed_s": round(elapsed, 3),
+    }
+
+
+def forced_openers(seed: dict, style: dict) -> list[str]:
+    """The examiner's forced first turns, in order.
+
+    The seed's opener is always one of them -- every dialog starts from
+    the seed distribution exactly -- and a greeting dialog puts a bare
+    greeting in front of it, so the student's first answer answers the
+    greeting and the opener lands one exchange later.
+    """
+    openers = []
+    if style.get(GREETING):
+        openers.append(style[GREETING])
+    openers.append(seed["opener"])
+    return openers
+
+
 def run_dialog(session, seed: dict, examiner: dict, examiner_url: str,
-               student, n_turns: int, timeout) -> list[dict]:
-    """One eval dialog: forced opener, then alternating turns.
+               student, n_turns: int, timeout,
+               style: dict | None = None) -> list[dict]:
+    """One eval dialog: forced opener(s), then alternating turns.
 
     `student` is any object with `.reply(session, turns, timeout)` and
     `.reset(seed_idx)` -- `UrlStudent`, `PhraseStudent` or
     `ElizaStudent`. The reset opens the dialog: a stateful seat must
     not carry a rule cursor or a memory stack over from the previous
     seed.
+
+    `style` is one `assign_style` draw (None, or `--no-style-mix`, is
+    the plain dialog this always used to run). It costs the examiner
+    generated turns rather than the dialog its length: the turn count
+    and the five student answers are what the report compares across
+    runs, so a forced greeting or farewell replaces a generated
+    examiner turn instead of adding one. Every examiner utterance --
+    forced and generated alike -- goes through the case transform
+    before it is recorded, so the student and the judge see exactly the
+    same text.
     """
     student.reset(seed["idx"])
+    style = _NO_STYLE if style is None else style
+    case = style.get("case", PLAIN)
+    openers = forced_openers(seed, style)
+    farewell = style.get(FAREWELL)
+    # Index of the examiner's last turn under strict alternation, which
+    # a forced farewell takes over: the student's final answer has to
+    # be an answer to the goodbye.
+    last_examiner = n_turns - 2
     system_prompt = examiner["system_prompt"]
-    turns = [{
-        "side": _EXAMINER,
-        "text": seed["opener"],
-        "forced": True,
-        "tokens": 0,
-        "elapsed_s": 0.0,
-    }]
+    turns = [_turn(_EXAMINER, apply_case_style(openers[0], case), forced=True)]
+    spoken = 1
     while len(turns) < n_turns:
         if turns[-1]["side"] == _EXAMINER:
             text, tokens, elapsed = student.reply(session, turns, timeout)
-            side = _STUDENT
+            turns.append(_turn(_STUDENT, text, tokens=tokens, elapsed=elapsed))
+            continue
+        if spoken < len(openers):
+            forced_text = openers[spoken]
+        elif farewell is not None and len(turns) == last_examiner:
+            forced_text = farewell
+        else:
+            forced_text = None
+        if forced_text is not None:
+            turns.append(_turn(_EXAMINER, apply_case_style(forced_text, case),
+                               forced=True))
         else:
             text, tokens, elapsed = ask(
                 session, examiner_url, examiner,
                 examiner_messages(system_prompt, turns), timeout)
-            side = _EXAMINER
-        turns.append({
-            "side": side,
-            "text": text,
-            "forced": False,
-            "tokens": tokens,
-            "elapsed_s": round(elapsed, 3),
-        })
+            turns.append(_turn(_EXAMINER, apply_case_style(text, case),
+                               tokens=tokens, elapsed=elapsed))
+        spoken += 1
     return turns
 
 
@@ -1400,12 +1691,16 @@ def run_generate(args) -> int:
                         _STUDENT, args.student, args.student_url,
                         temperature, args.max_reply_tokens)
                     student = UrlStudent(student_url, seat)
+                # Keyed on the seed index alone, so every student and
+                # every temperature meets the same examiner styles.
+                style = (assign_style(seed["idx"], args.style_seed)
+                         if args.style_mix else None)
                 started_at = _now()
                 t0 = time.time()
                 try:
                     turns = run_dialog(
                         session, seed, examiner, examiner_url, student,
-                        args.n_turns, timeout)
+                        args.n_turns, timeout, style)
                 except KeyboardInterrupt:
                     print(f"\ninterrupted during job {i + 1}; "
                           f"{written} dialog(s) written to {out_path}")
@@ -1419,11 +1714,14 @@ def run_generate(args) -> int:
                     "started_at": started_at,
                     "ended_at": _now(),
                 }
+                if style is not None:
+                    record["style"] = style
                 dh.write_record(f, record)
                 written += 1
                 label = anchor or "main"
                 print(f"[{i + 1}/{len(jobs)}] {label} seed={seed['idx']} "
                       f"T={temperature} turns={len(turns)} "
+                      f"style={style_tag(style)} "
                       f"{time.time() - t0:.1f}s")
         print(f"wrote {written} dialog(s) ({skipped} already present) "
               f"to {out_path}")
@@ -1780,6 +2078,10 @@ def run_judge(args) -> int:
                             record.get("student_temperature"),
                         "position": position,
                         "answer": answer,
+                        # Copied so the report can slice by case and
+                        # find the speech-act answers without the
+                        # dialogs file; absent on older dialogs.
+                        "style": record.get("style"),
                         "repetition": repetition_stats(answer),
                         "judge_model": seats["c"]["model"],
                     })
@@ -1898,6 +2200,166 @@ def student_kind(dialogs: list[dict]) -> str | None:
     return None
 
 
+def _style_of(grade: dict) -> dict:
+    """One grade's style draw; `{}` if the dialog predates style mixing."""
+    return grade.get("style") or {}
+
+
+def _by_dialog(grades: list[dict]) -> dict:
+    """Grades grouped by the dialog they came from."""
+    groups = collections.defaultdict(list)
+    for grade in grades:
+        groups[record_key(grade)].append(grade)
+    return groups
+
+
+def speech_act_answers(grades: list[dict]) -> list[dict]:
+    """The answers that reply to a forced greeting or farewell.
+
+    The greeting is the examiner's first turn, so the student's first
+    answer (position 1) is the reply to it; the farewell is its last,
+    so the dialog's last answer is. The last position is read off the
+    dialog's own grades rather than assumed to be 5, so a run with a
+    different `--n-turns` still lands on the right answer.
+
+    Each row is `{act, form, seen, lower, answer, ok, mirror}`: `ok` is
+    an accepted reply of that kind, `mirror` the lower-case style (only
+    meaningful, and only reported, where the dialog was lower case).
+    """
+    rows = []
+    for group in _by_dialog(grades).values():
+        style = _style_of(group[0])
+        if not style:
+            continue
+        last = max(g["position"] for g in group)
+        positions = {GREETING: 1, FAREWELL: last}
+        for grade in group:
+            for act in _ACTS:
+                form = style.get(act)
+                if not form or grade["position"] != positions[act]:
+                    continue
+                answer = grade.get("answer", "")
+                rows.append({
+                    "act": act,
+                    "form": form,
+                    "seen": bool(style.get(f"{act}_seen")),
+                    "lower": style.get("case") == LOWER,
+                    "answer": answer,
+                    "ok": answers_in_kind(act, answer),
+                    "mirror": mirrors_lower(answer),
+                })
+    return rows
+
+
+def _share(hits: int, total: int) -> float | None:
+    return 100.0 * hits / total if total else None
+
+
+def _act_row(label: str, rows: list[dict]) -> str:
+    n = len(rows)
+    lower = [r for r in rows if r["lower"]]
+    n_lower = len(lower)
+    return (
+        f"| {label} | {n} | "
+        f"{_fmt(_share(sum(r['ok'] for r in rows), n))} | "
+        f"{_fmt(_share(sum(not r['ok'] for r in rows), n))} | "
+        f"{n_lower} | "
+        f"{_fmt(_share(sum(r['ok'] and r['mirror'] for r in lower), n_lower))}"
+        f" | {_fmt(_share(sum(r['mirror'] for r in lower), n_lower))} |")
+
+
+def _act_examples(rows: list[dict], top: int = 5) -> list[str]:
+    """The most common replies to one act, verbatim."""
+    counts = collections.Counter(r["answer"].strip() for r in rows)
+    return [f"  - {text!r} x{count}"
+            for text, count in counts.most_common(top)]
+
+
+def _speech_act_lines(main: list[dict]) -> list[str]:
+    rows = speech_act_answers(main)
+    lines = [
+        "### Greeting and farewell answers",
+        "",
+        "The answer at the position the forced speech act lands on, "
+        "scored against the accepted-reply sets "
+        "`scratch/s5/speech_probe.py` uses -- no judge involved. `ok` is "
+        "an answer in kind; `ok+mirror` and `mirror` are over the "
+        "lower-case dialogs of that row only, where mirroring means no "
+        "capitals and no closing full stop. `seen` forms are the ones "
+        "the corpus trains on, `unseen` ones it never showed: the gap "
+        "between them is memorization versus the act.",
+        "",
+        "| act | forms | n | ok | wrong | n lower | ok+mirror | mirror |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    if not rows:
+        return lines[:2] + ["No forced greetings or farewells in this run.",
+                            ""]
+    for act in _ACTS:
+        act_rows = [r for r in rows if r["act"] == act]
+        if not act_rows:
+            continue
+        lines.append(_act_row(f"{act} | all", act_rows))
+        for label, seen in (("seen", True), ("unseen", False)):
+            group = [r for r in act_rows if r["seen"] is seen]
+            if group:
+                lines.append(_act_row(f"{act} | {label}", group))
+    lines.append("")
+    for act in _ACTS:
+        act_rows = [r for r in rows if r["act"] == act]
+        if act_rows:
+            lines.append(f"- most common replies to a {act}:")
+            lines += _act_examples(act_rows)
+    lines.append("")
+    return lines
+
+
+def _style_lines(main: list[dict]) -> list[str]:
+    """The two style slices: a/b/c by case, and the speech acts."""
+    styled = [g for g in main if _style_of(g)]
+    lines = ["## Style mixing", ""]
+    if not styled:
+        return lines + [
+            "No `style` on these dialogs: generated with `--no-style-mix`, "
+            "or before style mixing existed. The tables above are the "
+            "whole report.",
+            "",
+        ]
+    lines += [
+        f"{len(styled)} of {len(main)} main answers come from dialogs with "
+        "a recorded style draw. The examiner's side is rewritten per seed "
+        f"index: {_LOWERCASE_SHARE:.0%} of dialogs all lower case without "
+        f"closing full stops, {_GREETING_SHARE:.0%} opened with a bare "
+        f"greeting, {_FAREWELL_SHARE:.0%} closed with a farewell -- three "
+        "independent draws, so the slices are orthogonal. The student's "
+        "own replies are never rewritten.",
+        "",
+        "### By case",
+        "",
+        "| case | n | a | b | c | b-c | rep3 |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for case in (PLAIN, LOWER):
+        group = [g for g in styled if _style_of(g).get("case") == case]
+        if not group:
+            continue
+        s = summarize(group)
+        rates = s["rates"]
+        lines.append(
+            f"| {case} | {s['n']} | {_fmt(rates['a'])} | {_fmt(rates['b'])} | "
+            f"{_fmt(rates['c'])} | {_fmt(s['deflection'])} | "
+            f"{_fmt(s['rep3'], '')} |")
+    lines += [
+        "",
+        "Pass A is told to ignore capitalization and a missing final "
+        "period, so a gap in `a` between the two rows is the student "
+        "writing worse under a lower-case prompt, not the judge marking "
+        "the case down.",
+        "",
+    ]
+    return lines + _speech_act_lines(main)
+
+
 def _calibration_lines(summary: dict) -> list[str]:
     """The phrase bot's pass-A rate, called what it is."""
     return [
@@ -2011,6 +2473,8 @@ def build_report(dialogs_path: str, grades_path: str, grades: list[dict],
                 f"| {temperature} | {position} | {s['n']} | "
                 f"{_fmt(s['rates']['a'])} | {_fmt(s['rates']['b'])} | "
                 f"{_fmt(s['rates']['c'])} | {_fmt(s['rep3'], '')} |")
+
+    lines += [""] + _style_lines(main)
 
     anchors = sorted({g["anchor"] for g in grades
                       if g.get("anchor") is not None})
@@ -2147,6 +2611,19 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument(
         "--n-turns", type=int, default=_N_TURNS,
         help=f"utterances per dialog, both sides (default: {_N_TURNS})")
+    gen.add_argument(
+        "--style-mix", action=argparse.BooleanOptionalAction, default=True,
+        # "%%": argparse expands %-substitutions in help strings.
+        help=f"rewrite the examiner's side per seed: "
+             f"{100 * _LOWERCASE_SHARE:.0f}%% of dialogs all lower case "
+             f"without final full stops, {100 * _GREETING_SHARE:.0f}%% "
+             f"opened with a bare greeting, {100 * _FAREWELL_SHARE:.0f}%% "
+             "closed with a farewell (default: on; --no-style-mix is the "
+             "pre-2026-09 behaviour)")
+    gen.add_argument(
+        "--style-seed", type=int, default=_DEFAULT_STYLE_SEED,
+        help=f"base RNG seed for --style-mix; a dialog's draw comes from "
+             f"seed + its seed index (default: {_DEFAULT_STYLE_SEED})")
     gen.add_argument(
         "--anchor-good", action="store_true",
         help=f"also run the examiner model as the student on the first "

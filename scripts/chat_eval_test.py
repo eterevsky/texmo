@@ -6,11 +6,13 @@ test lives here and reaches the script through the mirror-image import
 shim.
 
 Only the pure pieces are covered -- message assembly for both seats,
-the resumability keys and the job plan, the repetition metrics, judge
-output parsing, the c-without-b check, report building, and the
-null-model phrase bot (draws, seeding, distillation, seat record) and
-the ELIZA reference student. No model, no server, no network:
-`grade_answer` is driven by a fake session, and neither reference
+the resumability keys and the job plan, the style mixing (the case
+transform, the seeded per-seed draw, the forced greeting/farewell turn
+structure), the repetition metrics, judge output parsing, the
+c-without-b check, report building, and the null-model phrase bot
+(draws, seeding, distillation, seat record) and the ELIZA reference
+student. No model, no server, no network: `grade_answer` and
+`run_dialog` are driven by a fake session, and neither reference
 student needs an endpoint at all.
 """
 import json
@@ -162,6 +164,25 @@ def test_pass_b_pairs_with_the_last_user_turn_not_the_previous_index():
     assert "Bot: second" in content
 
 
+def test_pass_a_ignores_capitalization_and_a_missing_final_period():
+    # A lower-case examiner turn is answered in kind by a model that
+    # learned to mirror, and that must not cost it (a).
+    system = chat_eval.judge_messages("a", _turns("hi", "i am good"), 1)[0][
+        "content"]
+    assert "Capitalization" in system
+    assert '"i am good"' in system
+
+
+def test_pass_c_counts_a_minimal_direct_answer_as_substantive():
+    # The laconic-answer ruling: "Yes." to a polar question resolves it.
+    system = chat_eval.judge_messages("c", _turns("o", "Yes."), 1)[0][
+        "content"]
+    assert "RESOLVES the question" in system
+    assert "a direct answer is never a deflection" in system
+    assert '"Do you like cats?"' in system
+    assert "counter-questions" in system
+
+
 def test_pass_c_carries_the_whole_dialog_and_the_substantive_example():
     turns = _turns("opener", "reply", "e2", "reply2")
     messages = chat_eval.judge_messages("c", turns, 3)
@@ -247,6 +268,122 @@ def test_plan_jobs_runs_anchors_once_at_the_anchor_temperature():
     assert {j[0] for j in anchors} == {"good", "garbage"}
     assert {j[2] for j in anchors} == {0.5}
     assert {j[1]["idx"] for j in anchors} == {0, 1, 2}
+
+
+# ------------------------------------------------------------ style mixing
+
+
+def _styled(case=None, greeting=None, greeting_seen=False, farewell=None,
+            farewell_seen=False):
+    return {"case": case or chat_eval.PLAIN, "greeting": greeting,
+            "greeting_seen": greeting_seen, "farewell": farewell,
+            "farewell_seen": farewell_seen}
+
+
+def test_apply_case_style_is_the_corpus_rewrite():
+    lower = chat_eval.LOWER
+    assert chat_eval.apply_case_style("I am Good.", lower) == "i am good"
+    # A full stop *inside* the utterance is not a closing one.
+    assert chat_eval.apply_case_style("It is late. Bye!", lower) == (
+        "it is late. bye!")
+    # "!" and "?" carry a tone a full stop does not, and an ellipsis is
+    # not a full stop -- all three survive.
+    assert chat_eval.apply_case_style("Hi!", lower) == "hi!"
+    assert chat_eval.apply_case_style("Really?", lower) == "really?"
+    assert chat_eval.apply_case_style("Well...", lower) == "well..."
+    # Only one stop comes off, and `plain` is the identity.
+    assert chat_eval.apply_case_style("Yes. No.", lower) == "yes. no"
+    assert chat_eval.apply_case_style("I am Good.", chat_eval.PLAIN) == (
+        "I am Good.")
+
+
+def test_assign_style_is_reproducible_per_seed_index():
+    # Keyed on the seed index alone: the same seed carries the same
+    # style across temperatures, students and reruns.
+    assert chat_eval.assign_style(7) == chat_eval.assign_style(7)
+    mine = [chat_eval.assign_style(i) for i in range(50)]
+    other = [chat_eval.assign_style(i, seed=99) for i in range(50)]
+    assert mine != other
+
+
+def test_assign_style_hits_its_shares_and_keeps_them_orthogonal():
+    styles = [chat_eval.assign_style(i) for i in range(4000)]
+
+    def share(test):
+        return sum(bool(test(s)) for s in styles) / len(styles)
+
+    assert abs(share(lambda s: s["case"] == chat_eval.LOWER) - 0.30) < 0.03
+    greet = share(lambda s: s["greeting"])
+    assert abs(greet - 0.40) < 0.03
+    assert abs(share(lambda s: s["farewell"]) - 0.15) < 0.03
+    # Independent draws from separate streams: the greeting share
+    # inside the lower-case slice is the overall one.
+    lows = [s for s in styles if s["case"] == chat_eval.LOWER]
+    assert abs(sum(bool(s["greeting"]) for s in lows) / len(lows)
+               - greet) < 0.05
+
+
+def test_assign_style_marks_the_unseen_forms():
+    styles = [chat_eval.assign_style(i) for i in range(2000)]
+    greetings = {s["greeting"] for s in styles if s["greeting"]}
+    farewells = {s["farewell"] for s in styles if s["farewell"]}
+    # Both blocks of both tables are reachable.
+    assert {"Hi!", "Hiya!"} <= greetings
+    assert {"Bye!", "Catch you later!"} <= farewells
+    for style in styles:
+        assert style["greeting_seen"] == (
+            style["greeting"] in chat_eval._TRAINED_GREETINGS)
+        assert style["farewell_seen"] == (
+            style["farewell"] in chat_eval._TRAINED_FAREWELLS)
+    unseen = [s for s in styles if s["greeting"] == "Hiya!"]
+    assert unseen and not any(s["greeting_seen"] for s in unseen)
+
+
+def test_forced_openers_put_the_greeting_before_the_seed_opener():
+    seed = _seed(opener="What is your favourite colour?")
+    assert chat_eval.forced_openers(seed, _styled()) == [seed["opener"]]
+    assert chat_eval.forced_openers(seed, _styled(greeting="Hi!")) == [
+        "Hi!", seed["opener"]]
+
+
+def test_style_tag_is_readable_in_the_progress_line():
+    assert chat_eval.style_tag(None) == "-"
+    assert chat_eval.style_tag(_styled()) == "plain"
+    assert chat_eval.style_tag(
+        _styled(case=chat_eval.LOWER, greeting="Hi!", farewell="Bye!")) == (
+            "lower+greet+bye")
+
+
+def test_answers_in_kind_uses_the_probes_accepted_sets():
+    greeting, farewell = chat_eval.GREETING, chat_eval.FAREWELL
+    assert chat_eval.answers_in_kind(greeting, "Hi!")
+    assert chat_eval.answers_in_kind(greeting, "  hello  ")
+    assert chat_eval.answers_in_kind(greeting, "Good morning.")
+    assert not chat_eval.answers_in_kind(greeting, "I am good.")
+    assert chat_eval.answers_in_kind(farewell, "See you later!")
+    assert chat_eval.answers_in_kind(farewell, "you too")
+    assert not chat_eval.answers_in_kind(farewell, "Hi!")
+
+
+def test_mirrors_lower_is_no_capitals_and_no_closing_stop():
+    assert chat_eval.mirrors_lower("hi")
+    assert chat_eval.mirrors_lower("bye!")
+    assert chat_eval.mirrors_lower("i am good")
+    assert not chat_eval.mirrors_lower("i am good.")
+    assert not chat_eval.mirrors_lower("Hi")
+    assert not chat_eval.mirrors_lower("   ")
+
+
+def _generate_args(argv=()):
+    return chat_eval.build_parser().parse_args(
+        ["generate", "--student", "m.json", "--examiner", "e.gguf", *argv])
+
+
+def test_style_mix_is_on_by_default_and_can_be_switched_off():
+    args = _generate_args()
+    assert args.style_mix is True
+    assert args.style_seed == chat_eval._DEFAULT_STYLE_SEED
+    assert _generate_args(["--no-style-mix"]).style_mix is False
 
 
 # ---------------------------------------------------------- resumability
@@ -714,6 +851,88 @@ def _judge_seat():
             "extra": chat_eval._JUDGE_EXTRA}
 
 
+# ------------------------------------------- dialog shape (fake examiner)
+
+
+def _examiner_seat():
+    return {"name": "examiner", "model": "e.gguf", "system_prompt": "SYS",
+            "temperature": 0.7, "max_tokens": 96,
+            "extra": chat_eval._NO_THINKING}
+
+
+_OPENER = "What is your favourite colour?"
+
+
+def _run_dialog(style, examiner_lines=None, answer="I am good.",
+                n_turns=10):
+    """One dialog against a canned examiner and a one-phrase student."""
+    session = _FakeSession(
+        examiner_lines or [f"Examiner line {i}." for i in range(1, 9)])
+    student = _phrase_student([(answer, 1)])
+    turns = chat_eval.run_dialog(
+        session, _seed(idx=3, opener=_OPENER), _examiner_seat(), "http://x",
+        student, n_turns, (1, 1), style)
+    return turns, session
+
+
+def _sides(turns, side):
+    return [t["text"] for t in turns if t["side"] == side]
+
+
+def test_run_dialog_without_style_is_the_old_shape():
+    turns, session = _run_dialog(None)
+    assert len(turns) == 10
+    assert turns[0]["text"] == _OPENER and turns[0]["forced"] is True
+    assert all(t["forced"] is False for t in turns[1:])
+    assert set(turns[0]) == {"side", "text", "forced", "tokens", "elapsed_s"}
+    # Four generated examiner turns, five student answers.
+    assert len(session.bodies) == 4
+    assert len(chat_eval.student_positions(turns)) == 5
+
+
+def test_run_dialog_forces_the_greeting_first_and_the_opener_second():
+    turns, session = _run_dialog(_styled(greeting="Hi there!",
+                                         greeting_seen=True))
+    assert len(turns) == 10
+    assert (turns[0]["text"], turns[0]["forced"]) == ("Hi there!", True)
+    assert (turns[2]["text"], turns[2]["forced"]) == (_OPENER, True)
+    # The student still answers five times; the first answer answers the
+    # greeting, and one generated examiner turn paid for it.
+    assert len(chat_eval.student_positions(turns)) == 5
+    assert turns[1]["side"] == chat_eval._STUDENT
+    assert len(session.bodies) == 3
+
+
+def test_run_dialog_forces_the_farewell_as_the_last_examiner_turn():
+    turns, session = _run_dialog(_styled(farewell="See you later!",
+                                         farewell_seen=True))
+    assert len(turns) == 10
+    assert turns[0]["text"] == _OPENER
+    assert (turns[8]["text"], turns[8]["forced"]) == ("See you later!", True)
+    # The student's final answer answers the goodbye.
+    assert turns[9]["side"] == chat_eval._STUDENT
+    assert len(session.bodies) == 3
+
+
+def test_run_dialog_lowercases_every_examiner_utterance_only():
+    style = _styled(case=chat_eval.LOWER, greeting="Hi!", greeting_seen=True,
+                    farewell="Bye!", farewell_seen=True)
+    turns, _ = _run_dialog(
+        style, examiner_lines=["That is Nice. I agree.", "Tell me More!"])
+    examiner = _sides(turns, chat_eval._EXAMINER)
+    assert examiner[0] == "hi!"
+    assert examiner[1] == _OPENER.lower()
+    assert examiner[-1] == "bye!"
+    # A mid-text stop survives; "!" and "?" survive; nothing keeps a
+    # capital or a closing full stop.
+    assert "that is nice. i agree" in examiner
+    assert "tell me more!" in examiner
+    for text in examiner:
+        assert text == text.lower() and not text.endswith(".")
+    # The student's own replies are never rewritten.
+    assert _sides(turns, chat_eval._STUDENT) == ["I am good."] * 5
+
+
 def test_grade_pass_retries_once_then_succeeds():
     session = _FakeSession([
         "I think it is fine, honestly.",
@@ -842,7 +1061,8 @@ def test_run_pass_gives_each_thread_its_own_session():
 
 
 def _grade(a, b, c, temperature=0.5, position=1, anchor=None, seed_idx=0,
-           answer="something", defect=None, error=None, c_raw=None):
+           answer="something", defect=None, error=None, c_raw=None,
+           style=None):
     c_raw = c if c_raw is None else c_raw
     grade = chat_eval.merge_grades({
         "a": {"a": a, "comment": "", "raw": "", "judge_error": error,
@@ -855,7 +1075,8 @@ def _grade(a, b, c, temperature=0.5, position=1, anchor=None, seed_idx=0,
     grade.update({
         "seed_idx": seed_idx, "anchor": anchor,
         "student_temperature": temperature, "position": position,
-        "answer": answer, "repetition": chat_eval.repetition_stats(answer),
+        "answer": answer, "style": style,
+        "repetition": chat_eval.repetition_stats(answer),
         "judge_model": "judge.gguf",
     })
     return grade
@@ -941,6 +1162,83 @@ def test_report_calls_out_the_phrase_bots_pass_a_as_calibration():
     # there.
     assert "Judge calibration" not in chat_eval.build_report(
         "d.jsonl", "g.jsonl", grades, None)
+
+
+# --------------------------------------------------- reporting the styles
+
+
+def test_report_slices_a_b_c_by_case():
+    grades = ([_grade(True, True, True, seed_idx=i, style=_styled())
+               for i in range(4)]
+              + [_grade(False, True, False, seed_idx=10 + i,
+                        style=_styled(case=chat_eval.LOWER))
+                 for i in range(4)])
+    report = chat_eval.build_report("d.jsonl", "g.jsonl", grades)
+    assert "| plain | 4 | 100.0% | 100.0% | 100.0% |" in report
+    assert "| lower | 4 | 0.0% | 100.0% | 0.0% |" in report
+    # The unsliced tables are untouched by the new section.
+    assert "| 0.5 | 8 | 50.0% | 100.0% | 50.0% |" in report
+
+
+def test_speech_act_answers_take_the_first_and_the_last_answer():
+    style = _styled(greeting="Hi!", greeting_seen=True,
+                    farewell="Catch you later!")
+    grades = [_grade(True, True, True, seed_idx=1, position=p, answer=a,
+                     style=style)
+              for p, a in ((1, "Hello!"), (2, "I like cats."), (3, "Bye!"))]
+    rows = chat_eval.speech_act_answers(grades)
+    assert [(r["act"], r["answer"], r["ok"], r["seen"]) for r in rows] == [
+        ("greeting", "Hello!", True, True),
+        ("farewell", "Bye!", True, False)]
+    # A dialog with no forced act contributes nothing.
+    assert chat_eval.speech_act_answers(
+        [_grade(True, True, True, style=_styled())]) == []
+
+
+def test_report_scores_speech_acts_by_seen_and_unseen():
+    seen = _styled(greeting="Hi!", greeting_seen=True)
+    unseen = _styled(case=chat_eval.LOWER, greeting="Hiya!")
+    grades = [
+        _grade(True, True, True, seed_idx=i, position=1, style=seen,
+               answer="Hi!" if i < 3 else "I like cats.")
+        for i in range(4)
+    ] + [
+        _grade(True, True, True, seed_idx=10 + i, position=1, style=unseen,
+               answer="hi" if i < 2 else "Hi.")
+        for i in range(4)
+    ]
+    report = chat_eval.build_report("d.jsonl", "g.jsonl", grades)
+    # 3 of 4 answered in kind, and none of these dialogs was lower case.
+    assert "| greeting | seen | 4 | 75.0% | 25.0% | 0 | n/a | n/a |" in report
+    # All four say "hi" one way or another, but only two mirror the case.
+    assert ("| greeting | unseen | 4 | 100.0% | 0.0% | 4 | 50.0% | 50.0% |"
+            in report)
+    assert "| greeting | all | 8 | 87.5% |" in report
+    assert "'Hi!' x3" in report
+
+
+def test_report_and_judging_survive_dialogs_without_a_style(tmp_path):
+    # An old dialogs file: no `style` key anywhere.
+    path = tmp_path / "old.jsonl"
+    path.write_text(
+        "\n".join(json.dumps(r) for r in
+                  [_judge_dialog(0), _judge_dialog(1)]),
+        encoding="utf-8")
+    dialogs = chat_eval.limit_seeds(chat_eval.read_records(str(path)), None)
+    todo = chat_eval.plan_answers(dialogs, set())
+    assert len(todo) == 4
+    # The grade record run_judge would write carries style None.
+    grades = [
+        _grade(True, True, True, seed_idx=record["seed_idx"],
+               position=position, style=record.get("style"))
+        for _, record, position, _ in todo
+    ]
+    assert all(g["style"] is None for g in grades)
+    report = chat_eval.build_report("d.jsonl", "g.jsonl", grades)
+    assert "No `style` on these dialogs" in report
+    assert chat_eval.speech_act_answers(grades) == []
+    # Everything else in the report is exactly what it always was.
+    assert "| 0.5 | 4 | 100.0% | 100.0% | 100.0% |" in report
 
 
 def test_student_kind_comes_from_the_first_non_anchor_dialog():

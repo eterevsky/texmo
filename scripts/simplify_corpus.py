@@ -22,6 +22,9 @@ Three target corpora, all in the same `Name: utterance` format as
     s5  s4, plus synthesized greeting / thanks / farewell exchanges
         and half the dialogs in lower case -- see "Speech acts" and
         "Case mirroring" below.
+    s5u s5, except that the lower-case rewrite covers the User side
+        only: the same dialogs are drawn, and the Bot answers every
+        one of them in edited prose.
 
 The first three differ only in *selection*, so generation runs once
 and renders three times:
@@ -120,7 +123,7 @@ Seeded: `render --seed` (default `_DEFAULT_SPEECH_SEED`) plus the
 `dialog_idx`, so a dialog gets the same exchanges whatever else is
 rendered with it, and `--n-dialogs` does not reshuffle the corpus.
 
-## Case mirroring (s5)
+## Case mirroring (s5) and the one-sided control (s5u)
 
 People type "hi" as often as "Hi!", and a corpus written entirely in
 edited prose has nothing to say about the first. So s5 rewrites
@@ -128,11 +131,21 @@ edited prose has nothing to say about the first. So s5 rewrites
 into lower case with the closing full stop dropped: "I am good." ->
 "i am good", "Yes." -> "yes".
 
-Whole dialogs, both sides. That is the whole point: the transform is
-applied after the speech acts, so a lower-case dialog is lower case
-throughout, and what the model can learn from it is to *mirror* the
-style it is given rather than to prefer one. A dialog lower-cased on
-the User side alone would teach exactly the opposite.
+Whole dialogs, both sides. The transform is applied after the speech
+acts, so a lower-case dialog is lower case throughout, and what the
+model can learn from it is to *mirror* the style it is given rather
+than to prefer one.
+
+**s5u** is the arm that asks whether mirroring is worth having. It
+draws exactly the same dialogs -- same `case_rng` stream, same
+fraction -- and lower-cases only their **User** turns; every Bot turn
+in the corpus therefore keeps its capital and its final full stop.
+The two corpora differ in nothing but the case of the Bot side, so a
+pair of models trained on them isolates one question: is it better to
+mirror a lower-case user, or to answer everyone in edited prose?
+`CASE_SIDES` is the whole difference, and `apply_case_style` draws its
+one random value before consulting it, so the *selection* cannot drift
+between the variants.
 
 Only the closing full stop goes, and only a real one: "!" and "?"
 stay, a full stop inside the utterance stays ("It is late. Bye!" ->
@@ -1269,16 +1282,29 @@ VARIANTS = {
     # and the lower-case rewrite, both applied after selection, so s5
     # minus s4 is exactly those two post-steps.
     "s5": {_USER: "simple", _BOT: "trivial"},
+    # s5u: s5 with the lower-case rewrite confined to the User side
+    # (`CASE_SIDES`). Same selection, same dialogs drawn.
+    "s5u": {_USER: "simple", _BOT: "trivial"},
 }
 
 # Variants that additionally consult the polar log.
-POLAR_VARIANTS = frozenset({"s4", "s5"})
+POLAR_VARIANTS = frozenset({"s4", "s5", "s5u"})
 
 # Variants that get synthesized speech-act exchanges.
-SPEECH_ACT_VARIANTS = frozenset({"s5"})
+SPEECH_ACT_VARIANTS = frozenset({"s5", "s5u"})
+
+# Which sides the lower-case rewrite covers, per variant -- and so,
+# implicitly, which variants have the post-step at all. s5 rewrites a
+# drawn dialog whole, so the model learns to mirror the style it is
+# given; s5u rewrites the User side of the *same* dialogs, so the Bot
+# answers every one of them in edited prose.
+CASE_SIDES = {
+    "s5": _SIDES,
+    "s5u": (_USER,),
+}
 
 # Variants that rewrite some dialogs in lower case.
-CASE_VARIANTS = frozenset({"s5"})
+CASE_VARIANTS = frozenset(CASE_SIDES)
 
 # The two answers s4 substitutes in. Bare and punctuated like the
 # trivial phrases around them, and deliberately not varied ("Yes, I
@@ -1472,27 +1498,35 @@ def drop_final_period(text: str) -> str:
     return _FINAL_PERIOD.sub("", text)
 
 
-def lowercase_dialog(turns: list[dict]) -> list[dict]:
-    """Every utterance lower-cased and stripped of its closing stop.
+def lowercase_dialog(turns: list[dict],
+                     sides: tuple = _SIDES) -> list[dict]:
+    """`sides`' utterances lower-cased and stripped of closing stops.
 
     `turns` are rendered turns -- `{"side", "text"}` -- and the result
-    is a new list. The side is untouched: "User"/"Bot" are the corpus
+    is a new list. A turn from a side outside `sides` is copied through
+    unchanged, which is how s5u keeps its Bot side in edited prose. The
+    side *label* is untouched either way: "User"/"Bot" are the corpus
     format, not something the model should mirror.
     """
     return [{"side": turn["side"],
-             "text": drop_final_period(turn["text"].lower())}
+             "text": (drop_final_period(turn["text"].lower())
+                      if turn["side"] in sides else turn["text"])}
             for turn in turns]
 
 
-def apply_case_style(turns: list[dict],
-                     rng: random.Random) -> tuple[list[dict], bool]:
+def apply_case_style(turns: list[dict], rng: random.Random,
+                     sides: tuple = _SIDES) -> tuple[list[dict], bool]:
     """`(turns, lowered)`: the dialog, in lower case or as it was.
 
     All of a dialog or none of it, which is what makes the style
-    something a model can mirror within a conversation.
+    something a model can mirror within a conversation -- or, with
+    `sides` narrowed to the User, something it can only be given.
+
+    The draw happens before `sides` is looked at and costs one value
+    whatever it says, so s5 and s5u treat exactly the same dialogs.
     """
     if rng.random() < _LOWERCASE_FRACTION:
-        return lowercase_dialog(turns), True
+        return lowercase_dialog(turns, sides), True
     return list(turns), False
 
 
@@ -1518,7 +1552,8 @@ def render_dialog(turns: list[dict], variant: str, stats: dict,
     `SPEECH_ACT_VARIANTS`; the exchanges go on after selection, so the
     polar indices still address the source turns. `case` is the
     case-style generator of `CASE_VARIANTS`, applied last of all, so
-    that the synthesized turns are rewritten with the rest.
+    that the synthesized turns are rewritten with the rest -- over the
+    sides `CASE_SIDES` gives the variant.
     """
     rendered = []
     for i, turn in enumerate(turns):
@@ -1539,7 +1574,8 @@ def render_dialog(turns: list[dict], variant: str, stats: dict,
         for act in SPEECH_ACTS:
             stats[act] += added[act]
     if case is not None:
-        rendered, lowered = apply_case_style(rendered, case)
+        rendered, lowered = apply_case_style(
+            rendered, case, CASE_SIDES[variant])
         stats["lowercased"] += lowered
     stats["turns"] += len(rendered)
     stats["bot_turns"] += sum(t["side"] == _BOT for t in rendered)
@@ -1633,8 +1669,10 @@ def run_render(args) -> int:
             print(line)
     if args.variant in CASE_VARIANTS:
         dialogs = max(stats["dialogs"], 1)
+        sides = "/".join(CASE_SIDES[args.variant])
         print(f"  lower case, no closing stop: {stats['lowercased']} "
-              f"dialog(s) ({100 * stats['lowercased'] / dialogs:.1f}%)")
+              f"dialog(s) ({100 * stats['lowercased'] / dialogs:.1f}%), "
+              f"{sides} turns")
     return 0
 
 
@@ -1807,7 +1845,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="s1: User original + Bot simple; s2: User original + Bot "
              "trivial; s3: User simple + Bot trivial; s4: s3 with polar "
              "answers; s5: s4 with greeting/thanks/farewell exchanges and "
-             "half the dialogs in lower case")
+             "half the dialogs in lower case; s5u: s5 with those dialogs "
+             "lower-cased on the User side only")
     ren.add_argument(
         "--n-dialogs", type=int, default=None,
         help="render only the first N records of the log (default: all); "

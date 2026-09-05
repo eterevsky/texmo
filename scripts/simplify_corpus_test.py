@@ -297,6 +297,7 @@ def test_existing_indices_of_a_missing_file_is_empty(tmp_path):
     ("s4", [("User", "simple"), ("Bot", "trivial")]),
     # s5 too; its speech acts are added turns, not a selection.
     ("s5", [("User", "simple"), ("Bot", "trivial")]),
+    ("s5u", [("User", "simple"), ("Bot", "trivial")]),
 ])
 def test_select_text_follows_the_variant_table(variant, expected):
     turns = [
@@ -803,6 +804,127 @@ def test_s4_is_never_lowercased():
     text, stats = sc.render_corpus(records, "s4")
     assert stats["lowercased"] == 0
     assert "User: Simple 0." in text
+
+
+# --------------------------------------------- one-sided case (s5u)
+
+
+def _dialogs(text: str) -> list[str]:
+    return text.rstrip("\n").split("\n\n\n")
+
+
+def _lines(dialog: str) -> list[str]:
+    return dialog.split("\n\n")
+
+
+def _mixed_records(n=120):
+    """Enough alternating dialogs, both openers, to draw both cases."""
+    return [_alternating_record(i, 2 + i % 4, sc._SIDES[i % 2])
+            for i in range(n)]
+
+
+def test_lowercase_dialog_can_cover_one_side_only():
+    turns = _rendered(("User", "Do you like tea?"), ("Bot", "Yes."))
+    assert _pairs(sc.lowercase_dialog(turns, (sc._USER,))) == [
+        ("User", "do you like tea?"), ("Bot", "Yes.")]
+
+
+def test_apply_case_style_draws_the_same_dialogs_whatever_the_sides():
+    turns = _rendered(("User", "Hi!"), ("Bot", "I am good."))
+    for idx in range(60):
+        both = sc.apply_case_style(turns, sc.case_rng(7, idx), sc._SIDES)
+        user = sc.apply_case_style(turns, sc.case_rng(7, idx), (sc._USER,))
+        assert both[1] == user[1]
+
+
+def test_s5u_lowercases_exactly_the_dialogs_s5_does():
+    records = _mixed_records()
+    s5, stats5 = sc.render_corpus(records, "s5")
+    s5u, stats5u = sc.render_corpus(records, "s5u")
+    assert stats5u["lowercased"] == stats5["lowercased"] > 0
+    # And the same *speech acts*, so the only difference left is case.
+    assert all(stats5u[act] == stats5[act] for act in sc.SPEECH_ACTS)
+    # A dialog differs between the two exactly when it was treated.
+    differ = sum(a != b for a, b in zip(_dialogs(s5), _dialogs(s5u)))
+    assert differ == stats5["lowercased"]
+
+
+def test_s5u_keeps_every_bot_turn_in_edited_prose(monkeypatch):
+    records = _mixed_records()
+    s5u, stats = sc.render_corpus(records, "s5u")
+    monkeypatch.setattr(sc, "case_rng", lambda seed, idx: _NoActsRng())
+    plain, plain_stats = sc.render_corpus(records, "s5u")
+    assert plain_stats["lowercased"] == 0 and stats["lowercased"] > 0
+
+    treated = 0
+    for mixed, prose in zip(_dialogs(s5u), _dialogs(plain)):
+        got, want = _lines(mixed), _lines(prose)
+        assert len(got) == len(want)
+        treated += got != want
+        for line, original in zip(got, want):
+            if original.startswith("Bot: "):
+                # Byte-identical to the un-lowercased render.
+                assert line == original
+            else:
+                assert line in (original, _lowered_line(original))
+    assert treated == stats["lowercased"]
+
+
+def test_s5u_user_turns_are_lowercased_exactly_as_s5s_are():
+    records = _mixed_records()
+    s5, _ = sc.render_corpus(records, "s5")
+    s5u, _ = sc.render_corpus(records, "s5u")
+    for left, right in zip(_dialogs(s5), _dialogs(s5u)):
+        for a, b in zip(_lines(left), _lines(right)):
+            if a.startswith("User: "):
+                assert a == b
+
+
+def test_s5u_leaves_the_untreated_dialogs_byte_identical_to_s5(
+        monkeypatch):
+    records = _mixed_records()
+    s5 = _dialogs(sc.render_corpus(records, "s5")[0])
+    s5u = _dialogs(sc.render_corpus(records, "s5u")[0])
+    monkeypatch.setattr(sc, "case_rng", lambda seed, idx: _NoActsRng())
+    prose = _dialogs(sc.render_corpus(records, "s5")[0])
+
+    untreated = 0
+    for a, b, plain in zip(s5, s5u, prose):
+        # Untreated: the case post-step changed nothing in s5 either.
+        if a != plain:
+            continue
+        untreated += 1
+        assert b == a
+    assert 0 < untreated < len(records)
+
+
+def test_render_s5u_of_one_dialog_answers_in_prose(monkeypatch):
+    monkeypatch.setattr(sc, "speech_rng", lambda seed, idx: _AllActsRng())
+    monkeypatch.setattr(sc, "case_rng", lambda seed, idx: _AllActsRng())
+    text, stats = sc.render_corpus([_s4_record()], "s5u", {0: {1: "yes"}})
+    assert text == (
+        "User: hi!\n\nBot: Hi!\n\n"
+        "User: do you like tea?\n\nBot: Yes.\n\n"
+        "User: what else?\n\nBot: Coffee.\n\n"
+        "User: thanks!\n\nBot: You're welcome!\n\n"
+        "User: bye!\n\nBot: Bye!\n")
+    assert stats["lowercased"] == 1
+    assert stats["polar"] == 1
+
+
+def test_s5u_bot_turns_hold_no_lower_case_dialog_opener():
+    # The Bot side of the whole corpus is the s5u claim: no Bot line
+    # ever starts lower case, in any dialog, treated or not.
+    text, stats = sc.render_corpus(_mixed_records(200), "s5u")
+    bot = [line for dialog in _dialogs(text) for line in _lines(dialog)
+           if line.startswith("Bot: ")]
+    assert bot and stats["lowercased"] > 0
+    assert all(line[5].isupper() for line in bot)
+
+
+def test_case_sides_covers_every_case_variant():
+    assert set(sc.CASE_SIDES) == set(sc.CASE_VARIANTS)
+    assert all(variant in sc.VARIANTS for variant in sc.CASE_SIDES)
 
 
 # ------------------------------------------------------------ summary

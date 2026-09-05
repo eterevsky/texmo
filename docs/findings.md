@@ -6,6 +6,78 @@ entries here are the results worth re-reading a year later). Dated,
 newest first. Full data locations are noted per entry; scratch/ paths
 are machine-local and untracked.
 
+## Pass B needed shapes, not a stricter rule (2026-09-04)
+
+A hand review of 30 pass-B verdicts on mg12k found the FALSE side
+clean and roughly a third of the TRUEs loose, all one failure mode: a
+reply that is brief and courteous but answers a different question --
+a bare "Yes." to "What's your name?", "See you!" to "Hiya!", "Thank
+you!" to being thanked. Naming those three shapes as micro-examples,
+rather than adding a general "when uncertain, answer false", fixed
+the specific defect without collapsing the slack: on the mg12k-s5u
+bare-"Yes." answers, b falls 67% -> 17% where the question was not a
+yes/no one, and both the 8B and a 27B judge land on the same 17%.
+Across the three s5u runs b drops 11-15 points (mg12k 46.2 -> 31.4)
+with the ranking intact, so the amendment moved the *level*, not the
+*ordering* -- b from before this amendment is on the old, looser
+scale and is not comparable to a `grades3b` number. Ruling recorded
+with it: (b) judges the FORMAL consistency of the pair only, never
+truthfulness -- "Are fleas bigger than dogs?" -> "Yes." passes.
+
+The same set was judged by Qwen3.8-27B-Q4_K_M (`-ngl 40`, 10.9 GB,
+the most that fits beside the resident search worker; 93 min per
+500-answer model against the 8B's 2). The amendment closed the
+8B-vs-27B verdict gap from 24.4% to 15.6%, and aggregate b now
+agrees to within noise (31.4% vs 33.0%). But per-item b still
+differs on 18% of answers, and pass C -- whose prompt nobody touched
+-- differs by 8.8 points (c_raw 12.0% vs 20.8%): the small judge is
+systematically stingier about substance. **Standing policy: quick
+evaluations run on the 9-12B judges; the 2-3 top models per weight
+class get their headline numbers re-judged with the 27B**, which
+agreed with the hand rulings 5/5 where the 8B managed 4/5. Known
+residual defect at the time of writing: the 8B under-credits bare
+polar answers to genuine yes/no questions (45% vs the 27B's 62%);
+fix in calibration. Artifacts: `evals/style100-*-grades3b*`,
+`scratch/judge_cal/` (machine-local).
+
+## Mirroring the user's case is not worth its weights: s5u (2026-09-03)
+
+s5 teaches case *mirroring* -- half its dialogs lower case on both
+sides. **s5u** is the same corpus with the same dialogs lower-cased on
+the **User side only** (`CASE_SIDES`; same `case_rng` draw, so the two
+files differ in nothing but the case of 15,037 dialogs' Bot turns,
++29.7 kB of restored full stops). Three students retrained on it and
+re-scored under the style-mixed examiner: mirroring falls from 97-100%
+to **0.0%** by construction, and nothing else gets worse. Eight of
+nine paired a/b/c deltas are non-negative -- hb32 b 38.6 -> 42.2 and
+a 94.0 -> 98.0 (z 3.2, under a judge that ignores capitalization),
+rl32 b 33.0 -> 38.6, mg12k unmoved (+0.2) -- and every model gains
+against its own phrase-bot null (hb32 b-null -3.8 -> +8.6, mg12k
++5.0 -> +8.8), so hb32-8k-s5u joins mg12k-s5 above its floor on b
+and c at once. Speech acts survive intact (greetings 94-100% ok,
+farewells 88-100%, both up on the 8k models), and eight lower-case
+transcripts read naturally: a capitalized "Yes." to a lower-case
+user looks like house style, not like an error.
+
+The case slices say where the gain lives: **all of it is in the plain
+slice** (+4.2 / +8.8 / -0.8 b) while the lower slice is a dead heat
+(+1.7 / -5.2 / +3.5, n ~ 115, SE +-4.5). So the 2026-09-03 note that
+lower-case input *helps* case-trained models was a mirroring
+artefact, not a content one: rl32's +11.3 b advantage on lower-case
+dialogs collapses to -2.7 once it stops mirroring. Two cautions. The
+nulls moved too -- an s5u phrase bag is single-style and therefore
+weaker (hb32 null b 42.4 -> 33.6), so part of b-null is a lower
+floor. And s5u costs corpus loss on the 8k models (hb32 1.183 ->
+1.2125) while improving every chat metric. At n = 500 (SE +-2, +-2.8
+on a difference) no single delta is significant; the claim rests on
+the sign pattern and on the two 8k models agreeing. mg12k (12.4k) is
+indifferent -- at that size there is room for both styles.
+**Decision: from here on, corpora accept any input case and
+punctuation, and the Bot side is always correctly formatted.**
+Artifacts: `data/soda_s5u.txt`,
+`models/{hb32-8k,rl32-8k,mg-12k}-s5u.json`, `evals/style100-*s5u*`,
+`scratch/s5u/` (machine-local).
+
 ## The eval can see speech acts now: the style-mixed examiner (2026-09-03)
 
 The scripted-examiner eval was blind to everything s5 added (see

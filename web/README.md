@@ -43,18 +43,30 @@ tree.
 
 Three chat models, switchable from the page's dropdown. All use the
 `tokens.32.hexbpe` tokenset and the `User:` / `Bot:` turn format, and
-all were trained on the `s5` corpus (LLM-simplified SODA dialogs plus
-greetings, farewells and thanks).
+all were trained on the `s5u` corpus (LLM-simplified SODA dialogs plus
+greetings, farewells and thanks, with the lower-case rewrite confined
+to the *User* side). That is what the page wants: the user may type in
+any case and with no closing punctuation, and the model still answers
+in edited prose. Its `s5` sibling lower-cases both sides of the same
+dialogs, so those models *mirror* the style they are given — a
+lower-case question got a lower-case answer, which reads as sloppy in
+a chat window.
 
 | model | weights | spec | recommended T |
 | --- | --- | --- | --- |
-| `models/rl32-8k-s5.json` | 8,017 | `rnn.32.gelu` + `rglru.16` + `lstm.16` | 0.4 |
-| `models/hb32-8k-s5.json` | 8,001 | `rnn.32.gelu` + `rglru.16` + `mgru.16` | 0.3 |
-| `models/mg-12k-s5.json` | 12,449 | gated `rnn.32.gelu` + `mingru.32` + `rglru.1` + `gru.16` | 0.4 |
+| `models/rl32-8k-s5u.json` | 8,017 | `rnn.32.gelu` + `rglru.16` + `lstm.16` | 0.4 |
+| `models/hb32-8k-s5u.json` | 8,001 | `rnn.32.gelu` + `rglru.16` + `mgru.16` | 0.3 |
+| `models/mg-12k-s5u.json` | 12,449 | gated `rnn.32.gelu` + `mingru.32` + `rglru.1` + `gru.16` | 0.4 |
 
-`mg-12k` (file name `mg12k-s5.json`) is the page default; the dropdown orders the models by quality: mg-12k, hb32, rl32. Selecting a model loads its JSON on
+`mg-12k-s5u` is the page default; the dropdown orders the models by
+quality: mg-12k, hb32, rl32. Selecting a model loads its JSON on
 first use, resets the chat and sets the temperature field to that
 model's recommendation.
+
+The specs are identical to the `s5` models' — same architectures,
+same weight counts, a different corpus — so the schematics below the
+chat are unchanged. The retired `*-s5.json` manifests stay tracked
+for history; the page no longer references them.
 
 A note on the third spec, because the digit is easy to misread:
 `rglru.N` counts *block-diagonal gate blocks*, not channels, and the
@@ -119,11 +131,11 @@ different architectures. Re-exporting at fp64 measures how much:
 
 |  | JS vs fp64 | fp32 vs fp64 |
 | --- | --- | --- |
-| `rl32-8k` | 4.2e-6 | 2.8e-5 |
-| `hb32-8k` | 4.1e-6 | 3.1e-5 |
-| `mg12k` | 5.8e-6 | 3.5e-4 |
+| `rl32-8k` | 7.6e-6 | 6.3e-5 |
+| `hb32-8k` | 7.2e-6 | 3.1e-5 |
+| `mg12k` | 5.3e-6 | 3.8e-4 |
 
-The JS agrees with the fp64 truth to ~5e-6 for all three — it is
+The JS agrees with the fp64 truth to ~8e-6 for all three — it is
 uniformly accurate, and since its matmuls accumulate in doubles it
 sits *nearer* fp64 than fp32 XLA does. `mg12k`'s wider band is the
 fp32 reference drifting: its long-memory chain (`mingru.32` into a
@@ -169,9 +181,9 @@ Recorded here because they are the places the two could drift:
 - Weights and layer outputs are `Float32Array` (JAX's fp32), but the
   arithmetic inside a matmul accumulates in JS doubles and rounds once
   on store — slightly *more* accurate than XLA, not less. Measured
-  worst deviation from the fp32 reference: ~3e-5 relative on the two
-  8k models, ~3.5e-4 on `mg12k` (see "About the tolerance" above —
-  against an fp64 reference all three sit at ~5e-6).
+  worst deviation from the fp32 reference: 3e-5 to 7e-5 relative on
+  the two 8k models, ~3.8e-4 on `mg12k` (see "About the tolerance"
+  above — against an fp64 reference all three sit at ~8e-6 or below).
 - A `Model` owns its recurrent state instead of threading it
   functionally; one instance is one running sequence, and `reset()`
   starts a new one. Every turn re-tokenizes and re-prefills the whole

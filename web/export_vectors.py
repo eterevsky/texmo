@@ -16,7 +16,7 @@ mixed-case and ALL-CAPS words, and non-ASCII characters (which the
 tokenset spells as nibble pairs).
 
 Between them the three exported models cover every layer the JS port
-implements: `mg12k-s5` is the only one exercising `gru`, `mingru`,
+implements: `mg-12k-s5u` is the only one exercising `gru`, `mingru`,
 `split.mul` (both the gated and the `pass`-value self-gate form), a
 `tanh` dense and `rglru` with a single full-width block.
 
@@ -41,9 +41,9 @@ from texmo.precision import Precision
 from texmo.tokens import get_tokenizer, set_tokens_dir
 
 MODELS = [
-    'models/rl32-8k-s5.json',
-    'models/hb32-8k-s5.json',
-    'models/mg-12k-s5.json',
+    'models/rl32-8k-s5u.json',
+    'models/hb32-8k-s5u.json',
+    'models/mg-12k-s5u.json',
 ]
 
 PROMPTS = [

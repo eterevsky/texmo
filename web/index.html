@@ -20,9 +20,9 @@
   <div class="controls">
     <label for="model">Model
       <select id="model">
-        <option value="mg12k" selected>mg-12k-s5 &mdash; gated rnn + mingru + rglru + gru (12,449 weights)</option>
-        <option value="hb32">hb32-8k-s5 &mdash; rnn + rglru + mgru (8,001 weights)</option>
-        <option value="rl32">rl32-8k-s5 &mdash; rnn + rglru + lstm (8,017 weights)</option>
+        <option value="mg12k" selected>mg-12k-s5u &mdash; gated rnn + mingru + rglru + gru (12,449 weights)</option>
+        <option value="hb32">hb32-8k-s5u &mdash; rnn + rglru + mgru (8,001 weights)</option>
+        <option value="rl32">rl32-8k-s5u &mdash; rnn + rglru + lstm (8,017 weights)</option>
       </select>
     </label>
     <label for="temperature">Temperature
@@ -155,7 +155,7 @@
         </g>
       </svg>
       <figcaption>
-        <strong>rl32-8k-s5</strong> &mdash; 8,017 weights.
+        <strong>rl32-8k-s5u</strong> &mdash; 8,017 weights.
         &#8214; concatenates two branches; + adds them channel-wise.
         Tinted boxes carry recurrent state.
       </figcaption>
@@ -260,7 +260,7 @@
         </g>
       </svg>
       <figcaption>
-        <strong>hb32-8k-s5</strong> &mdash; 8,001 weights.
+        <strong>hb32-8k-s5u</strong> &mdash; 8,001 weights.
         The + here joins unequal widths: the 16 channels coming up the
         branch are summed onto the first 16 of the skip, and the skip's
         upper 16 are carried through unchanged.
@@ -395,7 +395,7 @@
         </g>
       </svg>
       <figcaption>
-        <strong>mg-12k-s5</strong> &mdash; 12,449 weights.
+        <strong>mg-12k-s5u</strong> &mdash; 12,449 weights.
         &#215; multiplies channel-wise: the box on the left is a
         <em>gate</em> that scales the spine beside it, once over the
         input RNN and once as a self-gate closing the recurrent chain.
@@ -412,10 +412,14 @@
 
 <footer class="page-footer">
   <p>
-    <span id="footer-model">mg-12k-s5</span>,
+    <span id="footer-model">mg-12k-s5u</span>,
     <span id="footer-weights">12,449</span> weights, fp32, trained on
-    simplified SODA dialogs (the <code>s5</code> corpus: LLM-simplified
-    conversations plus greetings, farewells and thanks). Tokenizer:
+    simplified SODA dialogs (the <code>s5u</code> corpus: LLM-simplified
+    conversations plus greetings, farewells and thanks, where the
+    <em>User</em> side varies in case &mdash; some dialogs entirely
+    lower case, no closing full stop &mdash; while the <em>Bot</em>
+    always answers in edited prose). So type however you like; the
+    reply comes back properly capitalized and punctuated. Tokenizer:
     <code>tokens.32.hexbpe</code>, 32 tokens.
   </p>
   <p>

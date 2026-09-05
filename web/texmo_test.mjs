@@ -37,11 +37,11 @@ const DEFAULT_TOLERANCE = 1e-4;
  * `scratch/web/cmp_fp64.mjs` for the recipe):
  *
  *              JS vs fp64   fp32 vs fp64
- *   rl32-8k      4.2e-6       2.8e-5
- *   hb32-8k      4.1e-6       3.1e-5
- *   mg12k        5.8e-6       3.5e-4
+ *   rl32-8k      7.6e-6       6.3e-5
+ *   hb32-8k      7.2e-6       3.1e-5
+ *   mg12k        5.3e-6       3.8e-4
  *
- * The JS agrees with the fp64 truth to ~5e-6 for all three -- it is
+ * The JS agrees with the fp64 truth to ~8e-6 for all three -- it is
  * uniformly accurate, and its matmuls accumulate in doubles, so it sits
  * *nearer* fp64 than fp32 XLA does. mg12k's wider band is the fp32
  * reference drifting, not the port: its long-memory chain (mingru.32
@@ -54,7 +54,7 @@ const DEFAULT_TOLERANCE = 1e-4;
  *     --precision fp64 --places 9 -o scratch/web/vectors_fp64.json
  */
 const TOLERANCES = {
-  'models/mg-12k-s5.json': 5e-4,
+  'models/mg-12k-s5u.json': 5e-4,
 };
 
 function readJson(...parts) {

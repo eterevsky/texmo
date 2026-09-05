@@ -17,20 +17,20 @@ import {
 // works out where `models/` and `tokens/` actually sit (see below).
 const MODELS = {
   mg12k: {
-    label: 'mg-12k-s5',
-    manifest: 'models/mg-12k-s5.json',
+    label: 'mg-12k-s5u',
+    manifest: 'models/mg-12k-s5u.json',
     temperature: 0.4,
     figure: 'fig-mg12k',
   },
   hb32: {
-    label: 'hb32-8k-s5',
-    manifest: 'models/hb32-8k-s5.json',
+    label: 'hb32-8k-s5u',
+    manifest: 'models/hb32-8k-s5u.json',
     temperature: 0.3,
     figure: 'fig-hb32',
   },
   rl32: {
-    label: 'rl32-8k-s5',
-    manifest: 'models/rl32-8k-s5.json',
+    label: 'rl32-8k-s5u',
+    manifest: 'models/rl32-8k-s5u.json',
     temperature: 0.4,
     figure: 'fig-rl32',
   },

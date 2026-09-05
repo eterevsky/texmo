@@ -139,6 +139,38 @@ branch *and* the top chain. The Split-specific moves:
   hop — it's reachable in two (the invalid intermediate's own neighbors
   resize the gate), which a depth ≥ 2 walk finds for free.
 
+**Compound-block family** (`_tail_block_variants` /
+`_tail_group_starts` in `model2.py`) — **top chain only**: these are
+statements about the model's macro-structure, not about the inside of
+a branch.
+
+Read the chain's tail as alternating non-norm **units** and norms —
+`…-norm1-block1-norm2-block2-norm3` — where a unit is one top-level
+layer and a whole `split.op(…)` subtree counts as ONE unit. Two groups
+are defined: **G1** = the last unit plus its *trailing* norm if one
+follows it (`block2-norm3`); **G2** = the last two units with their
+trailing norms (`block1-norm2-block2-norm3`). A unit's *preceding*
+norm is never part of its group. With no trailing norms present, the
+groups are the bare units.
+
+- **Duplicate the trailing group** — append a verbatim copy of G1, or
+  of G2. Pure spec text: the copy trains from a fresh init like any
+  other conf, nothing is shared. Because a group always starts on a
+  unit, the copy can never land a norm next to the norm it follows —
+  these moves create no `norm-norm` adjacency out of a valid chain.
+- **Drop a trailing duplicate** — the exact inverse: when the tail is
+  `G-G` for either shape (exact spec-text equality of the two copies),
+  offer the chain with one copy removed.
+
+Why they exist: every other move mutates one layer at a time, which
+leaves a whole transformer block (attn + FFN + norms, each optionally
+wrapped in a residual split) unreachable in practice — the template
+regexes admit multi-block specs, but no path of valid, *sensible*
+single-layer intermediates leads to a second block. These two edges
+supply it. At most 2 duplications + 2 drops per conf, and they pass
+through the same `is_valid` filter and the same template spec filter
+(`Template.match_model`) as every other neighbor — no special-casing.
+
 ## Counts
 
 - `num_weights` = Σ over branches (Split itself is weightless).

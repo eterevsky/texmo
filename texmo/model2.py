@@ -126,6 +126,11 @@ class Model2Def:
         # Layer-chain mutations (recurse into the tree).
         for variant in _seq_variants(top, self.input.size):
             yield f"{input_spec}|" + "-".join(variant)
+        # Compound-block moves. TOP CHAIN ONLY: these duplicate/drop a
+        # whole trailing block, which is a statement about the model's
+        # macro-structure, not about what happens inside one branch.
+        for variant in _tail_block_variants(top):
+            yield f"{input_spec}|" + "-".join(variant)
 
     def neighbors(self) -> Iterable[Self]:
         """Yield single-mutation neighbor models (precision + arch).
@@ -197,6 +202,9 @@ _APPEND_RECURRENT = ("gru", "mgru", "mingru", "lstm", "slstm", "mullstm")
 # Same set plus the bare linear gate: `mul(dense.X.silu, dense.X)` is
 # SwiGLU, `mul(dense.X.gelu, dense.X)` GeGLU.
 _GATE_ACTS = (None, "gelu", "tanh", "silu")
+# The normalization layer names (layers/norm.py, layers/rmsnorm.py).
+# Kept in step with the norm rules in layers/seq.py:is_valid.
+_NORM_NAMES = ("norm", "rmsnorm")
 
 
 def _strs(layers: list[LayerDef]) -> list[str]:
@@ -401,3 +409,65 @@ def _seq_variants(
     for act in _GATE_ACTS:
         gate = f"dense.{last_output}" + (f".{act}" if act else "")
         yield strs + [_split_str("mul", [[], [gate]])]
+
+
+# --- compound-block moves (top chain only) -------------------------------
+#
+# Everything above mutates ONE layer at a time, which leaves a compound
+# trailing structure -- a transformer block: attn + FFN + norms, each
+# optionally wrapped in a residual split -- effectively unreachable. The
+# template regexes admit multi-block specs, but no path of valid, sensible
+# single-layer intermediates leads to a second block. These two moves add
+# the missing edge and its inverse: copy the trailing block group, or
+# collapse a doubled one. The copy is pure spec text -- the duplicate
+# trains from a fresh init like any other conf, nothing is shared.
+
+
+def _tail_group_starts(layers: list[LayerDef]) -> list[int]:
+    """Start indices of the one and two-unit trailing block groups.
+
+    A chain's tail reads as alternating non-norm *units* and norms --
+    `...-norm1-block1-norm2-block2-norm3` -- where a unit is one
+    top-level layer and a whole `split.op(...)` subtree counts as ONE
+    unit. This returns the start index of
+
+      G1 = the last unit plus its TRAILING norm if one follows it
+           (`block2-norm3`), and
+      G2 = the last TWO units with their trailing norms
+           (`block1-norm2-block2-norm3`),
+
+    shortest first, omitting whichever doesn't exist (a bare tail with
+    no trailing norm yields the bare units). A unit's PRECEDING norm is
+    never part of its group: that is what keeps a duplicated group from
+    landing its leading norm right after the norm it follows, so these
+    moves can never create a norm-norm adjacency out of a valid chain.
+    """
+    names = [l.name for l in layers]
+    starts: list[int] = []
+    i = len(names)
+    for _ in range(2):
+        if i and names[i - 1] in _NORM_NAMES:
+            i -= 1  # the unit's trailing norm
+        if i == 0 or names[i - 1] in _NORM_NAMES:
+            break  # no unit left to take (a leading norm isn't one)
+        i -= 1
+        starts.append(i)
+    return starts
+
+
+def _tail_block_variants(layers: list[LayerDef]) -> Iterable[list[str]]:
+    """Duplicate-trailing-group, and drop-trailing-duplicate.
+
+    Per group shape (see `_tail_group_starts`) at most two candidates:
+    the chain with a verbatim copy of the group appended, and -- when
+    the tail already is `G-G` by exact spec-text equality -- the chain
+    with one copy removed. So at most 4 extra neighbors per conf, and
+    the two moves are exact inverses of each other.
+    """
+    strs = _strs(layers)
+    for start in _tail_group_starts(layers):
+        group = strs[start:]
+        yield strs + group
+        prev = start - len(group)
+        if prev >= 0 and strs[prev:start] == group:
+            yield strs[:start]

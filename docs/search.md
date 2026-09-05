@@ -279,11 +279,36 @@ Two layers:
 - **`Model2Def.neighbors()`** — precision changes, input-layer mutations,
   single-layer mutations (via `LayerDef.neighbors`, recursing into split
   branches), append/remove last layer, insert/remove suffix.2,
-  insert/remove norm, prepend/remove a dense lead-in, and the Split
+  insert/remove norm, prepend/remove a dense lead-in, the Split
   mutations (wrap/unwrap residual and gate Splits, `add↔cat` op-swap,
-  grow/shrink a residual span, append a self-gate). Each mutation is a
-  spec string re-parsed via `parse_model2` and `is_valid`-filtered. See
+  grow/shrink a residual span, append a self-gate), and the
+  compound-block moves below. Each mutation is a spec string re-parsed
+  via `parse_model2` and `is_valid`-filtered. See
   [`split.md`](split.md).
+
+### Compound-block moves (duplicate / drop a trailing group)
+
+Every mutation above touches one layer at a time, which leaves a whole
+*block* — attention + FFN + norms, each optionally in a residual split
+— unreachable in practice: the sub-search regexes admit multi-block
+specs, but no path of valid, sensible single-layer intermediates leads
+to a second block. Two moves on the **top chain only** supply the
+missing edge and its inverse:
+
+- **Duplicate the trailing group** — read the tail as alternating
+  non-norm *units* and norms (a whole `split.op(…)` subtree is ONE
+  unit) and append a verbatim copy of either the last unit with its
+  trailing norm, or the last two units with theirs. A unit's
+  *preceding* norm is never copied, so no `norm-norm` adjacency is
+  created.
+- **Drop a trailing duplicate** — the inverse, when the tail already
+  is `G-G` by exact spec-text equality.
+
+The copy is spec text only: the duplicated block trains from a fresh
+init like any other conf. At most 2 + 2 extra candidates per conf, and
+they take the ordinary `is_valid` and `Template.match_model` (spec
+regex) filtering — nothing about them is special-cased. See
+[`split.md`](split.md) for the group definitions.
 
 Neighbors are generated **at runtime** (in-memory). No neighbor table in
 the DB. `DbReader.get_conf_id()` is cached (Configuration → id) so

@@ -7,12 +7,15 @@ layer counts, validity verdicts, and the classic mutation moves the
 legacy neighbor generator defined.
 """
 import math
+import re
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from texmo.configuration import Configuration, Template, conf_neighbors
+from texmo.model2 import _tail_block_variants
 from texmo.precision import Precision
 from texmo.spec_parser import parse_model2
 
@@ -703,6 +706,159 @@ def test_bare_dense_neighbors_well_formed():
     assert "dense.4" in nbs and "dense.16" in nbs
     # ...and no cross-type swap or ".None" artifacts appear.
     assert not any("None" in s or s.startswith("rnn") for s in nbs)
+
+
+# --- compound-block moves: duplicate / drop a trailing block group ----
+#
+# The tail reads as alternating non-norm units and norms; a whole
+# `split.op(...)` subtree is ONE unit. G1 = the last unit plus its
+# trailing norm, G2 = the last two units with their trailing norms and
+# never their preceding norm.
+
+# The canonical pre-norm transformer block, narrow enough for a
+# bits.1+bp stream (attn head_dim 4).
+_BLOCK = ("split.add(rmsnorm-attn.4.1.4, pass)"
+          "-split.add(rmsnorm-dense.4.gelu, pass)")
+
+
+def _tail_variants(spec: str) -> list[str]:
+    """Top-chain strings produced by the compound-block moves alone."""
+    md = parse_model2(spec, Precision.FP32)
+    return ["-".join(v) for v in _tail_block_variants(md.layer_seq.layers)]
+
+
+def _top_names(spec: str) -> list[str]:
+    return [l.name for l in
+            parse_model2(spec, Precision.FP32).layer_seq.layers]
+
+
+def test_duplicate_tail_norm_terminated():
+    """`...-u1-n1-u2-n2` doubles G1 as `u2-n2` and G2 as the whole
+    `u1-n1-u2-n2` -- u1's *preceding* norm slot is empty here, so both
+    shapes are visible without ambiguity."""
+    got = _tail_variants("bits.1+bp|dense.4.gelu-rmsnorm-dense.4.tanh-norm")
+    assert got == [
+        "dense.4.gelu-rmsnorm-dense.4.tanh-norm-dense.4.tanh-norm",
+        "dense.4.gelu-rmsnorm-dense.4.tanh-norm"
+        "-dense.4.gelu-rmsnorm-dense.4.tanh-norm",
+    ]
+
+
+def test_duplicate_tail_bare_units():
+    """With no trailing norms the bare units are duplicated."""
+    got = _tail_variants("bits.1+bp|dense.4.gelu-dense.4.tanh")
+    assert got == [
+        "dense.4.gelu-dense.4.tanh-dense.4.tanh",
+        "dense.4.gelu-dense.4.tanh-dense.4.gelu-dense.4.tanh",
+    ]
+
+
+def test_duplicate_tail_g2_keeps_interior_norm_drops_preceding():
+    """G2 spans `u2-n2-u3-n3` of `u1-n1-u2-n2-u3-n3`: the norm *inside*
+    the group rides along, the one *ahead* of it (n1) does not."""
+    spec = ("bits.1+bp|dense.4.gelu-norm-dense.4.tanh"
+            "-rmsnorm-dense.4.silu-norm")
+    chain = spec.split("|", 1)[1]
+    g1, g2 = _tail_variants(spec)
+    assert g1 == f"{chain}-dense.4.silu-norm"
+    # The copied group carries rmsnorm (interior) but starts on a unit:
+    # n1, the norm *ahead* of the group, is left behind.
+    assert g2 == f"{chain}-dense.4.tanh-rmsnorm-dense.4.silu-norm"
+
+
+def test_duplicate_tail_split_counts_as_one_unit():
+    """A residual transformer block is two `split` units; G2 copies the
+    pair verbatim, and no split subtree is cut in half."""
+    spec = f"bits.1+bp|{_BLOCK}"
+    doubled = f"{spec}-{_BLOCK}"
+    assert doubled.split("|", 1)[1] in _tail_variants(spec)
+    # It survives parsing as four top-level splits (a halved subtree
+    # would not parse at all).
+    assert _top_names(doubled) == ["split"] * 4
+    assert parse_model2(doubled, Precision.FP32).is_valid()
+    # ...and it is a real neighbor of the single-block model.
+    assert doubled in _arch_neighbor_specs(
+        parse_model2(spec, Precision.FP32))
+
+
+@pytest.mark.parametrize("spec", [
+    "bits.1+bp|dense.4.gelu-rmsnorm",
+    "bits.1+bp|dense.4.gelu-norm-dense.4.tanh-rmsnorm",
+    "bits.1+bp|dense.4.gelu-norm-dense.4.tanh-rmsnorm-dense.4.silu-norm",
+    "bits.1+bp|gru.4-rmsnorm",
+    f"bits.1+bp|{_BLOCK}",
+])
+def test_duplicate_tail_never_adjacent_norms(spec):
+    """Preceding norms are never copied, so a duplicated group can
+    never land its leading norm next to the norm it follows."""
+    md = parse_model2(spec, Precision.FP32)
+    for variant in _tail_variants(spec):
+        names = _top_names(f"{md.input}|{variant}")
+        assert not any(
+            a in ("norm", "rmsnorm") and b in ("norm", "rmsnorm")
+            for a, b in zip(names, names[1:])), variant
+
+
+def test_drop_trailing_duplicate_both_shapes():
+    """The inverse fires for a doubled G1 and for a doubled G2."""
+    g1 = "bits.1+bp|dense.4.gelu-rmsnorm-dense.4.tanh-norm-dense.4.tanh-norm"
+    assert "dense.4.gelu-rmsnorm-dense.4.tanh-norm" in _tail_variants(g1)
+
+    block = _BLOCK
+    g2 = f"bits.1+bp|{block}-{block}"
+    assert block in _tail_variants(g2)
+
+
+def test_drop_trailing_duplicate_needs_exact_copy():
+    """Same shape, different spec text -- no drop offered."""
+    spec = "bits.1+bp|dense.4.gelu-rmsnorm-dense.4.tanh-rmsnorm"
+    got = _tail_variants(spec)
+    assert all(len(v) > len(spec.split("|", 1)[1]) for v in got)
+
+
+@pytest.mark.parametrize("spec", [
+    "bits.1+bp|dense.4.gelu-dense.4.tanh",
+    "bits.1+bp|dense.4.gelu-rmsnorm-dense.4.tanh-norm",
+    "bits.1+bp|dense.4.gelu-norm-dense.4.tanh-rmsnorm-dense.4.silu-norm",
+    f"bits.1+bp|{_BLOCK}",
+])
+def test_duplicate_then_drop_round_trips(spec):
+    """Double with either group, and the inverse brings the original
+    spec back."""
+    input_spec, chain = spec.split("|", 1)
+    for variant in _tail_variants(spec):
+        assert chain in _tail_variants(f"{input_spec}|{variant}"), variant
+
+
+def test_template_regex_filters_doubled_candidate():
+    """A regex admitting only single-block specs drops the doubled
+    candidate on the same path the search uses -- no special-casing."""
+    spec = f"bits.1+bp|{_BLOCK}"
+    doubled = f"{spec}-{_BLOCK}"
+    md = parse_model2(spec, Precision.FP32)
+    # Present before the filter...
+    assert doubled in _arch_neighbor_specs(md)
+    # ...and gone after it.
+    single_only = re.escape(spec)
+    template = Template(
+        spec=single_only,
+        max_weights=(1, 10 ** 9),
+        num_layers=(0, 200),
+        length=(8, 8),
+        batch=(1, 1),
+        steps=(2, 2 ** 20),
+        lr=(1e-4, 1.0),
+        precision=[Precision.FP32],
+    )
+    conf = Configuration(
+        model=md, lr=1 / 128, length=8, batch=1, steps=1024, decay=1.0)
+    specs = {str(n.model) for n in conf_neighbors(conf, template)}
+    assert doubled not in specs
+    # The permissive regex keeps it, so the filter is what removed it.
+    open_template = template.with_spec(f"{re.escape(spec)}(-.*)?")
+    open_specs = {
+        str(n.model) for n in conf_neighbors(conf, open_template)}
+    assert doubled in open_specs
 
 
 # --- codec mode swaps + emb width sync in neighbor generation --------

@@ -164,6 +164,22 @@ def test_pass_b_pairs_with_the_last_user_turn_not_the_previous_index():
     assert "Bot: second" in content
 
 
+def test_pass_b_names_the_three_false_shapes_and_keeps_the_slack():
+    # The 2026-09-03 calibration rulings, as micro-examples: a bare
+    # affirmation to a question no yes/no answers, a farewell answering
+    # a greeting, and thanks answered with thanks are all FALSE; a
+    # greeting in kind and a bland "I agree." stay TRUE.
+    system = chat_eval.judge_messages("b", _turns("hi", "Yes."), 1)[0][
+        "content"]
+    assert '"Why do you ask?"' in system
+    assert '"Hiya!" -> "See you!" is FALSE' in system
+    assert '"Thanks for the help." -> "Thank you!" is FALSE' in system
+    assert '"Hiya!" -> "Hello!"' in system
+    assert '"I agree."' in system
+    # The slack: dullness alone is still not a reason to fail a reply.
+    assert "a short, vague or dull response can still fit the turn" in system
+
+
 def test_pass_a_ignores_capitalization_and_a_missing_final_period():
     # A lower-case examiner turn is answered in kind by a model that
     # learned to mirror, and that must not cost it (a).

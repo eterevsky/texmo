@@ -474,6 +474,16 @@ a chat -- a short, vague or dull response can still fit the turn. \
 Answer false when it answers some other question, ignores what {user} \
 said, or does not fit the turn at all.
 
+Some brief, polite replies still miss the turn and are FALSE. A bare \
+"Yes." or "No." answers a yes/no question only: after a wh-question \
+("What's your name?", "Why do you ask?") it is FALSE. A farewell does \
+not answer a greeting: "Hiya!" -> "See you!" is FALSE. Thanks are not \
+answered with thanks: "Thanks for the help." -> "Thank you!" is \
+FALSE, where an ordinary person says "You're welcome!". Two that stay \
+TRUE: a greeting answered in kind ("Hiya!" -> "Hello!"), and a bland \
+agreement to a statement ("Wait, what? I didn't ask you to do \
+anything yet." -> "I agree.").
+
 Grammar is not your question here: a clumsy reply that fits the turn \
 is still true.
 

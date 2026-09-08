@@ -175,12 +175,59 @@ class Model2Def:
         input_spec = str(codec.with_emb_size(codec.last_width))
         return parse_model2(f'{input_spec}|{layers_spec}', self.precision)
 
+    def layer_widths(self) -> frozenset[int]:
+        """Every activation width that occurs anywhere in the model.
+
+        The input and output size of each layer (recursing through
+        sequences and split branches), plus the codec's four: the
+        width fed to the chain, the head's input width, the logit
+        count, and the vocabulary.
+
+        Used by `Model2Jax.forward_recurrent` to keep the vmapped
+        batch size off those widths -- a `[batch, width]` dot with
+        batch == width is square, and a square dot with a `{0,1}`
+        output layout is what XLA:GPU miscompiles (docs/findings.md,
+        "XLA:GPU adds a fused bias on the wrong axis").
+        """
+        widths: set[int] = set()
+        codec = self.codec
+        widths.add(codec.size)
+        widths.add(codec.ntokens)
+        head = codec.head
+        if head is not None:
+            widths.add(head.input_size)
+            widths.add(head.size)
+        _collect_widths(self.layer_seq, widths)
+        return frozenset(widths)
+
     def build_jax(self) -> Model2Jax:
         return Model2Jax(
             self.codec.build_jax(),
             self.layer_seq.build_jax(self.precision.jax_dtype),
             total_padding=self.total_padding,
+            layer_widths=self.layer_widths(),
         )
+
+
+# --- activation widths ---------------------------------------------------
+
+
+def _collect_widths(layer: LayerDef, out: set[int]) -> None:
+    """Add `layer`'s input/output widths to `out`, recursively.
+
+    LayerSeqDef and SplitDef are containers: their own input_size/size
+    are the ends of the sub-tree, but every internal boundary matters
+    too, so recurse into `layers` / `branches`.
+    """
+    out.add(layer.input_size)
+    if layer.size is not None:
+        out.add(layer.size)
+    if isinstance(layer, LayerSeqDef):
+        for child in layer.layers:
+            _collect_widths(child, out)
+    elif isinstance(layer, SplitDef):
+        for branch in layer.branches:
+            _collect_widths(branch, out)
 
 
 # --- neighbor generation -------------------------------------------------

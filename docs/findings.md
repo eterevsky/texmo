@@ -266,11 +266,53 @@ results are safe because the eval batch is 1024 and no searched layer
 is 1024 wide — the exposure is `texmo.py eval --chunk W` and any
 hand-run eval whose batch equals a layer width. Fixed by
 `--xla_gpu_cublas_fallback=false`, injected at `import texmo`
-(`texmo/xla_flags.py`); perf-neutral to favorable on this repo's
-shapes. `--xla_gpu_enable_cublaslt=false` does NOT help (inert in this
-build). Seen on jax/jaxlib 0.11.0 + winjax CUDA 13, sm_120; other
-CUDA machines are unverified. 20-line standalone repro:
+(`texmo/xla_flags.py`) (reverted 2026-09-08, see amendment);
+perf-neutral to favorable on this repo's shapes.
+`--xla_gpu_enable_cublaslt=false` does NOT help (inert in this build).
+Seen on jax/jaxlib 0.11.0 + winjax CUDA 13, sm_120; other CUDA
+machines are unverified. 20-line standalone repro:
 `scratch/recurrent_bug/repro.py`.
+
+**Amended 2026-09-08 — the flag was worse than the bug; the fix is
+structural.** `--xla_gpu_cublas_fallback=false` does not only drop
+cuBLASLt from the *bias-epilogue* candidates: it removes XLA's cuBLAS
+fallback for **every** GEMM fusion Triton fails to compile, so a
+training step containing one dies with `RET_CHECK failure ...
+!candidates.empty() Autotuning failed for HLO ... __triton_gemm ... No
+configs could be compiled` instead of quietly running on cuBLAS.
+Reproduced (`-p fp32 -b 2 -l 128`) with
+
+    tokens.64.hexbpe.oh|suffix.2-dense.8.silu-suffix.2-dense.16.silu
+
+whose backward dot of the suffix stack is f32[8,258] x f32[258,128] —
+K = 2*129 inside a concatenate fusion, odd layouts Triton declines.
+Both a Windows and a Linux CUDA worker died on it. **Fleet exposure
+window 2026-08-29 → 2026-09-08:** every worker that pulled 2330e3a8a
+crashed on the first such conf it drew, so suffix-heavy confs were
+starved from the search for ten days (the crash kills the worker, it
+does not record a failed run).
+
+The flag is **gone**: `texmo/xla_flags.py` is deleted and nothing in
+texmo touches `XLA_FLAGS` any more — stock XLA on every machine. The
+bias miscompile is instead avoided by shape:
+`Model2Jax.forward_recurrent` pads its batch with dummy rows up to the
+first size that equals **no** layer width in the model
+(`Model2Def.layer_widths()` — every layer's input/output size plus the
+codec width, head input, logit count and vocabulary), and slices them
+off before the loss mask sees the logits. Widths are powers of two in
+practice, so it costs at most one row, and every caller of the
+recurrent path (`ManagerJax.eval`, `texmo.py eval --chunk N`) is
+covered because they all go through `forward_recurrent`. With that,
+`texmo.py eval -m models/hb32-8k-s3.json` under stock flags reads
+1.29 / 1.25 b/B at `--chunk 16` / `--chunk 32` where it read
+2.08 / 10.63 before; recurrent and parallel masked losses agree to
+~2e-5 relative at every batch size. Regressions: `model2_jax_test.py`
+(both GPU cases plus the CPU padding arithmetic). The old "is this
+machine affected?" probe moved into that same file behind
+`TEXMO_XLA_DIAG=1` — with nothing suppressing the bug it fails by
+design on an affected machine, which is the point of keeping it. The
+standalone repro of the miscompile lives in the winjax fork's docs,
+`docs/repro_cublaslt_bias.py`.
 
 ## Simplified data moves an 8k model from ~1% to ~80% grammatical (2026-08-28)
 

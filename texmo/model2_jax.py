@@ -42,10 +42,15 @@ class Model2Jax:
         codec: OneHotCodecJax | EmbeddingCodecJax | PairCodecJax,
         layer_seq: LayerSeqJax,
         total_padding: int = 1,
+        layer_widths: frozenset[int] = frozenset(),
     ):
         self.codec = codec
         self.layer_seq = layer_seq
         self._total_padding = total_padding
+        # Every activation width in the model (Model2Def.layer_widths).
+        # forward_recurrent keeps its batch size off this set; see
+        # `_recurrent_batch_size`.
+        self._layer_widths = layer_widths
 
     @property
     def ntokens(self) -> int:
@@ -122,6 +127,28 @@ class Model2Jax:
         mask = jnp.arange(per_token.shape[1]) < lengths[:, jnp.newaxis]
         return _1_BY_LOG2 * jnp.sum(per_token * mask)
 
+    def _recurrent_batch_size(self, batch_size: int) -> int:
+        """Batch size to actually run `forward_recurrent` at.
+
+        Under `vmap(step)` every layer's dot is `[batch, width]`, so
+        `batch == width` makes it square -- and a square dot whose
+        output layout is `{0,1}` (which a `split.cat` merge downstream
+        produces) is miscompiled by XLA:GPU into a cuBLASLt
+        `epilogue:"BIAS"` that broadcasts the bias along the wrong
+        axis. The corruption is silent and large: 10.8 b/B instead of
+        1.36 for `models/hb32-8k-s3.json` at batch 32. See
+        docs/findings.md, "XLA:GPU adds a fused bias on the wrong axis
+        (2026-08-29)".
+
+        So round the batch up to the first size that is not any layer's
+        width; the extra rows are dummies, dropped before the caller
+        (and before any loss reduction) sees the logits. Widths are
+        powers of two in practice, so this costs at most one row.
+        """
+        while batch_size in self._layer_widths:
+            batch_size += 1
+        return batch_size
+
     def forward_recurrent(
         self, weights, batch: jax.Array,
     ) -> jax.Array:
@@ -131,7 +158,27 @@ class Model2Jax:
         and lax.scan along time, so msr-style layers can use their
         per-step matrix-state path instead of the parallel-form
         O(T^2) scores tensor.
+
+        The batch may be padded with dummy rows before the scan (see
+        `_recurrent_batch_size`); they are sliced off again here, so
+        the returned logits always match `batch`'s first axis and no
+        caller has to know about it.
         """
+        n_real = batch.shape[0]
+        padded = self._recurrent_batch_size(n_real)
+        if padded != n_real:
+            # Token id 0 is valid for every codec, and these rows are
+            # discarded below -- they exist only to change the dot
+            # shapes.
+            pad = jnp.zeros(
+                (padded - n_real,) + batch.shape[1:], dtype=batch.dtype)
+            batch = jnp.concatenate([batch, pad], axis=0)
+            return self._forward_recurrent(weights, batch)[:n_real]
+        return self._forward_recurrent(weights, batch)
+
+    def _forward_recurrent(
+        self, weights, batch: jax.Array,
+    ) -> jax.Array:
         batch_size = batch.shape[0]
         init_state, init_logits = self.initial_step(weights)
 

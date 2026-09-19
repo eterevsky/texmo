@@ -405,7 +405,8 @@ def _conf_row(conf_score) -> dict:
         'data': f'{conf.batch}×{conf.length}',
         'lr': conf.learning_str,
         'steps': conf.steps,
-        'score': f'{conf_score.median_score:.3f} ({conf_score.num_runs})',
+        # The template appends the run count and the '+1 run' control.
+        'score': f'{conf_score.median_score:.3f}',
         'time': f'{ttoa3(conf_score.median_time)} on {conf_score.system}',
         'cmd': cmd,
         # For the per-row "+1 run" control: the conf as the /pick_me

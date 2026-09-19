@@ -20,7 +20,7 @@ matplotlib.use('Agg')
 from texmo.common import INF
 from texmo.configuration import MAIN_ENTRY, Configuration, Template
 from texmo import named_regexes
-from texmo.db import DbReader, DbWriter
+from texmo.db import ConfScore, DbReader, DbWriter
 from texmo.spec_parser import parse_model2
 from texmo.precision import Precision
 from texmo.run import Run
@@ -61,6 +61,8 @@ def _render(**overrides):
                 'score': '5.123 (3)',
                 'time': '1.23 s on test',
                 'cmd': "uv run texmo.py train -s 'bytes|dense.32.gelu'",
+                'conf_json': '{"spec": "bytes|dense.32.gelu"}',
+                'num_runs': 3,
             },
         ],
         graph='',
@@ -124,6 +126,17 @@ def test_index_copy_command_link():
     assert 'copy-link' in html
     # The pipe in the spec is quoted so it's shell-safe.
     assert "bytes|dense.32.gelu&#39;" in html
+
+
+def test_index_pick_me_control_present():
+    """Each top row carries a '+1 run' control wired to /pick_me with
+    the conf and its current run count."""
+    html = _render()
+    assert '+1 run' in html
+    assert 'pickMe(this)' in html
+    assert "/pick_me" in html
+    assert 'data-runs="3"' in html
+    assert 'bytes|dense.32.gelu' in html
 
 
 def test_index_default_spec_field_present():
@@ -215,6 +228,81 @@ def test_search_server_add_run_writes_median_estimate(
     time_s, source = est
     assert source == "median"
     assert time_s == pytest.approx(12.5)
+
+
+def test_conf_row_pick_me_payload_round_trips(tmp_path, monkeypatch):
+    """The row's conf_json is exactly what /pick_me accepts, and the
+    UI's "+1 run" (num_runs + 1) lands as the new target."""
+    monkeypatch.setattr(loss_tree, "train_loss_model",
+                        lambda reader: None)
+    model = parse_model2("bytes|dense.32.gelu", precision=Precision.FP32)
+    conf = Configuration(
+        model=model, lr=0.1, length=128, batch=32, steps=256, decay=1.0,
+    )
+    row = server_mod._conf_row(ConfScore(
+        conf_id=7, conf=conf, median_score=5.0, system='test',
+        median_time=1.0, num_runs=2))
+    assert row['num_runs'] == 2
+    payload = json.loads(row['conf_json'])
+    assert Configuration.from_dict(payload) == conf
+
+    server = SearchServer(
+        str(tmp_path / "test.db"), _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    try:
+        body = server.pick_me(
+            {"conf": payload, "runs": row['num_runs'] + 1})
+    finally:
+        server.join()
+    assert body['target'] == 3
+
+
+def test_search_server_pick_me_flags_the_conf(tmp_path, monkeypatch):
+    monkeypatch.setattr(loss_tree, "train_loss_model",
+                        lambda reader: None)
+    path = str(tmp_path / "test.db")
+    server = SearchServer(
+        path, _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    model = parse_model2("bytes|dense.32.gelu", precision=Precision.FP32)
+    conf = Configuration(
+        model=model, lr=0.1, length=128, batch=32, steps=256, decay=1.0,
+    )
+    try:
+        body = server.pick_me({"conf": conf.to_dict(), "runs": 3})
+        assert body["inserted"] is True
+        assert body["runs"] == 0
+        assert body["target"] == 3
+        # A second, smaller request never lowers the target.
+        again = server.pick_me({"conf": conf.to_dict(), "runs": 2})
+        assert again["inserted"] is False
+        assert again["conf_id"] == body["conf_id"]
+        assert again["target"] == 3
+    finally:
+        server.join()
+
+    with DbReader(path) as reader:
+        assert reader.pick_me_conf(_make_template()) == conf
+
+
+def test_search_server_pick_me_rejects_zero_runs(tmp_path, monkeypatch):
+    monkeypatch.setattr(loss_tree, "train_loss_model",
+                        lambda reader: None)
+    server = SearchServer(
+        str(tmp_path / "test.db"), _make_template(),
+        train_time=(1.0, 16.0), default_spec=None,
+    )
+    model = parse_model2("bytes|dense.32.gelu", precision=Precision.FP32)
+    conf = Configuration(
+        model=model, lr=0.1, length=128, batch=32, steps=256, decay=1.0,
+    )
+    try:
+        with pytest.raises(ValueError):
+            server.pick_me({"conf": conf.to_dict(), "runs": 0})
+    finally:
+        server.join()
 
 
 def _form_params(entries=(), seed_rows=(), **overrides):

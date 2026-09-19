@@ -129,6 +129,30 @@
             }
             document.addEventListener('DOMContentLoaded', updateShares);
 
+            // "+1 run": ask the server to make this conf a priority
+            // pick until it has one more run than it has now. Same
+            // endpoint as `texmo.py pick-me`; the reply carries the
+            // resulting target, which replaces the link text.
+            function pickMe(el) {
+                const runs = parseInt(el.dataset.runs, 10) + 1;
+                el.textContent = '...';
+                fetch('/pick_me', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        conf: JSON.parse(el.dataset.conf),
+                        runs: runs,
+                    }),
+                })
+                    .then(r => r.json().then(b => {
+                        if (!r.ok) throw new Error(b.error || r.status);
+                        el.textContent = 'queued (target ' + b.target + ')';
+                        el.classList.remove('copy-link');
+                        el.onclick = null;
+                    }))
+                    .catch(e => { el.textContent = 'failed: ' + e.message; });
+            }
+
             function copyCmd(el) {
                 const cmd = el.dataset.cmd;
                 const flash = () => {
@@ -374,6 +398,7 @@
                 <th>Score</th>
                 <th>Time</th>
                 <th></th>
+                <th></th>
             </tr>
             {% for item in top %}
             <tr>
@@ -385,6 +410,10 @@
                 <td>{{ item.score }}</td>
                 <td>{{ item.time }}</td>
                 <td><span class="copy-link" data-cmd="{{ item.cmd }}" onclick="copyCmd(this)">copy</span></td>
+                <td><span class="copy-link" data-conf="{{ item.conf_json }}"
+                          data-runs="{{ item.num_runs }}"
+                          title="schedule one more run of this conf, ahead of the search"
+                          onclick="pickMe(this)">+1 run</span></td>
             </tr>
             {% endfor %}
         </table>

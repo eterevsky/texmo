@@ -18,6 +18,7 @@ if not getattr(config, 'JAX_PREALLOCATE', True):
 from texmo import latency
 from texmo.cli import bench, client, db, loss, report, sample, server, train
 from texmo.cli import chat as chat_cli
+from texmo.cli import pick_me as pick_me_cli
 from texmo.cli import chat_server as chat_server_cli
 from texmo.cli import eval as eval_cli
 from texmo.cli import generate as generate_cli
@@ -138,6 +139,13 @@ def parse_args():
         help="Start a client that will run configurations provided by the server",
     )
     client.init_args(parser_client, config)
+
+    parser_pick_me = subparsers.add_parser(
+        "pick-me",
+        help="Ask the running server to give one configuration "
+             "priority runs until it has --runs of them",
+    )
+    pick_me_cli.init_args(parser_pick_me, config)
 
     parser_predict_time = subparsers.add_parser(
         "time", help="Predict the time that it will take to train a configuration"

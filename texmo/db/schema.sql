@@ -32,13 +32,15 @@ CREATE TABLE conf (
     -- added (run the db-backfill-num-layers CLI to fix those).
     num_layers INTEGER,
 
-    -- When 1, the search picks this conf preferentially over its other
-    -- strategies until it has accumulated `PICK_ME_MIN_RUNS` total runs.
-    -- Used to inject specific candidates we want to evaluate quickly
-    -- (e.g. the strip-leading-norm migration that creates valid
-    -- variants of invalid `<input>|norm-X.Y.Z-...` confs). The min-runs
-    -- gate is enforced at SELECT time, not by clearing the flag, so the
-    -- writer doesn't need to participate.
+    -- Target run count: while > 0, the search picks this conf
+    -- preferentially over its other strategies until it has that many
+    -- total runs (floored at `PICK_ME_MIN_RUNS`, so legacy rows -- the
+    -- column used to be a 0/1 flag -- keep their old meaning). Used to
+    -- inject specific candidates we want evaluated quickly (the
+    -- strip-leading-norm migration) or to buy extra runs for a conf
+    -- that topped the frontier on too few (`texmo.py pick-me --runs`).
+    -- The gate is enforced at SELECT time, not by clearing the column,
+    -- so the writer doesn't need to participate.
     pick_me INTEGER NOT NULL DEFAULT 0,
 
     -- Scores based on the runs.

@@ -80,7 +80,8 @@ never exits.
     doesn't either.
   - Sends to:
     - `WriterThread` via `write_queue` to record incoming runs
-      (`/add`), through the `SearchServer`-owned `DbWriterProxy`.
+      (`/add`) and to flag priority confs (`/pick_me`), through the
+      `SearchServer`-owned `DbWriterProxy`.
     - `SearchThread` via `requests_queue`: one `Select` per `/select`
       request (plus one extra the first time a system is seen, which
       primes that system's pipeline by one), and a `SetTemplate` from
@@ -189,9 +190,14 @@ threads — they dispatch into the request-handler thread pool.
     upserts). Both go through `DbWriterProxy`, which has the same
     method names as `DbWriter` and turns each call into a message.
   - Consumer: `WriterThread`.
-  - Messages (`WriteMessage = AddRun | UpsertPredictedTimeEstimates
-    | UpdateAllScores | Stop`):
+  - Messages (`WriteMessage = AddRun | AddPickMe |
+    UpsertPredictedTimeEstimates | UpdateAllScores | Stop`):
     - `AddRun(conf, run, strategy, track_winner_change)`
+    - `AddPickMe(conf, runs, reply)` — from the `/pick_me` handler.
+      The one RPC-style write message: the handler wants the conf id
+      and run count back, so it passes a reply queue and blocks on it
+      with a timeout (a fatal write puts nothing and takes the server
+      down anyway).
     - `UpsertPredictedTimeEstimates(rows)` — the proxy splits a
       refresh into `_UPSERT_CHUNK` (20k) row batches so `AddRun`
       messages interleave between the writer's transactions instead

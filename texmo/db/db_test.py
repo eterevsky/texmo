@@ -9,6 +9,7 @@ import pytest
 from texmo.configuration import Configuration
 from texmo.db import DbReader, DbWriter
 from texmo.db.writer import (
+    AddPickMe,
     AddRun,
     DbWriterProxy,
     FrontierVersion,
@@ -791,28 +792,71 @@ def _pick_me_conf(spec="bytes|dense.32.gelu"):
     )
 
 
+def _pick_me_value(db, conf_id: int) -> int:
+    return db._db.execute(
+        'SELECT pick_me FROM conf WHERE id = ?', (conf_id,)).fetchone()[0]
+
+
 def test_add_pick_me_conf_inserts_with_flag_set(db):
     conf = _pick_me_conf()
-    cid, inserted = db.writer.add_pick_me_conf(conf)
-    assert inserted is True
-    flag = db._db.execute(
-        'SELECT pick_me FROM conf WHERE id = ?', (cid,)).fetchone()[0]
-    assert flag == 1
+    status = db.writer.add_pick_me_conf(conf)
+    assert status.inserted is True
+    assert status.num_runs == 0
+    assert status.target == 1
+    assert _pick_me_value(db, status.conf_id) == 1
 
 
-def test_add_pick_me_conf_does_not_reflag_existing(db):
-    """If the conf already exists with pick_me=0, the call must not
-    silently flip its flag — that conf already has measurement
-    history and we shouldn't re-prioritize it."""
+def test_add_pick_me_conf_inserts_with_target(db):
+    """`runs=N` stores N as the conf's own target run count."""
     conf = _pick_me_conf()
-    # Insert via normal find_or_add (pick_me defaults to 0).
+    status = db.writer.add_pick_me_conf(conf, runs=4)
+    assert status.inserted is True
+    assert status.target == 4
+    assert _pick_me_value(db, status.conf_id) == 4
+
+
+def test_add_pick_me_conf_raises_target_of_existing(db):
+    """An existing conf (here with measurement history) gets its
+    target raised — that's the whole point of the CLI: ask for more
+    runs of a conf the search already characterized."""
+    conf = _pick_me_conf()
     first_id = db.writer.find_or_add_conf(conf)
-    cid, inserted = db.writer.add_pick_me_conf(conf)
-    assert inserted is False
-    assert cid == first_id
-    flag = db._db.execute(
-        'SELECT pick_me FROM conf WHERE id = ?', (cid,)).fetchone()[0]
-    assert flag == 0
+    db.add_run(conf, Run(
+        system="rpi", step_loss=None, loss=1.0, train_time=1.0))
+    status = db.writer.add_pick_me_conf(conf, runs=3)
+    assert status.inserted is False
+    assert status.conf_id == first_id
+    assert status.num_runs == 1
+    assert status.target == 3
+    assert _pick_me_value(db, first_id) == 3
+
+
+def test_add_pick_me_conf_never_lowers_the_target(db):
+    conf = _pick_me_conf()
+    db.writer.add_pick_me_conf(conf, runs=5)
+    status = db.writer.add_pick_me_conf(conf, runs=2)
+    assert status.target == 5
+    assert _pick_me_value(db, status.conf_id) == 5
+
+
+def test_pick_me_conf_honors_the_rows_target(db):
+    """A legacy pick_me=1 conf retires at min_runs; one asking for 3
+    keeps being returned until it has 3 runs."""
+    legacy = _pick_me_conf("bytes|dense.32.gelu")
+    db.writer.add_pick_me_conf(legacy)
+    wanted = _pick_me_conf("bytes|dense.16.gelu")
+    db.writer.add_pick_me_conf(wanted, runs=3)
+    template = _make_template()
+    for _ in range(2):
+        db.add_run(legacy, Run(
+            system="rpi", step_loss=None, loss=1.0, train_time=1.0))
+        db.add_run(wanted, Run(
+            system="rpi", step_loss=None, loss=1.0, train_time=1.0))
+    # The legacy row is retired at 2 runs; the target-3 row is not.
+    assert db.pick_me_conf(template) == wanted
+    db.add_run(wanted, Run(
+        system="rpi", step_loss=None, loss=1.0, train_time=1.0))
+    assert db.pick_me_conf(template) is None
 
 
 def test_pick_me_conf_returns_flagged_untrained(db):
@@ -990,6 +1034,33 @@ def _run_writer_thread(tmp_path, messages, on_fatal=None, timeout=10):
         q.put(m)
     thread.join(timeout=timeout)
     return thread, q
+
+
+def test_writer_thread_answers_add_pick_me(tmp_path):
+    """The RPC leg: `AddPickMe` with a reply queue comes back with the
+    status, and the row lands with the requested target."""
+    conf = _pick_me_conf()
+    reply = Queue()
+    thread, _ = _run_writer_thread(
+        tmp_path,
+        [AddPickMe(conf=conf, runs=3, reply=reply), Stop()])
+    assert not thread.is_alive()
+    status = reply.get(timeout=5)
+    assert status.inserted is True
+    assert status.target == 3
+    assert status.num_runs == 0
+    with DbReader(str(tmp_path / "test.db")) as reader:
+        assert reader.get_conf_id(conf) == status.conf_id
+
+
+def test_writer_proxy_posts_add_pick_me(tmp_path):
+    q = Queue()
+    proxy = DbWriterProxy(q)
+    conf = _pick_me_conf()
+    proxy.add_pick_me_conf(conf, runs=5)
+    m = q.get_nowait()
+    assert isinstance(m, AddPickMe)
+    assert m.conf == conf and m.runs == 5 and m.reply is None
 
 
 def test_writer_thread_panics_on_fatal_write(tmp_path, monkeypatch, caplog):

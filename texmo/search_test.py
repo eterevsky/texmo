@@ -388,8 +388,8 @@ def test_select_conf_returns_pick_me_with_priority(tmp_path):
     path = str(tmp_path / "test.db")
     writer = DbWriter(path)
     pm_conf = _make_conf(steps=256, spec="bytes|dense.16.gelu")
-    _, inserted = writer.add_pick_me_conf(pm_conf)
-    assert inserted
+    status = writer.add_pick_me_conf(pm_conf)
+    assert status.inserted
     writer.close()
     search = _make_search_at(path)
     result = search.select_conf('rpi')
@@ -415,6 +415,26 @@ def test_select_conf_skips_pick_me_after_min_runs(tmp_path):
     result = search.select_conf('rpi')
     # Whatever fires must not be the pick_me strategy.
     assert result is None or result.strategy != 'pick_me'
+
+
+def test_select_conf_keeps_pick_me_until_its_own_target(tmp_path):
+    """`pick_me = 3` outranks everything at 2 runs -- the point of the
+    `texmo.py pick-me --runs` path, where PICK_ME_MIN_RUNS is already
+    satisfied and we want one more measurement anyway."""
+    path = str(tmp_path / "test.db")
+    writer = DbWriter(path)
+    pm_conf = _make_conf(steps=256, spec="bytes|dense.16.gelu")
+    writer.add_pick_me_conf(pm_conf, runs=3)
+    writer.add_run(pm_conf, Run(
+        system="rpi", step_loss=[0.1], loss=0.5, train_time=2.0))
+    writer.add_run(pm_conf, Run(
+        system="rpi", step_loss=[0.1], loss=0.6, train_time=2.0))
+    writer.close()
+    search = _make_search_at(path)
+    result = search.select_conf('rpi')
+    assert result is not None
+    assert result.strategy == 'pick_me'
+    assert result.conf == pm_conf
 
 
 def test_timing_ready_reflects_fitted_pairs(tmp_path):

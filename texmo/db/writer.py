@@ -116,6 +116,21 @@ ON CONFLICT(conf_id, system) DO UPDATE
   WHERE conf_time_estimate.source = 'predicted'
 """
 
+@dataclass
+class PickMeStatus:
+    """Outcome of `DbWriter.add_pick_me_conf`.
+
+    `target` is the conf's stored `pick_me` value after the call (the
+    run count the search keeps picking it towards; `DbReader.pick_me_conf`
+    floors it at its `min_runs`), `num_runs` how many runs it has now.
+    """
+
+    conf_id: int
+    inserted: bool
+    num_runs: int
+    target: int
+
+
 class DbWriter(object):
     """Read-write handle to the results DB. Owns write transactions."""
 
@@ -168,15 +183,20 @@ class DbWriter(object):
             return conf_id
 
     def add_pick_me_conf(
-        self, conf: Configuration,
-    ) -> tuple[int, bool]:
-        """Insert `conf` with `pick_me = 1` if it isn't already in the
-        DB; otherwise leave the existing row's pick_me flag unchanged
-        (the conf has its own measurement history and we don't want
-        the migration to re-flag a conf we've already characterized).
+        self, conf: Configuration, runs: int = 1,
+    ) -> PickMeStatus:
+        """Mark `conf` as a priority pick until it has `runs` runs.
 
-        Returns `(conf_id, was_inserted)`.
+        `pick_me` holds the conf's own target run count (see
+        `DbReader.pick_me_conf`). A conf not yet in the DB is inserted
+        with `pick_me = runs`; an existing one has its target *raised*
+        to `runs` — never lowered, so re-asking for fewer runs than an
+        earlier request can't cancel it, and a conf already flagged
+        keeps whatever target it had.
+
+        Returns the resulting `PickMeStatus`.
         """
+        assert runs >= 1, f'pick_me target must be >= 1, got {runs}'
         with latency.timer('DbWriter.add_pick_me_conf'):
             cur = self._db.cursor()
             cur.execute('BEGIN IMMEDIATE')
@@ -184,22 +204,37 @@ class DbWriter(object):
             cur.execute(FIND_CONF, conf_dict)
             row = cur.fetchone()
             if row is not None:
-                cur.execute('COMMIT')
-                return row[0], False
-            conf_dict['weights'] = conf.model.num_weights
-            conf_dict['num_layers'] = conf.model.num_layers
-            cur.execute(
-                'INSERT INTO conf '
-                '(spec, weights, lr, length, batch, steps, precision,'
-                ' decay, cosine, num_layers, pick_me) '
-                'VALUES '
-                '(:spec, :weights, :lr, :length, :batch, :steps,'
-                ' :precision, :decay, :cosine, :num_layers, 1)',
-                conf_dict,
-            )
-            conf_id = cur.lastrowid
+                conf_id = row[0]
+                cur.execute(
+                    'UPDATE conf SET pick_me = MAX(pick_me, :runs) '
+                    'WHERE id = :id',
+                    {'runs': runs, 'id': conf_id})
+                inserted = False
+            else:
+                conf_dict['weights'] = conf.model.num_weights
+                conf_dict['num_layers'] = conf.model.num_layers
+                conf_dict['pick_me'] = runs
+                cur.execute(
+                    'INSERT INTO conf '
+                    '(spec, weights, lr, length, batch, steps, precision,'
+                    ' decay, cosine, num_layers, pick_me) '
+                    'VALUES '
+                    '(:spec, :weights, :lr, :length, :batch, :steps,'
+                    ' :precision, :decay, :cosine, :num_layers, :pick_me)',
+                    conf_dict,
+                )
+                conf_id = cur.lastrowid
+                inserted = True
+            target = cur.execute(
+                'SELECT pick_me FROM conf WHERE id = ?',
+                (conf_id,)).fetchone()[0]
+            num_runs = cur.execute(
+                'SELECT COUNT(*) FROM run WHERE conf_id = ?',
+                (conf_id,)).fetchone()[0]
             cur.execute('COMMIT')
-            return conf_id, True
+            return PickMeStatus(
+                conf_id=conf_id, inserted=inserted, num_runs=num_runs,
+                target=target)
 
     # --- run insertion ------------------------------------------------------
 
@@ -555,6 +590,22 @@ class AddRun:
 
 
 @dataclass
+class AddPickMe:
+    """Flag `conf` as a priority pick until it has `runs` runs.
+
+    RPC-style: when `reply` is given, the writer thread puts the
+    resulting `PickMeStatus` on it (the `/pick_me` handler blocks on
+    that, since the caller wants the conf id and run count back). A
+    write that raises takes the server down through the panic path
+    and nothing is ever put, so every waiter uses a timeout.
+    """
+
+    conf: Configuration
+    runs: int = 1
+    reply: Optional[Queue] = None
+
+
+@dataclass
 class PredictedTimeRow:
     conf_id: int
     system: str
@@ -578,6 +629,7 @@ class Stop:
 
 WriteMessage = (
     AddRun
+    | AddPickMe
     | UpsertPredictedTimeEstimates
     | UpdateAllScores
     | Stop
@@ -608,6 +660,14 @@ class DbWriterProxy:
             strategy=strategy,
             track_winner_change=track_winner_change,
         ))
+
+    def add_pick_me_conf(
+        self,
+        conf: Configuration,
+        runs: int = 1,
+        reply: Optional[Queue] = None,
+    ) -> None:
+        self._queue.put(AddPickMe(conf=conf, runs=runs, reply=reply))
 
     # A full estimate refresh posts ~350k rows; split into chunks so
     # AddRun messages interleave between the writer's transactions
@@ -689,6 +749,13 @@ class WriterThread(threading.Thread):
                             # bool dies here unless we publish it.
                             if changed and self._frontier_version is not None:
                                 self._frontier_version.bump()
+                        case AddPickMe(
+                            conf=conf, runs=runs, reply=reply,
+                        ):
+                            status = writer.add_pick_me_conf(
+                                conf, runs=runs)
+                            if reply is not None:
+                                reply.put(status)
                         case UpsertPredictedTimeEstimates(rows=rows):
                             writer.upsert_predicted_time_estimates(
                                 (r.conf_id, r.system, r.time_s)

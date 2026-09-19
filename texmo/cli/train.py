@@ -1,6 +1,7 @@
 import argparse
 import logging
 from dataclasses import dataclass
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -61,6 +62,96 @@ def parse_lr(x: str) -> float:
         num, den = x.split("/", 1)
         return float(num) / float(den)
     return float(x)
+
+
+def conf_from_args(args: argparse.Namespace) -> Configuration:
+    """Build the `Configuration` described by the conf flags.
+
+    Shared by `texmo.py train` and `texmo.py pick-me`, which take the
+    same `-s/-p/-b/-l/--lr/--decay/--cosine/--steps` group (see
+    `add_conf_args`), so the two can never disagree about what a given
+    command line means.
+    """
+    lr = parse_lr(args.lr)
+    decay = parse_lr(args.decay)
+    if args.cosine and decay != 1.0:
+        raise SystemExit(
+            "--cosine requires --decay 1 (cosine schedule already "
+            "decays LR to 0 over `steps`)")
+    return Configuration(
+        parse_model2(args.spec, precision=Precision(args.precision)),
+        lr=lr,
+        length=args.length,
+        batch=args.batch,
+        steps=args.steps,
+        decay=decay,
+        cosine=args.cosine,
+    )
+
+
+def add_conf_args(
+    parser: argparse.ArgumentParser,
+    spec_parser: Optional[argparse._ActionsContainer] = None,
+):
+    """Add the flags that define a `Configuration`.
+
+    `spec_parser` receives `-s/--spec` when it belongs to a group
+    (train puts it in a mutually exclusive group with `-m`); it
+    defaults to `parser`.
+    """
+    (spec_parser or parser).add_argument(
+        "-s",
+        "--spec",
+        default=None,
+        help="layer-by-layer model specification",
+    )
+    parser.add_argument(
+        "--steps", type=int, default=None, help="number of training steps"
+    )
+    parser.add_argument(
+        "-p",
+        "--precision",
+        type=str,
+        choices=["fp64", "fp32", "fp16", "bf16"],
+        metavar="P",
+        default="fp32",
+        help="training precision",
+    )
+    parser.add_argument(
+        "-b",
+        "--batch",
+        type=int,
+        metavar="N",
+        default=32,
+        help="batch size (default: 32)",
+    )
+    parser.add_argument(
+        "--lr",
+        type=str,
+        default="0.0078125",
+        help="learning rate, could be written as a float or as 2^-10 (default: 1/128)",
+    )
+    parser.add_argument(
+        '--decay',
+        type=str,
+        default="1.0",
+        help="decay of the learning rate over the course of training, i.e. (LR at the last step) / (LR at the first step)  (default: 1)",
+    )
+    parser.add_argument(
+        '--cosine',
+        default=False,
+        action="store_true",
+        help="use a cosine LR schedule that decays to 0 over `steps` "
+             "(no warmup); requires --decay 1",
+    )
+    parser.add_argument(
+        "-l",
+        "--length",
+        type=int,
+        default=128,
+        metavar="NTOKENS",
+        help="length in tokens of text fragments used for training (default: 128)",
+    )
 
 
 @dataclass(frozen=True)
@@ -167,27 +258,11 @@ def train(args: argparse.Namespace):
         args.data, args.data_weights, args.data_switch, args.steps)
     train_set_wrapper, post_switch_wrapper, all_wrappers = build_data(
         data_spec, args.sample_threads, args.steps)
-    lr = parse_lr(args.lr)
-    decay = parse_lr(args.decay)
-
     try:
         if args.model_path is not None:
             raise NotImplementedError("Loading pre-trained models is not supported yet")
         else:
-            if args.cosine and decay != 1.0:
-                raise SystemExit(
-                    "--cosine requires --decay 1 (cosine schedule already "
-                    "decays LR to 0 over `steps`)")
-            conf = Configuration(
-                parse_model2(
-                    args.spec, precision=Precision(args.precision)),
-                lr=lr,
-                length=args.length,
-                batch=args.batch,
-                steps=args.steps,
-                decay=decay,
-                cosine=args.cosine,
-            )
+            conf = conf_from_args(args)
             manager = create_manager(
                 args.backend,
                 conf=conf,
@@ -284,12 +359,9 @@ def init_args(parser: argparse.ArgumentParser, config):
         default=None,
         help="load trained model from file",
     )
-    model_group.add_argument(
-        "-s",
-        "--spec",
-        default=None,
-        help="layer-by-layer model specification",
-    )
+    # -s/--spec plus the rest of the conf flags (--steps, -p, -b, --lr,
+    # --decay, --cosine, -l), shared with `texmo.py pick-me`.
+    add_conf_args(parser, spec_parser=model_group)
     parser.add_argument(
         "-a",
         "--add-layers",
@@ -297,9 +369,6 @@ def init_args(parser: argparse.ArgumentParser, config):
         metavar="SPEC",
         default=None,
         help="add and train layers to a pre-trained model loaded with -m",
-    )
-    parser.add_argument(
-        "--steps", type=int, default=None, help="number of training steps"
     )
     parser.add_argument(
         "-o",
@@ -322,50 +391,6 @@ def init_args(parser: argparse.ArgumentParser, config):
         type=str,
         default=None,
         help="path to the token set definition",
-    )
-    parser.add_argument(
-        "-p",
-        "--precision",
-        type=str,
-        choices=["fp64", "fp32", "fp16", "bf16"],
-        metavar="P",
-        default="fp32",
-        help="training precision",
-    )
-    parser.add_argument(
-        "-b",
-        "--batch",
-        type=int,
-        metavar="N",
-        default=32,
-        help="batch size (default: 32)",
-    )
-    parser.add_argument(
-        "--lr",
-        type=str,
-        default="0.0078125",
-        help="learning rate, could be written as a float or as 2^-10 (default: 1/128)",
-    )
-    parser.add_argument(
-        '--decay',
-        type=str,
-        default="1.0",
-        help="decay of the learning rate over the course of training, i.e. (LR at the last step) / (LR at the first step)  (default: 1)",
-    )
-    parser.add_argument(
-        '--cosine',
-        default=False,
-        action="store_true",
-        help="use a cosine LR schedule that decays to 0 over `steps` "
-             "(no warmup); requires --decay 1",
-    )
-    parser.add_argument(
-        "-l",
-        "--length",
-        type=int,
-        default=128,
-        metavar="NTOKENS",
-        help="length in tokens of text fragments used for training (default: 128)",
     )
     parser.add_argument(
         "-t",

@@ -161,6 +161,41 @@ The row's live stats show how many candidates are left. Leave Seed on
 only while a sub-search is still new — the queue refills whenever the
 frontier moves, so on a broad entry it never stops.
 
+## Explicit picks (`pick_me`)
+
+`conf.pick_me` holds a **target run count**: while a conf has fewer
+than that many runs, `select_conf` hands it to the next worker ahead of
+every other strategy (template-blind, and still subject to the validity
+and retired-input filters). Legacy rows from when the column was a
+flag carry `pick_me = 1`, so the effective target is
+`max(pick_me, PICK_ME_MIN_RUNS)` — those keep their original "run it
+twice" meaning. The gate is evaluated at SELECT time against a live
+`COUNT(*)` over `run`, so nothing has to clear the column once the
+conf is done.
+
+Queue one from the command line, against a running server:
+
+```
+uv run texmo.py pick-me -s '<spec>' -b 128 -l 128 --lr 1/32 --cosine     --steps 131072 --runs 3
+```
+
+It takes the same conf flags as `texmo.py train` (`-s`, `-p`, `-b`,
+`-l`, `--lr`, `--cosine`, `--steps`, `--decay`; shared code, so a
+train command line can be copied verbatim) plus `--runs N` (default 3)
+and `--server host:port` (default `config.SERVER_HOST`). It POSTs the
+conf to `/pick_me`, which is served on the internal port only; the
+server hands the write to the writer thread and replies with the conf
+id, its current run count and its target, which the CLI prints. A conf
+not in the DB is inserted; one already there has its target **raised**
+to `--runs` and never lowered, so asking for 3 runs of a conf that
+already has 2 buys exactly one more (the winner's-curse case: a conf
+that topped the frontier on two runs before we believe it).
+
+The index page's top-confs table has the same thing as a per-row
+**`+1 run`** link: it POSTs the row's conf to `/pick_me` with
+`runs = <the row's run count> + 1` and reports the resulting target in
+place of the link. One click is one extra run of that conf.
+
 ## Search strategies
 
 Two strategies run before any of this, inside the drawn sub-search

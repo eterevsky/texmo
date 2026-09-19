@@ -369,20 +369,27 @@ class DbReader(object):
     def pick_me_conf(
         self, template: Template, min_runs: int = 2,
     ) -> Optional[Configuration]:
-        """Return one random pick_me conf with fewer than `min_runs`
-        total runs and matching the template, or None.
+        """Return one random pick_me conf still short of its target
+        run count and matching the template, or None.
 
-        The min-runs filter is computed on the fly (SELECT COUNT(*)
+        `pick_me` is the conf's own target: the row stays a priority
+        pick until it has at least `pick_me` runs. Legacy rows carry
+        `pick_me = 1` from when the column was a flag, so the
+        effective target is `max(pick_me, min_runs)` — those keep
+        their old "run it twice" meaning while a row asking for more
+        (`texmo.py pick-me --runs N`) gets what it asked for.
+
+        The run-count filter is computed on the fly (SELECT COUNT(*)
         FROM run WHERE conf_id=...) so the writer doesn't have to
-        clear the pick_me flag — once a conf has enough runs it's
+        clear the pick_me column — once a conf has enough runs it's
         simply skipped by this query and effectively retired from
         priority pick.
         """
         conditions, params = _make_template_conditions(template)
-        conditions.append('pick_me = 1')
+        conditions.append('pick_me >= 1')
         conditions.append(
             '(SELECT COUNT(*) FROM run WHERE conf_id = conf.id) '
-            '< :min_runs')
+            '< MAX(pick_me, :min_runs)')
         params['min_runs'] = min_runs
         where = 'WHERE ' + ' AND '.join(conditions)
         conf_fields = ', '.join([

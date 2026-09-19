@@ -3,6 +3,7 @@ import csv
 import gzip
 import hmac
 import io
+import json
 import logging
 import os
 import pickle
@@ -11,7 +12,7 @@ import time
 import weakref
 from datetime import datetime
 from itertools import zip_longest
-from queue import Queue
+from queue import Empty, Queue
 from typing import Iterable, Optional
 
 import matplotlib
@@ -79,6 +80,11 @@ _EXTERNAL_PATHS = frozenset({'/select', '/add'})
 _INTERNAL_PORT = 5000
 # External port (requires Bearer auth).
 _EXTERNAL_PORT = 5001
+
+# How long `/pick_me` waits for the writer thread to answer. The
+# writer only queues short transactions, so anything near this means
+# the queue is wedged and the caller is better off told than blocked.
+_PICK_ME_TIMEOUT_S = 60
 
 # How often (seconds) to append a latency-counter snapshot to the dump
 # file, so we have a time series of where wall-clock goes (and a record
@@ -402,6 +408,10 @@ def _conf_row(conf_score) -> dict:
         'score': f'{conf_score.median_score:.3f} ({conf_score.num_runs})',
         'time': f'{ttoa3(conf_score.median_time)} on {conf_score.system}',
         'cmd': cmd,
+        # For the per-row "+1 run" control: the conf as the /pick_me
+        # endpoint wants it, and the run count the button adds one to.
+        'conf_json': json.dumps(conf.to_dict()),
+        'num_runs': conf_score.num_runs,
     }
 
 
@@ -1184,6 +1194,35 @@ class SearchServer(object):
         self.train_queue.put(
             RunAdded(system=run.system, precision=conf.precision))
 
+    def pick_me(self, params) -> dict:
+        """Queue extra priority runs for one conf (`POST /pick_me`).
+
+        `params` is `{"conf": <Configuration.to_dict()>, "runs": N}`.
+        The write itself belongs to the writer thread like every other
+        write, but the caller wants the conf id and its current run
+        count back, so the `AddPickMe` message carries a reply queue
+        and this handler blocks on it (see docs/threads.md).
+        """
+        conf = Configuration.from_dict(params["conf"])
+        runs = int(params.get("runs", 1))
+        if runs < 1:
+            raise ValueError(f"runs must be >= 1, got {runs}")
+        logging.info(f"Pick-me: {conf} for {runs} runs")
+        reply = Queue()
+        self._writer.add_pick_me_conf(conf, runs=runs, reply=reply)
+        try:
+            status = reply.get(timeout=_PICK_ME_TIMEOUT_S)
+        except Empty:
+            raise TimeoutError(
+                "writer did not answer the pick_me request in "
+                f"{_PICK_ME_TIMEOUT_S}s")
+        return {
+            "conf_id": status.conf_id,
+            "inserted": status.inserted,
+            "runs": status.num_runs,
+            "target": status.target,
+        }
+
     def training_data(self) -> tuple[bytes, int]:
         """Gzipped CSV of all labeled runs + the run count.
 
@@ -1417,6 +1456,16 @@ class SearchServer(object):
             with timer("SearchServer.add_run"):
                 self.add_run(request.json)
                 return "", 200
+
+        @app.route("/pick_me", methods=["POST"])
+        def _pick_me():
+            with timer("SearchServer.pick_me"):
+                try:
+                    return self.pick_me(request.json)
+                except (KeyError, TypeError, ValueError) as e:
+                    return ({"error": str(e)}, 400)
+                except TimeoutError as e:
+                    return ({"error": str(e)}, 503)
 
         @app.route("/latency", methods=["GET"])
         def _latency():

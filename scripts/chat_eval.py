@@ -480,9 +480,16 @@ Some brief, polite replies still miss the turn and are FALSE. A bare \
 not answer a greeting: "Hiya!" -> "See you!" is FALSE. Thanks are not \
 answered with thanks: "Thanks for the help." -> "Thank you!" is \
 FALSE, where an ordinary person says "You're welcome!". Two that stay \
-TRUE: a greeting answered in kind ("Hiya!" -> "Hello!"), and a bland \
-agreement to a statement ("Wait, what? I didn't ask you to do \
-anything yet." -> "I agree.").
+TRUE: a greeting or a farewell answered in kind ("Hiya!" -> "Hello!", \
+"Bye!" -> "Bye!"), and a bland agreement to a statement ("Wait, what? \
+I didn't ask you to do anything yet." -> "I agree.").
+
+For a bare "Yes." or "No.", say in your comment which kind of \
+question {user} asked before you judge it: a question a yes or a no \
+can answer ("Did I say something wrong?", "Are you sure?") makes the \
+reply TRUE, a what/why/how/who question makes it FALSE. Whether the \
+answer is *correct* is never your question -- "Are fleas bigger than \
+dogs?" -> "Yes." is TRUE.
 
 Grammar is not your question here: a clumsy reply that fits the turn \
 is still true.

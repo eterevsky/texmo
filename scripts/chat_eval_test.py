@@ -175,9 +175,30 @@ def test_pass_b_names_the_three_false_shapes_and_keeps_the_slack():
     assert '"Hiya!" -> "See you!" is FALSE' in system
     assert '"Thanks for the help." -> "Thank you!" is FALSE' in system
     assert '"Hiya!" -> "Hello!"' in system
+    # A farewell answered *in kind* is the other side of that rule: the
+    # 8B fired "a farewell does not answer a greeting" at 'Bye!' ->
+    # 'Bye!' until the TRUE pair named it (2026-09-05 calibration).
+    assert '"Bye!" -> "Bye!"' in system
     assert '"I agree."' in system
     # The slack: dullness alone is still not a reason to fail a reply.
     assert "a short, vague or dull response can still fit the turn" in system
+
+
+def test_pass_b_credits_a_bare_yes_to_a_genuine_yes_no_question():
+    # The 2026-09-05 ruling, the positive half of the same shape: (b)
+    # judges the formal consistency of the pair only, never the truth
+    # of what the bot says, so a bare "Yes." to a real yes/no question
+    # is TRUE however false the claim it makes.
+    system = chat_eval.judge_messages(
+        "b", _turns("Are you sure?", "Yes."), 1)[0]["content"]
+    assert "which kind of question User asked" in system
+    assert "makes the reply TRUE" in system
+    assert "a what/why/how/who question makes it FALSE" in system
+    assert '"Are fleas bigger than dogs?" -> "Yes." is TRUE' in system
+    # It must not cost the three FALSE shapes their force.
+    assert '"What\'s your name?", "Why do you ask?") it is FALSE' in system
+    assert '"Hiya!" -> "See you!" is FALSE' in system
+    assert '"Thanks for the help." -> "Thank you!" is FALSE' in system
 
 
 def test_pass_a_ignores_capitalization_and_a_missing_final_period():

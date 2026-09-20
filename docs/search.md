@@ -57,9 +57,9 @@ presets](#named-regex-presets-named_regexesjson)).
 
 `select_conf` draws one entry per call, weighted by share, right after
 the (template-blind) pick_me and warmup steps. Everything below the
-draw runs inside that entry: the coverage walk, the layer cap, the
-`max_weights` ceiling, the strategy, and both fallbacks. Consequences
-worth knowing:
+draw runs inside that entry: the coverage walk, the `max_weights`
+ceiling, the [layer cap](#layer-count-diversification), the strategy,
+and both fallbacks. Consequences worth knowing:
 
 - **Per-entry frontier.** The coverage walk pulls `top_confs_global`
   for the *entry's* template, so a conf that is Pareto-optimal for a
@@ -69,10 +69,11 @@ worth knowing:
 - **Per-entry weight ceiling.** `_select_max_weights` derives from the
   best conf *within* the entry, so each sub-space gets a weight range
   matched to its own population.
-- **Per-entry layer caps.** `_LAYER_CAP_PROBS` drops every cap below
-  the entry's minimum layer count (from its default conf) and
-  renormalizes. A transformer block is ~9 layers, so without this 40%
-  of its selects would query an empty intersection and fall through.
+- **Per-entry layer caps.** Both the L\* the cap is measured against
+  and the floor below which caps are dropped (the entry's minimum
+  layer count, from its default conf) are the entry's own. A
+  transformer block is ~9 layers, so without the floor 40% of its
+  selects would query an empty intersection and fall through.
 - **Per-entry default fallback.** The last-resort fallback returns the
   drawn entry's default conf. This is what bootstraps an empty
   sub-space; without it a new entry returns None and its budget
@@ -205,10 +206,11 @@ anything left, then the coverage walk.
 `Search.select_conf(system)` then picks a time budget `t` (log-uniform
 within the configured range) and a weight budget `max_weights`
 (log-uniform between the template's min weights and
-`min(8 × top_conf.weights, template max weights)`), then tries the
-strategies below in order. Each gated strategy succeeds with a fixed
-probability **conditional on having reached it**; on miss it falls
-through to the next.
+`min(8 × top_conf.weights, template max weights)`), samples the
+[layer cap](#layer-count-diversification) inside that window, then
+tries the strategies below in order. Each gated strategy succeeds with
+a fixed probability **conditional on having reached it**; on miss it
+falls through to the next.
 
 For every selected configuration we record which strategy picked it
 (stored in `run.strategy`) and whether the resulting run changed the
@@ -216,6 +218,53 @@ winning conf at `(system, train_time, num_weights)` (stored in
 `run.changed_winner`). `uv run texmo.py strategy-stats` reports
 runs-per-strategy and the % that changed the winner — the live signal
 for whether each strategy is earning its slot.
+
+### Layer-count diversification
+
+A depth lever, because the walk has no symmetric one of its own: the
+neighbor rules can always append a layer, but removing one has
+conditions, so left alone the search drifts deeper and deeper. Shallow
+seeds are where fresh intermediate-depth families come from, so a
+share of the selects is spent re-seeding low.
+
+The cap is drawn **relative to L\***, the layer count of the conf this
+select would otherwise seed from — the top conf for `(system, entry
+template, max_weights, max_time ≤ t)`, the same `limit=1` query the
+predicted-best BFS seeds from. `t` and `max_weights` are therefore
+sampled **first**, under the entry's base template, and only then is
+the cap drawn:
+
+- with probability `_UNCAPPED_SHARE` (0.6) the select is
+  unconstrained;
+- otherwise the cap `N` is **uniform over 1 … L\*−1**. `N = L*` is a
+  no-op and is excluded, so `L* ≤ 1` leaves nothing to draw and the
+  select is unconstrained. Caps below the entry's own minimum layer
+  count are dropped and the remaining 0.4 is re-spread over the
+  survivors, so the capped share as a whole stays put.
+
+At L\* = 9 that is 0.6 unrestricted and 0.05 each for 1…8; at L\* = 18,
+0.6 and ~0.024 each for 1…17. The old fixed ladder (1–4 at 0.1 each)
+was replaced because absolute caps mostly bound regions the frontier
+has left behind: its depths are 6–9 layers in most weight bands and 18
+at 12–20k.
+
+A capped select runs under **two** templates
+(`_sample_layer_capped_templates`):
+
+- the **seed** query (the predicted-best seed, the neighbor walk's
+  top-conf list) at `num_layers ≤ N`;
+- the **expansion** — BFS / `conf_neighbors` filtering — and hence the
+  conf that is finally returned, plus the pure re-run pickers, at
+  `num_layers ≤ N + 1`.
+
+So the walk restarts shallow but may still return the one-layer-deeper
+neighbor when the predictor likes it: the lever re-seeds depth, it
+doesn't forbid it. The log line is
+`Layer-capped select for <system>: seed <= N, result <= N+1 (L* = …)`.
+
+`pick_me`, the warmup ladder, the coverage walk, `_select_max_weights`
+and the final default fallback all stay on the base template — explicit
+picks and cross-system coverage shouldn't be dodged by a sampled cap.
 
 ### 1. `predicted_2nd_neighbor`
 
@@ -227,9 +276,13 @@ Pipeline (shared with `predicted_3rd_neighbor`; see
 
 1. **Seed pick.** Take the top conf (lowest median loss) for
    `(system, max_weights, max_time ≤ t)` — `t` is the per-select
-   sampled time budget. If none, bail.
+   sampled time budget — under the select's *seed* template. If none,
+   bail.
 2. **BFS over unnormalized neighbors** to `bfs_depth` (2 for this
-   strategy). The set is deduped on the raw `Configuration` — every
+   strategy), filtered by the select's *expansion* template (one
+   layer looser than the seed's when this select is
+   [layer-capped](#layer-count-diversification), the same template
+   otherwise). The set is deduped on the raw `Configuration` — every
    step / batch / lr / arch mutation produced by `conf_neighbors`
    stays distinct in the walk. Over-budget intermediates are kept;
    they're just bridges to other candidates at depth N.

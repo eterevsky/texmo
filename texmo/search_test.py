@@ -17,7 +17,7 @@ from .run import Run
 from .configuration import conf_neighbors
 from . import search as search_mod
 from .search import (
-    _LAYER_CAP_PROBS,
+    _UNCAPPED_SHARE,
     _WARMUP_LADDER,
     _WARMUP_SELECTS_PER_RUNG,
     Search,
@@ -306,7 +306,7 @@ def test_select_predicted_best_no_seed_returns_none(tmp_path):
     # No runs at all -> no top conf for 'a' -> no seed -> None.
     assert search._select_predicted_best_impl(
         t=4.0, max_weights=INF, system='a', bfs_depth=2,
-        template=search.template,
+        seed_template=search.template, expansion_template=search.template,
     ) is None
 
 
@@ -325,7 +325,7 @@ def test_select_predicted_best_no_timing_returns_none(
         search.timing_model, 'predict', lambda system, conf: None)
     assert search._select_predicted_best_impl(
         t=4.0, max_weights=INF, system='a', bfs_depth=2,
-        template=search.template,
+        seed_template=search.template, expansion_template=search.template,
     ) is None
 
 
@@ -365,7 +365,7 @@ def test_select_predicted_best_happy_path(tmp_path, monkeypatch):
 
     picked = search._select_predicted_best_impl(
         t=4.0, max_weights=INF, system='a', bfs_depth=2,
-        template=search.template)
+        seed_template=search.template, expansion_template=search.template)
     assert picked is not None
     assert isinstance(picked, Configuration)
 
@@ -730,7 +730,7 @@ def test_retired_conf_is_never_re_run(tmp_path, monkeypatch):
     monkeypatch.setattr(
         search, '_select_neighbor_fewest_runs', lambda c, s, t: None)
     assert search._select_top_neighbor(
-        16.0, INF, 'a', search.template) is None
+        16.0, INF, 'a', search.template, search.template) is None
     # Time-budget scan and coverage walk: pure re-run pickers.
     assert search._select_time_budget(
         16.0, INF, 'a', search.template) is None
@@ -759,7 +759,8 @@ def test_retired_conf_is_still_a_mutation_source(tmp_path, monkeypatch):
     assert not _is_retired(str(neighbor.model))
 
     # End to end: the walk reaches a live conf THROUGH the retired one.
-    picked = search._select_top_neighbor(16.0, INF, 'a', search.template)
+    picked = search._select_top_neighbor(
+        16.0, INF, 'a', search.template, search.template)
     assert picked is not None
     assert not _is_retired(str(picked.model))
 
@@ -805,7 +806,7 @@ def test_predicted_best_expands_retired_seed_but_never_picks_it(
 
     picked = search._select_predicted_best_impl(
         t=16.0, max_weights=INF, system='a', bfs_depth=2,
-        template=search.template)
+        seed_template=search.template, expansion_template=search.template)
     assert picked is not None
     assert not _is_retired(str(picked.model))
     # The retired seed was expanded (its neighbours are in the pool)
@@ -883,31 +884,52 @@ def test_default_template_set_is_the_whole_template(tmp_path):
     assert entry.name == 'main'
     assert entry.template is search.template
     assert entry.default is search.init_conf
-    # And the layer-cap distribution is untouched: every cap is >= the
-    # default's own layer count.
+    # And the layer-cap distribution is untouched: every cap below L*
+    # is >= the default's own layer count.
     assert entry.min_layers == 1  # bytes|dense.8.gelu
-    assert _layer_cap_probs(0) == tuple(_LAYER_CAP_PROBS)
-    assert _layer_cap_probs(1) == tuple(_LAYER_CAP_PROBS)
+    assert _layer_cap_probs(0, 6) == _layer_cap_probs(1, 6)
+    assert [cap for cap, _ in _layer_cap_probs(1, 6)] == [None, 1, 2, 3, 4, 5]
+
+
+def test_layer_cap_probs_is_uniform_under_l_star():
+    """Caps are drawn relative to L*: unrestricted at `_UNCAPPED_SHARE`,
+    the rest uniform over 1..L*-1 (L* itself is a no-op)."""
+    probs = _layer_cap_probs(0, 6)
+    assert [cap for cap, _ in probs] == [None, 1, 2, 3, 4, 5]
+    assert abs(sum(w for _, w in probs) - 1.0) < 1e-9
+    weights = dict(probs)
+    assert abs(weights[None] - _UNCAPPED_SHARE) < 1e-9
+    for cap in range(1, 6):
+        assert abs(weights[cap] - 0.08) < 1e-9
+    # A 4-layer L* spreads the same 40% over three caps.
+    weights = dict(_layer_cap_probs(0, 4))
+    assert set(weights) == {None, 1, 2, 3}
+    for cap in (1, 2, 3):
+        assert abs(weights[cap] - 0.4 / 3) < 1e-9
+    # L* <= 1: every cap would be a no-op, so there is none.
+    assert _layer_cap_probs(0, 1) == ((None, 1.0),)
+    assert _layer_cap_probs(0, 0) == ((None, 1.0),)
 
 
 def test_layer_cap_probs_drops_sub_minimum_caps():
     """Caps below the entry's own minimum layer count would query an
-    empty intersection; they're dropped and the rest renormalized."""
-    probs = _layer_cap_probs(3)
-    assert [cap for cap, _ in probs] == [None, 3, 4]
+    empty intersection; they're dropped and the capped share is
+    re-spread over the survivors (it doesn't leak to `None`)."""
+    probs = _layer_cap_probs(3, 6)
+    assert [cap for cap, _ in probs] == [None, 3, 4, 5]
     assert abs(sum(w for _, w in probs) - 1.0) < 1e-9
-    # Ratios among survivors are preserved (0.6 : 0.1 : 0.1).
     weights = dict(probs)
-    assert abs(weights[None] - 0.75) < 1e-9
-    assert abs(weights[3] - 0.125) < 1e-9
-    assert abs(weights[4] - 0.125) < 1e-9
-    # Deeper than every cap -> unrestricted is all that's left.
-    assert _layer_cap_probs(9) == ((None, 1.0),)
+    assert abs(weights[None] - _UNCAPPED_SHARE) < 1e-9
+    for cap in (3, 4, 5):
+        assert abs(weights[cap] - 0.4 / 3) < 1e-9
+    # Entry deeper than L* -> unrestricted is all that's left.
+    assert _layer_cap_probs(9, 6) == ((None, 1.0),)
 
 
-def test_sample_layer_capped_template_respects_entry_minimum(tmp_path):
-    """A transformer-shaped entry never draws a 1-4 layer cap it can't
-    satisfy; a shallow entry still gets the full spread."""
+def test_sample_layer_capped_templates_respects_entry_minimum(tmp_path,
+                                                              monkeypatch):
+    """A transformer-shaped entry never draws a cap it can't satisfy;
+    a shallow entry still gets the full 1..L*-1 spread."""
     path = str(tmp_path / "test.db")
     DbWriter(path).close()
     base = _make_template()
@@ -919,17 +941,154 @@ def test_sample_layer_capped_template_respects_entry_minimum(tmp_path):
                       default_spec=deep_spec),
     ])
     search = _make_search_with(path, templates)
+    # Both entries' best conf is 6 layers deep -> caps 1..5 on offer.
+    monkeypatch.setattr(search, '_top_conf_layers', lambda *a: 6)
     deep = templates.by_name('attn')
     assert deep.min_layers == 3
     random.seed(4)
-    caps = {search._sample_layer_capped_template(deep)[1]
+    caps = {search._sample_layer_capped_templates(deep, 16.0, INF, 'a')[2]
             for _ in range(200)}
-    assert caps <= {None, 3, 4}
-    assert caps & {3, 4}, "the surviving caps should still fire"
+    assert caps <= {None, 3, 4, 5}
+    assert caps & {3, 4, 5}, "the surviving caps should still fire"
+    shallow = templates.by_name('main')
     shallow_caps = {
-        search._sample_layer_capped_template(templates.by_name('main'))[1]
+        search._sample_layer_capped_templates(shallow, 16.0, INF, 'a')[2]
         for _ in range(200)}
-    assert shallow_caps == {None, 1, 2, 3, 4}
+    assert shallow_caps == {None, 1, 2, 3, 4, 5}
+
+
+def test_sample_layer_capped_templates_draw_matches_the_distribution(
+    tmp_path, monkeypatch,
+):
+    """Over many draws the realized cap frequencies are the
+    distribution: 60% unrestricted, 8% each for 1..5 at L* = 6."""
+    search = _make_search(tmp_path)
+    entry = _main(search)
+    monkeypatch.setattr(search, '_top_conf_layers', lambda *a: 6)
+    random.seed(17)
+    counts: dict = {}
+    n = 4000
+    for _ in range(n):
+        _, _, cap = search._sample_layer_capped_templates(
+            entry, 16.0, INF, 'a')
+        counts[cap] = counts.get(cap, 0) + 1
+    assert abs(counts[None] / n - _UNCAPPED_SHARE) < 0.02
+    for cap in range(1, 6):
+        assert abs(counts[cap] / n - 0.08) < 0.02
+    assert set(counts) == {None, 1, 2, 3, 4, 5}
+
+
+def test_sample_layer_capped_templates_seed_is_one_shallower(
+    tmp_path, monkeypatch,
+):
+    """Seed template and expansion template differ by exactly one in
+    num_layers.max; an uncapped draw returns the base template twice
+    and never mutates it."""
+    search = _make_search(tmp_path)
+    entry = _main(search)
+    monkeypatch.setattr(search, '_top_conf_layers', lambda *a: 6)
+    random.seed(3)
+    seen_cap = False
+    for _ in range(50):
+        seed_t, exp_t, cap = search._sample_layer_capped_templates(
+            entry, 16.0, INF, 'a')
+        if cap is None:
+            assert seed_t is entry.template and exp_t is entry.template
+            continue
+        seen_cap = True
+        assert seed_t.num_layers.max == cap
+        assert exp_t.num_layers.max == cap + 1
+        assert seed_t.num_layers.min == entry.template.num_layers.min
+        assert exp_t.num_layers.min == entry.template.num_layers.min
+        assert entry.template.num_layers.max == INF  # base untouched
+    assert seen_cap
+
+
+def _dense_chain(n):
+    """A spec with exactly `n` hidden layers."""
+    return "bytes|" + "-".join(["dense.8.gelu"] * n)
+
+
+def _seed_depth_ladder(path, system='a'):
+    """Confs of depth 1..6, the deepest scoring best -> L* = 6."""
+    for depth in range(1, 7):
+        _seed_runs(path, _make_conf(spec=_dense_chain(depth)),
+                   system=system, n=2, loss_base=1.0 - 0.1 * depth)
+
+
+def test_layer_capped_select_seeds_shallow(tmp_path, monkeypatch):
+    """L* comes from the best conf in the window; a cap of 2 confines
+    the seed query to <= 2 layers and the walk to <= 3, even though the
+    best conf on the system is 6 deep."""
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    _seed_depth_ladder(path)
+    search = _make_search_at(path)
+    entry = _main(search)
+    assert search._top_conf_layers(16.0, INF, 'a', entry.template) == 6
+
+    monkeypatch.setattr(search_mod, '_layer_cap_probs', lambda *a: ((2, 1.0),))
+    seed_t, exp_t, cap = search._sample_layer_capped_templates(
+        entry, 16.0, INF, 'a')
+    assert cap == 2
+    assert (seed_t.num_layers.max, exp_t.num_layers.max) == (2, 3)
+
+    # The seed query sees only the shallow end of the ladder...
+    seeds = list(search._db.top_confs_for_system(
+        system='a', template=seed_t, max_time=16.0, limit=10))
+    assert seeds
+    assert all(c.conf.model.num_layers <= 2 for c in seeds)
+    # ...and the neighbor walk off it stays within one layer of the cap.
+    picked = search._select_top_neighbor(16.0, INF, 'a', seed_t, exp_t)
+    assert picked is not None
+    assert picked.model.num_layers <= 3
+
+
+def test_layer_capped_select_can_return_the_deeper_neighbor(
+    tmp_path, monkeypatch,
+):
+    """<= N + 1 is the point: with the predictor favouring 3-layer
+    confs, a select capped at N = 2 still returns one."""
+    import numpy as np
+    path = str(tmp_path / "test.db")
+    DbWriter(path).close()
+    _seed_depth_ladder(path)
+    search = _make_search_at(path)
+    entry = _main(search)
+
+    monkeypatch.setattr(
+        search.timing_model, 'predict',
+        lambda system, conf: 16.0 * conf.steps / 1024.0)
+    monkeypatch.setattr(
+        search.timing_model, 'predict_max_steps',
+        lambda system, conf, t: 1024)
+
+    scored: list[Configuration] = []
+
+    class FakeLossModel:
+        def is_ready(self): return True
+
+        def predict(self, confs):
+            scored.extend(confs)
+            return np.array(
+                [-5.0 if c.model.num_layers == 3 else 0.0 for c in confs],
+                dtype=np.float32)
+
+    search.loss_model = FakeLossModel()
+
+    monkeypatch.setattr(search_mod, '_layer_cap_probs', lambda *a: ((2, 1.0),))
+    seed_t, exp_t, cap = search._sample_layer_capped_templates(
+        entry, 16.0, INF, 'a')
+    assert cap == 2
+
+    picked = search._select_predicted_best_impl(
+        t=16.0, max_weights=INF, system='a', bfs_depth=2,
+        seed_template=seed_t, expansion_template=exp_t)
+    assert picked is not None
+    assert picked.model.num_layers == 3
+    # Nothing deeper than the expansion cap was ever a candidate.
+    assert scored
+    assert all(c.model.num_layers <= 3 for c in scored)
 
 
 def test_select_conf_draws_entries_by_share(tmp_path, monkeypatch):

@@ -184,44 +184,63 @@ _WARMUP_LADDER: list[tuple[int, int, int]] = [
 _WARMUP_SELECTS_PER_RUNG = 10
 
 # Layer-count diversification: per select, sample a cap on num_layers
-# and run the whole select (seed queries, neighbor/BFS expansion via
-# conf_neighbors' match_model filter, and hence the final conf) under
-# the base template intersected with that cap. Pulls part of the budget
-# toward shallow models so the search doesn't fixate on mutations of one
-# long layer chain. None = unrestricted. pick_me, the coverage walk and
-# the default fallback stay on the base template (explicit picks and
-# cross-system coverage shouldn't be dodged by a sampled cap). Weights
-# must sum to 1.0.
-_LAYER_CAP_PROBS: list[tuple[Optional[int], float]] = [
-    (None, 0.6),
-    (1, 0.1),
-    (2, 0.1),
-    (3, 0.1),
-    (4, 0.1),
-]
-assert abs(sum(w for _, w in _LAYER_CAP_PROBS) - 1.0) < 1e-9
+# and run the select under the entry's template intersected with it.
+# The point is a depth lever. The neighbor rules can always append a
+# layer but removing one needs conditions, so an unconstrained walk
+# drifts deeper over time; shallow seeds are where fresh
+# intermediate-depth families come from.
+#
+# The cap is drawn RELATIVE to L*, the layer count of the conf this
+# select would otherwise seed from (`Search._top_conf_layers`):
+# `_UNCAPPED_SHARE` of the selects are unrestricted, the rest draw a
+# cap uniformly from 1..L*-1 (a cap of L* is a no-op, so it is
+# excluded; L* <= 1 leaves no cap at all). Absolute caps -- this used
+# to be a fixed 1..4 -- mostly bound regions the frontier has left
+# behind: its depths are 6-9 layers in most weight bands and 18 at
+# 12-20k, so a fixed ladder either never bites or always bites the
+# same way.
+#
+# A capped select runs under TWO templates: the seed query at
+# num_layers <= N, the neighbor/BFS expansion and the final pick at
+# num_layers <= N+1. The walk restarts shallow but may still return
+# the one-layer-deeper neighbor when that is the predicted best --
+# the lever re-seeds depth, it doesn't forbid it.
+#
+# None = unrestricted. pick_me, the coverage walk, `_select_max_weights`
+# (both t and max_weights are sampled BEFORE the cap, since L* is
+# looked up within that window) and the final default fallback stay on
+# the base template: explicit picks and cross-system coverage
+# shouldn't be dodged by a sampled cap.
+_UNCAPPED_SHARE = 0.6
 
 
 @functools.lru_cache(maxsize=None)
 def _layer_cap_probs(
     min_layers: int,
+    top_layers: int,
 ) -> tuple[tuple[Optional[int], float], ...]:
-    """`_LAYER_CAP_PROBS` with every cap below `min_layers` dropped and
-    the surviving weights renormalized. `None` (unrestricted) always
-    survives.
+    """The cap distribution for a select seeding from a `top_layers`
+    (= L*) deep conf: `None` (unrestricted) at `_UNCAPPED_SHARE`, and
+    every cap in 1..L*-1 sharing the remaining mass uniformly.
 
-    A sub-search whose smallest conf already has N layers can never
-    satisfy a cap below N -- a transformer block is ~9 layers, so 40%
-    of its selects would query an empty intersection, pay for the
-    (regex-filtered) queries and fall through. Cached: this is called
-    on every select, keyed by the entry's cached `min_layers`.
+    Caps below `min_layers` are dropped and `1 - _UNCAPPED_SHARE` is
+    re-spread over the survivors, so the capped share as a whole stays
+    put instead of leaking into the unrestricted draw. A sub-search
+    whose smallest conf already has N layers can never satisfy a cap
+    below N -- a transformer block is ~9 layers -- and such a draw
+    would query an empty intersection, pay for the (regex-filtered)
+    queries and fall through.
+
+    `None` always survives, and is the whole distribution when no cap
+    does (L* <= 1, or every cap under `min_layers`). Cached: this is
+    called on every select, keyed by the entry's cached `min_layers`
+    and the select's L*.
     """
-    kept = [
-        (cap, w) for cap, w in _LAYER_CAP_PROBS
-        if cap is None or cap >= min_layers
-    ]
-    total = sum(w for _, w in kept)
-    return tuple((cap, w / total) for cap, w in kept)
+    caps = [cap for cap in range(1, top_layers) if cap >= min_layers]
+    if not caps:
+        return ((None, 1.0),)
+    share = (1.0 - _UNCAPPED_SHARE) / len(caps)
+    return ((None, _UNCAPPED_SHARE),) + tuple((cap, share) for cap in caps)
 
 
 def _cap_bound(b: Bounds, cap: int, floor: int) -> Bounds:
@@ -255,6 +274,9 @@ def _layer_capped_template(
     to the cap (sub-objects are shared, never mutated), or the base
     template itself (cap None) when the draw is unrestricted -- or when
     the cap is below the base floor / already implied by the base bound.
+
+    Called twice per capped select: once with the drawn cap N for the
+    seed template, once with N + 1 for the expansion template.
     """
     if cap is None:
         return template, None
@@ -720,13 +742,16 @@ class Search(object):
 
     def _select_top_neighbor(
             self, t: float, max_weights: int, system: str,
-            template: Template,
+            seed_template: Template, expansion_template: Template,
     ) -> Optional[Configuration]:
+        """Walk the top confs under `seed_template` and their neighbors
+        under `expansion_template` (the two differ only on a
+        layer-capped select; see `_sample_layer_capped_templates`)."""
         with latency.timer("Search._select_top_neighbor"):
             top_confs = list(
                 self._db.top_confs_for_system(
                     max_time=t, max_weights=max_weights, system=system,
-                    limit=10, template=template
+                    limit=10, template=seed_template
                 )
             )
             if not top_confs:
@@ -747,7 +772,7 @@ class Search(object):
                         top_confs = list(
                             self._db.top_confs_for_system(
                                 max_time=t, max_weights=max_weights, system=system,
-                                limit=end, template=template
+                                limit=end, template=seed_template
                             )
                         )
                         have_confs = end
@@ -768,7 +793,7 @@ class Search(object):
                     for j in range(start, min(end, len(top_confs))):
                         if len(min_runs_neighbor) < j + 1:
                             result = self._select_neighbor_fewest_runs(
-                                top_confs[j].conf, system, template)
+                                top_confs[j].conf, system, expansion_template)
                             min_runs_neighbor.append(result)
 
                         result = min_runs_neighbor[j]
@@ -1150,16 +1175,20 @@ class Search(object):
 
     def _select_predicted_best(
         self, t: float, max_weights: int, system: str, bfs_depth: int,
-        template: Template,
+        seed_template: Template, expansion_template: Template,
     ) -> Optional[Configuration]:
         """Predictor-guided tournament.
 
-        Take the best-known conf for (system, template, max_weights,
-        max_time<=t) as a seed, BFS out to `bfs_depth` neighbors,
-        adjust each candidate's steps to fit the time budget, score
-        them with a compound median(predicted_loss, run_losses...),
-        then walk the top 9 across the [1] / [2,1,1] / [3,2,2,1x6]
-        run-limit sequences.
+        Take the best-known conf for (system, seed_template,
+        max_weights, max_time<=t) as a seed, BFS out to `bfs_depth`
+        neighbors under `expansion_template`, adjust each candidate's
+        steps to fit the time budget, score them with a compound
+        median(predicted_loss, run_losses...), then walk the top 9
+        across the [1] / [2,1,1] / [3,2,2,1x6] run-limit sequences.
+
+        The two templates differ only on a layer-capped select, where
+        the seed is one layer shallower than what the walk may reach
+        (see `_sample_layer_capped_templates`).
         """
         if not self.loss_model.is_ready():
             return None
@@ -1167,15 +1196,16 @@ class Search(object):
             f'Search._select_predicted_best.depth{bfs_depth}'
         ):
             return self._select_predicted_best_impl(
-                t, max_weights, system, bfs_depth, template)
+                t, max_weights, system, bfs_depth, seed_template,
+                expansion_template)
 
     def _select_predicted_best_impl(
         self, t: float, max_weights: int, system: str, bfs_depth: int,
-        template: Template,
+        seed_template: Template, expansion_template: Template,
     ) -> Optional[Configuration]:
         try:
             seed = next(self._db.top_confs_for_system(
-                system=system, template=template,
+                system=system, template=seed_template,
                 max_weights=max_weights, max_time=t, limit=1,
             ))
         except StopIteration:
@@ -1201,7 +1231,7 @@ class Search(object):
                 if len(visited) >= _BFS_VISITED_CAP:
                     clipped = 'visited cap'
                     break
-                for n in conf_neighbors(c, template):
+                for n in conf_neighbors(c, expansion_template):
                     if n in visited:
                         continue
                     visited.add(n)
@@ -1362,38 +1392,88 @@ class Search(object):
                 return None
         return default
 
-    def _sample_layer_capped_template(
-        self, entry: TemplateEntry,
-    ) -> tuple[Template, Optional[int]]:
-        """Sample a per-select num_layers cap and intersect it with the
-        entry's template. Caps below the entry's own minimum layer count
-        are dropped from the distribution first (see
-        `_layer_cap_probs`)."""
-        probs = _layer_cap_probs(entry.min_layers)
+    def _top_conf_layers(
+        self, t: float, max_weights: int, system: str, template: Template,
+    ) -> Optional[int]:
+        """L*: the layer count of the best conf this select would seed
+        from, or None when nothing under (system, template,
+        max_weights, t) has a score yet.
+
+        Deliberately the same `top_confs_for_system(..., limit=1)`
+        query the predicted-best BFS seeds from, so the sampled cap is
+        relative to the depth the select would otherwise start at."""
+        with latency.timer("Search._top_conf_layers"):
+            try:
+                top = next(self._db.top_confs_for_system(
+                    system=system, template=template,
+                    max_weights=max_weights, max_time=t, limit=1,
+                ))
+            except StopIteration:
+                return None
+            return top.conf.model.num_layers
+
+    def _sample_layer_capped_templates(
+        self, entry: TemplateEntry, t: float, max_weights: int, system: str,
+    ) -> tuple[Template, Template, Optional[int]]:
+        """Sample this select's num_layers cap N relative to L* and
+        return (seed_template, expansion_template, N).
+
+        The seed query runs at num_layers <= N, the neighbor/BFS
+        expansion and the final pick at <= N + 1. Both templates are
+        the entry's own (and N is None) when the draw is unrestricted,
+        when the sub-space has no scored conf to measure L* against, or
+        when the cap turns out to be a no-op against the base bounds.
+        Caps below the entry's own minimum layer count are dropped from
+        the distribution first (see `_layer_cap_probs`)."""
+        base = entry.template
+        top_layers = self._top_conf_layers(t, max_weights, system, base)
+        if top_layers is None:
+            return base, base, None
+        probs = _layer_cap_probs(entry.min_layers, top_layers)
         (cap, _), = random.choices(
             probs,
             weights=[w for _, w in probs],
             k=1,
         )
-        return _layer_capped_template(entry.template, cap)
+        seed_template, cap = _layer_capped_template(base, cap)
+        if cap is None:
+            return base, base, None
+        expansion_template, _ = _layer_capped_template(base, cap + 1)
+        logging.info(
+            f'Layer-capped select for {system}: seed <= {cap}, '
+            f'result <= {cap + 1} (L* = {top_layers})')
+        return seed_template, expansion_template, cap
 
     def _run_strategy(
         self, name: str, t: float, max_weights: int, system: str,
-        template: Template,
+        seed_template: Template, expansion_template: Template,
     ) -> Optional[Configuration]:
+        """Run one strategy under the select's pair of templates.
+
+        `seed_template` bounds where the walk STARTS (the top-conf
+        queries), `expansion_template` what it may reach and return.
+        They are the same object on an uncapped select; on a capped one
+        they differ by exactly one layer. Pure re-run pickers get the
+        expansion template: nothing is mutated there, so the seed bound
+        has nothing to do."""
         match name:
             case 'predicted_2nd_neighbor':
                 return self._select_predicted_best(
-                    t, max_weights, system, bfs_depth=2, template=template)
+                    t, max_weights, system, bfs_depth=2,
+                    seed_template=seed_template,
+                    expansion_template=expansion_template)
             case 'predicted_3rd_neighbor':
                 return self._select_predicted_best(
-                    t, max_weights, system, bfs_depth=3, template=template)
+                    t, max_weights, system, bfs_depth=3,
+                    seed_template=seed_template,
+                    expansion_template=expansion_template)
             case 'time_budget':
                 return self._select_time_budget(
-                    t, max_weights, system, template)
+                    t, max_weights, system, expansion_template)
             case 'neighbor':
                 return self._select_top_neighbor(
-                    t, max_weights, system, template)
+                    t, max_weights, system, seed_template,
+                    expansion_template)
             case _:
                 raise ValueError(f"unknown strategy: {name}")
 
@@ -1406,9 +1486,9 @@ class Search(object):
         Both are template-blind: they run against the base template.
 
         Then ONE share-weighted draw picks the sub-template for this
-        select, and everything below it -- coverage walk, layer cap,
-        weight ceiling, strategies and both fallbacks -- runs inside
-        that entry. With a single entry this is exactly the
+        select, and everything below it -- coverage walk, weight
+        ceiling, layer cap, strategies and both fallbacks -- runs
+        inside that entry. With a single entry this is exactly the
         pre-template-set path.
 
         Frontier seeding comes first inside the entry: with its Seed
@@ -1494,29 +1574,33 @@ class Search(object):
                         conf, 'coverage_walk', system, covered, total,
                         entry=entry)
 
-            # Layer-count diversification: this select (seed queries,
-            # neighbor/BFS expansion, and hence the trained conf) may run
-            # under a sampled num_layers cap on top of the entry's
-            # template. The fallback chain below stays capped too; only
-            # the final default fallback is uncapped.
-            template, layer_cap = self._sample_layer_capped_template(entry)
-            if layer_cap is not None:
-                logging.info(
-                    f'Layer-capped select for {system}: '
-                    f'num_layers <= {layer_cap}')
-
             t = self._select_time()
-            # Derived from the best conf WITHIN this (capped) entry, so
-            # each sub-space gets a weight range matched to its own
-            # population rather than to the global frontier.
-            max_weights = self._select_max_weights(t, system, template)
+            # Derived from the best conf WITHIN this entry, so each
+            # sub-space gets a weight range matched to its own
+            # population rather than to the global frontier. On the
+            # BASE template: the layer cap below is sampled relative to
+            # the best conf in this (t, max_weights) window, so it
+            # cannot be in force yet.
+            max_weights = self._select_max_weights(t, system, entry.template)
+
+            # Layer-count diversification: this select may run under a
+            # sampled num_layers cap N, with the seed query at <= N and
+            # the neighbor/BFS expansion (and hence the trained conf) at
+            # <= N + 1, both on top of the entry's template. The
+            # fallback chain below stays capped too; only the final
+            # default fallback is uncapped.
+            seed_template, expansion_template, _ = (
+                self._sample_layer_capped_templates(
+                    entry, t, max_weights, system))
 
             picked, _ = random.choices(
                 _STRATEGY_PROBS,
                 weights=[w for _, w in _STRATEGY_PROBS],
                 k=1,
             )[0]
-            conf = self._run_strategy(picked, t, max_weights, system, template)
+            conf = self._run_strategy(
+                picked, t, max_weights, system, seed_template,
+                expansion_template)
             if conf is not None:
                 return self._result(conf, picked, system, entry=entry)
 
@@ -1524,7 +1608,8 @@ class Search(object):
             # to the neighbor walk.
             if picked != 'neighbor':
                 conf = self._run_strategy(
-                    'neighbor', t, max_weights, system, template)
+                    'neighbor', t, max_weights, system, seed_template,
+                    expansion_template)
                 if conf is not None:
                     return self._result(
                         conf, 'neighbor', system, entry=entry)

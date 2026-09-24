@@ -211,7 +211,7 @@ _WARMUP_SELECTS_PER_RUNG = 10
 # looked up within that window) and the final default fallback stay on
 # the base template: explicit picks and cross-system coverage
 # shouldn't be dodged by a sampled cap.
-_UNCAPPED_SHARE = 0.6
+_UNCAPPED_SHARE = 0.5
 
 
 @functools.lru_cache(maxsize=None)

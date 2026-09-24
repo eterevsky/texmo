@@ -900,12 +900,12 @@ def test_layer_cap_probs_is_uniform_under_l_star():
     weights = dict(probs)
     assert abs(weights[None] - _UNCAPPED_SHARE) < 1e-9
     for cap in range(1, 6):
-        assert abs(weights[cap] - 0.08) < 1e-9
-    # A 4-layer L* spreads the same 40% over three caps.
+        assert abs(weights[cap] - (1 - _UNCAPPED_SHARE) / 5) < 1e-9
+    # A 4-layer L* spreads the same capped share over three caps.
     weights = dict(_layer_cap_probs(0, 4))
     assert set(weights) == {None, 1, 2, 3}
     for cap in (1, 2, 3):
-        assert abs(weights[cap] - 0.4 / 3) < 1e-9
+        assert abs(weights[cap] - (1 - _UNCAPPED_SHARE) / 3) < 1e-9
     # L* <= 1: every cap would be a no-op, so there is none.
     assert _layer_cap_probs(0, 1) == ((None, 1.0),)
     assert _layer_cap_probs(0, 0) == ((None, 1.0),)
@@ -921,7 +921,7 @@ def test_layer_cap_probs_drops_sub_minimum_caps():
     weights = dict(probs)
     assert abs(weights[None] - _UNCAPPED_SHARE) < 1e-9
     for cap in (3, 4, 5):
-        assert abs(weights[cap] - 0.4 / 3) < 1e-9
+        assert abs(weights[cap] - (1 - _UNCAPPED_SHARE) / 3) < 1e-9
     # Entry deeper than L* -> unrestricted is all that's left.
     assert _layer_cap_probs(9, 6) == ((None, 1.0),)
 
@@ -961,7 +961,7 @@ def test_sample_layer_capped_templates_draw_matches_the_distribution(
     tmp_path, monkeypatch,
 ):
     """Over many draws the realized cap frequencies are the
-    distribution: 60% unrestricted, 8% each for 1..5 at L* = 6."""
+    distribution: 50% unrestricted, 10% each for 1..5 at L* = 6."""
     search = _make_search(tmp_path)
     entry = _main(search)
     monkeypatch.setattr(search, '_top_conf_layers', lambda *a: 6)
@@ -974,7 +974,7 @@ def test_sample_layer_capped_templates_draw_matches_the_distribution(
         counts[cap] = counts.get(cap, 0) + 1
     assert abs(counts[None] / n - _UNCAPPED_SHARE) < 0.02
     for cap in range(1, 6):
-        assert abs(counts[cap] / n - 0.08) < 0.02
+        assert abs(counts[cap] / n - (1 - _UNCAPPED_SHARE) / 5) < 0.02
     assert set(counts) == {None, 1, 2, 3, 4, 5}
 
 

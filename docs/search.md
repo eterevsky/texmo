@@ -234,16 +234,16 @@ predicted-best BFS seeds from. `t` and `max_weights` are therefore
 sampled **first**, under the entry's base template, and only then is
 the cap drawn:
 
-- with probability `_UNCAPPED_SHARE` (0.6) the select is
+- with probability `_UNCAPPED_SHARE` (0.5) the select is
   unconstrained;
 - otherwise the cap `N` is **uniform over 1 … L\*−1**. `N = L*` is a
   no-op and is excluded, so `L* ≤ 1` leaves nothing to draw and the
   select is unconstrained. Caps below the entry's own minimum layer
-  count are dropped and the remaining 0.4 is re-spread over the
+  count are dropped and the remaining 0.5 is re-spread over the
   survivors, so the capped share as a whole stays put.
 
-At L\* = 9 that is 0.6 unrestricted and 0.05 each for 1…8; at L\* = 18,
-0.6 and ~0.024 each for 1…17. The old fixed ladder (1–4 at 0.1 each)
+At L\* = 9 that is 0.5 unrestricted and 0.0625 each for 1…8; at L\* = 18,
+0.5 and ~0.029 each for 1…17. The old fixed ladder (1–4 at 0.1 each)
 was replaced because absolute caps mostly bound regions the frontier
 has left behind: its depths are 6–9 layers in most weight bands and 18
 at 12–20k.

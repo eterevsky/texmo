@@ -121,8 +121,9 @@ class PickMeStatus:
     """Outcome of `DbWriter.add_pick_me_conf`.
 
     `target` is the conf's stored `pick_me` value after the call (the
-    run count the search keeps picking it towards; `DbReader.pick_me_conf`
-    floors it at its `min_runs`), `num_runs` how many runs it has now.
+    run count the search keeps picking it towards;
+    `DbReader.pick_me_candidates` floors it at its `min_runs`),
+    `num_runs` how many runs it has now.
     """
 
     conf_id: int
@@ -188,7 +189,7 @@ class DbWriter(object):
         """Mark `conf` as a priority pick until it has `runs` runs.
 
         `pick_me` holds the conf's own target run count (see
-        `DbReader.pick_me_conf`). A conf not yet in the DB is inserted
+        `DbReader.pick_me_candidates`). A conf not yet in the DB is inserted
         with `pick_me = runs`; an existing one has its target *raised*
         to `runs` — never lowered, so re-asking for fewer runs than an
         earlier request can't cancel it, and a conf already flagged

@@ -839,7 +839,11 @@ def test_add_pick_me_conf_never_lowers_the_target(db):
     assert _pick_me_value(db, status.conf_id) == 5
 
 
-def test_pick_me_conf_honors_the_rows_target(db):
+def _pick_me_confs(db, template) -> list[Configuration]:
+    return [c.conf for c in db.pick_me_candidates(template)]
+
+
+def test_pick_me_candidates_honor_the_rows_target(db):
     """A legacy pick_me=1 conf retires at min_runs; one asking for 3
     keeps being returned until it has 3 runs."""
     legacy = _pick_me_conf("bytes|dense.32.gelu")
@@ -853,22 +857,46 @@ def test_pick_me_conf_honors_the_rows_target(db):
         db.add_run(wanted, Run(
             system="rpi", step_loss=None, loss=1.0, train_time=1.0))
     # The legacy row is retired at 2 runs; the target-3 row is not.
-    assert db.pick_me_conf(template) == wanted
+    assert _pick_me_confs(db, template) == [wanted]
     db.add_run(wanted, Run(
         system="rpi", step_loss=None, loss=1.0, train_time=1.0))
-    assert db.pick_me_conf(template) is None
+    assert _pick_me_confs(db, template) == []
 
 
-def test_pick_me_conf_returns_flagged_untrained(db):
-    """A pick_me=1 conf with no runs is returned."""
+def test_pick_me_candidates_return_flagged_untrained(db):
+    """A pick_me=1 conf with no runs is returned, with its id and a
+    zero run count."""
     conf = _pick_me_conf()
-    db.writer.add_pick_me_conf(conf)
-    template = _make_template()
-    got = db.pick_me_conf(template)
-    assert got == conf
+    status = db.writer.add_pick_me_conf(conf)
+    [got] = db.pick_me_candidates(_make_template())
+    assert got.conf == conf
+    assert got.conf_id == status.conf_id
+    assert got.num_runs == 0
 
 
-def test_pick_me_conf_returns_none_after_min_runs(db):
+def test_pick_me_candidates_carry_the_run_count(db):
+    """`num_runs` is the total over all systems -- what the search
+    compares against the count it saw at dispatch."""
+    conf = _pick_me_conf()
+    db.writer.add_pick_me_conf(conf, runs=5)
+    for system in ("rpi", "gpu"):
+        db.add_run(conf, Run(
+            system=system, step_loss=None, loss=1.0, train_time=1.0))
+    [got] = db.pick_me_candidates(_make_template())
+    assert got.num_runs == 2
+
+
+def test_pick_me_candidates_list_every_open_conf(db):
+    a = _pick_me_conf("bytes|dense.32.gelu")
+    b = _pick_me_conf("bytes|dense.16.gelu")
+    id_a = db.writer.add_pick_me_conf(a).conf_id
+    id_b = db.writer.add_pick_me_conf(b).conf_id
+    got = db.pick_me_candidates(_make_template())
+    assert [c.conf_id for c in got] == sorted([id_a, id_b])
+    assert {c.conf for c in got} == {a, b}
+
+
+def test_pick_me_candidates_empty_after_min_runs(db):
     """Once a pick_me conf has >= min_runs, it's no longer returned."""
     conf = _pick_me_conf()
     db.writer.add_pick_me_conf(conf)
@@ -877,11 +905,10 @@ def test_pick_me_conf_returns_none_after_min_runs(db):
         system="rpi", step_loss=None, loss=1.0, train_time=1.0))
     db.add_run(conf, Run(
         system="rpi", step_loss=None, loss=2.0, train_time=1.0))
-    template = _make_template()
-    assert db.pick_me_conf(template) is None
+    assert _pick_me_confs(db, _make_template()) == []
 
 
-def test_pick_me_conf_skips_invalid(db):
+def test_pick_me_candidates_skip_invalid(db):
     """A pick_me conf that no longer passes is_valid (norm as the first
     layer here) is skipped; a valid one is returned instead. Guards the
     Model2 transition, where the validity rules change."""
@@ -890,21 +917,20 @@ def test_pick_me_conf_skips_invalid(db):
     valid = _pick_me_conf("bytes|dense.32.gelu")
     db.writer.add_pick_me_conf(invalid)
     db.writer.add_pick_me_conf(valid)
-    assert db.pick_me_conf(_make_template()) == valid
+    assert _pick_me_confs(db, _make_template()) == [valid]
 
 
-def test_pick_me_conf_none_when_all_invalid(db):
+def test_pick_me_candidates_empty_when_all_invalid(db):
     invalid = _pick_me_conf("bytes|norm-dense.32.gelu")
     db.writer.add_pick_me_conf(invalid)
-    assert db.pick_me_conf(_make_template()) is None
+    assert _pick_me_confs(db, _make_template()) == []
 
 
-def test_pick_me_conf_ignores_unflagged(db):
+def test_pick_me_candidates_ignore_unflagged(db):
     """Confs without pick_me=1 are never returned."""
     conf, run = _make_conf_run()
     db.add_run(conf, run)  # adds the conf with pick_me=0
-    template = _make_template()
-    assert db.pick_me_conf(template) is None
+    assert _pick_me_confs(db, _make_template()) == []
 
 
 def test_top_confs_global_filters_invalid_by_default(db):

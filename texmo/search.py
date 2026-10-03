@@ -292,6 +292,18 @@ def _layer_capped_template(
 # single-run outlier, which is what `top_confs_global` already uses.
 PICK_ME_MIN_RUNS = 2
 
+
+@dataclass
+class _PickMeDispatch:
+    """The outstanding dispatches of one pick_me conf: the systems it
+    was handed to since its last result came back, and its total run
+    count (all systems) when the first of them went out. Every system
+    in the set was recorded at that same count -- a changed count
+    clears the whole entry before anything new is recorded."""
+    num_runs: int
+    systems: set[str]
+
+
 # Sticky-flag threshold: keep firing the coverage walk only when at
 # least this many uncovered top confs remain on the system. Set high
 # enough that successive selects within the prefetch gap window
@@ -585,6 +597,13 @@ class Search(object):
         # `_select_uncovered_top`, per (system, entry). Attached to
         # coverage-walk SearchResults so the client can log progress.
         self._coverage_stats: dict[tuple[str, str], tuple[int, int]] = {}
+
+        # Outstanding pick_me dispatches by conf id; see
+        # `_select_pick_me`. Touched only from `select_conf`, which
+        # runs on the single SearchThread, so no lock. In-memory only:
+        # a restart forgets every dispatch, and each unfinished pick_me
+        # conf becomes eligible on every system again.
+        self._pick_me_dispatched: dict[int, _PickMeDispatch] = {}
 
     def set_templates(self, templates: TemplateSet) -> None:
         """Install a template set and make sure every entry has its
@@ -1375,6 +1394,57 @@ class Search(object):
                 f'Conf for {system}: {conf} ({strategy}, {entry.name})')
         return SearchResult(conf, strategy, system, covered, total)
 
+    def _select_pick_me(self, system: str) -> Optional[Configuration]:
+        """A random pick_me conf `system` may take now, or None.
+
+        Each candidate (short of its target, on the base template,
+        valid, not a retired input) goes to at most ONE worker per
+        system while that dispatch is outstanding. Several workers
+        share a system name, and a demanding conf handed to all of
+        them at once clogs the whole group for hours; once one has it,
+        the rest fall through to the next eligible pick_me conf or to
+        the ordinary strategies.
+
+        A dispatch stays outstanding until a new result for the conf
+        arrives from ANY system -- seen as its total run count moving
+        off the count recorded at dispatch -- which clears every
+        system's dispatch of it at once; if it is still short of its
+        target, each system may then take it once more. There is no
+        timeout: a conf whose dispatches all fail is not retried until
+        a server restart (which forgets the bookkeeping).
+        """
+        eligible = []
+        for c in self._db.pick_me_candidates(
+                self.template, min_runs=PICK_ME_MIN_RUNS):
+            if _is_retired_conf(c.conf):
+                logging.warning(
+                    f'Ignoring pick_me conf {c.conf}: retired input')
+                continue
+            dispatch = self._pick_me_dispatched.get(c.conf_id)
+            # Any change counts: runs only ever disappear through admin
+            # deletes, which need a server stop (and so a reset) anyway.
+            if dispatch is not None and dispatch.num_runs != c.num_runs:
+                del self._pick_me_dispatched[c.conf_id]
+                dispatch = None
+            if dispatch is not None and system in dispatch.systems:
+                logging.debug(
+                    f'Skipping pick_me conf {c.conf} for {system}: '
+                    f'dispatched at {dispatch.num_runs} runs, no result '
+                    f'since')
+                continue
+            eligible.append(c)
+        if not eligible:
+            return None
+        pick = random.choice(eligible)
+        # Entries for confs that later leave the candidate list (target
+        # reached, template moved) are left in place: they are tiny,
+        # and a conf that comes back has a moved run count -- or, after
+        # a template change, still owes the result it was waiting for.
+        self._pick_me_dispatched.setdefault(
+            pick.conf_id, _PickMeDispatch(pick.num_runs, set()),
+        ).systems.add(system)
+        return pick.conf
+
     def _select_default(
         self, system: str, entry: TemplateEntry,
     ) -> Optional[Configuration]:
@@ -1499,10 +1569,12 @@ class Search(object):
     def select_conf(self, system: str) -> Optional[SearchResult]:
         """Select a SearchResult, or None if nothing matches.
 
-        Pick-me confs (explicit user-injected candidates with
-        `pick_me = 1`) take absolute priority until each has
-        `PICK_ME_MIN_RUNS` total runs. The warmup ladder comes next.
-        Both are template-blind: they run against the base template.
+        Pick-me confs (explicit user-injected candidates with a
+        `pick_me` target) take absolute priority until each has
+        `max(pick_me, PICK_ME_MIN_RUNS)` total runs, but go to at most
+        one worker per system until a result comes back (see
+        `_select_pick_me`). The warmup ladder comes next. Both are
+        template-blind: they run against the base template.
 
         Then ONE share-weighted draw picks the sub-template for this
         select, and everything below it -- coverage walk, weight
@@ -1529,13 +1601,9 @@ class Search(object):
         """
         with latency.timer("Search.select_conf"):
             # Pick-me: explicit user picks bypass every other strategy
-            # until they've been measured enough times.
-            pm = self._db.pick_me_conf(
-                self.template, min_runs=PICK_ME_MIN_RUNS)
-            if pm is not None and _is_retired_conf(pm):
-                logging.warning(
-                    f'Ignoring pick_me conf {pm}: retired input')
-                pm = None
+            # until they've been measured enough times -- once per
+            # system while a dispatch is outstanding.
+            pm = self._select_pick_me(system)
             if pm is not None:
                 return self._result(pm, 'pick_me', system)
 

@@ -396,7 +396,7 @@ connections enable WAL and a 30 s `busy_timeout`.
     for report handlers, persistent for the Search and Model threads.
   - Methods (read-only): `get_conf_id`, `get_run_counts`,
     `get_systems`, `has_covering_run`, `top_confs_global`,
-    `pick_me_conf`, `fastest_near_best_segments`,
+    `pick_me_candidates`, `fastest_near_best_segments`,
     `fastest_near_best_segments_any_system`, `top_confs_for_system`,
     `best_conf_for_spec_on_system`, `confs_under_time`, `total_runs`,
     `get_confs_runs`, `get_runs_for_timing`, `iter_labeled_runs`,

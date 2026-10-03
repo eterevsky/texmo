@@ -284,7 +284,8 @@ def test_search_server_pick_me_flags_the_conf(tmp_path, monkeypatch):
         server.join()
 
     with DbReader(path) as reader:
-        assert reader.pick_me_conf(_make_template()) == conf
+        assert [c.conf for c in reader.pick_me_candidates(
+            _make_template())] == [conf]
 
 
 def test_search_server_pick_me_rejects_zero_runs(tmp_path, monkeypatch):

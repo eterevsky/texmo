@@ -174,6 +174,32 @@ twice" meaning. The gate is evaluated at SELECT time against a live
 `COUNT(*)` over `run`, so nothing has to clear the column once the
 conf is done.
 
+**Once per system while outstanding.** Several workers can share one
+system name (a group of identical small boards reports as one system),
+so handing a demanding conf
+(say 131072 steps) to every worker that asks would clog the whole group
+for hours. Instead, once a system has been handed a pick_me conf, its
+other workers skip that conf — they get the next eligible pick_me conf
+(a random one, as before), or fall through to the ordinary strategies
+when none is left for them. Other systems are unaffected: each gets the
+conf once.
+
+The dispatch stays outstanding until **any** new result for the conf
+arrives, from any system: the search notices the conf's total run
+count has moved since the dispatch and clears every system's dispatch
+of it at once. If the conf is still short of its target, each system
+can take it once more. There is no timeout. A conf whose dispatches
+all fail (dead worker, crashed run) is simply not retried; it stays
+blocked on those systems until a server restart.
+
+The bookkeeping (`Search._pick_me_dispatched`: conf id → run count at
+dispatch, plus the systems it went to) is **in memory** on the search
+thread, so a restart forgets it and every unfinished pick_me conf is
+eligible on every system again. Runs in flight don't count toward
+the target, so a conf can still end up with more runs than it asked
+for; what the rule bounds is the rate — at most one new dispatch per
+system per returned result.
+
 Queue one from the command line, against a running server:
 
 ```

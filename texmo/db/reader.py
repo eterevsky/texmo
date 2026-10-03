@@ -77,7 +77,16 @@ class ConfWithRuns:
     system_runs: int
 
 
-# --- SQL constants (read-only side) -----------------------------------------
+@dataclass
+class PickMeCandidate:
+    """A pick_me conf still short of its target, with its current
+    total run count (all systems). See `DbReader.pick_me_candidates`."""
+    conf_id: int
+    conf: Configuration
+    num_runs: int
+
+
+# --- SQL constants (read-only side)-----------------------------------------
 
 
 GET_CONFS_RUNS = """
@@ -366,11 +375,11 @@ class DbReader(object):
             bucket_done = True
             yield conf_score
 
-    def pick_me_conf(
+    def pick_me_candidates(
         self, template: Template, min_runs: int = 2,
-    ) -> Optional[Configuration]:
-        """Return one random pick_me conf still short of its target
-        run count and matching the template, or None.
+    ) -> list[PickMeCandidate]:
+        """Every pick_me conf still short of its target run count and
+        matching the template, in conf-id order (the caller draws).
 
         `pick_me` is the conf's own target: the row stays a priority
         pick until it has at least `pick_me` runs. Legacy rows carry
@@ -379,26 +388,28 @@ class DbReader(object):
         their old "run it twice" meaning while a row asking for more
         (`texmo.py pick-me --runs N`) gets what it asked for.
 
-        The run-count filter is computed on the fly (SELECT COUNT(*)
-        FROM run WHERE conf_id=...) so the writer doesn't have to
-        clear the pick_me column — once a conf has enough runs it's
-        simply skipped by this query and effectively retired from
-        priority pick.
+        The run count is computed on the fly (SELECT COUNT(*) FROM run
+        WHERE conf_id=...) so the writer doesn't have to clear the
+        pick_me column — once a conf has enough runs it's simply
+        skipped by this query and effectively retired from priority
+        pick. It is also returned: the search compares it against the
+        count it saw at dispatch to tell that a result has come back.
         """
         conditions, params = _make_template_conditions(template)
         conditions.append('pick_me >= 1')
-        conditions.append(
-            '(SELECT COUNT(*) FROM run WHERE conf_id = conf.id) '
-            '< MAX(pick_me, :min_runs)')
         params['min_runs'] = min_runs
         where = 'WHERE ' + ' AND '.join(conditions)
         conf_fields = ', '.join([
             'spec', 'precision', 'lr',
             'decay', 'cosine', 'length', 'batch', 'steps'])
         query = (
-            f'SELECT {conf_fields} FROM conf {where} '
-            'ORDER BY RANDOM()'
+            f'SELECT id, {conf_fields}, num_runs FROM ('
+            f'SELECT id, {conf_fields}, pick_me, '
+            '(SELECT COUNT(*) FROM run WHERE run.conf_id = conf.id) '
+            f'AS num_runs FROM conf {where}'
+            ') WHERE num_runs < MAX(pick_me, :min_runs) ORDER BY id'
         )
+        candidates = []
         for row in self._db.execute(query, params):
             conf = Configuration.from_dict(row)
             # Skip confs that no longer pass validity (e.g. under the
@@ -406,8 +417,9 @@ class DbReader(object):
             # can't build/run them. The other DB-extraction paths filter
             # the same way; pick_me is the last one to honor it.
             if conf.model.is_valid():
-                return conf
-        return None
+                candidates.append(
+                    PickMeCandidate(row['id'], conf, row['num_runs']))
+        return candidates
 
     def fastest_near_best_segments(
         self,

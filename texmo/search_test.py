@@ -441,6 +441,93 @@ def test_select_conf_keeps_pick_me_until_its_own_target(tmp_path):
     assert result.conf == pm_conf
 
 
+def _pick_me_db(tmp_path, *specs, runs=3):
+    """A fresh DB with one pick_me conf (target `runs`) per spec.
+    Returns the path and the confs."""
+    path = str(tmp_path / "test.db")
+    writer = DbWriter(path)
+    confs = [_make_conf(steps=256, spec=spec) for spec in specs]
+    for conf in confs:
+        writer.add_pick_me_conf(conf, runs=runs)
+    writer.close()
+    return path, confs
+
+
+def _is_pick_me(result, conf) -> bool:
+    return (result is not None and result.strategy == 'pick_me'
+            and result.conf == conf)
+
+
+def test_pick_me_goes_once_per_system(tmp_path):
+    """A second worker of the same system must not get the pick_me
+    conf while the first dispatch is outstanding; it falls through to
+    the ordinary strategies instead."""
+    path, [pm_conf] = _pick_me_db(tmp_path, "bytes|dense.16.gelu")
+    search = _make_search_at(path)
+    assert _is_pick_me(search.select_conf('rpi'), pm_conf)
+    for _ in range(3):
+        result = search.select_conf('rpi')
+        assert result is None or result.strategy != 'pick_me'
+
+
+def test_pick_me_still_goes_to_other_systems(tmp_path):
+    path, [pm_conf] = _pick_me_db(tmp_path, "bytes|dense.16.gelu")
+    search = _make_search_at(path)
+    assert _is_pick_me(search.select_conf('rpi'), pm_conf)
+    assert _is_pick_me(search.select_conf('gpu'), pm_conf)
+    assert _is_pick_me(search.select_conf('mac'), pm_conf)
+
+
+def test_pick_me_new_result_clears_every_dispatch(tmp_path):
+    """A result from ANY system clears all of the conf's outstanding
+    dispatches: while it is still short of its target, each system
+    may take it once more."""
+    path, [pm_conf] = _pick_me_db(tmp_path, "bytes|dense.16.gelu", runs=3)
+    search = _make_search_at(path)
+    assert _is_pick_me(search.select_conf('rpi'), pm_conf)
+    assert _is_pick_me(search.select_conf('gpu'), pm_conf)
+    assert not _is_pick_me(search.select_conf('rpi'), pm_conf)
+    assert not _is_pick_me(search.select_conf('gpu'), pm_conf)
+
+    _seed_runs(path, pm_conf, system='gpu', n=1)   # 1 of 3 runs
+    assert _is_pick_me(search.select_conf('rpi'), pm_conf)
+    assert _is_pick_me(search.select_conf('gpu'), pm_conf)
+    assert not _is_pick_me(search.select_conf('rpi'), pm_conf)
+
+    _seed_runs(path, pm_conf, system='mac', n=2)   # target reached
+    for system in ('rpi', 'gpu', 'mac'):
+        assert not _is_pick_me(search.select_conf(system), pm_conf)
+
+
+def test_pick_me_blocked_system_gets_the_next_conf(tmp_path):
+    """With two pick_me confs, a system holding one gets the other,
+    and only then falls through to the ordinary strategies."""
+    path, confs = _pick_me_db(
+        tmp_path, "bytes|dense.16.gelu", "bytes|dense.32.gelu")
+    search = _make_search_at(path)
+    first = search.select_conf('rpi')
+    second = search.select_conf('rpi')
+    assert first.strategy == 'pick_me' and second.strategy == 'pick_me'
+    assert {first.conf, second.conf} == set(confs)
+    third = search.select_conf('rpi')
+    assert third is None or third.strategy != 'pick_me'
+    # Another system is untouched by rpi's dispatches.
+    assert search.select_conf('gpu').strategy == 'pick_me'
+
+
+def test_pick_me_draws_at_random_among_eligible(tmp_path):
+    """The choice among eligible pick_me confs stays random rather
+    than settling on conf-id order."""
+    path, confs = _pick_me_db(
+        tmp_path, "bytes|dense.16.gelu", "bytes|dense.32.gelu")
+    search = _make_search_at(path)
+    random.seed(0)
+    firsts = set()
+    for i in range(32):
+        firsts.add(search.select_conf(f'sys{i}').conf)
+    assert firsts == set(confs)
+
+
 def test_timing_ready_reflects_fitted_pairs(tmp_path):
     from .predict.timing import Weights
     search = _make_search(tmp_path)

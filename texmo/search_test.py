@@ -26,6 +26,7 @@ from .search import (
     _layer_cap_probs,
     _layer_capped_template,
     _run_limit_sequences,
+    top_confs_report,
 )
 
 
@@ -307,6 +308,7 @@ def test_select_predicted_best_no_seed_returns_none(tmp_path):
     assert search._select_predicted_best_impl(
         t=4.0, max_weights=INF, system='a', bfs_depth=2,
         seed_template=search.template, expansion_template=search.template,
+        max_layers=None,
     ) is None
 
 
@@ -326,6 +328,7 @@ def test_select_predicted_best_no_timing_returns_none(
     assert search._select_predicted_best_impl(
         t=4.0, max_weights=INF, system='a', bfs_depth=2,
         seed_template=search.template, expansion_template=search.template,
+        max_layers=None,
     ) is None
 
 
@@ -365,7 +368,8 @@ def test_select_predicted_best_happy_path(tmp_path, monkeypatch):
 
     picked = search._select_predicted_best_impl(
         t=4.0, max_weights=INF, system='a', bfs_depth=2,
-        seed_template=search.template, expansion_template=search.template)
+        seed_template=search.template, expansion_template=search.template,
+        max_layers=None)
     assert picked is not None
     assert isinstance(picked, Configuration)
 
@@ -730,10 +734,10 @@ def test_retired_conf_is_never_re_run(tmp_path, monkeypatch):
     monkeypatch.setattr(
         search, '_select_neighbor_fewest_runs', lambda c, s, t: None)
     assert search._select_top_neighbor(
-        16.0, INF, 'a', search.template, search.template) is None
+        16.0, INF, 'a', search.template, search.template, None) is None
     # Time-budget scan and coverage walk: pure re-run pickers.
     assert search._select_time_budget(
-        16.0, INF, 'a', search.template) is None
+        16.0, INF, 'a', search.template, None) is None
     assert search._select_uncovered_top('b', _main(search)) is None
     # ...and the retired conf doesn't latch the sticky coverage flag on.
     assert search._coverage_flag[('b', 'main')] is False
@@ -760,7 +764,7 @@ def test_retired_conf_is_still_a_mutation_source(tmp_path, monkeypatch):
 
     # End to end: the walk reaches a live conf THROUGH the retired one.
     picked = search._select_top_neighbor(
-        16.0, INF, 'a', search.template, search.template)
+        16.0, INF, 'a', search.template, search.template, None)
     assert picked is not None
     assert not _is_retired(str(picked.model))
 
@@ -806,7 +810,8 @@ def test_predicted_best_expands_retired_seed_but_never_picks_it(
 
     picked = search._select_predicted_best_impl(
         t=16.0, max_weights=INF, system='a', bfs_depth=2,
-        seed_template=search.template, expansion_template=search.template)
+        seed_template=search.template, expansion_template=search.template,
+        max_layers=None)
     assert picked is not None
     assert not _is_retired(str(picked.model))
     # The retired seed was expanded (its neighbours are in the pool)
@@ -1039,7 +1044,8 @@ def test_layer_capped_select_seeds_shallow(tmp_path, monkeypatch):
     assert seeds
     assert all(c.conf.model.num_layers <= 2 for c in seeds)
     # ...and the neighbor walk off it stays within one layer of the cap.
-    picked = search._select_top_neighbor(16.0, INF, 'a', seed_t, exp_t)
+    picked = search._select_top_neighbor(
+        16.0, INF, 'a', seed_t, exp_t, cap + 1)
     assert picked is not None
     assert picked.model.num_layers <= 3
 
@@ -1083,12 +1089,41 @@ def test_layer_capped_select_can_return_the_deeper_neighbor(
 
     picked = search._select_predicted_best_impl(
         t=16.0, max_weights=INF, system='a', bfs_depth=2,
-        seed_template=seed_t, expansion_template=exp_t)
+        seed_template=seed_t, expansion_template=exp_t,
+        max_layers=cap + 1)
     assert picked is not None
     assert picked.model.num_layers == 3
     # Nothing deeper than the expansion cap was ever a candidate.
     assert scored
     assert all(c.model.num_layers <= 3 for c in scored)
+
+
+def test_top_confs_report_shows_the_layer_cap():
+    """A capped select's header carries `L ≤ N+1` right after the T
+    part; an uncapped one has no L part at all."""
+    capped = top_confs_report([], 1584, 1.63, 'a', max_layers=2)
+    t_at = capped.index('T ≤ ')
+    assert ' L ≤ 2 (' in capped[t_at:]
+    assert 'L ≤' not in top_confs_report([], 1584, 1.63, 'a')
+
+
+def test_select_conf_threads_the_result_cap_to_the_strategy(
+    tmp_path, monkeypatch,
+):
+    """The strategy is told the EXPANSION cap (N + 1), or None when
+    the select is uncapped."""
+    search = _make_search(tmp_path)
+    for cap, expected in ((2, 3), (None, None)):
+        seen: list = []
+        monkeypatch.setattr(
+            search, '_run_strategy', lambda *a: seen.append(a[-1]))
+        monkeypatch.setattr(
+            search, '_sample_layer_capped_templates',
+            lambda entry, *a: (entry.template, entry.template, cap))
+        search.select_conf('b')
+        # The drawn strategy, plus the neighbor fallback when the draw
+        # wasn't 'neighbor' itself -- both see the same cap.
+        assert seen and set(seen) == {expected}
 
 
 def test_select_conf_draws_entries_by_share(tmp_path, monkeypatch):

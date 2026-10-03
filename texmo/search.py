@@ -335,11 +335,13 @@ _SEED_RUN_COUNT_CHUNK = 500
 
 
 def top_confs_report(
-    confs: list[ConfScore], max_weights: int, max_time: Optional[float], system: Optional[str]
+    confs: list[ConfScore], max_weights: int, max_time: Optional[float], system: Optional[str],
+    max_layers: Optional[int] = None,
 ) -> str:
     sys = "" if system is None else f" ({system})"
     t = "" if max_time is None else f" T ≤ {ttoa3(max_time)}"
-    lines = [f"Top confs W ≤ {itoa3(max_weights)}{t}{sys}:"]
+    lc = "" if max_layers is None else f" L ≤ {max_layers}"
+    lines = [f"Top confs W ≤ {itoa3(max_weights)}{t}{lc}{sys}:"]
     for c in confs:
         lines.append(format_top_conf_row(c))
     return "\n".join(lines)
@@ -352,14 +354,16 @@ def _predicted_best_report(
     max_weights: int,
     max_time: float,
     depth: int,
+    max_layers: Optional[int] = None,
 ) -> str:
     """Log the seed (with its known median loss for comparison) and
     the top 9 candidates — we only look at the top 9 during the
     run-limit walk."""
     seed_score = f'{seed.median_score:.4f} ({seed.num_runs})'
+    lc = "" if max_layers is None else f" L <= {max_layers}"
     lines = [
         f"Predicted-best confs W <= {itoa3(max_weights)} "
-        f"T <= {ttoa3(max_time)}, depth {depth} ({system}):",
+        f"T <= {ttoa3(max_time)}{lc}, depth {depth} ({system}):",
         f'    {seed_score:<12}  {seed.conf.aligned_str()}  [seed]',
     ]
     for compound, total_runs, c in candidate_data[:9]:
@@ -373,10 +377,12 @@ def time_budget_report(
     max_weights: int,
     max_time: float,
     system: str,
+    max_layers: Optional[int] = None,
 ) -> str:
+    lc = "" if max_layers is None else f" L ≤ {max_layers}"
     lines = [
         f"Time-budget confs W ≤ {itoa3(max_weights)} "
-        f"T ≤ {ttoa3(max_time)} ({system}):"
+        f"T ≤ {ttoa3(max_time)}{lc} ({system}):"
     ]
     for c in confs:
         t = f'{c.time_estimate:7.3f}s'
@@ -743,10 +749,13 @@ class Search(object):
     def _select_top_neighbor(
             self, t: float, max_weights: int, system: str,
             seed_template: Template, expansion_template: Template,
+            max_layers: Optional[int],
     ) -> Optional[Configuration]:
         """Walk the top confs under `seed_template` and their neighbors
         under `expansion_template` (the two differ only on a
-        layer-capped select; see `_sample_layer_capped_templates`)."""
+        layer-capped select; see `_sample_layer_capped_templates`).
+        `max_layers` is that select's result cap (N + 1), None when
+        uncapped; it only labels the report header."""
         with latency.timer("Search._select_top_neighbor"):
             top_confs = list(
                 self._db.top_confs_for_system(
@@ -757,7 +766,8 @@ class Search(object):
             if not top_confs:
                 return None
             logging.info(top_confs_report(confs=top_confs,
-                         max_weights=max_weights, max_time=t, system=system))
+                         max_weights=max_weights, max_time=t, system=system,
+                         max_layers=max_layers))
 
             have_confs = 10
             min_runs_neighbor = []
@@ -813,7 +823,7 @@ class Search(object):
 
     def _select_time_budget(
         self, t: float, max_weights: int, system: str,
-        template: Template,
+        template: Template, max_layers: Optional[int],
     ) -> Optional[Configuration]:
         """Score-ordered scan with a widening total-runs requirement.
 
@@ -824,6 +834,8 @@ class Search(object):
         requirement at its position (or which has zero runs on this
         system). Termination: iteration N's position-0 requirement is
         N, so once N exceeds candidates[0].total_runs we pick it.
+        `max_layers` (the select's layer cap on `template`, or None)
+        only labels the report header.
         """
         with latency.timer("Search._select_time_budget"):
             # Pure re-run picks -- nothing is mutated here, so retired
@@ -849,7 +861,7 @@ class Search(object):
                 return None
             logging.info(time_budget_report(
                 candidates, max_weights=max_weights, max_time=t,
-                system=system,
+                system=system, max_layers=max_layers,
             ))
 
             for limits in _run_limit_sequences():
@@ -1176,6 +1188,7 @@ class Search(object):
     def _select_predicted_best(
         self, t: float, max_weights: int, system: str, bfs_depth: int,
         seed_template: Template, expansion_template: Template,
+        max_layers: Optional[int],
     ) -> Optional[Configuration]:
         """Predictor-guided tournament.
 
@@ -1188,7 +1201,9 @@ class Search(object):
 
         The two templates differ only on a layer-capped select, where
         the seed is one layer shallower than what the walk may reach
-        (see `_sample_layer_capped_templates`).
+        (see `_sample_layer_capped_templates`). `max_layers` is that
+        reachable bound (N + 1), None when uncapped; it only labels the
+        report header.
         """
         if not self.loss_model.is_ready():
             return None
@@ -1197,11 +1212,12 @@ class Search(object):
         ):
             return self._select_predicted_best_impl(
                 t, max_weights, system, bfs_depth, seed_template,
-                expansion_template)
+                expansion_template, max_layers)
 
     def _select_predicted_best_impl(
         self, t: float, max_weights: int, system: str, bfs_depth: int,
         seed_template: Template, expansion_template: Template,
+        max_layers: Optional[int],
     ) -> Optional[Configuration]:
         try:
             seed = next(self._db.top_confs_for_system(
@@ -1323,7 +1339,8 @@ class Search(object):
         candidate_data.sort(key=lambda r: r[0])
 
         logging.info(_predicted_best_report(
-            seed, candidate_data, system, max_weights, t, bfs_depth))
+            seed, candidate_data, system, max_weights, t, bfs_depth,
+            max_layers=max_layers))
 
         # Run-limit sequences (cap at iteration 3 / top 9 confs).
         sequences = [[1], [2, 1, 1], [3, 2, 2, 1, 1, 1, 1, 1, 1]]
@@ -1439,14 +1456,12 @@ class Search(object):
         if cap is None:
             return base, base, None
         expansion_template, _ = _layer_capped_template(base, cap + 1)
-        logging.info(
-            f'Layer-capped select for {system}: seed <= {cap}, '
-            f'result <= {cap + 1} (L* = {top_layers})')
         return seed_template, expansion_template, cap
 
     def _run_strategy(
         self, name: str, t: float, max_weights: int, system: str,
         seed_template: Template, expansion_template: Template,
+        max_layers: Optional[int],
     ) -> Optional[Configuration]:
         """Run one strategy under the select's pair of templates.
 
@@ -1455,25 +1470,29 @@ class Search(object):
         They are the same object on an uncapped select; on a capped one
         they differ by exactly one layer. Pure re-run pickers get the
         expansion template: nothing is mutated there, so the seed bound
-        has nothing to do."""
+        has nothing to do. `max_layers` is the expansion template's
+        layer cap (N + 1) on a capped select, None otherwise; the
+        strategies print it in their report headers as `L ≤ …`."""
         match name:
             case 'predicted_2nd_neighbor':
                 return self._select_predicted_best(
                     t, max_weights, system, bfs_depth=2,
                     seed_template=seed_template,
-                    expansion_template=expansion_template)
+                    expansion_template=expansion_template,
+                    max_layers=max_layers)
             case 'predicted_3rd_neighbor':
                 return self._select_predicted_best(
                     t, max_weights, system, bfs_depth=3,
                     seed_template=seed_template,
-                    expansion_template=expansion_template)
+                    expansion_template=expansion_template,
+                    max_layers=max_layers)
             case 'time_budget':
                 return self._select_time_budget(
-                    t, max_weights, system, expansion_template)
+                    t, max_weights, system, expansion_template, max_layers)
             case 'neighbor':
                 return self._select_top_neighbor(
                     t, max_weights, system, seed_template,
-                    expansion_template)
+                    expansion_template, max_layers)
             case _:
                 raise ValueError(f"unknown strategy: {name}")
 
@@ -1588,10 +1607,12 @@ class Search(object):
             # the neighbor/BFS expansion (and hence the trained conf) at
             # <= N + 1, both on top of the entry's template. The
             # fallback chain below stays capped too; only the final
-            # default fallback is uncapped.
-            seed_template, expansion_template, _ = (
+            # default fallback is uncapped. The strategies' report
+            # headers show the result cap (N + 1) as `L ≤ …`.
+            seed_template, expansion_template, cap = (
                 self._sample_layer_capped_templates(
                     entry, t, max_weights, system))
+            max_layers = None if cap is None else cap + 1
 
             picked, _ = random.choices(
                 _STRATEGY_PROBS,
@@ -1600,7 +1621,7 @@ class Search(object):
             )[0]
             conf = self._run_strategy(
                 picked, t, max_weights, system, seed_template,
-                expansion_template)
+                expansion_template, max_layers)
             if conf is not None:
                 return self._result(conf, picked, system, entry=entry)
 
@@ -1609,7 +1630,7 @@ class Search(object):
             if picked != 'neighbor':
                 conf = self._run_strategy(
                     'neighbor', t, max_weights, system, seed_template,
-                    expansion_template)
+                    expansion_template, max_layers)
                 if conf is not None:
                     return self._result(
                         conf, 'neighbor', system, entry=entry)

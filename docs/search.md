@@ -259,8 +259,12 @@ A capped select runs under **two** templates
 
 So the walk restarts shallow but may still return the one-layer-deeper
 neighbor when the predictor likes it: the lever re-seeds depth, it
-doesn't forbid it. The log line is
-`Layer-capped select for <system>: seed <= N, result <= N+1 (L* = …)`.
+doesn't forbid it. There is no separate log line for the cap: the
+strategy's report header carries the result bound `N + 1` after its
+`T` part — `Top confs W ≤ … T ≤ … L ≤ N+1 (<system>):`, likewise
+`Time-budget confs … T ≤ … L ≤ N+1 (…)` and
+`Predicted-best confs … T <= … L <= N+1, depth …` (that one keeps its
+ASCII `<=`). An uncapped select has no `L` part.
 
 `pick_me`, the warmup ladder, the coverage walk, `_select_max_weights`
 and the final default fallback all stay on the base template — explicit

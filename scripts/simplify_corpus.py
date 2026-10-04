@@ -25,6 +25,9 @@ Three target corpora, all in the same `Name: utterance` format as
     s5u s5, except that the lower-case rewrite covers the User side
         only: the same dialogs are drawn, and the Bot answers every
         one of them in edited prose.
+    s5p s5u, except that every dialog appears twice, once in each
+        style, instead of once in a drawn one -- see "Both styles of
+        every dialog" below.
 
 The first three differ only in *selection*, so generation runs once
 and renders three times:
@@ -152,6 +155,36 @@ stay, a full stop inside the utterance stays ("It is late. Bye!" ->
 "it is late. bye!"), and an ellipsis is not a full stop. The speaker
 labels are format rather than content and are never touched -- the
 corpus parses on "User: " / "Bot: ".
+
+## Both styles of every dialog (s5p), and a held-out split
+
+s5u fixes each dialog's style at render time, so a model that makes
+many passes over the corpus sees every dialog in the same style every
+time: half of them only ever lower case, half only in prose. s5p
+replaces the draw with both of its outcomes. Every dialog is emitted
+twice, once exactly as s5u renders an untreated dialog and once with
+its `PAIRED_SIDES` (User) turns lower-cased and stripped of their
+closing stop. One selection, one polar map and one speech-act draw
+make both copies (`render_pair`), so they differ in nothing but the
+User side's case: exactly half the corpus has a lower-case User, and
+the Bot side is edited prose throughout.
+
+The copies are shuffled apart (`shuffle_apart`, seeded from
+`--seed`): side by side, the second would be predictable from the
+first in any window spanning both -- a free lesson in training and a
+leak in evaluation.
+
+`--holdout N` reserves the last N records of the log -- file order,
+so it composes with `--n-dialogs` -- and `--split valid` renders them
+in place of the training records:
+
+    render --variant s5p --holdout 5000 --out data/soda_s5p.txt
+    render --variant s5p --holdout 5000 --split valid \\
+        --out data/soda_s5p_valid.txt
+
+Neither split holds a dialog of the other, which is what lets a
+held-out loss tell a model that learned the language of the corpus
+from one that memorized its dialogs.
 
 ## Source and dialog identity
 
@@ -1285,13 +1318,16 @@ VARIANTS = {
     # s5u: s5 with the lower-case rewrite confined to the User side
     # (`CASE_SIDES`). Same selection, same dialogs drawn.
     "s5u": {_USER: "simple", _BOT: "trivial"},
+    # s5p: s5u with the case draw replaced by both outcomes -- every
+    # dialog twice, as is and User-lower-cased (`PAIRED_SIDES`).
+    "s5p": {_USER: "simple", _BOT: "trivial"},
 }
 
 # Variants that additionally consult the polar log.
-POLAR_VARIANTS = frozenset({"s4", "s5", "s5u"})
+POLAR_VARIANTS = frozenset({"s4", "s5", "s5u", "s5p"})
 
 # Variants that get synthesized speech-act exchanges.
-SPEECH_ACT_VARIANTS = frozenset({"s5", "s5u"})
+SPEECH_ACT_VARIANTS = frozenset({"s5", "s5u", "s5p"})
 
 # Which sides the lower-case rewrite covers, per variant -- and so,
 # implicitly, which variants have the post-step at all. s5 rewrites a
@@ -1305,6 +1341,16 @@ CASE_SIDES = {
 
 # Variants that rewrite some dialogs in lower case.
 CASE_VARIANTS = frozenset(CASE_SIDES)
+
+# Variants that draw no case style at all but emit every dialog twice:
+# once as rendered and once with these sides lower-cased, the copies
+# shuffled apart. s5p is s5u with both outcomes of its draw.
+PAIRED_SIDES = {
+    "s5p": (_USER,),
+}
+
+# The two sides of `render --holdout`.
+TRAIN, VALID = "train", "valid"
 
 # The two answers s4 substitutes in. Bare and punctuated like the
 # trivial phrases around them, and deliberately not varied ("Yes, I
@@ -1540,20 +1586,16 @@ def select_text(turn: dict, variant: str) -> tuple[str, str]:
     raise ValueError(f"no usable text for a {turn['side']} turn: {turn!r}")
 
 
-def render_dialog(turns: list[dict], variant: str, stats: dict,
-                  polar: dict | None = None,
-                  rng: random.Random | None = None,
-                  case: random.Random | None = None) -> str:
-    """One dialog as `Name: utterance` lines separated by blank lines.
+def render_turns(turns: list[dict], variant: str, stats: dict,
+                 polar: dict | None = None,
+                 rng: random.Random | None = None) -> list[dict]:
+    """One dialog's rendered turns -- `{"side", "text"}` -- before case.
 
     `polar` is `{turn index: "yes"/"no"/"other"}` for this dialog; only
     the polar variants pass it, and only `yes`/`no` override the text.
     `rng` is the speech-act generator, passed only by the variants in
     `SPEECH_ACT_VARIANTS`; the exchanges go on after selection, so the
-    polar indices still address the source turns. `case` is the
-    case-style generator of `CASE_VARIANTS`, applied last of all, so
-    that the synthesized turns are rewritten with the rest -- over the
-    sides `CASE_SIDES` gives the variant.
+    polar indices still address the source turns.
     """
     rendered = []
     for i, turn in enumerate(turns):
@@ -1573,13 +1615,85 @@ def render_dialog(turns: list[dict], variant: str, stats: dict,
         rendered, added = add_speech_acts(rendered, rng)
         for act in SPEECH_ACTS:
             stats[act] += added[act]
+    stats["turns"] += len(rendered)
+    stats["bot_turns"] += sum(t["side"] == _BOT for t in rendered)
+    return rendered
+
+
+def format_dialog(rendered: list[dict]) -> str:
+    """Rendered turns as `Name: utterance` lines separated by blank lines."""
+    return "\n\n".join(f"{t['side']}: {t['text']}" for t in rendered)
+
+
+def render_dialog(turns: list[dict], variant: str, stats: dict,
+                  polar: dict | None = None,
+                  rng: random.Random | None = None,
+                  case: random.Random | None = None) -> str:
+    """One dialog as `Name: utterance` lines separated by blank lines.
+
+    `render_turns` plus the case style: `case` is the case-style
+    generator of `CASE_VARIANTS`, applied last of all, so that the
+    synthesized turns are rewritten with the rest -- over the sides
+    `CASE_SIDES` gives the variant.
+    """
+    rendered = render_turns(turns, variant, stats, polar, rng)
     if case is not None:
         rendered, lowered = apply_case_style(
             rendered, case, CASE_SIDES[variant])
         stats["lowercased"] += lowered
-    stats["turns"] += len(rendered)
-    stats["bot_turns"] += sum(t["side"] == _BOT for t in rendered)
-    return "\n\n".join(f"{t['side']}: {t['text']}" for t in rendered)
+    return format_dialog(rendered)
+
+
+def render_pair(turns: list[dict], variant: str, stats: dict,
+                polar: dict | None = None,
+                rng: random.Random | None = None) -> tuple[str, str]:
+    """`(as rendered, lower-cased)`: one dialog of `PAIRED_SIDES`, twice.
+
+    One `render_turns` call makes both copies, so they share the
+    selection, the polar answers and the speech acts, and differ only
+    in the lower-case rewrite of the variant's paired sides. The tally
+    counts the dialog once and its lower-cased copy in `lowercased`.
+    """
+    rendered = render_turns(turns, variant, stats, polar, rng)
+    stats["lowercased"] += 1
+    return (format_dialog(rendered),
+            format_dialog(lowercase_dialog(rendered, PAIRED_SIDES[variant])))
+
+
+def shuffle_rng(seed: int) -> random.Random:
+    """The generator for the order of a paired variant's dialogs."""
+    return random.Random(f"{seed}:shuffle")
+
+
+def shuffle_apart(items: list[tuple], rng: random.Random) -> list[tuple]:
+    """`(key, text)` items in seeded random order, no key twice in a row.
+
+    A plain shuffle of N pairs leaves one pair side by side on average.
+    Each such collision is swapped with the first item that, once
+    moved, sits clear of its own twin and leaves the collider clear of
+    its. Only five positions are ruled out (the colliding two, their
+    outer neighbours, and the twin of the right-hand neighbour), so
+    from three pairs up such an item always exists; below that a
+    collision may stay.
+    """
+    out = list(items)
+    rng.shuffle(out)
+
+    def clear(k: int) -> bool:
+        return all(out[m][0] != out[k][0] for m in (k - 1, k + 1)
+                   if 0 <= m < len(out))
+
+    for i in range(1, len(out)):
+        if out[i][0] != out[i - 1][0]:
+            continue
+        for j in range(len(out)):
+            if abs(j - i) <= 1:
+                continue
+            out[i], out[j] = out[j], out[i]
+            if clear(i) and clear(j):
+                break
+            out[i], out[j] = out[j], out[i]
+    return out
 
 
 def render_corpus(records: list[dict], variant: str,
@@ -1590,16 +1704,22 @@ def render_corpus(records: list[dict], variant: str,
     Failed dialogs are skipped; the rest are emitted in `dialog_idx`
     order (the log is in completion order, which the thread pool
     shuffles), two blank lines between dialogs, one trailing newline
-    -- the format `make_soda_txt.py` writes.
+    -- the format `make_soda_txt.py` writes. A variant in
+    `PAIRED_SIDES` emits every dialog twice instead (`render_pair`),
+    in the seeded order of `shuffle_apart`.
 
     `polar` is the `{dialog_idx: {turn index: label}}` map of
     `polar_map`, consulted only by the variants in `POLAR_VARIANTS`.
     `seed` drives the speech acts and the case style of the variants
-    in `SPEECH_ACT_VARIANTS` / `CASE_VARIANTS`, per `dialog_idx`.
+    in `SPEECH_ACT_VARIANTS` / `CASE_VARIANTS`, per `dialog_idx`, and
+    the order of the paired ones.
+
+    The tallies count source dialogs; `emitted` is the number of
+    dialogs in the text, which is twice that for a paired variant.
     """
-    stats = {"dialogs": 0, "turns": 0, "bot_turns": 0, "failed": 0,
-             "collapsed": 0, "fallbacks": 0, "polar": 0, f"polar_{YES}": 0,
-             f"polar_{NO}": 0, "lowercased": 0}
+    stats = {"dialogs": 0, "emitted": 0, "turns": 0, "bot_turns": 0,
+             "failed": 0, "collapsed": 0, "fallbacks": 0, "polar": 0,
+             f"polar_{YES}": 0, f"polar_{NO}": 0, "lowercased": 0}
     stats.update({act: 0 for act in SPEECH_ACTS})
     usable = []
     for record in records:
@@ -1610,24 +1730,49 @@ def render_corpus(records: list[dict], variant: str,
     usable.sort(key=lambda r: r["dialog_idx"])
     chunks = []
     for record in usable:
-        by_turn = (polar or {}).get(record["dialog_idx"]) \
+        idx = record["dialog_idx"]
+        by_turn = (polar or {}).get(idx) \
             if variant in POLAR_VARIANTS else None
-        rng = (speech_rng(seed, record["dialog_idx"])
+        rng = (speech_rng(seed, idx)
                if variant in SPEECH_ACT_VARIANTS else None)
-        case = (case_rng(seed, record["dialog_idx"])
-                if variant in CASE_VARIANTS else None)
-        chunks.append(
-            render_dialog(
-                record["turns"], variant, stats, by_turn, rng, case))
+        if variant in PAIRED_SIDES:
+            chunks += [(idx, dialog) for dialog in render_pair(
+                record["turns"], variant, stats, by_turn, rng)]
+        else:
+            case = (case_rng(seed, idx)
+                    if variant in CASE_VARIANTS else None)
+            chunks.append((idx, render_dialog(
+                record["turns"], variant, stats, by_turn, rng, case)))
         stats["dialogs"] += 1
-    text = "\n\n\n".join(chunks)
+    if variant in PAIRED_SIDES:
+        chunks = shuffle_apart(chunks, shuffle_rng(seed))
+    stats["emitted"] = len(chunks)
+    text = "\n\n\n".join(dialog for _, dialog in chunks)
     if text:
         text += "\n"
     return text, stats
 
 
-def default_corpus_path(variant: str) -> str:
-    return os.path.join(_CORPUS_DIR, f"soda_train_ub_{variant}.txt")
+def split_records(records: list[dict], holdout: int,
+                  split: str) -> list[dict]:
+    """The `split` side of `records`, with the last `holdout` held out.
+
+    File order, like `--n-dialogs`, which is applied first: the
+    held-out records are the last ones the log holds, so a grown log
+    moves them unless `--n-dialogs` pins its length.
+    """
+    if not 0 <= holdout < len(records):
+        raise ValueError(f"--holdout {holdout} must be in [0, "
+                         f"{len(records)}), the number of records")
+    if split == VALID and holdout == 0:
+        raise ValueError(f"--split {VALID} needs a --holdout")
+    cut = len(records) - holdout
+    return records[:cut] if split == TRAIN else records[cut:]
+
+
+def default_corpus_path(variant: str, split: str = TRAIN) -> str:
+    suffix = "" if split == TRAIN else f"_{split}"
+    return os.path.join(_CORPUS_DIR, f"soda_train_ub_{variant}{suffix}.txt")
 
 
 def run_render(args) -> int:
@@ -1636,6 +1781,7 @@ def run_render(args) -> int:
         raise ValueError(f"no records in {args.log}")
     if args.n_dialogs is not None:
         records = records[:args.n_dialogs]
+    records = split_records(records, args.holdout, args.split)
     polar = None
     if args.variant in POLAR_VARIANTS:
         polar_records = read_polar_records(args.polar_log)
@@ -1645,7 +1791,7 @@ def run_render(args) -> int:
                 f"{args.polar_log} has no usable records (run "
                 f"`simplify_corpus.py classify` first)")
         polar = polar_map(polar_records)
-    out_path = args.out or default_corpus_path(args.variant)
+    out_path = args.out or default_corpus_path(args.variant, args.split)
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     text, stats = render_corpus(records, args.variant, polar, args.seed)
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
@@ -1653,8 +1799,14 @@ def run_render(args) -> int:
     print(f"{args.log} -> {out_path} ({args.variant}: "
           f"User={VARIANTS[args.variant][_USER]}, "
           f"Bot={VARIANTS[args.variant][_BOT]})")
+    if args.holdout:
+        print(f"  split {args.split}: {len(records)} record(s) "
+              f"(last {args.holdout} of the log held out)")
     print(f"  dialogs {stats['dialogs']}, turns {stats['turns']}, "
           f"bytes {len(text.encode('utf-8'))}")
+    if args.variant in PAIRED_SIDES:
+        print(f"  each dialog twice, shuffled apart: {stats['emitted']} "
+              f"emitted")
     print(f"  skipped (failed in the log): {stats['failed']}")
     print(f"  newline collapses: {stats['collapsed']}, "
           f"field fallbacks: {stats['fallbacks']}")
@@ -1667,12 +1819,12 @@ def run_render(args) -> int:
     if args.variant in SPEECH_ACT_VARIANTS:
         for line in format_speech_acts(stats, args.seed):
             print(line)
-    if args.variant in CASE_VARIANTS:
-        dialogs = max(stats["dialogs"], 1)
-        sides = "/".join(CASE_SIDES[args.variant])
+    sides = CASE_SIDES.get(args.variant) or PAIRED_SIDES.get(args.variant)
+    if sides:
+        emitted = max(stats["emitted"], 1)
         print(f"  lower case, no closing stop: {stats['lowercased']} "
-              f"dialog(s) ({100 * stats['lowercased'] / dialogs:.1f}%), "
-              f"{sides} turns")
+              f"dialog(s) ({100 * stats['lowercased'] / emitted:.1f}%), "
+              f"{'/'.join(sides)} turns")
     return 0
 
 
@@ -1846,12 +1998,20 @@ def build_parser() -> argparse.ArgumentParser:
              "trivial; s3: User simple + Bot trivial; s4: s3 with polar "
              "answers; s5: s4 with greeting/thanks/farewell exchanges and "
              "half the dialogs in lower case; s5u: s5 with those dialogs "
-             "lower-cased on the User side only")
+             "lower-cased on the User side only; s5p: s5u with every "
+             "dialog twice, as is and User-lower-cased, shuffled apart")
     ren.add_argument(
         "--n-dialogs", type=int, default=None,
         help="render only the first N records of the log (default: all); "
              "how a later variant covers exactly the dialogs an earlier "
              "one did, the log having grown in between")
+    ren.add_argument(
+        "--holdout", type=int, default=0,
+        help="hold out the last N records (file order, after "
+             "--n-dialogs) as the validation split (default: 0)")
+    ren.add_argument(
+        "--split", default=TRAIN, choices=(TRAIN, VALID),
+        help=f"which side of --holdout to render (default: {TRAIN})")
     ren.add_argument(
         "--polar-log", default=_DEFAULT_POLAR_LOG,
         help=f"a `classify` output JSONL, required by the polar variants "
@@ -1861,12 +2021,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--seed", type=int, default=_DEFAULT_SPEECH_SEED,
         help=f"RNG seed for the speech-act and lower-case post-steps "
              f"({', '.join(sorted(SPEECH_ACT_VARIANTS | CASE_VARIANTS))}); "
-             f"combined with each dialog_idx (default: "
+             f"combined with each dialog_idx, and for the order of the "
+             f"paired ones ({', '.join(sorted(PAIRED_SIDES))}) (default: "
              f"{_DEFAULT_SPEECH_SEED})")
     ren.add_argument(
         "--out", default=None,
         help="output text file (default: "
-             "data/soda/soda_train_ub_<variant>.txt)")
+             "data/soda/soda_train_ub_<variant>.txt, with a _valid suffix "
+             "for --split valid)")
     ren.set_defaults(func=run_render)
 
     return parser

@@ -11,9 +11,12 @@ resumability set, the render selection table and the degenerate-output
 warning are all pure. The script's pyarrow import is guarded exactly
 so this module imports in an environment without it.
 """
+import collections
+import hashlib
 import json
 import os
 import random
+import re
 import sys
 
 import pytest
@@ -326,8 +329,8 @@ def test_render_corpus_sorts_skips_failures_and_formats():
     ]
     text, stats = sc.render_corpus(records, "s1")
     assert text == ("User: u0\n\nBot: s0\n\n\nUser: u2\n\nBot: s2\n")
-    assert stats == {"dialogs": 2, "turns": 4, "bot_turns": 2, "failed": 1,
-                     "collapsed": 0, "fallbacks": 0, "polar": 0,
+    assert stats == {"dialogs": 2, "emitted": 2, "turns": 4, "bot_turns": 2,
+                     "failed": 1, "collapsed": 0, "fallbacks": 0, "polar": 0,
                      "polar_yes": 0, "polar_no": 0, "lowercased": 0,
                      "greeting": 0, "thanks": 0, "farewell": 0}
 
@@ -925,6 +928,178 @@ def test_s5u_bot_turns_hold_no_lower_case_dialog_opener():
 def test_case_sides_covers_every_case_variant():
     assert set(sc.CASE_SIDES) == set(sc.CASE_VARIANTS)
     assert all(variant in sc.VARIANTS for variant in sc.CASE_SIDES)
+
+
+# --------------------------------------------- both styles (s5p)
+
+
+def _unique_record(dialog_idx, n_turns, first=sc._USER):
+    """`_alternating_record` with the dialog's index in every text."""
+    sides = [first, sc._other_side(first)]
+    return _record(dialog_idx, [
+        _log_turn(sides[i % 2], f"Original {dialog_idx} {i}.",
+                  f"Simple {dialog_idx} {i}.", f"Trivial {dialog_idx} {i}.")
+        for i in range(n_turns)])
+
+
+def _unique_records(n=120, max_extra=4):
+    return [_unique_record(i, 2 + i % max_extra, sc._SIDES[i % 2])
+            for i in range(n)]
+
+
+def _unique_polar(n):
+    """A polar label on turn 1 -- a Bot turn there -- of the even dialogs."""
+    return {i: {1: "yes" if i % 4 == 0 else "no"} for i in range(0, n, 2)}
+
+
+# Every User turn of a `_unique_record` is "Simple <idx> <i>." in some
+# case, and every rendered dialog has one: that is how a test finds
+# which source dialog an emitted one came from.
+_SOURCE_IDX = re.compile(r"User: [Ss]imple (\d+) ")
+
+
+def _order(text: str) -> list[int]:
+    return [int(_SOURCE_IDX.search(d).group(1)) for d in _dialogs(text)]
+
+
+def _by_source(text: str) -> dict:
+    out = {}
+    for idx, dialog in zip(_order(text), _dialogs(text)):
+        out.setdefault(idx, []).append(dialog)
+    return out
+
+
+def test_s5p_emits_each_dialog_as_s5u_renders_it_in_both_styles(
+        monkeypatch):
+    records = _unique_records()
+    polar = _unique_polar(len(records))
+    s5p, stats = sc.render_corpus(records, "s5p", polar)
+    monkeypatch.setattr(sc, "case_rng", lambda seed, idx: _NoActsRng())
+    prose, prose_stats = sc.render_corpus(records, "s5u", polar)
+    monkeypatch.setattr(sc, "case_rng", lambda seed, idx: _AllActsRng())
+    lower, _ = sc.render_corpus(records, "s5u", polar)
+
+    # Exactly s5u's two outcomes of every dialog: same selection, same
+    # polar answers, same speech acts -- only the draw is gone.
+    assert collections.Counter(_dialogs(s5p)) == collections.Counter(
+        _dialogs(prose) + _dialogs(lower))
+    for key in ("dialogs", "turns", "bot_turns", "polar", *sc.SPEECH_ACTS):
+        assert stats[key] == prose_stats[key]
+    assert stats["polar"] > 0
+    assert all(stats[act] > 0 for act in sc.SPEECH_ACTS)
+    assert stats["emitted"] == 2 * len(records)
+    assert stats["lowercased"] == len(records)
+
+
+def test_s5p_pair_differs_only_in_the_user_side_case():
+    text, _ = sc.render_corpus(_unique_records(), "s5p", _unique_polar(120))
+    pairs = _by_source(text)
+    assert sorted(pairs) == list(range(120))
+    for copies in pairs.values():
+        assert len(copies) == 2
+        users = [[line for line in _lines(d) if line.startswith("User: ")]
+                 for d in copies]
+        # One copy is all prose on the User side, the other none of it.
+        plain = [all(line[6].isupper() for line in u) for u in users]
+        assert sorted(plain) == [False, True]
+        prose, lowered = (copies if plain[0] else copies[::-1])
+        got, want = _lines(lowered), _lines(prose)
+        assert len(got) == len(want)
+        for line, original in zip(got, want):
+            if original.startswith("Bot: "):
+                # Byte-identical across the pair, and edited prose.
+                assert line == original
+                assert original[5].isupper()
+            else:
+                assert line == _lowered_line(original)
+
+
+def test_s5p_never_puts_the_two_copies_side_by_side():
+    order = _order(sc.render_corpus(_unique_records(), "s5p")[0])
+    assert all(a != b for a, b in zip(order, order[1:]))
+    # A shuffle, not the source order twice over.
+    assert order != sorted(order)
+
+
+def test_s5p_order_is_seeded_and_reproducible():
+    records = _unique_records()
+    first = sc.render_corpus(records, "s5p")[0]
+    assert sc.render_corpus(records, "s5p")[0] == first
+    reseeded = sc.render_corpus(records, "s5p", seed=7)[0]
+    assert _order(reseeded) != _order(first)
+
+
+@pytest.mark.parametrize("n_pairs", [3, 4, 7, 60])
+def test_shuffle_apart_keeps_every_twin_apart(n_pairs):
+    items = [(k, f"{k}{copy}") for k in range(n_pairs) for copy in "ab"]
+    for seed in range(200):
+        out = sc.shuffle_apart(items, random.Random(seed))
+        assert sorted(out) == sorted(items)
+        assert all(a[0] != b[0] for a, b in zip(out, out[1:]))
+
+
+def test_split_records_holds_out_the_tail_of_the_log():
+    records = [_record(i) for i in range(5)]
+    assert sc.split_records(records, 0, sc.TRAIN) == records
+    assert sc.split_records(records, 2, sc.TRAIN) == records[:3]
+    assert sc.split_records(records, 2, sc.VALID) == records[3:]
+    with pytest.raises(ValueError):
+        sc.split_records(records, 0, sc.VALID)
+    with pytest.raises(ValueError):
+        sc.split_records(records, 5, sc.TRAIN)
+
+
+def test_render_holdout_splits_share_no_dialog(tmp_path):
+    log = tmp_path / "log.jsonl"
+    # File order is not dialog order: the hold-out follows the file.
+    records = _unique_records(50)
+    records = records[10:] + records[:10]
+    log.write_text("".join(json.dumps(r) + "\n" for r in records),
+                   encoding="utf-8")
+    polar = tmp_path / "polar.jsonl"
+    polar.write_text(json.dumps({"dialog_idx": 0, "turn": 1, "label": "yes"})
+                     + "\n", encoding="utf-8")
+    seen = {}
+    for split in (sc.TRAIN, sc.VALID):
+        out = tmp_path / f"{split}.txt"
+        assert sc.main([
+            "render", "--variant", "s5p", "--log", str(log),
+            "--polar-log", str(polar), "--holdout", "12", "--split", split,
+            "--out", str(out)]) == 0
+        pairs = _by_source(out.read_text(encoding="utf-8"))
+        assert all(len(copies) == 2 for copies in pairs.values())
+        seen[split] = set(pairs)
+    assert seen[sc.VALID] == {r["dialog_idx"] for r in records[-12:]}
+    assert seen[sc.TRAIN] == {r["dialog_idx"] for r in records[:-12]}
+    assert not seen[sc.TRAIN] & seen[sc.VALID]
+
+
+def test_paired_variants_are_s5u_without_the_draw():
+    for variant in sc.PAIRED_SIDES:
+        assert variant in sc.VARIANTS
+        assert variant in sc.POLAR_VARIANTS
+        assert variant in sc.SPEECH_ACT_VARIANTS
+        assert variant not in sc.CASE_VARIANTS
+
+
+# sha256 of each earlier variant's render of `_golden_records()`, taken
+# with the renderer as it stood before s5p went in (2026-10-03): the
+# render refactor that s5p needed must not move a byte of them. A real
+# corpus was checked the same way -- `render --variant s5u --n-dialogs
+# 30000` reproduces data/soda_s5u.txt exactly.
+_GOLDEN = {
+    "s4": "3a1ff11cfa8eef22d5219958da517b9afb1d3ffd4e82212deef9610e4636d5d3",
+    "s5": "7ec45727fe20b9015eb186115cc5738db94a780fcdb5ce6f2e5ed252e34808f9",
+    "s5u": "41780afa2ca5aa07a25e84a6a375d4b2e5c712f62f433a7e8722fdb1035a3592",
+}
+
+
+@pytest.mark.parametrize("variant", sorted(_GOLDEN))
+def test_earlier_variants_render_byte_identically(variant):
+    text, _ = sc.render_corpus(
+        _unique_records(150, max_extra=5), variant, _unique_polar(150))
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    assert digest == _GOLDEN[variant]
 
 
 # ------------------------------------------------------------ summary

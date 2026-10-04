@@ -4,6 +4,9 @@ import math
 import os
 import random
 import statistics
+import subprocess
+import time
+from dataclasses import dataclass
 from datetime import datetime
 from time import perf_counter
 from typing import Optional
@@ -13,9 +16,15 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 
+try:
+    import resource  # Unix only
+except ImportError:  # Windows: the rusage fields of a chunk stay None
+    resource = None
+
 from . import generate
 from .common import ttoa3
 from .configuration import Configuration
+from .dataset import DataSetWrapper
 from .layer_jax import LayerWeights
 from .manager import Manager
 from .model2_jax import Model2Jax
@@ -73,6 +82,50 @@ _SUSPEND_MIN_CHUNKS = 8
 _SUSPEND_OUTLIER_FACTOR = 10.0
 _SUSPEND_MIN_GAP_S = 30.0
 
+# Diagnostics for the chunks the detector above flags. An outlier on
+# its own is just a number at the end of the run -- "52.8 s and 31.1 s
+# against a 1.08 s median" on a dedicated GPU box says nothing about
+# why. So every chunk keeps a few cheap counters (`_ChunkRecord`: a
+# handful of clock reads and one getrusage per chunk), the end-of-run
+# warning and crash quote the outliers' records, and a chunk over the
+# threshold is also reported the moment it ends, together with a
+# system snapshot (`_system_snapshot`: PSI, load, memory, nvidia-smi)
+# taken while the cause may still be visible. Nothing is snapshotted
+# in the steady state: a chunk under the absolute floor costs one
+# comparison.
+#
+# What the counters separate:
+# - wall (perf_counter) vs clock (time.time()): equal when the process
+#   was awake for the whole chunk; clock far ahead means the machine
+#   slept (or the system clock was stepped). Linux's perf_counter is
+#   CLOCK_MONOTONIC, which stops during suspend, so there a long chunk
+#   is always awake time.
+# - sample vs compute: waiting on the prefetch queue (queue depth at
+#   chunk start; 0 means the chunk had to wait) vs the jitted scan and
+#   its host sync.
+# - process CPU time (all threads) against wall, plus, where rusage
+#   exists, user/sys split, major page faults and block reads (paging
+#   or disk) and involuntary context switches (preemption).
+# - recompiled: the jit cache of the chunk function changed size
+#   during the chunk. Always true for chunk 0, and for a shorter last
+#   chunk.
+#
+# Online, a chunk is judged against the median of the eligible chunks
+# before it, with the same factor and floor. It needs fewer of them
+# than the correction does: a false alarm costs one log line rather
+# than a corrected or crashed run, and an outlier among the first few
+# chunks of a short run is just as worth a snapshot. Three is the
+# fewest whose median a single earlier outlier cannot drag up.
+_ONLINE_MIN_CHUNKS = 3
+
+# nvidia-smi can hang on a wedged GPU -- itself worth knowing, so a
+# timeout is reported rather than swallowed.
+_NVIDIA_SMI_TIMEOUT_S = 5.0
+_NVIDIA_SMI_QUERY = (
+    'utilization.gpu,clocks.sm,clocks_throttle_reasons.active,'
+    'temperature.gpu,power.draw,memory.used')
+_NVIDIA_SMI_LABEL = 'util, sm clock, throttle reasons, temp C, power, mem'
+
 # Below this share of training wall time spent waiting on the input
 # pipeline, the summary line is phrased as a neutral statistic rather
 # than as a diagnosis.
@@ -86,7 +139,286 @@ _INPUT_BOUND_FRACTION = 0.10
 _EMB_SCALE_LOG = 'results/emb_scale.jsonl'
 
 
-def _correct_chunk_times(chunk_times: list[float]) -> tuple[float, int]:
+@dataclass(frozen=True)
+class _Usage:
+    """Process counters read at a chunk boundary. The rusage fields
+    are None where the `resource` module is missing (Windows) or
+    getrusage failed."""
+    clock: float
+    cpu: float
+    utime: float | None = None
+    stime: float | None = None
+    majflt: int | None = None
+    inblock: int | None = None
+    nivcsw: int | None = None
+
+
+def _read_usage() -> _Usage:
+    """The counters `_ChunkRecord` takes deltas of. Never raises."""
+    clock = time.time()
+    cpu = time.process_time()
+    if resource is None:
+        return _Usage(clock, cpu)
+    try:
+        ru = resource.getrusage(resource.RUSAGE_SELF)
+        return _Usage(clock, cpu, ru.ru_utime, ru.ru_stime, ru.ru_majflt,
+                      ru.ru_inblock, ru.ru_nivcsw)
+    except Exception:
+        return _Usage(clock, cpu)
+
+
+def _delta(start: float | None, end: float | None) -> float | None:
+    return None if start is None or end is None else end - start
+
+
+@dataclass(frozen=True)
+class _ChunkRecord:
+    """What one training chunk cost, for the anomaly diagnostics (see
+    the comment above `_ONLINE_MIN_CHUNKS`). Durations in seconds;
+    None where the platform or the installed jax cannot tell."""
+    index: int
+    first_step: int
+    steps: int
+    wall: float  # perf_counter, sample + compute: what the detector judges
+    sample: float
+    compute: float
+    clock: float  # time.time() over the same interval
+    cpu: float  # process CPU time, all threads
+    utime: float | None
+    stime: float | None
+    majflt: int | None
+    inblock: int | None
+    nivcsw: int | None
+    recompiled: bool | None
+    queue_depth: int | None  # prefetched batches at chunk start
+
+
+def _make_chunk_record(
+    index: int,
+    first_step: int,
+    steps: int,
+    wall: float,
+    sample: float,
+    compute: float,
+    start: _Usage,
+    end: _Usage,
+    recompiled: bool | None,
+    queue_depth: int | None,
+) -> _ChunkRecord:
+    return _ChunkRecord(
+        index=index, first_step=first_step, steps=steps,
+        wall=wall, sample=sample, compute=compute,
+        clock=end.clock - start.clock,
+        cpu=end.cpu - start.cpu,
+        utime=_delta(start.utime, end.utime),
+        stime=_delta(start.stime, end.stime),
+        majflt=_delta(start.majflt, end.majflt),
+        inblock=_delta(start.inblock, end.inblock),
+        nivcsw=_delta(start.nivcsw, end.nivcsw),
+        recompiled=recompiled,
+        queue_depth=queue_depth,
+    )
+
+
+def _jit_cache_size(fn) -> int | None:
+    """How many compiled variants a jitted function holds; None where
+    the installed jax lacks this private API."""
+    try:
+        return fn._cache_size()
+    except Exception:
+        return None
+
+
+def _queue_depth(
+    dataset, ntokens: int, batch: int, tokenset_name: str
+) -> int | None:
+    """Prefetched batches waiting for this request shape; None for a
+    sampler without a prefetch queue."""
+    if not isinstance(dataset, DataSetWrapper):
+        return None
+    try:
+        return dataset.queue_depth(ntokens, batch, tokenset_name)
+    except Exception:
+        return None
+
+
+def _fmt_s(t: float | None) -> str:
+    """`ttoa3`, extended to None and to negative intervals (a clock
+    stepped backwards)."""
+    if t is None:
+        return '?'
+    return f'-{ttoa3(-t)}' if t < 0 else ttoa3(t)
+
+
+def _format_chunk_record(r: _ChunkRecord) -> str:
+    """Everything a chunk record knows, on one line. Fields the
+    platform could not measure are left out."""
+    cpu = f'cpu {_fmt_s(r.cpu)}'
+    if r.utime is not None and r.stime is not None:
+        cpu += f' (user {_fmt_s(r.utime)}, sys {_fmt_s(r.stime)})'
+    parts = [
+        f'chunk {r.index} (steps {r.first_step}-'
+        f'{r.first_step + r.steps - 1}): wall {_fmt_s(r.wall)} '
+        f'(sample {_fmt_s(r.sample)}, compute {_fmt_s(r.compute)})',
+        f'clock {_fmt_s(r.clock)}',
+        cpu,
+    ]
+    if r.majflt is not None:
+        parts.append(f'majflt {r.majflt}')
+    if r.inblock is not None:
+        parts.append(f'inblock {r.inblock}')
+    if r.nivcsw is not None:
+        parts.append(f'nivcsw {r.nivcsw}')
+    if r.recompiled is not None:
+        parts.append(f'recompiled {"yes" if r.recompiled else "no"}')
+    if r.queue_depth is not None:
+        parts.append(f'queue depth {r.queue_depth}')
+    return ', '.join(parts)
+
+
+def _typical_record(records: list[_ChunkRecord]) -> _ChunkRecord:
+    """The record at the (lower) median wall time: the steady-state
+    chunk an outlier is set against."""
+    return sorted(records, key=lambda r: r.wall)[(len(records) - 1) // 2]
+
+
+def _first_line(path: str) -> str:
+    with open(path) as f:
+        return f.readline().strip()
+
+
+def _probe_psi(root: str = '/proc/pressure') -> str | None:
+    """Linux pressure stall information: the first (`some`) line for
+    cpu, io and memory -- the share of the last 10/60/300 s in which
+    at least one task stalled on that resource."""
+    parts = []
+    for name in ('cpu', 'io', 'memory'):
+        try:
+            parts.append(f'{name} {_first_line(os.path.join(root, name))}')
+        except OSError:
+            pass  # no PSI on this kernel or platform
+    return f'psi: {" | ".join(parts)}' if parts else None
+
+
+def _probe_loadavg(path: str = '/proc/loadavg') -> str | None:
+    return f'loadavg {_first_line(path)}'
+
+
+def _probe_meminfo(path: str = '/proc/meminfo') -> str | None:
+    """MemAvailable and SwapFree from /proc/meminfo, in GiB."""
+    wanted = ('MemAvailable', 'SwapFree')
+    found = {}
+    with open(path) as f:
+        for line in f:
+            key, _, rest = line.partition(':')
+            if key in wanted:
+                found[key] = int(rest.split()[0]) / 2**20  # kB -> GiB
+    return ', '.join(
+        f'{key} {found[key]:.2f} GiB' for key in wanted if key in found
+    ) or None
+
+
+def _probe_gpu() -> str | None:
+    """One nvidia-smi query; None on a machine without the driver."""
+    try:
+        out = subprocess.run(
+            ['nvidia-smi', f'--query-gpu={_NVIDIA_SMI_QUERY}',
+             '--format=csv,noheader'],
+            capture_output=True, text=True, timeout=_NVIDIA_SMI_TIMEOUT_S)
+    except FileNotFoundError:
+        return None
+    except subprocess.TimeoutExpired:
+        return (f'gpu: nvidia-smi timed out after '
+                f'{ttoa3(_NVIDIA_SMI_TIMEOUT_S)}')
+    if out.returncode != 0:
+        err = (out.stderr or out.stdout or '').strip().splitlines()
+        reason = f' ({err[0].strip()})' if err else ''
+        return f'gpu: nvidia-smi exit {out.returncode}{reason}'
+    gpus = [line.strip() for line in out.stdout.splitlines() if line.strip()]
+    if not gpus:
+        return None
+    return f'gpu ({_NVIDIA_SMI_LABEL}): {" | ".join(gpus)}'
+
+
+def _system_snapshot() -> str:
+    """Whatever this machine can say about its state right now, on one
+    line. A probe that fails or does not apply here is left out; the
+    snapshot itself never raises."""
+    parts = []
+    for probe in (_probe_psi, _probe_loadavg, _probe_meminfo, _probe_gpu):
+        try:
+            part = probe()
+        except Exception:
+            continue
+        if part:
+            parts.append(part)
+    return '; '.join(parts) or 'nothing to report'
+
+
+def _suspend_threshold(eligible: list[float]) -> tuple[float, float]:
+    """`(median, threshold)` over the eligible chunk times. Both
+    conditions at once: relative to this run *and* long enough to be
+    a nap rather than a data-pipeline hiccup."""
+    median = statistics.median(eligible)
+    return median, max(_SUSPEND_OUTLIER_FACTOR * median, _SUSPEND_MIN_GAP_S)
+
+
+def _online_outlier_threshold(chunk_times: list[float]) -> float | None:
+    """The threshold the latest chunk exceeded, judged against the
+    eligible chunks before it; None if it is no outlier, or if there
+    are fewer than `_ONLINE_MIN_CHUNKS` of those to judge by."""
+    previous = chunk_times[1:-1]
+    if len(previous) < _ONLINE_MIN_CHUNKS:
+        return None
+    _, threshold = _suspend_threshold(previous)
+    return threshold if chunk_times[-1] > threshold else None
+
+
+def _warn_if_anomalous(records: list[_ChunkRecord]) -> bool:
+    """Warn, with its record and a system snapshot, the moment the
+    latest chunk turns out anomalous; returns whether it did. Never
+    raises -- the verdict that counts is `_correct_chunk_times`'s at
+    the end of the run."""
+    # The steady state: under the floor no chunk is ever an outlier,
+    # so no list and no median.
+    if records[-1].wall <= _SUSPEND_MIN_GAP_S:
+        return False
+    threshold = _online_outlier_threshold([r.wall for r in records])
+    if threshold is None:
+        return False
+    try:
+        logging.warning(
+            f'anomalous chunk: {_format_chunk_record(records[-1])} -- over '
+            f'the threshold {ttoa3(threshold)}; typical '
+            f'{_format_chunk_record(_typical_record(records[1:-1]))}; '
+            f'system: {_system_snapshot()}')
+    except Exception:
+        logging.exception('anomalous-chunk diagnostics failed (ignored)')
+    return True
+
+
+def _outlier_details(
+    records: list[_ChunkRecord] | None, outliers: list[int], sep: str
+) -> str:
+    """The outlying chunks' records and, for scale, the typical one,
+    each led by `sep`. Empty without records. A formatting failure
+    degrades to a note rather than masking the caller's verdict."""
+    if not records:
+        return ''
+    try:
+        lines = [f'outlier {_format_chunk_record(records[i])}'
+                 for i in outliers]
+        lines.append(
+            f'typical {_format_chunk_record(_typical_record(records[1:]))}')
+    except Exception as e:
+        return f'{sep}(chunk details unavailable: {e!r})'
+    return ''.join(sep + line for line in lines)
+
+
+def _correct_chunk_times(
+    chunk_times: list[float],
+    records: list[_ChunkRecord] | None = None,
+) -> tuple[float, int]:
     """Total training wall time, with a single suspend-sized gap repaired.
 
     `chunk_times` are the measured durations of the training chunks,
@@ -96,6 +428,11 @@ def _correct_chunk_times(chunk_times: list[float]) -> tuple[float, int]:
     `_SUSPEND_OUTLIER_FACTOR` times the median of the eligible chunks
     and over `_SUSPEND_MIN_GAP_S` in absolute terms (see the
     constants above for what counts and why).
+
+    `records`, if given, are the same chunks' `_ChunkRecord`s; the
+    suspend warning and the error then quote the outliers' records
+    and a typical one, so the log line or the traceback alone tells
+    what the outlying chunks were doing.
 
     Raises:
         RuntimeError: more than one outlying chunk. A suspend that
@@ -115,16 +452,15 @@ def _correct_chunk_times(chunk_times: list[float]) -> tuple[float, int]:
         # run is 2 chunks). Short runs are accepted as uncorrectable.
         return total, 0
 
-    median = statistics.median(eligible)
-    # Both conditions at once: relative to this run *and* long enough
-    # to be a nap rather than a data-pipeline hiccup.
-    threshold = max(_SUSPEND_OUTLIER_FACTOR * median, _SUSPEND_MIN_GAP_S)
-    outliers = [t for t in eligible if t > threshold]
+    median, threshold = _suspend_threshold(eligible)
+    # Indices into `chunk_times`, so the records can be quoted.
+    outliers = [i for i in range(1, len(chunk_times))
+                if chunk_times[i] > threshold]
     if not outliers:
         return total, 0
 
     if len(outliers) > 1:
-        durations = ', '.join(ttoa3(t) for t in outliers)
+        durations = ', '.join(ttoa3(chunk_times[i]) for i in outliers)
         raise RuntimeError(
             f'anomalous chunk times: {len(outliers)} chunks over the '
             f'suspend threshold {ttoa3(threshold)} '
@@ -132,13 +468,16 @@ def _correct_chunk_times(chunk_times: list[float]) -> tuple[float, int]:
             f'floor {ttoa3(_SUSPEND_MIN_GAP_S)}): {durations} -- out of a '
             f'measured total of {ttoa3(total)}. Repeated suspends or a '
             f'broken clock -- the timing of this run is garbage and it '
-            f'must not be submitted.')
+            f'must not be submitted.'
+            + _outlier_details(records, outliers, '\n  '))
 
-    corrected = total - outliers[0] + median
+    outlier = chunk_times[outliers[0]]
+    corrected = total - outlier + median
     logging.warning(
-        f'suspend detected: one chunk took {ttoa3(outliers[0])} against a '
+        f'suspend detected: one chunk took {ttoa3(outlier)} against a '
         f'median of {ttoa3(median)}; correcting train time '
-        f'{ttoa3(total)} -> {ttoa3(corrected)}')
+        f'{ttoa3(total)} -> {ttoa3(corrected)}'
+        + _outlier_details(records, outliers, '; '))
     return corrected, 1
 
 
@@ -273,7 +612,11 @@ class ManagerJax(Manager):
         suspend-sized gap in the remaining chunks is repaired by
         `_correct_chunk_times`; several of them raise. Each chunk's
         time is also split into input-pipeline wait and compute, and
-        the ratio is logged once at the end.
+        the ratio is logged once at the end. Every chunk also keeps a
+        `_ChunkRecord` of process counters; one over the suspend
+        threshold is logged with its record and a system snapshot as
+        soon as it ends, and the end-of-run warning or error quotes
+        the outliers' records.
 
         NaN losses propagate -- once the model diverges, subsequent
         steps run with NaN updates and the final eval will catch it.
@@ -300,17 +643,19 @@ class ManagerJax(Manager):
         start_time = perf_counter()
         last_progress_log = start_time
         chunk_start = start_time
-        chunk_times: list[float] = []
-        # Phase split of the same intervals: how much of each chunk
-        # went to waiting for the sampler and how much to the model.
-        # Kept apart from `chunk_times`, which stays the per-iteration
-        # total the suspend detector needs -- a nap can land in either
-        # phase, and only the total is guaranteed to contain it.
-        sample_time = 0.0
-        compute_time = 0.0
+        # One record per chunk. Its `wall` is the per-iteration total
+        # the suspend detector needs -- a nap can land in either phase,
+        # and only the total is guaranteed to contain it; the phase
+        # split and the counters are there to explain an outlier.
+        records: list[_ChunkRecord] = []
+        usage = _read_usage()
+        cache_size = _jit_cache_size(self._train_chunk)
         while self.step < steps:
             self._maybe_switch_data()
             n = min(_CHUNK_SIZE, steps - self.step)
+            first_step = self.step
+            queue_depth = _queue_depth(
+                self.dataset, length, n * batch, tokens_name)
             # One big sample of (n*batch, length), reshaped to
             # (n, batch, length). Avoids n round-trips through the
             # prefetch queue and n separate host->device transfers.
@@ -330,9 +675,20 @@ class ManagerJax(Manager):
             for loss_val in losses_host:
                 self.run.add_step(self.tokenset.byte_loss(float(loss_val)))
             now = perf_counter()
-            sample_time += sampled - chunk_start
-            compute_time += now - sampled
-            chunk_times.append(now - chunk_start)
+            usage_end = _read_usage()
+            cache_end = _jit_cache_size(self._train_chunk)
+            recompiled = (None if cache_size is None or cache_end is None
+                          else cache_end != cache_size)
+            records.append(_make_chunk_record(
+                index=len(records), first_step=first_step, steps=n,
+                wall=now - chunk_start, sample=sampled - chunk_start,
+                compute=now - sampled, start=usage, end=usage_end,
+                recompiled=recompiled, queue_depth=queue_depth))
+            # A snapshot, when one is taken, lands in the next chunk's
+            # sample phase -- usually well under a second (at worst the
+            # nvidia-smi timeout), and only right after an outlier.
+            _warn_if_anomalous(records)
+            usage, cache_size = usage_end, cache_end
             chunk_start = now
             if (
                 self.verbose
@@ -342,9 +698,11 @@ class ManagerJax(Manager):
                 logging.info(f'{self.step}  {last:.4f} b/B')
                 last_progress_log = now
 
-        total_time, _ = _correct_chunk_times(chunk_times)
+        total_time, _ = _correct_chunk_times(
+            [r.wall for r in records], records)
         logging.info(f'Trained for {self.step} steps in {ttoa3(total_time)}')
-        _log_input_bound(sample_time, compute_time)
+        _log_input_bound(math.fsum(r.sample for r in records),
+                         math.fsum(r.compute for r in records))
         return total_time, self.conf.replace(steps=self.step)
 
     def train_and_eval(

@@ -383,6 +383,17 @@ class DataSetWrapper(object):
             self.jobs_queue.put(key)
             return results_queue.get()
 
+    def queue_depth(
+        self, ntokens: int, batch: int, tokenset_name: str
+    ) -> int | None:
+        """Batches already prefetched for this request shape, or None
+        before its first request. A diagnostic snapshot only: workers
+        keep filling the queue while it is read."""
+        with self.results_queues_lock:
+            results_queue = self.results_queues.get(
+                (ntokens, batch, tokenset_name))
+        return None if results_queue is None else results_queue.qsize()
+
     def sample_bytes(
             self, nbytes: int, batch: int, tokenset_name: str) -> tuple[np.ndarray, np.ndarray]:
         with timer("DataSet.sample_bytes"):

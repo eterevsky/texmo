@@ -1,5 +1,6 @@
 import os
 import random
+import time
 from threading import Thread
 
 import numpy as np
@@ -334,3 +335,21 @@ def test_wrapper_join_is_idempotent(dataset):
     assert wrapper.joined
     wrapper.join()
     assert wrapper.jobs_queue.qsize() <= wrapper.num_workers
+
+
+def test_wrapper_queue_depth(dataset):
+    """None before a shape's first request; afterwards the workers
+    refill the queue to one prefetched batch per worker plus one."""
+    wrapper = DataSetWrapper(dataset, num_workers=2)
+    try:
+        assert wrapper.queue_depth(8, 4, "bytes") is None
+        wrapper.sample_tokens(8, 4, "bytes")
+        deadline = time.monotonic() + 10.0
+        while (wrapper.queue_depth(8, 4, "bytes") < wrapper.num_workers + 1
+               and time.monotonic() < deadline):
+            time.sleep(0.01)
+        assert wrapper.queue_depth(8, 4, "bytes") == wrapper.num_workers + 1
+        # Other shapes have queues of their own.
+        assert wrapper.queue_depth(8, 2, "bytes") is None
+    finally:
+        wrapper.join()

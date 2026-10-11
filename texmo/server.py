@@ -288,6 +288,55 @@ def _is_unrestricted(preset: str) -> bool:
             or preset.strip().lower() == named_regexes.RESERVED_NAME.lower())
 
 
+def _frontier_view(
+    templates: TemplateSet, selected_entry: Optional[str],
+) -> tuple[Optional[str], list[dict]]:
+    """Resolve the index's `?entry=` arg into the spec filter for the
+    top-confs query, plus the Sub-search dropdown's options.
+
+    - blank, or a name that no longer resolves: what the live search
+      explores -- the union of the drawable entries' specs
+      (`TemplateSet.union_spec`), so a single restricted entry shows
+      its own frontier, not the whole DB's;
+    - an entry name: that entry's spec;
+    - `Unrestricted` (`named_regexes.RESERVED_NAME`): no spec filter,
+      the whole DB under the base template's other bounds.
+
+    Options are `{value, label, selected}` dicts, default first; the
+    per-entry ones only when there is more than one entry (with one,
+    the default already is it), and `Unrestricted` only when the
+    default view is filtered. A single option means there is nothing
+    to choose -- the caller hides the dropdown.
+    """
+    union = templates.union_spec
+    multi = not templates.is_single
+    selected = selected_entry or ''
+    entry = templates.by_name(selected) if selected else None
+    if entry is not None:
+        spec = entry.spec
+        value = entry.name if multi else ''
+    # `selected and`: `_is_unrestricted` reads blank as the no-filter
+    # choice, but here blank means the default union view.
+    elif selected and _is_unrestricted(selected):
+        spec = None
+        value = '' if union is None else named_regexes.RESERVED_NAME
+    else:
+        spec = union
+        value = ''
+
+    choices = [('', 'All sub-searches' if multi else templates.names[0])]
+    if multi:
+        choices.extend((name, name) for name in templates.names)
+    if union is not None:
+        choices.append(
+            (named_regexes.RESERVED_NAME, named_regexes.RESERVED_NAME))
+    options = [
+        {'value': v, 'label': label, 'selected': v == value}
+        for v, label in choices
+    ]
+    return spec, options
+
+
 def _lookup_preset(name: str, presets: list[dict]) -> Optional[dict]:
     """The stored preset `name` selects, or None for the unrestricted
     choice.
@@ -828,11 +877,13 @@ class SearchServer(object):
         # so anything cached would go stale silently.
         presets = named_regexes.load()
 
-        # Frontier filter: with an entry selected, the top list is the
-        # one THAT sub-search sees (its spec filter applied at query
-        # time -- no schema change, no stored attribution).
-        entry = templates.by_name(selected_entry) if selected_entry else None
-        query_template = template if entry is None else entry.template
+        # Frontier filter, applied at query time (no schema change, no
+        # stored attribution): by default the union of the live
+        # entries' specs -- what the search is actually exploring --
+        # with one entry or Unrestricted selectable on top of that.
+        # The base template carries no spec, so this is the only one.
+        spec, entry_options = _frontier_view(templates, selected_entry)
+        query_template = template.with_spec(spec)
 
         # Use a dedicated read-only connection to avoid contending with
         # the writer thread for the main connection.
@@ -871,9 +922,8 @@ class SearchServer(object):
             # rejection path the submitted ones, so the user can fix
             # them in place rather than retype.
             entries=entry_form or self._entry_rows(templates, presets),
-            show_entries=not templates.is_single,
-            entry_names=templates.names,
-            selected_entry=selected_entry or '',
+            show_entries=len(entry_options) > 1,
+            entry_options=entry_options,
             preset_names=[p['name'] for p in presets],
             reserved_regex_name=named_regexes.RESERVED_NAME,
             presets_path=named_regexes.PATH,

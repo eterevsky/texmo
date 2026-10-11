@@ -7,6 +7,7 @@ import pickle
 import threading
 import time
 from queue import Queue
+from typing import Optional
 
 import matplotlib
 import pytest
@@ -18,7 +19,12 @@ from werkzeug.datastructures import MultiDict
 matplotlib.use('Agg')
 
 from texmo.common import INF
-from texmo.configuration import MAIN_ENTRY, Configuration, Template
+from texmo.configuration import (
+    MAIN_ENTRY,
+    Configuration,
+    Template,
+    TemplateSet,
+)
 from texmo import named_regexes
 from texmo.db import ConfScore, DbReader, DbWriter
 from texmo.spec_parser import parse_model2
@@ -1119,11 +1125,107 @@ _TEMPLATES_JSON = (
 )
 
 
+_RNN_REGEX = r'.*\|rnn\..*'
+_DENSE_REGEX = r'bytes\|dense\..*'
+
+
+def _entry_json(name: str, share: float, regex: Optional[str] = None,
+                default_spec: Optional[str] = None) -> dict:
+    out: dict = {'name': name, 'share': share}
+    if regex:
+        out['regex'] = regex
+    if default_spec:
+        out['default_spec'] = default_spec
+    return out
+
+
+_RNN_ENTRY = _entry_json('rnn', 100, _RNN_REGEX, 'bytes|rnn.8.tanh')
+_DENSE_ENTRY = _entry_json('dense', 100, _DENSE_REGEX, 'bytes|dense.4.gelu')
+
+
+def _template_set(*entries: dict) -> TemplateSet:
+    return TemplateSet.from_json(
+        json.dumps(list(entries)), _make_template(spec=None))
+
+
+def _option(value: str, label: str, selected: bool) -> dict:
+    """One Sub-search dropdown option, as `_frontier_view` builds it."""
+    return {'value': value, 'label': label, 'selected': selected}
+
+
 def _entry_row_count(html: str) -> int:
     """Rows in the editable sub-search table (the `<template>` clone
     source sits outside `#entry-rows`, so it isn't counted)."""
     body = html.split('id="entry-rows"', 1)[1].split('</tbody>', 1)[0]
     return body.count('name="entry_preset"')
+
+
+def test_frontier_view_single_unrestricted_entry_has_one_option():
+    """Nothing to choose between: the caller hides the dropdown."""
+    ts = _template_set(_entry_json(MAIN_ENTRY, 100))
+    assert server_mod._frontier_view(ts, None) == (
+        None, [_option('', MAIN_ENTRY, True)])
+
+
+def test_frontier_view_single_restricted_entry_defaults_to_its_spec():
+    """The reported bug: one restricted entry used to show the whole
+    DB's frontier, with no dropdown to say so."""
+    ts = _template_set(_RNN_ENTRY)
+    reserved = named_regexes.RESERVED_NAME
+    spec, options = server_mod._frontier_view(ts, None)
+    assert spec == _RNN_REGEX
+    assert options == [
+        _option('', 'rnn', True), _option(reserved, reserved, False)]
+    # The entry by name (the row link) is the same view.
+    assert server_mod._frontier_view(ts, 'rnn') == (spec, options)
+    # A name that no longer resolves falls back to the default.
+    assert server_mod._frontier_view(ts, 'gone') == (spec, options)
+    # Unrestricted drops the filter.
+    assert server_mod._frontier_view(ts, reserved) == (None, [
+        _option('', 'rnn', False), _option(reserved, reserved, True)])
+
+
+def test_frontier_view_with_an_unrestricted_entry():
+    """`main` makes the union unrestricted, so there is no separate
+    Unrestricted option -- the default already is it."""
+    ts = _template_set(
+        _entry_json(MAIN_ENTRY, 60),
+        _entry_json('rnn', 40, _RNN_REGEX, 'bytes|rnn.8.tanh'))
+    spec, options = server_mod._frontier_view(ts, None)
+    assert spec is None
+    assert options == [
+        _option('', 'All sub-searches', True),
+        _option(MAIN_ENTRY, MAIN_ENTRY, False),
+        _option('rnn', 'rnn', False),
+    ]
+    spec, options = server_mod._frontier_view(ts, 'rnn')
+    assert spec == _RNN_REGEX
+    assert [o['value'] for o in options if o['selected']] == ['rnn']
+    # A bookmarked ?entry=Unrestricted still means no filter, shown on
+    # the default option that gives it.
+    spec, options = server_mod._frontier_view(
+        ts, named_regexes.RESERVED_NAME)
+    assert spec is None
+    assert [o['value'] for o in options if o['selected']] == ['']
+
+
+def test_frontier_view_all_restricted_entries_default_to_the_union():
+    ts = _template_set(_RNN_ENTRY, _DENSE_ENTRY)
+    reserved = named_regexes.RESERVED_NAME
+    spec, options = server_mod._frontier_view(ts, None)
+    assert spec == ts.union_spec
+    union = _make_template(spec=None).with_spec(spec)
+    assert union.matches_spec('bytes|rnn.8.tanh')
+    assert union.matches_spec('bytes|dense.4.gelu')
+    assert not union.matches_spec('bits.1+bp|')
+    assert options == [
+        _option('', 'All sub-searches', True),
+        _option('rnn', 'rnn', False),
+        _option('dense', 'dense', False),
+        _option(reserved, reserved, False),
+    ]
+    assert server_mod._frontier_view(ts, 'dense')[0] == _DENSE_REGEX
+    assert server_mod._frontier_view(ts, reserved)[0] is None
 
 
 def test_index_has_no_base_spec_field():
@@ -1140,12 +1242,15 @@ def test_index_has_no_base_spec_field():
 def test_index_single_template_renders_one_unrestricted_row():
     """No sub-searches configured: one row sitting on Unrestricted --
     the search that was already running, now visible and editable."""
-    html = _render(show_entries=False, entry_names=[],
+    html = _render(show_entries=False,
+                   entry_options=[_option('', MAIN_ENTRY, True)],
                    entries=[_entry_display_row()])
     assert _entry_row_count(html) == 1
     assert f'<option selected>{named_regexes.RESERVED_NAME}' in html
     assert 'addEntryRow()' in html
     assert 'id="entry-row-template"' in html
+    # One view only, so no frontier dropdown.
+    assert 'id="entry"' not in html
 
 
 def test_index_renders_entry_form_rows():
@@ -1190,8 +1295,11 @@ def test_index_renders_subsearch_stats_and_filter():
     together."""
     html = _render(
         show_entries=True,
-        entry_names=['main', 'rnn'],
-        selected_entry='rnn',
+        entry_options=[
+            _option('', 'All sub-searches', False),
+            _option('main', 'main', False),
+            _option('rnn', 'rnn', True),
+        ],
         entries=[
             _entry_display_row(
                 share='60', share_pct='60%', realized='68%', selects=34,
@@ -1558,6 +1666,45 @@ def test_search_server_index_filters_the_frontier_by_entry(
         # ...but its own conf is on ITS frontier even though the dense
         # one dominates globally.
         assert 'bytes|rnn.8.tanh' in html_rnn
+    finally:
+        server.join()
+
+
+def test_search_server_index_defaults_to_what_the_search_explores(
+        tmp_path, monkeypatch):
+    """With one restricted entry live, the default top list is that
+    entry's, and the whole-DB frontier is one Unrestricted pick away."""
+    # Startup LossRefit stub: see the frontier-filter test above.
+    monkeypatch.setattr(loss_tree, "train_loss_model", lambda reader: None)
+    path = str(tmp_path / "test.db")
+    writer = DbWriter(path)
+    for spec, loss in (("bytes|dense.4.gelu", 0.3),
+                       ("bytes|rnn.8.tanh", 0.5)):
+        conf = Configuration(
+            model=parse_model2(spec, precision=Precision.FP32),
+            lr=0.1, length=128, batch=32, steps=256, decay=1.0)
+        for i in range(2):
+            writer.add_run(conf, Run(
+                system='a', step_loss=[0.1], loss=loss + 0.01 * i,
+                train_time=2.0))
+    writer.close()
+
+    server = SearchServer(
+        path, _make_template(spec=None),
+        train_time=(1.0, 16.0), default_spec=None,
+        templates_json=json.dumps([_RNN_ENTRY]),
+    )
+    try:
+        with _make_app().test_request_context():
+            html_default = server.index()
+            html_all = server.index(
+                selected_entry=named_regexes.RESERVED_NAME)
+        assert 'bytes|dense.4.gelu' not in html_default
+        assert 'bytes|dense.4.gelu' in html_all
+        # The dropdown shows up even for a single entry, labelled by it.
+        assert '<option value="" selected>rnn</option>' in html_default
+        assert (f'<option value="{named_regexes.RESERVED_NAME}" selected>'
+                in html_all)
     finally:
         server.join()
 

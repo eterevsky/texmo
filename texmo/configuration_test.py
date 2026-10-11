@@ -635,6 +635,74 @@ def test_template_set_zero_share_entry_is_never_drawn():
     assert all(ts.draw().name == 'main' for _ in range(500))
 
 
+_EMB_REGEX = r"bits\.\d+\.emb\.\d+\|.*"
+
+
+def test_union_spec_unrestricted_entry_makes_it_unrestricted():
+    ts = _templates(
+        ('attn', 40, _ATTN_REGEX, _ATTN_SPEC),
+        ('main', 60, None, None),
+    )
+    assert ts.union_spec is None
+
+
+def test_union_spec_of_one_entry_is_its_spec_verbatim():
+    ts = _templates(('attn', 100, _ATTN_REGEX, _ATTN_SPEC))
+    assert ts.union_spec == _ATTN_REGEX
+    # Duplicate specs collapse to the same thing.
+    ts = _templates(
+        ('attn', 50, _ATTN_REGEX, _ATTN_SPEC),
+        ('attn2', 50, _ATTN_REGEX, _ATTN_SPEC),
+    )
+    assert ts.union_spec == _ATTN_REGEX
+
+
+def test_union_spec_fullmatches_either_entry_whole():
+    rnn_regex = r"bytes\|rnn\.\d+\.tanh"
+    ts = _templates(
+        ('rnn', 50, rnn_regex, 'bytes|rnn.8.tanh'),
+        ('emb', 30, _EMB_REGEX, None),
+        ('rnn2', 20, rnn_regex, 'bytes|rnn.8.tanh'),
+    )
+    # The duplicate adds no third branch.
+    assert ts.union_spec.count('(?:') == 2
+    union = _base_template().with_spec(ts.union_spec)
+    assert union.regex is not None
+    assert union.matches_spec('bytes|rnn.8.tanh')
+    assert union.matches_spec('bits.1.emb.4|dense.4.gelu')
+    assert not union.matches_spec('bytes|dense.4.gelu')
+    # A branch matching only a prefix is not a match: fullmatch holds
+    # per branch, as it does for the entry on its own.
+    assert not union.matches_spec('bytes|rnn.8.tanh|dense.4.gelu')
+    assert not ts.by_name('rnn').template.matches_spec(
+        'bytes|rnn.8.tanh|dense.4.gelu')
+
+
+def test_union_spec_escapes_a_literal_entry():
+    """A spec that parses as a model is matched by equality; inside the
+    union its `|` and `.` must stay literal."""
+    ts = _templates(
+        ('one', 50, 'bytes|dense.4.gelu', 'bytes|dense.4.gelu'),
+        ('emb', 50, _EMB_REGEX, None),
+    )
+    assert ts.by_name('one').template.spec == 'bytes|dense.4.gelu'
+    union = _base_template().with_spec(ts.union_spec)
+    assert union.matches_spec('bytes|dense.4.gelu')
+    # Unescaped, `(?:bytes|dense.4.gelu)` would admit these.
+    assert not union.matches_spec('bytes')
+    assert not union.matches_spec('dense.4xgelu')
+
+
+def test_union_spec_skips_zero_share_entries():
+    """A paused entry is never drawn, so it doesn't widen the view --
+    not even a paused unrestricted one."""
+    ts = _templates(
+        ('main', 0, None, None),
+        ('attn', 100, _ATTN_REGEX, _ATTN_SPEC),
+    )
+    assert ts.union_spec == _ATTN_REGEX
+
+
 def test_template_set_json_round_trip():
     ts = _templates(
         ('main', 60, None, None),

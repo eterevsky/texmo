@@ -353,9 +353,8 @@
             {% if show_entries %}
             <label for="entry">Sub-search:</label>
             <select name="entry" id="entry">
-                <option value="" {% if not selected_entry %}selected{% endif %}>Whole template</option>
-                {% for name in entry_names %}
-                <option value="{{ name }}" {% if name == selected_entry %}selected{% endif %}>{{ name }}</option>
+                {% for o in entry_options %}
+                <option value="{{ o.value }}" {% if o.selected %}selected{% endif %}>{{ o.label }}</option>
                 {% endfor %}
             </select>
             {% endif %}

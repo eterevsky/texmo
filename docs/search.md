@@ -89,10 +89,11 @@ and the index form has one place, not two, where specs are set.
 The index page shows each entry's nominal share next to its **realized**
 share and the raw select count behind it (an in-memory counter of confs
 served per entry since server start, no schema change; realized share
-means little below a few hundred selects). The top-confs and compare
-views can be filtered to one entry, which just applies its regex at
-query time. Nothing about which entry produced a run is recorded in
-the DB.
+means little below a few hundred selects). The top-confs view defaults
+to the union of the entries' regexes and can be narrowed to one entry
+(see the Sub-search dropdown under [Server UI](#server-ui)); either
+way the filter is just applied at query time. Nothing about which
+entry produced a run is recorded in the DB.
 
 ### Frontier seeding
 
@@ -560,9 +561,16 @@ a graph (score vs. weights, Pareto frontier), and a table of top configs.
   sub-search and means nothing to a query.
 - **System dropdown** — filters the graph and table to configs that have
   at least one run on the selected system.
-- **Sub-search dropdown** — with a template set configured, filters the
-  index graph and table to one entry's frontier by name (`?entry=`);
-  entry names are preset names now, except the unrestricted `main`.
+- **Sub-search dropdown** — picks the spec filter for the index graph
+  and table (`?entry=`). The default is what the live search explores:
+  the union of the entries' regexes (zero-share entries left out),
+  which is no filter at all whenever an unrestricted entry is drawn.
+  With several entries each one is selectable by name (preset names,
+  except the unrestricted `main`), and whenever the default is
+  filtered, `Unrestricted` shows the whole DB's frontier under the
+  base template's other bounds. Hidden for a lone unrestricted entry,
+  where there is only one view; a name that no longer resolves falls
+  back to the default.
 - **Copy link** — each row has a "copy" link that copies a
   `uv run texmo.py train ...` command to the clipboard.
 

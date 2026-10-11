@@ -720,6 +720,14 @@ class TemplateEntry(object):
         )
 
 
+def _spec_as_regex(template: Template) -> str:
+    """`template`'s spec filter as a regex source: a literal spec
+    escaped, a regex as written. Only for a restricted template."""
+    if template.spec is not None:
+        return re.escape(template.spec)
+    return template.regex.pattern
+
+
 class TemplateSet(object):
     """An ordered list of `TemplateEntry`, drawn per select in
     proportion to their shares (which are normalized, so they need not
@@ -763,6 +771,32 @@ class TemplateSet(object):
     def nominal_share(self, entry: TemplateEntry) -> float:
         """`entry`'s share as a percentage of the whole set."""
         return 100.0 * entry.share / self.total_share
+
+    @property
+    def union_spec(self) -> Optional[str]:
+        """One spec filter admitting exactly what some entry can draw:
+        the region the set as a whole explores.
+
+        None (unrestricted) when any drawable entry is unrestricted.
+        Zero-share entries are left out -- `draw` never picks them, so
+        a paused entry doesn't widen the view. One distinct spec comes
+        back verbatim; several become an alternation with each branch
+        wrapped in `(?:...)`, so under `fullmatch` a spec passes iff it
+        passes some entry's filter whole. A literal spec matches by
+        equality, so its regex metacharacters (`|`, `.`, `+`, parens)
+        are escaped first.
+        """
+        branches: dict[str, Template] = {}
+        for e in self.entries:
+            if e.share <= 0:
+                continue
+            if e.spec is None:
+                return None
+            branches.setdefault(e.spec, e.template)
+        if len(branches) == 1:
+            return next(iter(branches))
+        return '|'.join(
+            f'(?:{_spec_as_regex(t)})' for t in branches.values())
 
     def draw(self) -> TemplateEntry:
         """Draw one entry weighted by share.

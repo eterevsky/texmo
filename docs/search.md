@@ -398,7 +398,8 @@ Two layers:
 - **`Model2Def.neighbors()`** — precision changes, input-layer mutations,
   single-layer mutations (via `LayerDef.neighbors`, recursing into split
   branches), append/remove last layer, insert/remove suffix.2,
-  insert/remove norm, prepend/remove a dense lead-in, the Split
+  insert/remove norm, prepend/remove a dense or rnn lead-in (input
+  width snapped to the power-of-2 grid, append activations), the Split
   mutations (wrap/unwrap residual and gate Splits, `add↔cat` op-swap,
   grow/shrink a residual span, append a self-gate), and the
   compound-block moves below. Each mutation is a spec string re-parsed

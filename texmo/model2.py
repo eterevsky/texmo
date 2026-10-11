@@ -382,16 +382,18 @@ def _seq_variants(
         if s in ("norm", "rmsnorm"):
             yield strs[:i] + strs[i + 1:]
 
-    # 8./9. Prepend a dense lead-in / remove it (symmetric). Same
-    #       sizing rule as appends: size-preserving on the grid.
+    # 8./9. Prepend a dense or rnn lead-in / remove it (symmetric).
+    #       Same sizing rule as appends: size-preserving on the grid.
     prepend_size = floor_power2(input_size)
     # The removal below is the exact inverse of this prepend, so the
-    # two activation sets have to stay identical.
-    for act in _APPEND_ACTS:
-        yield [f"dense.{prepend_size}.{act}"] + strs
-    if layers and layers[0].name == "dense":
+    # layer types, size and activation sets have to stay identical.
+    # (A bare rnn/dense has _activation None, never in _APPEND_ACTS.)
+    for name in ("dense", "rnn"):
+        for act in _APPEND_ACTS:
+            yield [f"{name}.{prepend_size}.{act}"] + strs
+    if layers and layers[0].name in ("dense", "rnn"):
         first = layers[0]
-        if (first.size == floor_power2(input_size)
+        if (first.size == prepend_size
                 and first._activation in _APPEND_ACTS):
             yield strs[1:]
 

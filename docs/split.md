@@ -111,7 +111,7 @@ Neighbor generation is recursive over the tree
 emitted as a spec string and re-parsed through `parse_model2`, so size
 threading and `is_valid` filtering live in one place. The generic
 sequence mutations (mutate/append/remove a layer, insert/remove
-`suffix.2` or `norm`, prepend/remove a dense lead-in) apply inside any
+`suffix.2` or `norm`, prepend/remove a dense or rnn lead-in) apply inside any
 branch *and* the top chain. The Split-specific moves:
 
 **Residual family** (`_split_variants`, `_seq_variants` sec. 10, 12, 13):

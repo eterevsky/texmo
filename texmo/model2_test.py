@@ -929,6 +929,36 @@ def test_appends_are_size_preserving_snapped():
     assert "bits.4.oh+bp|dense.16.tanh-rnn.8.tanh" in specs
 
 
+def test_rnn_lead_in_prepend():
+    io = "tokens.32.hexbpe.oh"
+    specs = _arch_neighbor_specs(
+        parse_model2(f"{io}|attn.32.4.64-dense.32.gelu", Precision.FP32))
+    for act in ("gelu", "tanh", "silu"):
+        assert f"{io}|rnn.32.{act}-attn.32.4.64-dense.32.gelu" in specs
+        assert f"{io}|dense.32.{act}-attn.32.4.64-dense.32.gelu" in specs
+
+
+def test_rnn_lead_in_remove_is_exact_inverse():
+    io = "tokens.32.hexbpe.oh"
+    tail = "attn.32.4.64-dense.32.gelu"
+    # Matching size and an append activation: removable.
+    specs = _arch_neighbor_specs(
+        parse_model2(f"{io}|rnn.32.gelu-{tail}", Precision.FP32))
+    assert f"{io}|{tail}" in specs
+    # Size not the (snapped) input width: not a prepend product.
+    specs = _arch_neighbor_specs(
+        parse_model2(f"{io}|rnn.16.gelu-{tail}", Precision.FP32))
+    assert f"{io}|{tail}" not in specs
+    # Activation outside _APPEND_ACTS (relu parses but is retired).
+    specs = _arch_neighbor_specs(
+        parse_model2(f"{io}|rnn.32.relu-{tail}", Precision.FP32))
+    assert f"{io}|{tail}" not in specs
+    # Bare rnn (activation None) neither crashes nor is removable.
+    specs = _arch_neighbor_specs(
+        parse_model2(f"{io}|rnn.32-{tail}", Precision.FP32))
+    assert f"{io}|{tail}" not in specs
+
+
 # --- step == forward across every layer family -----------------------
 #
 # The invariant that would have caught the rglru step-reset bug: the

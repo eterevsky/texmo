@@ -957,12 +957,12 @@ def _make_search_with(path, templates, warmup_systems=None):
 
 
 def _two_entry_set(default_spec=_CONF_B_SPEC, main_share=50, rnn_share=50,
-                   seed=False):
+                   seed=False, rnn_regex=_RNN_REGEX):
     base = _make_template()
     return TemplateSet([
         TemplateEntry(base, name='main', share=main_share),
         TemplateEntry(base, name='rnn', share=rnn_share,
-                      spec=_RNN_REGEX, default_spec=default_spec,
+                      spec=rnn_regex, default_spec=default_spec,
                       seed=seed),
     ])
 
@@ -1375,9 +1375,12 @@ def test_set_templates_seeds_counters_for_every_entry(tmp_path):
 # can't see at all. `conf_neighbors` bridges the two with exactly one
 # edge, dense.4.gelu -> rnn.4.gelu -- and that single edge is the whole
 # reason this strategy exists: the random walk crosses it a handful of
-# times a day.
+# times a day. The entry admits only single-layer rnn chains, so the
+# rnn lead-in prepends (rnn.256.*-dense.4.gelu) -- further bridges in
+# the full rnn space -- stay out and the edge above is the only one.
 
 _BRIDGE_SPEC = "bytes|rnn.4.gelu"
+_SEED_RNN_REGEX = r".*\|rnn\.[^-]*$"
 
 
 def _seeded_search(path, seed=True):
@@ -1385,7 +1388,7 @@ def _seeded_search(path, seed=True):
     holding one dense frontier conf."""
     _seed_runs(path, _make_conf(steps=256, spec=_CONF_A_SPEC),
                system='a', n=2)
-    templates = _two_entry_set(seed=seed)
+    templates = _two_entry_set(seed=seed, rnn_regex=_SEED_RNN_REGEX)
     return _make_search_with(path, templates), templates
 
 

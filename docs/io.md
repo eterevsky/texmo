@@ -450,8 +450,20 @@ then the first day of hexbpe search showed shift *beating*
 `tokens.64.hexbpe` by ~1–2% loss over most of the frontier above
 ~400 weights (every letter having its own token appears to matter).
 It is schedulable again, bridged bidirectionally to
-`tokens.64.hexbpe`; the retirement mechanism
-(`search.RETIRED_INPUTS`, now empty) stays for the next candidate.
+`tokens.64.hexbpe`.
+
+**fold-32 retired from scheduling 2026-10-21**, together with
+shift-32 (below) — both are in `search.RETIRED_INPUTS`. In the
+search's compare view, `bits.4` + `tokens.32.hexbpe` against
+shift-32 + fold-32 differ by under 2% anywhere (shift/fold ahead by
+at most ~2%, only between ~200 and ~900 weights; behind by up to ~6%
+below 200), the two cover narrow weight ranges, and they muddy the
+bits-vs-tokens question the search now focuses on (getting `bits.4`
+to match `tokens.32.hexbpe`). Frozen, not removed: the tokenset files
+stay, the specs still parse, train and run, and the confs stay in
+the DB and on the frontier. Retired confs are still mutation sources, so
+their live bridges — `bits.4.oh+bp` / `bits.4.emb.d` and
+`tokens.32.hexbpe` — remain schedulable from them.
 
 ## Hexbpe tokensets: one schema for every size
 
@@ -543,8 +555,11 @@ pairs, one per stored choice. Coverage: 97.5% of bytes lossless,
 digits keep their *shape* (`1984` → four digit tokens), residual
 0.151 b/B (digits 0.87% at log2 10 + catch-all 1.62% at log2 188),
 1.047 tokens/byte. Against fold-32: 0.151 vs 0.348 residual at 58
-vs 64 weights — fold stays searchable regardless. Generator:
-`scripts/make_shift32.py` from the raw `freq.txt`.
+vs 64 weights. Generator: `scripts/make_shift32.py` from the raw
+`freq.txt`. **Retired from scheduling 2026-10-21** along with fold-32
+(see the fold section above): still parses and runs, confs stay in
+the DB, and its live bridges `tokens.32.hexbpe` and
+`tokens.64.shift` remain schedulable from it.
 
 **fold-128** (2026-08-03, `tokens/tokens.128.fold.json`,
 `tokens.128.fold`): the simplest possible lossy rung — the 127 most
@@ -574,7 +589,10 @@ shift off the chain at its own size. shift-32 sits between both
 tokens.32.hexbpe.oh` and `tokens.32.shift.oh <->
 tokens.64.shift.oh` (no direct bits.4 edge — reachable through
 either incumbent). The same chains exist in emb mode at the shared
-table width, and the usual oh<->emb mode swap applies. The loss predictor carries the residual charge and
+table width, and the usual oh<->emb mode swap applies. Since
+2026-10-21 fold-32 and shift-32 are retired from scheduling: the
+edges stay, but only the ones leading out to live encodings are
+ever handed to a client. The loss predictor carries the residual charge and
 log2(bytes/token) as global features; the timing model treats each
 input as just another type key.
 

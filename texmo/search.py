@@ -109,12 +109,20 @@ SearchMessage = Select | SetTemplate | Stop
 # outgoing bridge edge is how the DB population migrates off a
 # retired encoding.
 #
-# Currently empty. tokens.64.shift was retired here 2026-07-28 in
-# favor of tokens.64.hexbpe, then re-enabled a day later when the
-# search showed shift BEATING hexbpe-64 by ~1-2% loss over most of
-# the frontier above ~400 weights (per-letter tokens seem to matter);
-# the mechanism stays for the next retirement.
-RETIRED_INPUTS: tuple[str, ...] = ()
+# tokens.32.shift and tokens.32.fold retired 2026-10-21. In the
+# compare view, bits.4 + tokens.32.hexbpe vs shift-32 + fold-32
+# differ by under 2% anywhere (shift/fold ahead by at most ~2%, only
+# between ~200 and ~900 weights; behind by up to ~6% below 200); they
+# cover narrow weight ranges; and they muddy the bits-vs-tokens
+# question the search now focuses on (getting bits.4 to match
+# tokens.32.hexbpe). Frozen, not removed: both still parse and run,
+# and their confs stay in the DB and on the frontier.
+#
+# tokens.64.shift was retired here 2026-07-28 in favor of
+# tokens.64.hexbpe, then re-enabled a day later when the search showed
+# shift BEATING hexbpe-64 by ~1-2% loss over most of the frontier
+# above ~400 weights (per-letter tokens seem to matter).
+RETIRED_INPUTS: tuple[str, ...] = ('tokens.32.shift', 'tokens.32.fold')
 
 
 def _is_retired(spec: str) -> bool:

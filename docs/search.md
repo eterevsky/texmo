@@ -224,6 +224,25 @@ The index page's top-confs table has the same thing as a per-row
 `runs = <the row's run count> + 1` and reports the resulting target in
 place of the link. One click is one extra run of that conf.
 
+## Retired inputs
+
+`search.RETIRED_INPUTS` lists input-spec prefixes that are frozen out
+of **scheduling**: a conf whose input matches is never handed to a
+client, neither as a re-run (coverage walk, time budget, neighbor
+walk, warmup, `pick_me`, default fallback) nor as a fresh mutation.
+Its runs stay in the DB and on the frontier, and it remains a
+mutation *source* — its non-retired neighbors are still schedulable,
+which is how the population migrates off it along the bridge edges.
+
+Since 2026-10-21 it holds `tokens.32.shift` and `tokens.32.fold`
+(both codec spellings): within 2% of `bits.4` + `tokens.32.hexbpe`
+everywhere, narrow weight ranges, and a distraction from the
+bits-vs-tokens question. Their live exits are `bits.4` and
+`tokens.32.hexbpe` (fold) and `tokens.32.hexbpe` and
+`tokens.64.shift` (shift); see [`io.md`](io.md). A sub-search whose
+regex admits only retired inputs (e.g. the `fold.32` / `shift.32`
+presets) has nothing left to schedule.
+
 ## Search strategies
 
 Two strategies run before any of this, inside the drawn sub-search

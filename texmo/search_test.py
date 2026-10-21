@@ -766,9 +766,10 @@ def test_warmup_caches_top_confs_per_rung(tmp_path, monkeypatch):
 
 # --- retired inputs --------------------------------------------------
 #
-# RETIRED_INPUTS is empty right now (tokens.64.shift was retired
-# 2026-07-28 and re-enabled 2026-07-29), so these tests retire shift
-# synthetically to keep the mechanism covered for the next retirement.
+# The scheduling tests below retire tokens.64.shift synthetically
+# (it was retired 2026-07-28 and re-enabled 2026-07-29) so they don't
+# depend on whatever the live RETIRED_INPUTS holds; the live value
+# (tokens.32.shift + tokens.32.fold since 2026-10-21) has its own test.
 
 _SHIFT_SPEC = "tokens.64.shift.emb.4|rnn.4.tanh"
 
@@ -793,10 +794,24 @@ def test_is_retired_covers_both_codec_spellings(monkeypatch):
     assert not _is_retired("bytes|dense.8.gelu")
 
 
-def test_nothing_is_retired_by_default():
-    for spec in (_SHIFT_SPEC, "tokens.64.hexbpe.emb.4|rnn.4.tanh",
+def test_live_retired_inputs_are_shift32_and_fold32():
+    """The live value (2026-10-21): both 32-token rivals of hexbpe-32,
+    in either codec spelling -- and nothing that merely shares a
+    `tokens.` prefix with them."""
+    for spec in ("tokens.32.shift.oh|rnn.4.tanh",
+                 "tokens.32.shift.emb.4|rnn.4.tanh",
+                 "tokens.32.fold.oh|dense.4.gelu",
+                 "tokens.32.fold.emb.8|rnn.8.tanh"):
+        assert _is_retired(spec), spec
+    for spec in ("tokens.32.hexbpe.oh|rnn.4.tanh",
+                 "tokens.32.hexbpe.emb.4|rnn.4.tanh",
+                 "tokens.64.shift.oh|rnn.4.tanh",
+                 "tokens.128.fold.emb.8|rnn.8.tanh",
+                 "bits.4.oh+bp|rnn.4.tanh",
+                 "bits.4.emb.8|rnn.8.tanh",
+                 "bits.4.pair.add|rnn.4.tanh",
                  "bytes|dense.8.gelu"):
-        assert not _is_retired(spec)
+        assert not _is_retired(spec), spec
 
 
 def test_retired_conf_is_never_re_run(tmp_path, monkeypatch):

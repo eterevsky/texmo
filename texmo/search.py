@@ -22,6 +22,7 @@ from .configuration import (
     conf_neighbors,
 )
 from .db import ConfScore, ConfWithRuns, DbReader, FrontierVersion
+from .db.conf_index import SHADOW_EVERY
 from .predict.loss_rnn import LossModelHolder
 from .predict.timing import TrainTimingModel
 from .report import format_top_conf_row
@@ -1732,6 +1733,8 @@ class SearchThread(threading.Thread):
         warmup_systems: Optional[Iterable[str]] = None,
         templates: Optional[TemplateSet] = None,
         frontier_version: Optional[FrontierVersion] = None,
+        conf_index: bool = False,
+        conf_index_shadow_every: int = SHADOW_EVERY,
     ):
         # Daemon like every other server thread: this one is
         # read-only, and durability belongs to the graceful path
@@ -1752,6 +1755,8 @@ class SearchThread(threading.Thread):
         # Shared with the writer thread, which is the only writer; see
         # `FrontierVersion`.
         self._frontier_version = frontier_version
+        self._conf_index = conf_index
+        self._conf_index_shadow_every = conf_index_shadow_every
         self.template = template
         self.requests_queue = requests_queue
         self.confs_by_system = confs_by_system
@@ -1760,7 +1765,12 @@ class SearchThread(threading.Thread):
         self.search: Optional[Search] = None
 
     def run(self):
-        reader = DbReader(self._path)
+        # The reader's ConfIndex (built here, seconds on the full DB)
+        # answers the ranked per-select queries; it is this thread's
+        # alone -- the writer keeps its own. See docs/threads.md.
+        reader = DbReader(
+            self._path, conf_index=self._conf_index,
+            shadow_every=self._conf_index_shadow_every)
         self.search = Search(
             reader=reader,
             template=self._template,

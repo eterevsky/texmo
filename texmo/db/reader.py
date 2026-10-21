@@ -7,11 +7,17 @@ is single-connection by construction; concurrent readers in the same
 process get separate `DbReader` instances.
 """
 
+import logging
 import sqlite3
-from collections.abc import Iterable
+import time
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from itertools import islice
+from typing import Any, Optional
+
+import numpy as np
 
 from .. import latency
 from ..common import INF
@@ -24,6 +30,12 @@ from .common import (
     _make_template_conditions,
     _unpack_ndarray,
     open_connection,
+)
+from .conf_index import (
+    SHADOW_EVERY,
+    ConfIndex,
+    ConfIndexUnavailable,
+    ConfIndexUnsupported,
 )
 
 
@@ -113,17 +125,344 @@ WHERE conf.id = run.conf_id
 """
 
 
+# Output rows for the index-backed queries, fetched by id once the
+# index has picked and ordered the ids. Same columns (and the same
+# per-row subqueries) as the SQL versions, plus `weights` for the
+# drift check. `{marks}` is the `?` list for the ids.
+_TOP_FOR_SYSTEM_ROWS = """
+    SELECT conf.id AS conf_id, spec, precision, lr, length, batch,
+        decay, cosine, steps, median_score, weights,
+        (SELECT COUNT(*) FROM run WHERE conf_id = conf.id) AS num_runs,
+        (SELECT time_s FROM conf_time_estimate
+         WHERE conf_id = conf.id AND system = ?
+           AND source = 'median'
+         ORDER BY time_s LIMIT 1) AS median_time
+    FROM conf WHERE id IN ({marks})
+"""
+
+_UNDER_TIME_ROWS = """
+    SELECT conf.id AS conf_id,
+           spec, precision, lr, decay, cosine, length, batch, steps,
+           median_score, weights,
+           (SELECT cte.time_s FROM conf_time_estimate cte
+            WHERE cte.conf_id = conf.id
+              AND cte.system = ?) AS time_estimate,
+           (SELECT COUNT(*) FROM run
+            WHERE conf_id = conf.id) AS total_runs,
+           (SELECT COUNT(*) FROM run
+            WHERE conf_id = conf.id AND system = ?
+           ) AS system_runs
+    FROM conf WHERE id IN ({marks})
+"""
+
+# Rows per output fetch: lazy queries start small (most callers stop
+# after a few) and double up to the cap.
+_FETCH_FIRST = 16
+_FETCH_MAX = 512
+# A lazy (unlimited) query's shadow check compares this long a prefix.
+_SHADOW_PREFIX = 32
+
+
+class _IndexDrift(Exception):
+    """A row the index selected doesn't satisfy the query in SQL --
+    the index disagrees with the snapshot it claims to describe."""
+
+
+@dataclass
+class _IndexQuery:
+    """One index-backed query, as `DbReader._index_query` runs it.
+
+    `ids` picks and orders the conf ids from the synced index; `sql`
+    (with `params` before the ids) fetches their output rows; `check`
+    returns a drift description if a fetched row contradicts the
+    index; `make` builds the result object (None skips the row -- the
+    validity filter); `key` is what the shadow check compares;
+    `reference` runs the SQL version of the same query.
+    """
+    name: str
+    args: dict[str, Any]
+    limit: Optional[int]
+    ids: Callable[[ConfIndex], np.ndarray]
+    sql: str
+    params: list
+    check: Callable[[sqlite3.Row, ConfIndex], Optional[str]]
+    make: Callable[[sqlite3.Row], Any]
+    key: Callable[[Any], tuple]
+    reference: Callable[[], Iterator]
+
+    def describe(self) -> str:
+        args = ', '.join(
+            f'{k}={v!s}' if k == 'template' else f'{k}={v!r}'
+            for k, v in self.args.items())
+        return f'{self.name}({args})'
+
+
 class DbReader(object):
-    """Read-only handle to the results DB."""
+    """Read-only handle to the results DB.
+
+    With `conf_index=True` the hot ranked queries
+    (`top_confs_for_system`, `confs_under_time`) are answered from an
+    in-memory `ConfIndex` owned by this reader -- so by the thread
+    that owns the reader (the SearchThread in the server); every other
+    reader stays on SQL. Every `shadow_every`-th index-backed query
+    also runs the SQL version and compares (0 disables).
+    """
 
     @staticmethod
     def from_args(db: Optional[str]) -> 'DbReader':
         return DbReader(db)
 
-    def __init__(self, path: Optional[str]):
+    def __init__(
+        self,
+        path: Optional[str],
+        conf_index: bool = False,
+        shadow_every: int = SHADOW_EVERY,
+    ):
         assert path is not None, "DbReader needs a real path (mode=ro)"
         self._path = path
         self._db = open_connection(path, readonly=True)
+        self._index: Optional[ConfIndex] = None
+        self._shadow_every = shadow_every
+        self._index_queries = 0
+        self._shadow_checks = 0
+        self._shadow_mismatches = 0
+        self._unsupported_logged: set[str] = set()
+        # Nesting depth of `_snapshot()`; the outermost one owns the
+        # BEGIN/COMMIT. See `_snapshot`.
+        self._txn_depth = 0
+        if conf_index:
+            self.enable_conf_index()
+
+    # --- conf index ---------------------------------------------------------
+
+    def enable_conf_index(self) -> bool:
+        """Attach and build a `ConfIndex` (seconds on the full DB, so
+        the owning thread pays it up front rather than on its first
+        query). False -- and the reader stays on SQL -- if the DB has
+        no changelog machinery (never opened by a current `DbWriter`).
+        """
+        index = ConfIndex()
+        try:
+            with self._snapshot():
+                index.sync(self._db)
+        except ConfIndexUnavailable as e:
+            logging.warning(f'ConfIndex unavailable, staying on SQL: {e}')
+            return False
+        self._index = index
+        return True
+
+    @property
+    def conf_index(self) -> Optional[ConfIndex]:
+        return self._index
+
+    @property
+    def shadow_stats(self) -> tuple[int, int]:
+        """(shadow checks run, mismatches seen)."""
+        return self._shadow_checks, self._shadow_mismatches
+
+    @contextmanager
+    def _snapshot(self) -> Iterator[None]:
+        """Pin one read snapshot for the enclosed statements.
+
+        An explicit BEGIN (the connection is in the sqlite3 module's
+        legacy transaction mode, where SELECTs alone never open one)
+        makes every statement until COMMIT read the same snapshot: the
+        index sync and the row fetches that follow must agree, or a
+        write committed in between could hand back a row the index
+        didn't vet. Re-entrant by depth count rather than by
+        `in_transaction`, because index-backed results are generators
+        whose lifetimes can interleave: whichever leaves last commits,
+        and anything nested joins the outer snapshot.
+        """
+        if self._txn_depth == 0:
+            self._db.execute('BEGIN')
+        self._txn_depth += 1
+        try:
+            yield
+        finally:
+            self._txn_depth -= 1
+            if self._txn_depth == 0:
+                self._db.commit()
+
+    def _index_query(self, q: _IndexQuery) -> Iterator:
+        """Run `q` against the index inside one pinned snapshot.
+
+        A limited query is materialized whole inside the snapshot and
+        the transaction closed before the first yield, so the read
+        transaction lasts one query. An unlimited one (time-budget's
+        lazy scan) keeps its snapshot until the caller drops the
+        generator -- the same lifetime the SQL cursor it replaces had.
+        """
+        if q.limit is not None:
+            with self._snapshot():
+                results = self._index_eager(q)
+            yield from results
+        else:
+            with self._snapshot():
+                yield from self._index_lazy(q)
+
+    def _index_ids(self, q: _IndexQuery) -> Optional[np.ndarray]:
+        """Sync and pick ids, or None to answer `q` from SQL."""
+        index = self._index
+        if index is None:
+            return None
+        try:
+            index.sync(self._db)
+        except ConfIndexUnavailable as e:
+            logging.error(
+                f'ConfIndex disabled, falling back to SQL for good: {e}')
+            self._index = None
+            return None
+        try:
+            return q.ids(index)
+        except ConfIndexUnsupported as e:
+            if str(e) not in self._unsupported_logged:
+                self._unsupported_logged.add(str(e))
+                logging.error(
+                    f'ConfIndex cannot answer {q.describe()}: {e}; '
+                    f'answering such queries from SQL')
+            return None
+
+    def _fetch(
+        self, q: _IndexQuery, index: ConfIndex, ids: np.ndarray,
+        first: int,
+    ) -> Iterator:
+        """Output objects for `ids`, in order, fetched by id in chunks
+        of `first` doubling to `_FETCH_MAX`. Raises `_IndexDrift` on a
+        row that contradicts the index."""
+        pos, size = 0, first
+        while pos < len(ids):
+            chunk = ids[pos:pos + size].tolist()
+            pos += len(chunk)
+            size = min(size * 2, _FETCH_MAX)
+            marks = ','.join('?' * len(chunk))
+            rows = {
+                row['conf_id']: row for row in self._db.execute(
+                    q.sql.format(marks=marks), q.params + chunk)}
+            for cid in chunk:
+                row = rows.get(cid)
+                problem = ('conf row missing' if row is None
+                           else q.check(row, index))
+                if problem is not None:
+                    raise _IndexDrift(f'conf {cid}: {problem}')
+                obj = q.make(row)
+                if obj is not None:
+                    yield obj
+
+    def _on_drift(self, q: _IndexQuery, index: ConfIndex, e: Exception):
+        logging.error(
+            f'ConfIndex drift in {q.describe()}: {e}. Rebuilding the '
+            f'index; this query answers from SQL.')
+        index.invalidate()
+
+    def _shadow_due(self) -> bool:
+        due = (self._shadow_every > 0
+               and self._index_queries % self._shadow_every == 0)
+        self._index_queries += 1
+        return due
+
+    def _index_eager(self, q: _IndexQuery) -> list:
+        t0 = time.perf_counter()
+        index = self._index
+        with latency.timer(f'DbReader.{q.name}.index'):
+            ids = self._index_ids(q)
+            if ids is None:
+                return list(q.reference())
+            assert index is not None
+            ids = ids[:q.limit]
+            try:
+                results = list(self._fetch(
+                    q, index, ids, max(min(len(ids), _FETCH_MAX), 1)))
+            except _IndexDrift as e:
+                self._on_drift(q, index, e)
+                return list(q.reference())
+        if self._shadow_due():
+            results = self._shadow(
+                q, index, results, time.perf_counter() - t0, None)
+        return results
+
+    def _index_lazy(self, q: _IndexQuery) -> Iterator:
+        t0 = time.perf_counter()
+        index = self._index
+        with latency.timer(f'DbReader.{q.name}.index'):
+            ids = self._index_ids(q)
+        if ids is None:
+            yield from q.reference()
+            return
+        assert index is not None
+        stream = self._fetch(q, index, ids, _FETCH_FIRST)
+        yielded: set[int] = set()
+        try:
+            prefix = []
+            if self._shadow_due():
+                prefix = list(islice(stream, _SHADOW_PREFIX))
+                checked = self._shadow(
+                    q, index, prefix, time.perf_counter() - t0,
+                    _SHADOW_PREFIX)
+                if checked is not prefix:
+                    # Mismatch: the whole answer comes from SQL.
+                    yield from q.reference()
+                    return
+            for obj in prefix:
+                yielded.add(obj.conf_id)
+                yield obj
+            for obj in stream:
+                yielded.add(obj.conf_id)
+                yield obj
+        except _IndexDrift as e:
+            # Finish from SQL in the same snapshot, without repeating
+            # what the caller already has.
+            self._on_drift(q, index, e)
+            for obj in q.reference():
+                if obj.conf_id not in yielded:
+                    yield obj
+
+    def _shadow(
+        self, q: _IndexQuery, index: ConfIndex, results: list,
+        index_s: float, n: Optional[int],
+    ) -> list:
+        """Production self-check: run the SQL that `q` replaced, inside
+        the same snapshot, and compare the first `n` results (all of
+        them for a limited query). Returns `results` itself when they
+        agree; on a mismatch logs ERROR with the first differing
+        positions, invalidates the index (full rebuild on the next
+        query) and returns the SQL answer instead. One INFO line per
+        check, so the log shows the index staying honest and what it
+        saves."""
+        t0 = time.perf_counter()
+        with latency.timer(f'DbReader.{q.name}.shadow_sql'):
+            ref_iter = q.reference()
+            ref = list(ref_iter if n is None else islice(ref_iter, n))
+            close = getattr(ref_iter, 'close', None)
+            if close is not None:
+                close()
+        sql_s = time.perf_counter() - t0
+        self._shadow_checks += 1
+        got = [q.key(r) for r in results]
+        want = [q.key(r) for r in ref]
+        if got == want:
+            logging.info(
+                f'ConfIndex shadow ok #{self._shadow_checks}: '
+                f'{q.describe()}: {len(got)} rows agree; index '
+                f'{index_s * 1e3:.1f} ms, sql {sql_s * 1e3:.1f} ms')
+            return results
+        self._shadow_mismatches += 1
+        diffs = [
+            i for i in range(max(len(got), len(want)))
+            if (got[i] if i < len(got) else None)
+            != (want[i] if i < len(want) else None)]
+        shown = '; '.join(
+            f'[{i}] index={got[i] if i < len(got) else None} '
+            f'sql={want[i] if i < len(want) else None}'
+            for i in diffs[:5])
+        logging.error(
+            f'ConfIndex shadow MISMATCH #{self._shadow_checks} '
+            f'({self._shadow_mismatches} of {self._shadow_checks} checks '
+            f'so far): {q.describe()}: index {len(got)} rows, sql '
+            f'{len(want)}; {len(diffs)} positions differ: {shown}. '
+            f'Rebuilding the index; answering from SQL.')
+        index.invalidate()
+        return ref
 
     @property
     def path(self) -> str:
@@ -622,10 +961,145 @@ class DbReader(object):
         max_weights: Optional[float] = None,
         max_time: Optional[float] = None,
         limit: Optional[int] = None,
-    ) -> Iterable[ConfScore]:
+    ) -> Iterator[ConfScore]:
+        """Scored confs matching `template`, best `median_score` first
+        (ties by conf id), skipping invalid models.
+
+        `max_weights` / `max_time` apply only when truthy; `max_time`
+        bounds the conf's `median`-source time on `system`, so a conf
+        never run there doesn't qualify. `median_time` on the results
+        is that time (None without one). `limit` caps the rows
+        considered *before* the validity skip, so fewer may come back.
+
+        Answered from the `ConfIndex` when one is attached, else (and
+        as the shadow reference) by `_top_confs_for_system_sql`.
+        """
         assert type(system) is str
         assert type(template) is Template
+        if self._index is None:
+            return self._top_confs_for_system_sql(
+                system, template, max_weights, max_time, limit)
 
+        def ids(index: ConfIndex) -> np.ndarray:
+            return index.ordered_ids(
+                template, system,
+                weights_max=max_weights if max_weights else None,
+                time_max=max_time if max_time else None,
+                median_time_only=True)
+
+        def check(row: sqlite3.Row, index: ConfIndex) -> Optional[str]:
+            if row['median_score'] != index.score_of(row['conf_id']):
+                return (f"median_score {row['median_score']!r} != index "
+                        f"{index.score_of(row['conf_id'])!r}")
+            if max_weights and not row['weights'] <= max_weights:
+                return f"weights {row['weights']} > {max_weights}"
+            if max_time and not (row['median_time'] is not None
+                                 and row['median_time'] <= max_time):
+                return f"median_time {row['median_time']!r} > {max_time}"
+            return None
+
+        def make(row: sqlite3.Row) -> Optional[ConfScore]:
+            cs = ConfScore._from_row(row, system)
+            return cs if cs.conf.model.is_valid() else None
+
+        return self._index_query(_IndexQuery(
+            name='top_confs_for_system',
+            args=dict(system=system, max_weights=max_weights,
+                      max_time=max_time, limit=limit, template=template),
+            limit=limit,
+            ids=ids,
+            sql=_TOP_FOR_SYSTEM_ROWS,
+            params=[system],
+            check=check,
+            make=make,
+            key=lambda cs: (
+                cs.conf_id, cs.median_score, cs.median_time, cs.num_runs),
+            reference=lambda: self._top_confs_for_system_sql(
+                system, template, max_weights, max_time, limit),
+        ))
+
+    def confs_under_time(
+        self,
+        template: Template,
+        system: str,
+        max_weights: int,
+        max_time: float,
+    ) -> Iterator[ConfWithRuns]:
+        """Yield scored confs with time_estimate <= max_time, ordered by
+        score (ties by conf id), skipping invalid models.
+
+        Time estimate comes from `conf_time_estimate` regardless of
+        source (median or predicted). Confs without any score
+        (median_score IS NULL) are excluded. Both bounds always apply
+        (None bounds match nothing, as in SQL).
+
+        Answered from the `ConfIndex` when one is attached, else (and
+        as the shadow reference) by `_confs_under_time_sql`. Lazy: rows
+        are fetched in growing chunks as the caller pulls.
+        """
+        if self._index is None:
+            return self._confs_under_time_sql(
+                template, system, max_weights, max_time)
+
+        def ids(index: ConfIndex) -> np.ndarray:
+            if max_weights is None or max_time is None:
+                return np.zeros(0, dtype=np.int64)
+            return index.ordered_ids(
+                template, system, weights_max=max_weights,
+                time_max=max_time)
+
+        def check(row: sqlite3.Row, index: ConfIndex) -> Optional[str]:
+            if row['median_score'] != index.score_of(row['conf_id']):
+                return (f"median_score {row['median_score']!r} != index "
+                        f"{index.score_of(row['conf_id'])!r}")
+            if not row['weights'] <= max_weights:
+                return f"weights {row['weights']} > {max_weights}"
+            if not (row['time_estimate'] is not None
+                    and row['time_estimate'] <= max_time):
+                return f"time_estimate {row['time_estimate']!r} > {max_time}"
+            return None
+
+        def make(row: sqlite3.Row) -> Optional[ConfWithRuns]:
+            conf = Configuration.from_dict(row)
+            if not conf.model.is_valid():
+                return None
+            return ConfWithRuns(
+                conf_id=row['conf_id'],
+                conf=conf,
+                median_score=row['median_score'],
+                time_estimate=row['time_estimate'],
+                total_runs=row['total_runs'],
+                system_runs=row['system_runs'],
+            )
+
+        return self._index_query(_IndexQuery(
+            name='confs_under_time',
+            args=dict(system=system, max_weights=max_weights,
+                      max_time=max_time, template=template),
+            limit=None,
+            ids=ids,
+            sql=_UNDER_TIME_ROWS,
+            params=[system, system],
+            check=check,
+            make=make,
+            key=lambda c: (
+                c.conf_id, c.median_score, c.time_estimate,
+                c.total_runs, c.system_runs),
+            reference=lambda: self._confs_under_time_sql(
+                template, system, max_weights, max_time),
+        ))
+
+    def _top_confs_for_system_sql(
+        self,
+        system: str,
+        template: Template,
+        max_weights: Optional[float] = None,
+        max_time: Optional[float] = None,
+        limit: Optional[int] = None,
+    ) -> Iterator[ConfScore]:
+        """SQL implementation of `top_confs_for_system`: the fallback
+        when no `ConfIndex` is attached, and the reference the shadow
+        check and tests compare the index against."""
         conditions, params = _make_template_conditions(template)
 
         conditions.append('median_score IS NOT NULL')
@@ -647,6 +1121,10 @@ class DbReader(object):
             params['limit'] = limit
             limit = 'LIMIT :limit'
 
+        # The `conf.id` tie-break spells out the order the index walk
+        # already yields (index entries are (median_score, rowid)), so
+        # the planner adds no sort; it makes ties deterministic, which
+        # the ConfIndex reproduces exactly and the shadow check needs.
         # INDEXED BY conf_median_score: walk confs in median_score order
         # and early-exit at the LIMIT, instead of the planner's default
         # (scan all confs under the weight cap, then temp-B-tree sort),
@@ -663,7 +1141,7 @@ class DbReader(object):
                    AND source = 'median'
                  ORDER BY time_s LIMIT 1) AS median_time
             FROM conf INDEXED BY conf_median_score {where}
-            ORDER BY median_score ASC {limit}
+            ORDER BY median_score ASC, conf.id ASC {limit}
             """
 
         cur = self._db.execute(query, params)
@@ -722,22 +1200,22 @@ class DbReader(object):
             return None
         return cs
 
-    def confs_under_time(
+    def _confs_under_time_sql(
         self,
         template: Template,
         system: str,
         max_weights: int,
         max_time: float,
-    ) -> Iterable[ConfWithRuns]:
-        """Yield scored confs with time_estimate <= max_time, ordered by score.
-
-        Time estimate comes from `conf_time_estimate` regardless of
-        source (median or predicted). Confs without any score
-        (median_score IS NULL) are excluded.
-        """
+    ) -> Iterator[ConfWithRuns]:
+        """SQL implementation of `confs_under_time` (fallback and
+        shadow/test reference, like `_top_confs_for_system_sql`)."""
         conditions, params = _make_template_conditions(template)
         conditions.append('median_score IS NOT NULL')
         conditions.append('weights <= :max_weights')
+        # Ties break by id explicitly: without INDEXED BY a selective
+        # filter (a literal spec) makes the planner sort in a temp
+        # B-tree, where tie order would otherwise be arbitrary. With the
+        # usual `conf_median_score` walk it costs nothing (same plan).
         # EXISTS form so SQLite walks conf in `conf_median_score`
         # ASC order and stops at the first row the caller pulls.
         # The previous JOIN form had to filter+sort the entire cte
@@ -767,7 +1245,7 @@ class DbReader(object):
                    ) AS system_runs
             FROM conf
             {where}
-            ORDER BY median_score ASC
+            ORDER BY median_score ASC, conf.id ASC
         """
         cur = self._db.execute(query, params)
         for row in cur:

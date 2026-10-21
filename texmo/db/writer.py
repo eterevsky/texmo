@@ -24,6 +24,7 @@ import logging
 import math
 import sqlite3
 import threading
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
@@ -41,6 +42,12 @@ from .common import (
     FIND_CONF,
     _pack_ndarray,
     open_connection,
+)
+from .conf_index import (
+    CONF_CHANGE_KEEP,
+    SHADOW_EVERY,
+    ConfIndex,
+    ConfIndexUnavailable,
 )
 
 
@@ -70,6 +77,9 @@ VALUES (:conf_id, :system, :train_time, :timestamp, :loss,
 # cte system index existed) or filter-then-sort the cte slice for
 # this system. EXISTS lets the planner stop at the first qualifying
 # conf -- microseconds vs 165-650 ms on the live DB.
+# The `conf.id` tie-break is the index walk's own order (entries are
+# (median_score, rowid)), written out so ties are deterministic and
+# `ConfIndex` reproduces them exactly; the plan is unchanged.
 # INDEXED BY conf_median_score forces the planner to walk confs in
 # median_score order and stop at the first match (LIMIT 1), instead of
 # its default "scan every conf under the weight cap -> temp-B-tree sort",
@@ -88,7 +98,7 @@ WHERE conf.median_score IS NOT NULL
         AND cte.system = :system
         AND cte.time_s <= :max_time
   )
-ORDER BY conf.median_score ASC
+ORDER BY conf.median_score ASC, conf.id ASC
 LIMIT 1
 """
 
@@ -133,17 +143,62 @@ class PickMeStatus:
 
 
 class DbWriter(object):
-    """Read-write handle to the results DB. Owns write transactions."""
+    """Read-write handle to the results DB. Owns write transactions.
+
+    With `conf_index=True`, `_top_conf_at` (the `changed_winner`
+    sample `add_run` takes twice per tracked run) is answered from a
+    lean in-memory `ConfIndex` owned by this writer, synced from this
+    connection inside the write transaction -- so it sees the
+    transaction's own uncommitted changes, exactly as the SQL did.
+    Every `shadow_every`-th call also runs the SQL and compares.
+    """
 
     @staticmethod
     def from_args(db: Optional[str]) -> 'DbWriter':
         return DbWriter(db)
 
-    def __init__(self, path: Optional[str] = None):
+    def __init__(
+        self,
+        path: Optional[str] = None,
+        conf_index: bool = False,
+        shadow_every: int = SHADOW_EVERY,
+    ):
         if path is None:
             path = ':memory:'
         self._path = path
         self._db = open_connection(path, readonly=False)
+        self._conf_index: Optional[ConfIndex] = None
+        self._shadow_every = shadow_every
+        self._top_conf_calls = 0
+        self._shadow_checks = 0
+        self._shadow_mismatches = 0
+        if conf_index:
+            self.enable_conf_index()
+
+    def enable_conf_index(self) -> bool:
+        """Attach and build the writer's `ConfIndex` in a read
+        transaction of its own (a full load takes seconds; doing it
+        here keeps it out of the first `add_run`'s write lock)."""
+        index = ConfIndex(full=False)
+        self._db.execute('BEGIN')
+        try:
+            index.sync(self._db)
+        except ConfIndexUnavailable as e:
+            logging.warning(f'Writer ConfIndex unavailable: {e}')
+            return False
+        finally:
+            self._db.commit()
+        self._conf_index = index
+        return True
+
+    @property
+    def conf_index(self) -> Optional[ConfIndex]:
+        return self._conf_index
+
+    @property
+    def shadow_stats(self) -> tuple[int, int]:
+        """(shadow checks run, mismatches seen)."""
+        return self._shadow_checks, self._shadow_mismatches
 
     @property
     def path(self) -> str:
@@ -296,10 +351,12 @@ class DbWriter(object):
         self._update_median_score(cur, conf_id)
         self._update_median_time(cur, conf_id, system)
 
-    def _top_conf_at(
+    def _top_conf_at_sql(
         self, cur: sqlite3.Cursor,
         system: str, max_weights: int, max_time: float,
     ) -> Optional[int]:
+        """SQL implementation of `_top_conf_at`: the fallback without
+        an index, and the shadow/test reference."""
         cur.execute(TOP_CONF_AT, {
             'system': system,
             'max_weights': max_weights,
@@ -307,6 +364,92 @@ class DbWriter(object):
         })
         row = cur.fetchone()
         return row[0] if row is not None else None
+
+    def _top_conf_at(
+        self, cur: sqlite3.Cursor,
+        system: str, max_weights: int, max_time: float,
+    ) -> Optional[int]:
+        """Best-scoring conf (ties by id) with weights <= max_weights
+        and an estimate of any source on `system` with time_s <=
+        max_time; None if there is none. Must run inside the write
+        transaction (as `add_run` calls it)."""
+        index = self._conf_index
+        if index is None:
+            return self._top_conf_at_sql(cur, system, max_weights, max_time)
+        with latency.timer('DbWriter._top_conf_at.index'):
+            try:
+                index.sync(self._db)
+            except ConfIndexUnavailable as e:
+                logging.error(
+                    f'Writer ConfIndex disabled, back to SQL: {e}')
+                self._conf_index = None
+                return self._top_conf_at_sql(
+                    cur, system, max_weights, max_time)
+            if max_weights is None or max_time is None:
+                got = None  # `<= NULL` matches nothing in SQL either
+            else:
+                ids = index.ordered_ids(
+                    None, system, weights_max=max_weights,
+                    time_max=max_time)
+                got = int(ids[0]) if len(ids) else None
+            problem = None if got is None else self._top_conf_drift(
+                cur, index, got, system, max_weights, max_time)
+        if problem is not None:
+            logging.error(
+                f'Writer ConfIndex drift in _top_conf_at(system='
+                f'{system!r}, max_weights={max_weights!r}, max_time='
+                f'{max_time!r}): conf {got}: {problem}. Rebuilding; '
+                f'answering from SQL.')
+            index.invalidate()
+            return self._top_conf_at_sql(cur, system, max_weights, max_time)
+
+        due = (self._shadow_every > 0
+               and self._top_conf_calls % self._shadow_every == 0)
+        self._top_conf_calls += 1
+        if not due:
+            return got
+        t0 = time.perf_counter()
+        with latency.timer('DbWriter._top_conf_at.shadow_sql'):
+            want = self._top_conf_at_sql(cur, system, max_weights, max_time)
+        sql_ms = (time.perf_counter() - t0) * 1e3
+        self._shadow_checks += 1
+        args = (f'_top_conf_at(system={system!r}, max_weights='
+                f'{max_weights!r}, max_time={max_time!r})')
+        if got == want:
+            logging.info(
+                f'Writer ConfIndex shadow ok #{self._shadow_checks}: '
+                f'{args}: conf {got}; sql {sql_ms:.1f} ms')
+            return got
+        self._shadow_mismatches += 1
+        logging.error(
+            f'Writer ConfIndex shadow MISMATCH #{self._shadow_checks} '
+            f'({self._shadow_mismatches} so far): {args}: index conf '
+            f'{got}, sql conf {want}. Rebuilding; answering from SQL.')
+        index.invalidate()
+        return want
+
+    def _top_conf_drift(
+        self, cur: sqlite3.Cursor, index: ConfIndex, conf_id: int,
+        system: str, max_weights: int, max_time: float,
+    ) -> Optional[str]:
+        """Cheap always-on tripwire: does the conf the index picked
+        satisfy the query in SQL, with the score the index ranked it
+        by? Returns a description of the disagreement, or None."""
+        row = cur.execute(
+            'SELECT median_score, weights, '
+            '(SELECT time_s FROM conf_time_estimate '
+            ' WHERE conf_id = conf.id AND system = ?) '
+            'FROM conf WHERE id = ?', (system, conf_id)).fetchone()
+        if row is None:
+            return 'conf row missing'
+        score, weights, time_s = row[0], row[1], row[2]
+        if score != index.score_of(conf_id):
+            return f'median_score {score!r} != index {index.score_of(conf_id)!r}'
+        if not weights <= max_weights:
+            return f'weights {weights} > {max_weights}'
+        if not (time_s is not None and time_s <= max_time):
+            return f'time_s {time_s!r} > {max_time}'
+        return None
 
     def _add_run(
         self,
@@ -411,10 +554,47 @@ class DbWriter(object):
             f"(system={run.system!r}, conf={conf})"
         )
         with latency.timer('DbWriter.add_run'):
-            return self._add_run(
-                conf, run, conf_id, timestamp,
-                strategy, track_winner_change,
-            )
+            try:
+                return self._add_run(
+                    conf, run, conf_id, timestamp,
+                    strategy, track_winner_change,
+                )
+            except BaseException:
+                # The index may have synced this transaction's own
+                # uncommitted rows (and seqs AUTOINCREMENT will hand
+                # out again after the rollback), so it no longer
+                # describes any snapshot: rebuild on next use.
+                if self._conf_index is not None:
+                    self._conf_index.invalidate()
+                if self._db.in_transaction:
+                    self._db.rollback()
+                raise
+
+    def prune_conf_change(self, keep: int = CONF_CHANGE_KEEP) -> int:
+        """Drop all but the newest `keep` changelog rows, raising
+        `conf_change_floor.floor` in the same transaction so any
+        consumer still behind it detects the gap and rebuilds rather
+        than missing changes. Returns the number of rows deleted."""
+        cur = self._db.cursor()
+        cur.execute('BEGIN IMMEDIATE')
+        row = cur.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'conf_change'"
+        ).fetchone()
+        hw = row[0] if row is not None else 0
+        (floor,) = cur.execute(
+            'SELECT floor FROM conf_change_floor WHERE id = 0').fetchone()
+        new_floor = hw - keep
+        if new_floor <= floor:
+            cur.execute('COMMIT')
+            return 0
+        cur.execute(
+            'DELETE FROM conf_change WHERE seq <= ?', (new_floor,))
+        deleted = cur.rowcount
+        cur.execute(
+            'UPDATE conf_change_floor SET floor = ? WHERE id = 0',
+            (new_floor,))
+        cur.execute('COMMIT')
+        return deleted
 
     # --- bulk maintenance ---------------------------------------------------
 
@@ -692,6 +872,11 @@ class DbWriterProxy:
         self._queue.put(UpdateAllScores())
 
 
+# WriterThread prunes `conf_change` at startup and then once per this
+# many queue messages.
+_PRUNE_EVERY = 1000
+
+
 class WriterThread(threading.Thread):
     """Owns the only post-init writable connection in the server.
 
@@ -721,19 +906,48 @@ class WriterThread(threading.Thread):
         queue: Queue,
         on_fatal: Optional[Callable[[], None]] = None,
         frontier_version: Optional[FrontierVersion] = None,
+        conf_index: bool = False,
+        shadow_every: int = SHADOW_EVERY,
     ):
         super().__init__(daemon=True)
         self._db_path = db_path
         self._queue = queue
         self._on_fatal = on_fatal
         self._frontier_version = frontier_version
+        self._conf_index = conf_index
+        self._shadow_every = shadow_every
+
+    def _prune(self, writer: DbWriter) -> None:
+        with latency.timer('WriterThread.prune_conf_change'):
+            deleted = writer.prune_conf_change()
+        if deleted:
+            logging.info(f'Pruned {deleted} conf_change rows')
 
     def run(self):
-        writer = DbWriter(self._db_path)
+        # The writer's own ConfIndex (lean: weights/score/estimates)
+        # lives and dies with this connection, on this thread; the
+        # SearchThread has a separate one. See docs/threads.md.
+        writer = DbWriter(
+            self._db_path, conf_index=self._conf_index,
+            shadow_every=self._shadow_every)
         logging.info("Started writer thread")
+        processed = 0
         try:
             while True:
+                if processed % _PRUNE_EVERY == 0:
+                    # Startup, then every _PRUNE_EVERY messages: keeps
+                    # conf_change bounded (a full estimate refresh
+                    # logs ~1M rows) between server restarts.
+                    try:
+                        self._prune(writer)
+                    except Exception as e:
+                        logging.critical(
+                            f"Writer thread died pruning conf_change: "
+                            f"{e!r}; shutting down.", exc_info=True)
+                        self._panic()
+                        break
                 m = self._queue.get()
+                processed += 1
                 try:
                     match m:
                         case AddRun(

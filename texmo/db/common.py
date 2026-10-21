@@ -209,6 +209,145 @@ def _maybe_create_perf_indexes(db) -> None:
         db.commit()
 
 
+# --- conf changelog (feeds `ConfIndex`) -------------------------------------
+
+
+# Every write to `conf` or `conf_time_estimate` logs the touched conf
+# id (plus the system, for estimate rows) here, from triggers inside
+# the DB itself. `ConfIndex` (conf_index.py) keeps an in-memory copy of
+# those two tables and catches up by re-reading exactly the logged
+# rows; because the log is written by SQLite rather than by our write
+# paths, no writer -- the server, an admin CLI, a migration script, a
+# hand-typed UPDATE -- can change an indexed row without the index
+# hearing about it. Rows are only ever pruned from the bottom
+# (`DbWriter.prune_conf_change`), and the prune floor is recorded in
+# `conf_change_floor` so a consumer that fell behind it knows it
+# missed something and rebuilds instead.
+#
+# The BEFORE triggers on `conf` exist for conflict-resolution deletes:
+# `INSERT OR REPLACE` / `UPDATE OR REPLACE` silently delete the row
+# they collide with (on the id or on the UNIQUE key), and DELETE
+# triggers don't fire for those unless `recursive_triggers` is on --
+# a per-connection setting a raw script won't have. Logging every
+# would-be collider up front covers that on any connection. (For
+# `conf_time_estimate` the only UNIQUE key is (conf_id, system), so a
+# REPLACE there evicts the same pair the AFTER INSERT trigger logs.)
+CONF_CHANGE_TRIGGERS = (
+    'conf_change_conf_before_insert',
+    'conf_change_conf_insert',
+    'conf_change_conf_before_update',
+    'conf_change_conf_update',
+    'conf_change_conf_delete',
+    'conf_change_cte_insert',
+    'conf_change_cte_update',
+    'conf_change_cte_delete',
+)
+
+CONF_CHANGE_DDL = """
+CREATE TABLE IF NOT EXISTS conf_change (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    conf_id INTEGER NOT NULL,
+    -- NULL: the conf row itself changed (re-read it and all its
+    -- estimates). Non-NULL: only the (conf_id, system) estimate did.
+    system TEXT
+);
+
+-- One row. `floor`: every seq <= floor has been pruned. `epoch`:
+-- random at creation, so a dropped-and-recreated changelog (whose
+-- AUTOINCREMENT restarts) can't be mistaken for the old one.
+CREATE TABLE IF NOT EXISTS conf_change_floor (
+    id INTEGER PRIMARY KEY CHECK (id = 0),
+    floor INTEGER NOT NULL,
+    epoch TEXT NOT NULL
+);
+INSERT OR IGNORE INTO conf_change_floor (id, floor, epoch)
+    VALUES (0, 0, lower(hex(randomblob(8))));
+
+CREATE TRIGGER IF NOT EXISTS conf_change_conf_before_insert
+BEFORE INSERT ON conf BEGIN
+    INSERT INTO conf_change (conf_id)
+        SELECT id FROM conf WHERE id = NEW.id;
+    INSERT INTO conf_change (conf_id)
+        SELECT id FROM conf
+        WHERE spec = NEW.spec AND precision = NEW.precision
+          AND lr = NEW.lr AND decay = NEW.decay AND cosine = NEW.cosine
+          AND length = NEW.length AND batch = NEW.batch
+          AND steps = NEW.steps;
+END;
+
+CREATE TRIGGER IF NOT EXISTS conf_change_conf_insert
+AFTER INSERT ON conf BEGIN
+    INSERT INTO conf_change (conf_id) VALUES (NEW.id);
+END;
+
+CREATE TRIGGER IF NOT EXISTS conf_change_conf_before_update
+BEFORE UPDATE ON conf BEGIN
+    INSERT INTO conf_change (conf_id)
+        SELECT id FROM conf WHERE id = NEW.id AND id != OLD.id;
+    INSERT INTO conf_change (conf_id)
+        SELECT id FROM conf
+        WHERE spec = NEW.spec AND precision = NEW.precision
+          AND lr = NEW.lr AND decay = NEW.decay AND cosine = NEW.cosine
+          AND length = NEW.length AND batch = NEW.batch
+          AND steps = NEW.steps AND id != OLD.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS conf_change_conf_update
+AFTER UPDATE ON conf BEGIN
+    INSERT INTO conf_change (conf_id) VALUES (OLD.id);
+    INSERT INTO conf_change (conf_id)
+        SELECT NEW.id WHERE NEW.id IS NOT OLD.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS conf_change_conf_delete
+AFTER DELETE ON conf BEGIN
+    INSERT INTO conf_change (conf_id) VALUES (OLD.id);
+END;
+
+CREATE TRIGGER IF NOT EXISTS conf_change_cte_insert
+AFTER INSERT ON conf_time_estimate BEGIN
+    INSERT INTO conf_change (conf_id, system)
+        VALUES (NEW.conf_id, NEW.system);
+END;
+
+CREATE TRIGGER IF NOT EXISTS conf_change_cte_update
+AFTER UPDATE ON conf_time_estimate BEGIN
+    INSERT INTO conf_change (conf_id, system)
+        VALUES (OLD.conf_id, OLD.system);
+    INSERT INTO conf_change (conf_id, system)
+        SELECT NEW.conf_id, NEW.system
+        WHERE NEW.conf_id IS NOT OLD.conf_id
+           OR NEW.system IS NOT OLD.system;
+END;
+
+CREATE TRIGGER IF NOT EXISTS conf_change_cte_delete
+AFTER DELETE ON conf_time_estimate BEGIN
+    INSERT INTO conf_change (conf_id, system)
+        VALUES (OLD.conf_id, OLD.system);
+END;
+"""
+
+
+def _maybe_create_conf_change(db) -> None:
+    """Create the changelog tables + triggers if any piece is missing.
+
+    Checked first so the common case (everything present) costs one
+    sqlite_master read and no write transaction -- every `DbWriter`
+    open goes through here, including short-lived admin CLIs that may
+    run next to a live server. Adding the triggers to an existing DB
+    rewrites no data, so it is instant even on the full results DB.
+    The DDL is all IF NOT EXISTS, so a partial earlier state (a
+    trigger dropped by hand) is simply completed.
+    """
+    names = {row[0] for row in db.execute(
+        "SELECT name FROM sqlite_master WHERE type IN ('table', 'trigger')")}
+    wanted = {'conf_change', 'conf_change_floor', *CONF_CHANGE_TRIGGERS}
+    if wanted <= names:
+        return
+    db.executescript(CONF_CHANGE_DDL)
+    db.commit()
+
+
 def open_connection(
     path: Optional[str], readonly: bool,
 ) -> sqlite3.Connection:
@@ -255,11 +394,13 @@ def open_connection(
         with open(_SCHEMA_PATH) as schema:
             db.executescript(schema.read())
             db.commit()
+        _maybe_create_conf_change(db)
     elif not readonly:
         # Existing DB -- run any additive column migrations.
         _maybe_add_num_layers_column(db)
         _maybe_add_pick_me_column(db)
         _maybe_create_perf_indexes(db)
+        _maybe_create_conf_change(db)
 
     # Enable WAL for file-backed DBs so the timing thread and search
     # thread can write concurrently without blocking readers.

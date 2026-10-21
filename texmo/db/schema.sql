@@ -143,3 +143,9 @@ CREATE INDEX conf_weights_score ON conf(weights, median_score);
 -- (pickled blobs) until 2026-07; they now live as pickle files next
 -- to the DB (see texmo/predict/persist.py) so DB backups don't carry
 -- refittable artifacts.
+
+-- The `conf_change` changelog, its `conf_change_floor` marker and the
+-- triggers that fill it are created by `CONF_CHANGE_DDL` in
+-- texmo/db/common.py, applied right after this file on a fresh DB and
+-- on every read-write open of an existing one. They feed the
+-- in-memory `ConfIndex` (texmo/db/conf_index.py).

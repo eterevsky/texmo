@@ -478,14 +478,28 @@ it against this number if anything ever promotes confs on fewer runs.
 
 ## Database access (`texmo/db/`)
 
-- **`DbWriter`** — opens the SQLite file read-write. SearchThread and
-  ModelThread each hold their own writer (both `check_same_thread=False`),
-  serialized via SQLite's WAL + `BEGIN IMMEDIATE` + a 30 s `busy_timeout`.
-  Step 6 of the threading refactor will collapse them to a single
-  writer on a dedicated DBWriter thread.
+- **`DbWriter`** — opens the SQLite file read-write. In the server the
+  `WriterThread` owns the only post-init writer; everything else posts
+  writes to it (see [`threads.md`](threads.md)).
 - **`DbReader`** — opens the SQLite file with `mode=ro` (URI form).
   Flask request handlers open a fresh `DbReader(self.path)` per
   request; Search holds a persistent reader for its `select` loop.
+- **`ConfIndex`** (`db/conf_index.py`) — in-memory columnar copy of
+  `conf` + `conf_time_estimate` that answers the ranked "best score
+  first under these filters" queries: `top_confs_for_system` and
+  `confs_under_time` on the SearchThread's reader, `_top_conf_at` (the
+  `changed_winner` sample) on the writer. The SQL versions walk the
+  `conf_median_score` index until they find enough matches; the live
+  search's small-weights region is the worst-scoring half of the
+  table, so each walk covered ~400k rows (1.5-3.5 s, several per
+  select). The index picks and orders the ids in milliseconds and SQL
+  then fetches only those rows. It is kept consistent by DB triggers
+  that log every touched conf to `conf_change`, re-read inside the
+  query's own snapshot, with a full rebuild whenever catching up can't
+  be proven complete, and a 1-in-100 production shadow check against
+  the SQL (`ConfIndex shadow ok` / `MISMATCH` in the server log).
+  `--no-conf-index` turns it off; `--conf-index-shadow-every` sets the
+  check rate. Details in [`threads.md`](threads.md#conf-index).
 - **Score computation** — `median_score` is the median loss across all
   runs of a conf (across all systems, since runs are equivalent by dtype).
   Per-system time estimates live in `conf_time_estimate` with

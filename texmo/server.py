@@ -42,6 +42,7 @@ from .configuration import (
 )
 from . import named_regexes
 from .db import ConfScore, DbReader, DbWriter, FrontierVersion
+from .db.conf_index import SHADOW_EVERY
 from .db.writer import DbWriterProxy, Stop as WriterStop, WriterThread
 from .latency import get_report, report, timer
 from .predict.loss_rnn import LossModelHolder
@@ -532,6 +533,8 @@ class SearchServer(object):
         warmup_systems: Optional[Iterable[str]] = None,
         templates_json: Optional[str] = None,
         loss_refit: str = 'workers',
+        conf_index: bool = True,
+        conf_index_shadow_every: int = SHADOW_EVERY,
     ):
         assert loss_refit in LOSS_REFIT_MODES, (
             f"loss_refit must be one of {LOSS_REFIT_MODES}, "
@@ -668,7 +671,9 @@ class SearchServer(object):
 
         self.writer_thread = WriterThread(
             self.path, self.write_queue, on_fatal=_writer_fatal,
-            frontier_version=self.frontier_version)
+            frontier_version=self.frontier_version,
+            conf_index=conf_index,
+            shadow_every=conf_index_shadow_every)
         self.writer_thread.start()
 
         # Server-side handle the request handlers and `add_run` use to
@@ -708,6 +713,8 @@ class SearchServer(object):
             loss_model=self.loss_model,
             templates=self.templates,
             frontier_version=self.frontier_version,
+            conf_index=conf_index,
+            conf_index_shadow_every=conf_index_shadow_every,
         )
         self.search_thread.start()
 

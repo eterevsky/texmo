@@ -97,7 +97,10 @@ never exits.
   - Count: 1.
   - Owns: the only post-init `DbWriter` (read-write connection) and
     all write-transaction state. Opens it inside `run()`, so sqlite's
-    default `check_same_thread=True` holds.
+    default `check_same_thread=True` holds. Also its own lean
+    `ConfIndex` (weights, score, estimates; ~110 MB, ~5 s to build at
+    startup) for `_top_conf_at`, and the pruning of `conf_change` (at
+    startup, then every 1000 messages) -- see "Conf index".
   - Reads from: its `write_queue`.
   - Sends to: nothing through a queue. It does bump the shared
     `FrontierVersion` when an `AddRun` reports a winner flip — see
@@ -125,7 +128,8 @@ never exits.
 - **SearchThread** (`texmo/search.py`)
   - Count: 1 (created in `SearchServer.__init__`).
   - Owns: its own persistent `DbReader` and the `Search` object, both
-    built inside `run()`.
+    built inside `run()`, and the reader's full `ConfIndex` (~210 MB,
+    ~9 s to build before the first select) -- see "Conf index".
   - Reads from:
     - `DbReader` for query work.
     - The shared `TrainTimingModel` and `LossModelHolder` instances
@@ -274,6 +278,79 @@ threads — they dispatch into the request-handler thread pool.
   - The queue is private to `texmo/latency.py`; the public surface
     stays `Timer` / `timer(name)` / `get_report()` / `report()`.
 
+## Conf index
+
+`ConfIndex` (`texmo/db/conf_index.py`) is an in-memory columnar copy
+of `conf` + `conf_time_estimate` that answers the ranked queries --
+"best `median_score` first among confs passing these filters" -- in
+milliseconds instead of the seconds the `conf_median_score` walk takes
+(see [`search.md`](search.md#database-access-texmodb)). It is mutable
+and unsynchronized, so it is **not** a shared object: each thread that
+uses one owns its own instance.
+
+- **SearchThread**: a full index (all filterable columns plus a spec
+  string table) inside its `DbReader`, behind `top_confs_for_system`
+  and `confs_under_time`. Per-request report readers and the Model
+  thread's reader have none and stay on SQL.
+- **WriterThread**: a lean index (weights, score, estimates) inside its
+  `DbWriter`, behind `_top_conf_at`.
+
+Two copies cost ~320 MB together; sharing one would need a lock around
+every sync and query, and the writer's copy must see the writer's own
+*uncommitted* rows, which no other connection can.
+
+**Change capture.** Triggers in the DB (`CONF_CHANGE_DDL` in
+`db/common.py`, created by every read-write open) append the conf id of
+every insert/update/delete on `conf` -- and conf id + system for every
+change to `conf_time_estimate` -- to `conf_change(seq AUTOINCREMENT,
+conf_id, system)`. Capture lives in SQLite rather than in our write
+paths, so `add_run`, the predicted upserts, `clear_system`,
+`update_all_scores`, migrations, admin CLIs and a hand-typed UPDATE are
+all covered alike. BEFORE triggers also log the row an `INSERT/UPDATE
+OR REPLACE` on `conf` would silently evict (DELETE triggers don't fire
+for those without `recursive_triggers`).
+
+**Sync.** `ConfIndex.sync(conn)` reads `conf_change` past its last
+seq and re-reads exactly those confs (or `(conf, system)` estimates)
+from the DB, overwriting its copy -- the index is always a function of
+a DB snapshot, never of what our code believes it wrote. Every
+index-backed query runs sync, id selection and the SQL fetch of the
+output rows inside **one** transaction on the same connection: the
+reader opens an explicit `BEGIN` (re-entrant by depth count, since
+results are generators), the writer is already inside its `BEGIN
+IMMEDIATE`. So the result equals what the SQL query returns on that
+snapshot. Limited queries close the transaction before yielding; the
+unlimited `confs_under_time` holds it while the caller pulls, exactly
+as the SQL cursor it replaces did.
+
+**Rebuild instead of catching up** when the changelog can't prove the
+delta complete: first use; `invalidate()` (shadow mismatch, drift, a
+failed `add_run` whose transaction the writer index had synced from);
+the `conf_change_floor.floor` passed our seq (pruned); the
+AUTOINCREMENT high-water went backwards (a rolled-back transaction we
+read, or a recreated table); the floor row's random `epoch` changed;
+`PRAGMA schema_version` changed (any DDL, e.g. a dropped and re-created
+trigger); or we're more than 300k changelog rows behind (a bulk
+refresh -- re-reading that much costs as much as a full load). Missing
+triggers make the index unavailable and the owner falls back to SQL for
+good, logged at ERROR.
+
+**Pruning.** The WriterThread keeps the newest 500k `conf_change` rows
+(`DbWriter.prune_conf_change`), raising `floor` in the same
+transaction.
+
+**Self-checks.** Every row fetched for an index-chosen id is checked
+against the index (score equal, bounds hold); a disagreement logs
+ERROR, invalidates, and answers from SQL. Every 100th index-backed
+query (`--conf-index-shadow-every`, 0 disables) also runs the original
+SQL inside the same snapshot and compares the ordered results (the
+first 32 for the lazy `confs_under_time`), logging one INFO line
+(`ConfIndex shadow ok #N: ... index X ms, sql Y ms`) or an ERROR
+`ConfIndex shadow MISMATCH` with the query and the first differing
+positions -- after which the index rebuilds and that query answers from
+SQL. The writer does the same for `_top_conf_at` (`Writer ConfIndex
+shadow ...`). `--no-conf-index` turns the whole thing off.
+
 ## Shutdown
 
 `/stop` (internal port only) spawns a one-shot thread that calls
@@ -382,6 +459,8 @@ type system enforces the read/write boundary. Code layout:
   constants.
 - `texmo/db/writer.py` — `DbWriter`, `DbWriterProxy`, `WriterThread`,
   `FrontierVersion` and the write-side SQL constants.
+- `texmo/db/conf_index.py` — `ConfIndex` (see "Conf index"); the
+  changelog DDL it depends on lives in `common.py`.
 - `texmo/db/schema.sql` — the schema (used to bootstrap the writer
   connection on a fresh DB).
 
@@ -418,7 +497,7 @@ connections enable WAL and a 30 s `busy_timeout`.
     transaction, and just doesn't return the bool to the caller),
     `find_or_add_conf`, `add_pick_me_conf`, `upsert_time_estimates`,
     `upsert_predicted_time_estimates`, `update_all_scores`,
-    `backfill_num_layers`, `clear_system`.
+    `backfill_num_layers`, `clear_system`, `prune_conf_change`.
   - `upsert_predicted_time_estimates` uses an
     `ON CONFLICT ... WHERE source = 'predicted'` guard so a `median`
     row written concurrently by `_add_run` is never clobbered.

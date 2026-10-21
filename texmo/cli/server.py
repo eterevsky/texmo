@@ -10,6 +10,7 @@ import logging
 import matplotlib
 
 from ..configuration import Template
+from ..db.conf_index import SHADOW_EVERY
 from ..server import LOSS_REFIT_MODES, SearchServer
 from ..tokens import set_tokens_dir
 
@@ -35,6 +36,8 @@ def main(args: argparse.Namespace):
         warmup_systems=warmup_systems,
         templates_json=templates_json,
         loss_refit=args.loss_refit,
+        conf_index=not args.no_conf_index,
+        conf_index_shadow_every=args.conf_index_shadow_every,
     )
 
     server.serve(api_key=args.api_key or '')
@@ -158,6 +161,23 @@ def init_args(parser: argparse.ArgumentParser, config):
              " 'server' fits in-process on the model thread (which"
              " needs a fast JAX platform in the server process)."
              " Defaults to config.LOSS_REFIT.",
+    )
+    parser.add_argument(
+        "--no-conf-index",
+        action="store_true",
+        help="answer the ranked search queries (and the writer's"
+             " changed_winner sample) with plain SQL instead of the"
+             " in-memory ConfIndex. A kill switch; the index is"
+             " self-checking (see --conf-index-shadow-every).",
+    )
+    parser.add_argument(
+        "--conf-index-shadow-every",
+        type=int,
+        default=SHADOW_EVERY,
+        help="every Nth index-backed query also runs the SQL it"
+             " replaced, in the same snapshot, and logs the comparison"
+             " ('ConfIndex shadow ok' / ERROR 'MISMATCH', which also"
+             " rebuilds the index). 0 disables.",
     )
     parser.add_argument(
         "--api-key",
